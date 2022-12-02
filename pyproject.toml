@@ -1,0 +1,29 @@
+[project]
+name = "jax-tpu-embedding"
+version = "0.1.0"
+description = "JAX TPU Embedding API"
+readme = "README.md"
+requires-python = ">=3.7<3.10"
+dependencies = [
+  "absl-py",
+  "jax>=0.3.15",
+  "tensorflow>=2.11.0",
+  "numpy",
+  "flax",
+  "tensorstore",
+  "orbax"
+]
+
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[tools.setuptools]
+packages = ["jax_tpu_embedding"]
+
+[project.urls]
+homepage = 'http://github.com/jax-ml/jax-tpu-embedding'
+repository = 'http://github.com/jax-ml/jax-tpu-embedding'
