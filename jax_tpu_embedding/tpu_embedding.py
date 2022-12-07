@@ -15,7 +15,9 @@
 """Jax Mid level API for TPU Embedding."""
 
 import copy
-from typing import Any, Optional, Mapping, Sequence, List, Tuple
+import os
+import re
+from typing import Optional, Mapping, Sequence, List, Tuple
 
 from absl import logging
 import jax
@@ -26,10 +28,14 @@ from jax_tpu_embedding import pytype_utils
 from jax_tpu_embedding import tpu_embedding_utils
 import tensorflow as tf
 
-from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
+from tensorflow..python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
 
 TensorType = pytype_utils.TensorType
 NestedTfTensor = pytype_utils.NestedTfTensor
+Nested = pytype_utils.Nested
+
+# Regular expression handler to extract task id from environment variable.
+_TASK_HANDLE_RE = re.compile(r"(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+")
 
 
 def _add_key_attr(op: tf.Operation, name: str):
@@ -153,6 +159,21 @@ def _initialize_fn(config_str: bytes) -> None:
                           merged_memory_config)
 
 
+def _get_task_id() -> int:
+  """Get TPU task id."""
+
+  task_id = None
+  if "BORG_TASK_HANDLE" in os.environ:
+    handle = os.getenv("BORG_TASK_HANDLE")
+    task_id_str, _, _ = _TASK_HANDLE_RE.match(handle).groups()
+    task_id = int(task_id_str)
+  else:
+    logging.warning("`BORG_TASK_HANDLE` is not found, using "
+                    "`tf.experimental.dtensor.client_id()`.")
+    task_id = tf.experimental.dtensor.client_id()
+  return task_id
+
+
 class TPUEmbedding(object):
   """The TPUEmbedding mid level API for Jax users."""
 
@@ -173,7 +194,7 @@ class TPUEmbedding(object):
         computations will overlap with the TensorCore computations (and hence
         will be one step old). Set to True for improved performance.
       cores_per_replica: default 1 using pmap. If it is greater than, it will
-        enable embedding engine spmd. Note that range of is 
+        enable embedding engine spmd. Note that range of is
         [1, total_tensor_cores], i.e. the maximum is all avaibale cores.
         For pjit users, always set this based on cores for each model replica.
         For pjit data parallelism user, it should be set as jax.device_count().
@@ -186,8 +207,8 @@ class TPUEmbedding(object):
                        "1 <= cores_per_replica <= {}".format(
                            cores_per_replica, jax.device_count()))
 
-    # Get current host global id.
-    self._host_id = jax.process_index()
+    # Get current host id.
+    self._host_id = _get_task_id()
     self._num_hosts = jax.process_count()
 
     # Create config_utils.TpuEmbeddingConfig instance.
@@ -378,17 +399,21 @@ class TPUEmbedding(object):
     return jax2tf.call_tf(_dequeue_fn)()
 
   def enqueue(self,
-              features: List[Any],
-              weights: Optional[List[Any]] = None,
+              features: List[Nested[TensorType]],
+              weights: Optional[List[Nested[TensorType]]] = None,
               is_training: bool = True,
               name: Optional[str] = None) -> None:
     """Enqueues id tensors for embedding lookup for all devices.
 
-    This
+    This function enqueues a list of nested structure of features to be looked
+    up in embedding tables. We expect the input shape of each feature to matche
+    the `output_shape` defined in FeatureConfig.
 
     Args:
       features: A list of nested structure of `tf.Tensor`s, `tf.SparseTensor`s
-        with the same structure as `feature_config` for each device to enqueue.
+        with the **same** structure as `feature_config` for each device to
+        enqueue, for example if `feature_config` is tuple or list, each one of
+        `features[device_id]` should be in same order.
       weights: If not `None`, a list nested structure of `tf.Tensor`s,
         `tf.SparseTensor`s matching `features above, for each device as well.
       is_training: Defaults to `True`. If `False`, enqueue the batch as
@@ -423,11 +448,16 @@ class TPUEmbedding(object):
           combiners=combiners)
 
     mode_override = "train" if is_training else "inference"
-    flat_feature_with_names, _ = input_utils.tree_flatten_with_names(
+    flat_feature_with_names, configs_treedef = input_utils.tree_flatten_with_names(
         self._feature_configs)
     for device_id in range(jax.local_device_count()):
       flat_inputs, inputs_treedef = jax.tree_util.tree_flatten(
           features[device_id])
+
+      if inputs_treedef != configs_treedef:
+        raise ValueError("Expects `flat_inputs` has the same tree structure as "
+                         "`self.feature_configs`.")
+
       flat_weights = [None] * len(flat_inputs)
       if weights is not None:
         flat_weights, weights_treedef = jax.tree_util.tree_flatten(

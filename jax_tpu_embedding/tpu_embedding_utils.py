@@ -20,9 +20,9 @@ from absl import flags
 from absl import logging
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
-from tensorflow.dtensor.python import accelerator_util
-from tensorflow.dtensor.python import gen_dtensor_ops
-from tensorflow.python.eager import context
+from tensorflow..dtensor.python import accelerator_util
+from tensorflow..dtensor.python import gen_dtensor_ops
+from tensorflow..python.eager import context
 # pylint: enable=g-direct-tensorflow-import
 
 TableConfig = tf.tpu.experimental.embedding.TableConfig

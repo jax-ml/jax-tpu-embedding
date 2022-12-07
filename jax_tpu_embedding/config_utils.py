@@ -26,7 +26,7 @@ import numpy as np
 import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import
-from tensorflow.python.tpu import tpu_embedding_v2_utils
+from tensorflow..python.tpu import tpu_embedding_v2_utils
 # pylint: enable=g-direct-tensorflow-import
 
 LearningRate = Union[float, Callable[[], float]]
