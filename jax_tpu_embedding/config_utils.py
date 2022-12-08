@@ -44,7 +44,7 @@ global_state = distributed.global_state
 
 @dataclasses.dataclass
 class TpuEmbeddingConfigSpecs:
-  """Configurations and specs to create tpu embedding configuration proto.
+  """Configurations and specs to create a tpu embedding configuration proto.
 
   Attributes:
     feature_config: A nested structure of feature config.
