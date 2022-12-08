@@ -51,7 +51,7 @@ def _add_key_attr(op: tf.Operation, name: str):
 
 
 def _initialize_fn(config_str: bytes) -> None:
-  """TF function for Initialize tpu embedding rewrite.
+  """TF function for initializing tpu embedding rewrite.
 
   Reusing logic from `tpu/graph_rewrite/configure_tpu_embedding_rewrite_pass.cc`
   to lower tpu_embedding_initialize to:
