@@ -19,7 +19,7 @@ import os
 from typing import Any, Dict, List, Optional, cast
 
 import jax
-from jax.experimental.gda_serialization.google.spec import get_tensorstore_spec
+from jax.experimental.array_serialization.google.spec import get_tensorstore_spec
 import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint as orbax_ckpt
