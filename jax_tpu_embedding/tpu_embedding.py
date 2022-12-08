@@ -43,7 +43,7 @@ def _add_key_attr(op: tf.Operation, name: str):
 
   Args:
     op: an op to set tpu embedding layer attribute name.
-    name:
+    name: A name for the underlying op.
   """
   op._set_attr(  # pylint: disable=protected-access
       "_tpu_embedding_layer",
