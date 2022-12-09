@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Tuple, TypeVar, Union, Iterable
 
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
-from tensorflow..core.protobuf.tpu import tpu_embedding_configuration_pb2
+from tensorflow.core.protobuf.tpu import tpu_embedding_configuration_pb2
 # pylint: enable=g-direct-tensorflow-import
 
 

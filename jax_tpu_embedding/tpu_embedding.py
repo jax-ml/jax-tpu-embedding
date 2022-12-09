@@ -28,7 +28,7 @@ from jax_tpu_embedding import pytype_utils
 from jax_tpu_embedding import tpu_embedding_utils
 import tensorflow as tf
 
-from tensorflow..python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
+from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
 
 TensorType = pytype_utils.TensorType
 NestedTfTensor = pytype_utils.NestedTfTensor
