@@ -56,7 +56,7 @@ class TpuEmbeddingConfigSpecs:
       overlap with the TensorCore computations.
     num_hosts: number of hosts.
     num_tensor_cores: number of tensor cores.
-    cores_per_replica: number of cores for one replica, use for spmd when it's
+    cores_per_replica: number of cores per replica, use for spmd when it's
       not None.
   """
   feature_config: NestedFeatureConfig
