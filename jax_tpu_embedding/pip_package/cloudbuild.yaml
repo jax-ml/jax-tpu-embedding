@@ -1,0 +1,30 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+          'build',
+          '--build-arg', 'wheel_folder=${_WHEEL_FOLDER}',
+          '-t', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}',
+          '-f', 'jax_tpu_embedding/pip_package/Dockerfile', '.'
+        ]
+  timeout: 3600s
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}']
+  timeout: 1800s
+- name: 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}'
+  entrypoint: 'bash'
+  args: ['-c', 'source jax_tpu_embedding/pip_package/collect_wheels.sh && collect_wheels ${_RELEASE_VERSION} ${_WHEEL_FOLDER}']
+
+substitutions:
+    _PYTHON_VERSION: '3.8'
+    _RELEASE_VERSION: 'nightly'  # or rX.Y
+    _IMAGE_NAME: 'jax_tpu_embedding_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
+    _WHEEL_FOLDER: '/tmp/wheels'
+options:
+    dynamic_substitutions: true
+    substitution_option: 'ALLOW_LOOSE'
+    machineType: E2_HIGHCPU_8
+timeout: 5400s
+artifacts:
+  objects:
+    location: 'gs://jax-bc-cloud-tpu/wheels/$(date -u +%Y%m%d)'
+    paths: ['/**/*.whl', '/**/*.txt']
