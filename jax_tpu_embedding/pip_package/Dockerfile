@@ -51,6 +51,8 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
 
 # Install pip package
 RUN pip3 install pip-tools
+RUN pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+RUN pip install tensorflow~=2.9.2
 
 ARG bazel_version=5.1.1
 # This is to install bazel, for development purposes.
