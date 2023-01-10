@@ -55,9 +55,8 @@ write_action_env_to_blazerc "TF_SHARED_LIBRARY_DIR" ${SHARED_LIBRARY_DIR}
 write_action_env_to_blazerc "TF_SHARED_LIBRARY_NAME" ${SHARED_LIBRARY_NAME}
 write_action_env_to_blazerc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 
-bazel clean
-bazel build ...
-
+blaze clean
+blaze build ...
 # TODO: Run some tests
 
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
