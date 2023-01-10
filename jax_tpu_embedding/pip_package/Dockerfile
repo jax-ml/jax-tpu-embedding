@@ -69,7 +69,7 @@ RUN mkdir -p $WHEEL_FOLDER && cd jax_tpu_embedding && git rev-parse HEAD > $WHEE
 
 RUN pip3 install pip six numpy wheel setuptools mock 'future>=0.17.1'
 
-RUN cd /jax_tpu_embedding && bash pip_package/build.sh
+RUN cd jax_tpu_embedding && bash pip_package/build.sh
 
 
 WORKDIR /
