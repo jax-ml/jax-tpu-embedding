@@ -55,9 +55,6 @@ write_action_env_to_blazerc "TF_SHARED_LIBRARY_DIR" ${SHARED_LIBRARY_DIR}
 write_action_env_to_blazerc "TF_SHARED_LIBRARY_NAME" ${SHARED_LIBRARY_NAME}
 write_action_env_to_blazerc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 
-echo 'Using .blazerc:\n'
-batcat .blazerc -l sh
-
 bazel clean
 bazel build ...
 
