@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Tuple, TypeVar, Union, Iterable
 
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
+from tensorflow.core.framework import tensor_pb2
 from tensorflow.core.protobuf.tpu import tpu_embedding_configuration_pb2
 # pylint: enable=g-direct-tensorflow-import
 
@@ -26,6 +27,7 @@ T = TypeVar("T")
 Nested = Union[T, Tuple[Any, ...], List[Any], Dict[str, Any], Iterable]
 
 TensorType = Union[tf.Tensor, tf.SparseTensor]
+TensorProto = tensor_pb2.TensorProto
 NestedTfTensor = Nested[tf.Tensor]
 
 # TPUEmbedding related Types
@@ -33,5 +35,3 @@ TableConfig = tf.tpu.experimental.embedding.TableConfig
 FeatureConfig = tf.tpu.experimental.embedding.FeatureConfig
 NestedFeatureConfig = Nested[FeatureConfig]
 TPUEmbeddingConfigurationProto = tpu_embedding_configuration_pb2.TPUEmbeddingConfiguration
-
-
