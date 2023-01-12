@@ -1,6 +1,6 @@
 """Starlark macros for Jax Embedding API users."""
 
-load("//devtools/python/blaze:pytype.bzl", "pytype_binary")
+load("//jax_tpu_embedding:jte.bzl", "pytype_binary", "pytype_strict_binary")
 
 def _export_sources_impl(ctx):
     files = []
