@@ -59,6 +59,9 @@ bazel clean
 bazel build ...
 # TODO: Run some tests
 
+gsutil cp gs://cloud-tpu-tpuvm-artifacts/jax/jax_tpu_embedding/jax_tpu_embedding_singlehost_pjit.py .
+
+
 chmod u+x pip_package/build_pip_pkg.sh
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
 pip3 freeze > "${DST_DIR}/dependencies.txt"
