@@ -59,5 +59,6 @@ bazel clean
 bazel build ...
 # TODO: Run some tests
 
+chmod u+x pip_package/build_pip_pkg.sh
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
 pip3 freeze > "${DST_DIR}/dependencies.txt"

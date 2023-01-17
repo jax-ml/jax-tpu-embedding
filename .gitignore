@@ -4,6 +4,7 @@
 # Byte-compiled
 _pycache__/
 .cache/
+bazel-*
 
 /*.egg-info
 .eggs/
