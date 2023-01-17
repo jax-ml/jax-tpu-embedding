@@ -42,7 +42,7 @@ function main() {
   rsync -avm -L jax_tpu_embedding "${TMPDIR}"
   rsync -avm -L  --include="*.so" --include="*_pb2.py" \
     --exclude="*.runfiles" --exclude="*_obj" --include="*/" --exclude="*" \
-    blaze-bin/jax_tpu_embedding "${TMPDIR}"
+    bazel-bin/jax_tpu_embedding "${TMPDIR}"
 
   pushd ${TMPDIR}
   echo $(date) : "=== Building wheel"

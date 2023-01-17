@@ -27,7 +27,7 @@ function write_action_env_to_bazelrc() {
 }
 
 # Remove .bazelrc if it already exist
-[ -e .bazelrc ] && rm .blazerc
+[ -e .bazelrc ] && rm .bazelrc
 
 write_to_bazelrc "build -c opt"
 write_to_bazelrc 'build --cxxopt="-std=c++14"'
