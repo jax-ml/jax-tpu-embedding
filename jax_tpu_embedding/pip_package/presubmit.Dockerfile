@@ -1,5 +1,5 @@
 ARG image_name
-ARG base_image="gcr.io/jax-bc-cloud-tpu/${image_name}:latest"
+ARG base_image="gcr.io/jax-tpu-embeddings/${image_name}:latest"
 FROM $base_image
 RUN rm -rf /jax_tpu_embedding/jax_tpu_embedding
 COPY . /jax_tpu_embedding_new
