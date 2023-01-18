@@ -26,5 +26,5 @@ options:
 timeout: 5400s
 artifacts:
   objects:
-    location: 'gs://jax-bc-cloud-tpu/wheels/$(date -u +%Y%m%d)'
+    location: 'gs://jax-tpu-embeddings/wheels/$(date -u +%Y%m%d)'
     paths: ['/**/*.whl', '/**/*.txt']

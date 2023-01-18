@@ -38,12 +38,11 @@ function main() {
   echo "=== Copy jax_tpu_embedding files"
 
   cp ${PIP_FILE_PREFIX}setup.py "${TMPDIR}"
-  cp ${PIP_FILE_PREFIX}requirements.in "${TMPDIR}"
   cp LICENSE "${TMPDIR}"
   rsync -avm -L jax_tpu_embedding "${TMPDIR}"
   rsync -avm -L  --include="*.so" --include="*_pb2.py" \
     --exclude="*.runfiles" --exclude="*_obj" --include="*/" --exclude="*" \
-    blaze-bin/jax_tpu_embedding "${TMPDIR}"
+    bazel-bin "${TMPDIR}"
 
   pushd ${TMPDIR}
   echo $(date) : "=== Building wheel"

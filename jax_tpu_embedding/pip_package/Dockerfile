@@ -49,8 +49,10 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
     python3.8 -m pip install pip --upgrade && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 0
 
-# Install pip package
+# Install pip packages
 RUN pip3 install pip-tools
+RUN pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+RUN pip install tensorflow~=2.9.2
 
 ARG bazel_version=5.1.1
 # This is to install bazel, for development purposes.
@@ -67,15 +69,9 @@ RUN mkdir /bazel && \
 COPY . /jax_tpu_embedding
 RUN mkdir -p $WHEEL_FOLDER && cd jax_tpu_embedding && git rev-parse HEAD > $WHEEL_FOLDER/jax_tpu_embedding_commit.txt
 
-RUN cd /jax_tpu_embedding/jax_tpu_embedding/pip_package && \
-    sed -i 's/jax_tpu_embedding/#jax_tpu_embedding/' requirements.in && \
-    pip-compile --quiet requirements.in \
-    /jax_tpu_embedding/jax_tpu_embedding/pip_package/requirements.in \
-    --output-file $WHEEL_FOLDER/jax_tpu_embedding_requirements.txt
-
 RUN pip3 install pip six numpy wheel setuptools mock 'future>=0.17.1'
-RUN pip3 install -r jax_tpu_embedding/jax_tpu_embedding/pip_package/requirements.txt
 
+RUN mv jax_tpu_embedding/jax_tpu_embedding/pip_package /jax_tpu_embedding/
 RUN cd /jax_tpu_embedding && bash pip_package/build.sh
 
 

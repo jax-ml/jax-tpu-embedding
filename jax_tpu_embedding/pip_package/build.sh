@@ -18,30 +18,30 @@ else
 fi
 update-alternatives --install /usr/bin/python3 python3 "/usr/bin/$PYTHON" 1
 
-function write_to_blazerc() {
-  echo "$1" >> .blazerc
+function write_to_bazelrc() {
+  echo "$1" >> .bazelrc
 }
 
-function write_action_env_to_blazerc() {
-  write_to_blazerc "build --action_env $1=\"$2\""
+function write_action_env_to_bazelrc() {
+  write_to_bazelrc "build --action_env $1=\"$2\""
 }
 
-# Remove .blazerc if it already exist
-[ -e .blazerc ] && rm .blazerc
+# Remove .bazelrc if it already exist
+[ -e .bazelrc ] && rm .bazelrc
 
-write_to_blazerc "build -c opt"
-write_to_blazerc 'build --cxxopt="-std=c++14"'
-write_to_blazerc 'build --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"'
-write_to_blazerc 'build --auto_output_filter=subpackages'
-write_to_blazerc 'build --copt="-Wall" --copt="-Wno-sign-compare"'
-write_to_blazerc 'build --linkopt="-lrt -lm"'
+write_to_bazelrc "build -c opt"
+write_to_bazelrc 'build --cxxopt="-std=c++14"'
+write_to_bazelrc 'build --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"'
+write_to_bazelrc 'build --auto_output_filter=subpackages'
+write_to_bazelrc 'build --copt="-Wall" --copt="-Wno-sign-compare"'
+write_to_bazelrc 'build --linkopt="-lrt -lm"'
 
 TF_NEED_CUDA=0
 echo 'Using installed tensorflow'
 TF_CFLAGS=( $(${PYTHON} -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))') )
 TF_LFLAGS="$(${PYTHON} -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))')"
 
-write_action_env_to_blazerc "TF_HEADER_DIR" ${TF_CFLAGS:2}
+write_action_env_to_bazelrc "TF_HEADER_DIR" ${TF_CFLAGS:2}
 SHARED_LIBRARY_DIR=${TF_LFLAGS:2}
 SHARED_LIBRARY_NAME=$(echo $TF_LFLAGS | rev | cut -d":" -f1 | rev)
 if ! [[ $TF_LFLAGS =~ .*:.* ]]; then
@@ -51,17 +51,16 @@ if ! [[ $TF_LFLAGS =~ .*:.* ]]; then
     SHARED_LIBRARY_NAME="libtensorflow_framework.so"
   fi
 fi
-write_action_env_to_blazerc "TF_SHARED_LIBRARY_DIR" ${SHARED_LIBRARY_DIR}
-write_action_env_to_blazerc "TF_SHARED_LIBRARY_NAME" ${SHARED_LIBRARY_NAME}
-write_action_env_to_blazerc "TF_NEED_CUDA" ${TF_NEED_CUDA}
-
-echo 'Using .blazerc:\n'
-batcat .blazerc -l sh
+write_action_env_to_bazelrc "TF_SHARED_LIBRARY_DIR" ${SHARED_LIBRARY_DIR}
+write_action_env_to_bazelrc "TF_SHARED_LIBRARY_NAME" ${SHARED_LIBRARY_NAME}
+write_action_env_to_bazelrc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 
 bazel clean
 bazel build ...
+bazel test  --test_output=all --test_verbose_timeout_warnings   --  jax_tpu_embedding/... -jax_tpu_embedding/examples:input_utils_test.py
 
 # TODO: Run some tests
 
+chmod u+x pip_package/build_pip_pkg.sh
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
 pip3 freeze > "${DST_DIR}/dependencies.txt"
