@@ -364,7 +364,7 @@ class TPUEmbedding(object):
       if name is not None:
         _add_key_attr(op, name)
 
-    jax2tf.call_tf(_gradients_fn)(gradients)
+    jax2tf.call_tf(_gradients_fn, has_side_effects=False)(gradients)
 
   def dequeue(self, name: Optional[str] = None) -> NestedTfTensor:
     """Gets the embedding results with inputs non-duplicated.
@@ -396,7 +396,7 @@ class TPUEmbedding(object):
       # Pack the list back into the same nested structure as the features.
       return tf.nest.pack_sequence_as(self._feature_configs, activations)
 
-    return jax2tf.call_tf(_dequeue_fn)()
+    return jax2tf.call_tf(_dequeue_fn, has_side_effects=False)()
 
   def enqueue(self,
               features: List[Nested[TensorType]],
