@@ -36,6 +36,8 @@ Nested = pytype_utils.Nested
 NestedTfTensor = pytype_utils.NestedTfTensor
 TensorType = pytype_utils.TensorType
 FeatureConfig = pytype_utils.FeatureConfig
+EMBED_PLACEMENT = pytype_utils.EMBED_PLACEMENT
+NON_EMBED_PLACEMENT = pytype_utils.NON_EMBED_PLACEMENT
 
 
 def prepare_devices_data(
@@ -171,8 +173,8 @@ def split_and_prefetch_to_host_and_devices(
   def enqueue(n):  # Enqueues *up to* `n` elements from the iterator.
     for data in itertools.islice(iterator, n):
       queue.append({
-          'host': host_input_fn(data['host']),
-          'device': device_input_fn(data['device'])
+          EMBED_PLACEMENT: host_input_fn(data[EMBED_PLACEMENT]),
+          NON_EMBED_PLACEMENT: device_input_fn(data[NON_EMBED_PLACEMENT])
       })
 
   enqueue(buffer_size)  # Fill up the buffer.

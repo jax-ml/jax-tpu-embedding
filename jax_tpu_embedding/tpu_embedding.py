@@ -652,8 +652,9 @@ class TPUEmbedding(object):
           features[device_id])
 
       if inputs_treedef != configs_treedef:
-        raise ValueError("Expects `flat_inputs` has the same tree structure as "
-                         "`self.feature_configs`.")
+        raise ValueError(f"Expects `flat_inputs` has the same tree structure as"
+                         f" `self.feature_configs`, inputs = {inputs_treedef}"
+                         f" feature configs = {configs_treedef}")
 
       flat_weights = [None] * len(flat_inputs)
       if weights is not None:
