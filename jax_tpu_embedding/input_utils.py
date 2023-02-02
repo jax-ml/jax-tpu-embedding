@@ -18,7 +18,6 @@ import collections
 import itertools
 from typing import Any, Callable, NamedTuple, Optional, Tuple, Iterator, Sequence, Dict, List
 
-from flax import jax_utils
 import jax
 from jax.experimental import multihost_utils
 from jax.experimental import PartitionSpec
@@ -89,7 +88,7 @@ def make_pmap_array_fn(
   if not jax.config.jax_array:
     raise ValueError('Must use jax array as default.')
 
-  devices = devices or jax_utils._pmap_device_order()  # pylint: disable=protected-access
+  devices = devices or jax.local_devices()
 
   def _put_sharded(xs):
     return jax.device_put_sharded(list(xs), devices)
