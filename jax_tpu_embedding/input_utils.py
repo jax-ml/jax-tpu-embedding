@@ -20,8 +20,8 @@ from typing import Any, Callable, NamedTuple, Optional, Tuple, Iterator, Sequenc
 
 import jax
 from jax.experimental import multihost_utils
-from jax.experimental import PartitionSpec
-from jax.experimental.maps import Mesh
+from jax.sharding import PartitionSpec
+from jax.sharding import Mesh
 from jax_tpu_embedding import pytype_utils
 import tensorflow as tf
 import tree
