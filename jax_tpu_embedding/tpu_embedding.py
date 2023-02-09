@@ -15,13 +15,15 @@
 """Jax Mid level API for TPU Embedding."""
 
 import copy
+import dataclasses
 import os
 import re
-from typing import Optional, Mapping, Sequence, List, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 from absl import logging
 import jax
 from jax.experimental import jax2tf
+import jax.numpy as jnp
 from jax_tpu_embedding import config_utils
 from jax_tpu_embedding import input_utils
 from jax_tpu_embedding import pytype_utils
@@ -174,6 +176,58 @@ def _get_task_id() -> int:
   return task_id
 
 
+def _get_tuple_mask(config_str: bytes) -> pytype_utils.TensorProto:
+  """Get deduplication data tuple mask.
+
+  Deduplication data is a xla tuple of integer or float 1-D tensors. This op is
+  to generate a mask to respresent type and span size of these tensors.
+
+  Args:
+    config_str: A serialized string of TPUEmbeddingConfiguration.
+
+  Returns:
+    A tensor proto of tuple mask, whose first column is 0 or 1 to represent
+    integer or float correspondingly, and second column is span size of each
+    element in this tuple.
+  """
+
+  def _compute_dedup_tuple_mask():
+    return tpu_ops.compute_dedup_data_tuple_mask(config_str)
+
+  tuple_mask = jax2tf.call_tf(
+      _compute_dedup_tuple_mask, has_side_effects=False
+  )()
+  dedup_tuple_mask_proto = config_utils.create_mask_proto(tuple_mask)
+  return dedup_tuple_mask_proto
+
+
+@dataclasses.dataclass
+class DeduplicationTuple:
+  """Deduplication Tuple."""
+
+  integers: tf.Tensor
+  floats: tf.Tensor
+
+
+@dataclasses.dataclass
+class DequeueOutput:
+  """Utility class to represent `TPUEmbedding.dequeue` output.
+
+  User may consider to use TPUEmbedding software deduplication, as result of
+  `tpu_ops.xla_recv_tpu_embedding_deduplication_data`. However, the result needs
+  to be converted to integer and float tf.Tensor(s) as part of
+  `TPUEmbedding.dequeue` output, which will be correspondingly used in
+  `TPUEmbedding.apply_gradient`.
+
+  Attributes:
+    activations: TPUEmbedding activations results.
+    deduplication_tuple: A `DeduplicationTuple` instance.
+  """
+
+  activations: NestedTfTensor
+  deduplication_tuple: DeduplicationTuple
+
+
 class TPUEmbedding(object):
   """The TPUEmbedding mid level API for Jax users."""
 
@@ -227,6 +281,10 @@ class TPUEmbedding(object):
     self._output_shapes = tpu_embedding_config.output_shapes
     self._dynamic_learning_rates = tpu_embedding_config.dynamic_learning_rates
 
+    # TPUEmbedding software deduplication tuple mask and data.
+    self._dedup_tuple_mask = None
+    self._dedup_tuple_tensors = None
+
   def initialize_tpu_embedding(self):
     """Initializae tpu embedding.
 
@@ -267,6 +325,10 @@ class TPUEmbedding(object):
 
     logging.info("TPU Embedding Configuration: %s", str(copied_proto))
     _initialize_fn(copied_proto.SerializeToString())
+    self._dedup_tuple_mask = _get_tuple_mask(
+        self._config_proto.SerializeToString()
+    )
+    logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
   def load_embedding_tables(self) -> None:
     """Load tables' variables on the embedding engine to given set of tensors.
@@ -291,6 +353,9 @@ class TPUEmbedding(object):
         host_id=self._host_id,
         num_hosts=self._num_hosts)
 
+  def _is_empty_dedup_mask(self):
+    return self._dedup_tuple_mask.tensor_shape.dim[0].size == 0
+
   def apply_gradients(self,
                       gradients: NestedTfTensor,
                       name: Optional[str] = None):
@@ -310,7 +375,11 @@ class TPUEmbedding(object):
         corresponding sequence in `feature_config`.
     """
 
-    def _gradients_fn(gradients: NestedTfTensor):
+    def _gradients_fn(
+        gradients: NestedTfTensor,
+        dedup_tuple_integers: Optional[tf.Tensor] = None,
+        dedup_tuple_floats: Optional[tf.Tensor] = None,
+    ):
       tf.nest.assert_same_structure(self._feature_configs, gradients)
       updated_gradients = []
       gradients_with_names, _ = input_utils.tree_flatten_with_names(gradients)
@@ -347,10 +416,21 @@ class TPUEmbedding(object):
         # This ensures that the shape of the gradient is correctly set.
         updated_gradients.append(tf.reshape(gradient, shape=gradient.shape))
 
-      # Here we need compute deduplication data for apply_gradients and dequeue
-      # as we are using call2tf to compile, to assure input is not out of scope.
-      deduplication_data = tpu_ops.xla_recv_tpu_embedding_deduplication_data(
-          config=self._config_proto.SerializeToString())
+      # Merging integer tensor and float tensor in `dedup_tuple` to create
+      # deduplication data. When tuple mask is empty, create empty tensors with
+      # default types.
+      if self._is_empty_dedup_mask():
+        logging.info("Creates empty dedup data when dedup mask is empty.")
+        dedup_tuple_integers = tf.constant((), dtype=tf.uint32)
+        dedup_tuple_floats = tf.constant((), dtype=tf.float32)
+
+      deduplication_data = tpu_ops.merge_dedup_data(
+          integer_tensor=dedup_tuple_integers,
+          float_tensor=dedup_tuple_floats,
+          tuple_mask=self._dedup_tuple_mask.SerializeToString(),
+          config=self._config_proto.SerializeToString(),
+      )
+
       op = tpu_ops.xla_send_tpu_embedding_gradients(
           gradients=updated_gradients,
           learning_rates=[
@@ -364,7 +444,11 @@ class TPUEmbedding(object):
       if name is not None:
         _add_key_attr(op, name)
 
-    jax2tf.call_tf(_gradients_fn, has_side_effects=False)(gradients)
+    jax2tf.call_tf(_gradients_fn, has_side_effects=False)(
+        gradients,
+        self._dedup_tuple_tensors.integers,
+        self._dedup_tuple_tensors.floats,
+    )
 
   def dequeue(self, name: Optional[str] = None) -> NestedTfTensor:
     """Gets the embedding results with inputs non-duplicated.
@@ -378,9 +462,53 @@ class TPUEmbedding(object):
       `TPUEmbedding` object.
     """
 
-    def _dequeue_fn() -> NestedTfTensor:
+    def _dedup_fn():
       deduplication_data = tpu_ops.xla_recv_tpu_embedding_deduplication_data(
-          config=self._config_proto.SerializeToString())
+          config=self._config_proto.SerializeToString()
+      )
+      tuple_integers, tuple_floats = tpu_ops.split_dedup_data(
+          deduplication_data,
+          integer_type=tf.uint32,
+          float_type=tf.float32,
+          tuple_mask=self._dedup_tuple_mask.SerializeToString(),
+          config=self._config_proto.SerializeToString(),
+      )
+      return tuple_integers, tuple_floats
+
+    if self._is_empty_dedup_mask():
+      # When dedup_tuple_mask is empty, `tpu_ops.split_dedup_data` will give two
+      # shape zero tensors, which are not traced by jax XLA input tracing.
+      # Therefore we create two dummy inputs with shape (1,) to return for
+      # methods using these two as inputs.
+      tuple_integers = jnp.zeros([1], dtype=jnp.uint32)
+      tuple_floats = jnp.zeros([1], dtype=jnp.float32)
+    else:
+      tuple_integers, tuple_floats = jax2tf.call_tf(
+          _dedup_fn, has_side_effects=False
+      )()
+
+    self._dedup_tuple_tensors = DeduplicationTuple(
+        integers=tuple_integers, floats=tuple_floats
+    )
+
+    def _dequeue_fn(
+        dedup_tuple_integers: Optional[tf.Tensor] = None,
+        dedup_tuple_floats: Optional[tf.Tensor] = None,
+    ) -> tf.Tensor:
+      # Merging integer tensor and float tensor in `dedup_tuple` to create
+      # deduplication data. When tuple mask is empty, create empty tensors with
+      # default types.
+      if self._is_empty_dedup_mask():
+        logging.info("Creates empty dedup data when dedup mask is empty.")
+        dedup_tuple_integers = tf.constant((), dtype=tf.uint32)
+        dedup_tuple_floats = tf.constant((), dtype=tf.float32)
+
+      deduplication_data = tpu_ops.merge_dedup_data(
+          integer_tensor=dedup_tuple_integers,
+          float_tensor=dedup_tuple_floats,
+          tuple_mask=self._dedup_tuple_mask.SerializeToString(),
+          config=self._config_proto.SerializeToString(),
+      )
 
       # The activations returned by this op are per feature.
       # here num_tables is num_outputs when using feature descriptor
@@ -396,7 +524,9 @@ class TPUEmbedding(object):
       # Pack the list back into the same nested structure as the features.
       return tf.nest.pack_sequence_as(self._feature_configs, activations)
 
-    return jax2tf.call_tf(_dequeue_fn, has_side_effects=False)()
+    return jax2tf.call_tf(_dequeue_fn, has_side_effects=False)(
+        self._dedup_tuple_tensors.integers, self._dedup_tuple_tensors.floats
+    )
 
   def enqueue(self,
               features: List[Nested[TensorType]],

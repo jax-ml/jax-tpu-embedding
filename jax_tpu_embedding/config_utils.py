@@ -33,6 +33,7 @@ LearningRate = Union[float, Callable[[], float]]
 Optimizer = tpu_embedding_v2_utils._Optimizer  # pylint:disable=protected-access
 
 TableConfig = pytype_utils.TableConfig
+TensorProto = pytype_utils.TensorProto
 FeatureConfig = pytype_utils.FeatureConfig
 NestedFeatureConfig = pytype_utils.NestedFeatureConfig
 TPUEmbeddingConfigurationProto = pytype_utils.TPUEmbeddingConfigurationProto
@@ -392,3 +393,24 @@ def maybe_all_gather_configs(config_type: str,
         local_config_bytes=local_config,
         timeout_in_sec=timeout_in_sec)
   return [local_config]
+
+
+def create_mask_proto(tuple_mask: np.ndarray) -> TensorProto:
+  """Create TensorProto for Tuple mask.
+
+  When using software deduplication, the output of deduplication is XLA tuple,
+  including integer elements and floating point elements. `tuple_mask` consists
+  of 0 or 1. 1 means floating point type, 0 means integer type.
+
+  Args:
+    tuple_mask: A np.ndarray represents tuple element is floating point type.
+
+  Returns:
+    A TensorProto of `tuple_mask`.
+  """
+  mask_shape = tf.TensorShape(tuple_mask.shape)
+  mask_tensor_proto = TensorProto(
+      dtype=tf.int32.as_datatype_enum, tensor_shape=mask_shape.as_proto()
+  )
+  mask_tensor_proto.int_val.extend(tuple_mask.ravel())
+  return mask_tensor_proto
