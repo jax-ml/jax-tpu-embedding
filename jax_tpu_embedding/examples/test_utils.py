@@ -16,7 +16,7 @@
 
 from typing import Any, Optional, Sequence, Tuple
 
-from jax.experimental.pjit import PartitionSpec
+from jax.sharding import PartitionSpec
 from jax_tpu_embedding import pytype_utils
 import numpy as np
 import tensorflow as tf
