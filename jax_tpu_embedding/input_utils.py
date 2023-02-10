@@ -16,7 +16,7 @@
 
 import collections
 import itertools
-from typing import Any, Callable, NamedTuple, Optional, Tuple, Iterator, Sequence, Dict, List
+from typing import Any, Callable, NamedTuple, Optional, Tuple, Iterator, Sequence, Dict, List, Union
 
 import jax
 from jax.experimental import multihost_utils
@@ -37,7 +37,9 @@ TensorType = pytype_utils.TensorType
 FeatureConfig = pytype_utils.FeatureConfig
 
 
-def prepare_devices_data(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
+def prepare_devices_data(
+    xs: Union[NestedTfTensor, Nested[Array]]
+) -> Nested[jax.numpy.ndarray]:
   """Converts device input batches to numpy and split it among local devices.
 
   Each element of xs should be batched, it will be split into data parallel onto
@@ -45,7 +47,8 @@ def prepare_devices_data(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
 
   Args:
     xs: batches to be reshaped (tree-map'able). It can only be tf.Tensor as
-      tf.SparseTensor cannot be converted to numpy().
+      tf.SparseTensor cannot be converted to numpy(). Or it can be the type of
+      jax.Array.
 
   Raises:
     ValueError: If any element is not a tf.Tensor.
@@ -55,10 +58,9 @@ def prepare_devices_data(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
   local_device_count = jax.local_device_count()
 
   def _shard(x):
-    if not isinstance(x, tf.Tensor):
-      raise ValueError('Value to shard is not a tf.Tensor.')
-    # Use _numpy() for zero-copy conversion between TF and NumPy.
-    x = x._numpy()  # pylint: disable=protected-access
+    if isinstance(x, tf.Tensor):
+      # Use _numpy() for zero-copy conversion between TF and NumPy.
+      x = x._numpy()  # pylint: disable=protected-access
 
     # reshape (batch_size, ...) to
     # (local_devices, device_batch_size, ...)
