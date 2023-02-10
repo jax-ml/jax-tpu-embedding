@@ -68,7 +68,7 @@ def prepare_devices_data(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
 
 
 def make_pmap_array_fn(
-    devices: Optional[Sequence[jax.xla.Device]] = None
+    devices: Optional[Sequence[jax.Device]] = None
 ) -> Callable[..., Nested[Array]]:
   """Example function of creating jax.Array for pmap from local host data.
 
