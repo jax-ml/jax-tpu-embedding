@@ -235,7 +235,7 @@ class TPUEmbedding(object):
                feature_configs: config_utils.NestedFeatureConfig,
                optimizer: Optional[config_utils.Optimizer] = None,
                pipeline_execution_with_tensor_core: bool = False,
-               cores_per_replica: int = 1):
+               cores_per_replica: Optional[int] = None):
     """Creates jax TPUEmbedding object.
 
     Args:
@@ -256,7 +256,8 @@ class TPUEmbedding(object):
     Raises:
       ValueError: when cores_per_replica is not legal.
     """
-    if cores_per_replica > jax.device_count() or cores_per_replica < 1:
+    if cores_per_replica and (
+        cores_per_replica > jax.device_count() or cores_per_replica < 1):
       raise ValueError("`cores_per_replica = {}` is not allowed, legal range is"
                        "1 <= cores_per_replica <= {}".format(
                            cores_per_replica, jax.device_count()))
