@@ -354,21 +354,19 @@ def _all_gather_configs(config_type: str,
     return "{type}_config_by_process_{id}".format(type=config_type, id=pid)
 
   # Add key value store into coordination service.
-  # Note: here and following we encode local_config_bytes to `cp437` due to
-  # utf-8 or ascii decoding would not return results decoded same as original.
   global_state.client.key_value_set(
       key=_get_config_key(config_type, current_pid),
-      value=local_config_bytes.decode("cp437"))
+      value=local_config_bytes)
 
-  all_configs = []
+  all_configs = [b"" for _ in range(jax.process_count())]
   for pid in range(jax.process_count()):
     if pid == current_pid:
-      all_configs.append(local_config_bytes)
+      all_configs[pid] = local_config_bytes
     else:
-      gathered_config_str = global_state.client.blocking_key_value_get(
+      gathered_config_bytes = global_state.client.blocking_key_value_get_bytes(
           key=_get_config_key(config_type, pid),
           timeout_in_ms=timeout_in_sec * 1000)
-      all_configs.append(gathered_config_str.encode("cp437"))
+      all_configs[pid] = gathered_config_bytes
   return all_configs
 
 
