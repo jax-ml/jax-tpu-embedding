@@ -353,8 +353,32 @@ def _all_gather_configs(config_type: str,
     """Create configure key for each process."""
     return "{type}_config_by_process_{id}".format(type=config_type, id=pid)
 
+  # Get value for a given key store into coordination service.
+  def _get_key_value(key: str) -> bytes:
+    # Checking `blocking_key_value_get_bytes` API for backwards compatibilty
+    # And falling back to blocking_key_value_get.
+    if hasattr(global_state.client, "blocking_key_value_get_bytes"):
+      return global_state.client.blocking_key_value_get_bytes(
+          key=key, timeout_in_ms=timeout_in_sec * 1000)
+    else:
+      # TODO remove blocking_key_value_get fallback when most user migrate to
+      # Jax 0.4.5+.
+      gathered_config_str = global_state.client.blocking_key_value_get(
+          key=key, timeout_in_ms=timeout_in_sec * 1000)
+      # Here and following we encode local_config_bytes to `cp437` due to utf-8
+      # or ascii decoding would not return results decoded same as original.
+      return gathered_config_str.encode("cp437")
+
   # Add key value store into coordination service.
-  global_state.client.key_value_set(
+  def _set_key_value(key: str, value: bytes) -> None:
+    if hasattr(global_state.client, "blocking_key_value_get_bytes"):
+      global_state.client.key_value_set(key=key, value=value)
+    else:
+      global_state.client.key_value_set(
+          key=key,
+          value=local_config_bytes.decode("cp437"))
+
+  _set_key_value(
       key=_get_config_key(config_type, current_pid),
       value=local_config_bytes)
 
@@ -363,10 +387,8 @@ def _all_gather_configs(config_type: str,
     if pid == current_pid:
       all_configs[pid] = local_config_bytes
     else:
-      gathered_config_bytes = global_state.client.blocking_key_value_get_bytes(
-          key=_get_config_key(config_type, pid),
-          timeout_in_ms=timeout_in_sec * 1000)
-      all_configs[pid] = gathered_config_bytes
+      all_configs[pid] = _get_key_value(key=_get_config_key(config_type, pid))
+
   return all_configs
 
 
