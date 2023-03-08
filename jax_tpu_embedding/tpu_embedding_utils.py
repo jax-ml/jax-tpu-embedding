@@ -31,7 +31,7 @@ TableConfig = tf.tpu.experimental.embedding.TableConfig
 def init_tpu_system():
   """Initialize tpu system for tpu embedding."""
   # As Jax TPUEmbedding also use coordination service to initialize
-  # embedding engine, setting `enable_coordination_service` to `False` 
+  # embedding engine, setting `enable_coordination_service` to `False`
   # in dtensor to avoid potential conflict.
   tf.experimental.dtensor.initialize_accelerator_system(
       enable_coordination_service=False)

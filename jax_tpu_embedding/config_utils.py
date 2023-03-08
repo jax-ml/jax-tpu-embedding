@@ -98,7 +98,6 @@ def create_tpu_embedding_config(
     An instance of TpuEmbeddingConfig.
   """
 
-  # TODO(zhonglinhan) : infer output shape when it's not given.
   output_shapes = []
   flatten_feature_configs, _ = jax.tree_util.tree_flatten(feature_configs)
   for feature in flatten_feature_configs:

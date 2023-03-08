@@ -18,10 +18,11 @@ import collections
 import itertools
 from typing import Any, Callable, NamedTuple, Optional, Tuple, Iterator, Sequence, Dict, List, Union
 
+from absl import logging
 import jax
 from jax.experimental import multihost_utils
-from jax.sharding import PartitionSpec
 from jax.sharding import Mesh
+from jax.sharding import PartitionSpec
 from jax_tpu_embedding import pytype_utils
 import tensorflow as tf
 import tree
@@ -392,8 +393,6 @@ def enqueue_prefetch(
     A function call to shard inputs for each local device and execute enqueue.
   """
 
-  tf_enqueue_fn = tf.function(enqueue_fn)
-
   def _prefetch_fn(xs: TensorType) -> Tuple[()]:
     """Apply prefetch input to tf enqueue function.
 
@@ -405,7 +404,105 @@ def enqueue_prefetch(
       output to yield.
     """
     xs = shard_inputs(xs, num_shards=jax.local_device_count())
-    tf_enqueue_fn(xs)
+    enqueue_fn(features=xs)
     return ()
 
   return _prefetch_fn
+
+
+def _get_dense_output_shape(
+    input_shape: List[int],
+    path_name: str) -> tf.TensorShape:
+  """Get the input shape for dense feature."""
+
+  if len(input_shape) < 1:
+    raise ValueError('Only rank 1 or above dense tensor is supported, got rank '
+                     f'{len(input_shape)} dense tensor for input {path_name}.')
+  return tf.TensorShape(input_shape)
+
+
+def _get_sparse_output_shape(
+    input_shape: List[int],
+    path_name: str,
+    feature_config: FeatureConfig) -> tf.TensorShape:
+  """Get the input shape for the sparse feature."""
+
+  if len(input_shape) < 2:
+    raise ValueError(
+        'Only rank 2 or above sparse tensor is supported, found rank = '
+        f'{len(input_shape)} for input {path_name}'
+    )
+
+  if not feature_config.output_shape and feature_config.max_sequence_length > 0:
+    # If the max_sequence_length is set and the output shape for FeatureConfig
+    # is not set, we modify the shape of the input feature. Only rank 2 feature
+    # output shape is modified.
+    if len(input_shape) > 2:
+      raise ValueError(
+          'Max_sequenece_length cannot be applied to rank 2 tensor.'
+      )
+
+    if len(input_shape) == 2:
+      # If the sparse tensor is 2D and max_sequence_length is set, we need to
+      # add one dimension to the input feature.
+      input_shape.insert(len(input_shape) - 1,
+                         feature_config.max_sequence_length)
+
+  return tf.TensorShape(input_shape[:-1])
+
+
+def infer_output_shapes(
+    features: Nested[TensorType],
+    feature_configs: Nested[FeatureConfig]
+) -> List[tf.TensorShape]:
+  """Infer input shapes from input feature tensors.
+
+  Args:
+    features: Enqueued input features.
+    feature_configs: Nested structure of feature configs, which to define tpu
+      embedding layer.
+
+  Returns:
+    A list of inferred output shapes corresponding to features.
+  """
+  inferred_output_shapes = []
+
+  flatten_features_with_name, features_treedef = tree_flatten_with_names(
+      features)
+  flatten_feature_configs, config_treedef = jax.tree_util.tree_flatten(
+      feature_configs)
+
+  if features_treedef != config_treedef:
+    raise ValueError('Input feature should respect config tree structure,'
+                     f'feature tree = {features_treedef}, while config tree = '
+                     f'{config_treedef}')
+
+  for (path_name, feature), feature_config in zip(
+      flatten_features_with_name, flatten_feature_configs
+  ):
+    input_shape = feature.shape.as_list()
+    output_shape = None
+    logging.debug('Input feature path_name = %s, input shape = %s',
+                  path_name, input_shape)
+    if isinstance(feature, tf.Tensor):
+      logging.debug('tf.Tensor feature name = %s', feature_config.name)
+      output_shape = _get_dense_output_shape(input_shape, path_name)
+    elif isinstance(feature, tf.SparseTensor):
+      logging.debug('tf.SparseTensor feature name = %s', feature_config.name)
+      output_shape = _get_sparse_output_shape(
+          input_shape, path_name, feature_config
+      )
+    else:
+      raise ValueError('Only support tf.Tensor and tf.SparseTensor as input.'
+                       f'But got feature of {feature}.')
+
+    if not output_shape.is_fully_defined():
+      raise ValueError(
+          f'Inferred output shape of {path_name} is {output_shape} not fully '
+          f'defined, which is inferred from input_shape = {input_shape}.'
+      )
+
+    logging.debug('Inferred output shape = %s ', output_shape)
+    inferred_output_shapes.append(output_shape)
+
+  return inferred_output_shapes

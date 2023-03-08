@@ -35,6 +35,8 @@ from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint
 TensorType = pytype_utils.TensorType
 NestedTfTensor = pytype_utils.NestedTfTensor
 Nested = pytype_utils.Nested
+NestedFeatureConfig = config_utils.NestedFeatureConfig
+TPUEmbeddingOptimizer = config_utils.Optimizer
 
 # Regular expression handler to extract task id from environment variable.
 _TASK_HANDLE_RE = re.compile(r"(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+")
@@ -232,8 +234,8 @@ class TPUEmbedding(object):
   """The TPUEmbedding mid level API for Jax users."""
 
   def __init__(self,
-               feature_configs: config_utils.NestedFeatureConfig,
-               optimizer: Optional[config_utils.Optimizer] = None,
+               feature_configs: Optional[NestedFeatureConfig] = None,
+               optimizer: Optional[TPUEmbeddingOptimizer] = None,
                pipeline_execution_with_tensor_core: bool = False,
                cores_per_replica: Optional[int] = None):
     """Creates jax TPUEmbedding object.
@@ -262,12 +264,12 @@ class TPUEmbedding(object):
                        "1 <= cores_per_replica <= {}".format(
                            cores_per_replica, jax.device_count()))
 
-    # Get current host id.
+    # Setup device specs.
     self._host_id = _get_task_id()
     self._num_hosts = jax.process_count()
 
     # Create config_utils.TpuEmbeddingConfig instance.
-    tpu_embedding_config = config_utils.create_tpu_embedding_config(
+    self._tpu_embedding_config = config_utils.create_tpu_embedding_config(
         feature_configs=feature_configs,
         optimizer=optimizer,
         pipeline_execution_with_tensor_core=pipeline_execution_with_tensor_core,
@@ -276,11 +278,13 @@ class TPUEmbedding(object):
         cores_per_replica=cores_per_replica)
 
     self._cores_per_replica = cores_per_replica
-    self._table_config_list = tpu_embedding_config.table_config_list
-    self._config_proto = config_utils.create_config_proto(tpu_embedding_config)
+    self._table_config_list = self._tpu_embedding_config.table_config_list
     self._feature_configs = feature_configs
-    self._output_shapes = tpu_embedding_config.output_shapes
-    self._dynamic_learning_rates = tpu_embedding_config.dynamic_learning_rates
+    self._output_shapes = self._tpu_embedding_config.output_shapes
+    self._dynamic_learning_rates = (
+        self._tpu_embedding_config.dynamic_learning_rates
+        )
+    self._is_initialized = False
 
     # TPUEmbedding software deduplication tuple mask and data.
     self._dedup_tuple_mask = None
@@ -302,17 +306,33 @@ class TPUEmbedding(object):
     It is important to disable coordination service on from DTensor to avoid
     double initialization of the service.
 
+    Also note that, when user need to make output shape inference, user should
+    not explicitly call `initialize_tpu_embedding`. It will be called in side
+    of `enqueue` after inferring output shapes from first input batch.
+
     The initialization would be like:
 
     ```python
-    tf.experimental.dtensor.initialize_accelerator_system('TPU',
-      enable_coordination_service=False)
-    initialize_tpu_embedding(config_proto)
+    # Example 1: When not using shape inference `initialize_tpu_embedding` is .
+    from jax_tpu_embedding import tpu_embedding_utils
+    tpu_embedding_utils.init_tpu_system()
+    initialize_tpu_embedding()
+
+    # Example 2: When using shape inference, initialize_tpu_embedding is not
+    explicit called, it will be executed after output shape inferred during
+    first batch of data enqueued.
+
+    tpu_embedding_utils.init_tpu_system()
+    tpu_embedding_layer = TPUEmbedding(...)
+
+    tpu_embedding_layer.enqueue(...)
     ```
 
     Raises:
       RuntimeError: If tpu embedding is already initialized on TPU.
     """
+    self._config_proto = config_utils.create_config_proto(
+        self._tpu_embedding_config)
     if tpu_ops.is_tpu_embedding_initialized():
       raise RuntimeError(
           "TPU is already initialized for embeddings. This may be caused by "
@@ -326,6 +346,9 @@ class TPUEmbedding(object):
 
     logging.info("TPU Embedding Configuration: %s", str(copied_proto))
     _initialize_fn(copied_proto.SerializeToString())
+    self._is_initialized = True
+    logging.info("Successfully Initialized TPUEmbedding devices.")
+
     self._dedup_tuple_mask = _get_tuple_mask(
         self._config_proto.SerializeToString()
     )
@@ -538,7 +561,9 @@ class TPUEmbedding(object):
 
     This function enqueues a list of nested structure of features to be looked
     up in embedding tables. We expect the input shape of each feature to matche
-    the `output_shape` defined in FeatureConfig.
+    the `output_shape` defined in FeatureConfig. When TPU Embedding is not
+    initialized, then when first time enqueue is called, it will initialize
+    TPU Embedding as part of this `enqueue` function.
 
     Args:
       features: A list of nested structure of `tf.Tensor`s, `tf.SparseTensor`s
@@ -551,6 +576,46 @@ class TPUEmbedding(object):
         inference batch (forward pass only). Do not call `apply_gradients` when
         this is `False` as this may lead to a deadlock.
        name: An optional name for the underlying op.
+    """
+    if not self._is_initialized:
+      # Use output shapes inference mode when feature_configs did not provide
+      # output_shape. `output_shape` of each feature_config, i.e. each instance
+      # of tf.tpu.experimental.embedding.FeatureConfig, is to configure output
+      # shape of the feature activation but without last embedding dimension.
+      # For example, if we expect output feature activation shape is [B, N, E]
+      # where E is embedding dimension, the output shape should be [B, N].
+
+      inferred_output_shapes = input_utils.infer_output_shapes(
+          features[0], self._feature_configs
+      )
+      self._tpu_embedding_config.output_shapes = inferred_output_shapes
+      self._output_shapes = inferred_output_shapes
+      logging.info(
+          "Using shape inference mode, initializing embedding layer and loading"
+          " embedding weights in first enqueue call."
+      )
+      self.initialize_tpu_embedding()
+      self.load_embedding_tables()
+      self._is_initialized = True
+
+    self.enqueue_fn_call(features=features,
+                         weights=weights,
+                         is_training=is_training,
+                         name=name)
+
+  @tf.function
+  def enqueue_fn_call(self,
+                      features: List[Nested[TensorType]],
+                      weights: Optional[List[Nested[TensorType]]] = None,
+                      is_training: bool = True,
+                      name: Optional[str] = None) -> None:  # pylint:disable=g-doc-args
+    """tf.function call of enqueue().
+
+    This function enqueues a list of nested structure of features to be looked
+    up in embedding tables. We expect the input shape of each feature to matche
+    the `output_shape` defined in FeatureConfig.
+
+    Args are same as the `enqueue` function.
     """
 
     def _generate_enqueue_op(flat_inputs: List[TensorType],
@@ -579,8 +644,9 @@ class TPUEmbedding(object):
           combiners=combiners)
 
     mode_override = "train" if is_training else "inference"
-    flat_feature_with_names, configs_treedef = input_utils.tree_flatten_with_names(
-        self._feature_configs)
+    flat_feature_with_names, configs_treedef = (
+        input_utils.tree_flatten_with_names(self._feature_configs)
+    )
     for device_id in range(jax.local_device_count()):
       flat_inputs, inputs_treedef = jax.tree_util.tree_flatten(
           features[device_id])
@@ -607,4 +673,4 @@ class TPUEmbedding(object):
 
   @property
   def config_proto(self) -> config_utils.TPUEmbeddingConfigurationProto:
-    return self._config_proto
+    return self._config_proto  # pytype: disable=attribute-error
