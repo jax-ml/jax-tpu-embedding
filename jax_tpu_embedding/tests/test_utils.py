@@ -16,6 +16,8 @@
 
 from typing import Any, Optional, Sequence, Tuple
 
+import jax
+from jax.sharding import Mesh
 from jax.sharding import PartitionSpec
 from jax_tpu_embedding import pytype_utils
 import numpy as np
@@ -77,6 +79,7 @@ def create_dummy_dataset(batch_size: int) -> tf.data.Dataset:
 
 def create_feature_config(
     batch_size: int,
+    use_shape_inference: bool = False,
     init_values: Optional[np.ndarray] = None) -> tuple[FeatureConfig, ...]:
   """Create A tuple of feature config.
 
@@ -97,17 +100,38 @@ def create_feature_config(
       dim=4,
       initializer=initializer,
       combiner='sum',
-      name='video')
+      name='video',
+  )
   table_user = TableConfig(
       vocabulary_size=16,
       dim=2,
       initializer=initializer,
       combiner='mean',
-      name='user')
-  return (FeatureConfig(
-      table=table_video, name='watched', output_shape=[batch_size]),
-          FeatureConfig(
-              table=table_video, name='favorited', output_shape=[batch_size]),
-          FeatureConfig(
-              table=table_user, name='friends', output_shape=[batch_size]))
+      name='user',
+  )
+  output_shape = None if use_shape_inference else [batch_size]
+  return (
+      FeatureConfig(
+          table=table_video, name='watched', output_shape=output_shape
+      ),
+      FeatureConfig(
+          table=table_video, name='favorited', output_shape=output_shape
+      ),
+      FeatureConfig(
+          table=table_user, name='friends', output_shape=output_shape
+      ),
+  )
+
+
+def create_global_mesh(
+    mesh_shape: tuple[int, ...], axis_names: Sequence[jax.pxla.MeshAxisName]
+) -> Mesh:
+  size = np.prod(mesh_shape)
+  if len(jax.devices()) < size:
+    raise ValueError(f'Test requires {size} global devices.')
+  # Sorts devices by host_id and core on chip for contiguous devices.
+  devices = sorted(jax.devices(), key=lambda d: (d.host_id, d.core_on_chip))
+  mesh_devices = np.array(devices[:size]).reshape(mesh_shape)
+  global_mesh = Mesh(mesh_devices, axis_names)
+  return global_mesh
 

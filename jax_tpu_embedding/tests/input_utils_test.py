@@ -17,7 +17,7 @@
 from absl.testing import parameterized
 import jax
 from jax_tpu_embedding import input_utils
-from jax_tpu_embedding.examples import test_utils
+from jax_tpu_embedding.tests import test_utils
 import tensorflow as tf
 
 GLOBAL_BATCH_SIZE = 4
