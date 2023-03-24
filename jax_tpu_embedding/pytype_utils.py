@@ -23,7 +23,7 @@ from tensorflow.core.protobuf.tpu import tpu_embedding_configuration_pb2
 # pylint: enable=g-direct-tensorflow-import
 
 
-T = TypeVar("T")
+T = TypeVar('T')
 Nested = Union[T, Tuple[Any, ...], List[Any], Dict[str, Any], Iterable]
 
 TensorType = Union[tf.Tensor, tf.SparseTensor]
@@ -34,4 +34,10 @@ NestedTfTensor = Nested[tf.Tensor]
 TableConfig = tf.tpu.experimental.embedding.TableConfig
 FeatureConfig = tf.tpu.experimental.embedding.FeatureConfig
 NestedFeatureConfig = Nested[FeatureConfig]
-TPUEmbeddingConfigurationProto = tpu_embedding_configuration_pb2.TPUEmbeddingConfiguration
+TPUEmbeddingConfigurationProto = (
+    tpu_embedding_configuration_pb2.TPUEmbeddingConfiguration
+)
+
+# Special field names.
+EMBED_PLACEMENT = 'host'
+NON_EMBED_PLACEMENT = 'device'
