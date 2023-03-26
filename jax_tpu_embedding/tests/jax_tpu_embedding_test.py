@@ -88,7 +88,6 @@ class JaxJaxTpuEmbeddingTest(parameterized.TestCase, JaxTpuEmbeddingTestBase):
     jax.clear_backends()
     super().setUp()
 
-    jax.config.update('jax_array', True)
     self.split_fn = lambda xs: {'host': xs[0], 'device': xs[1]}
 
   def tearDown(self):

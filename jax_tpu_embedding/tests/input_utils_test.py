@@ -54,7 +54,6 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
         batch_size=test_utils.PER_CORE_BATCH_SIZE)
     self._flatten_feature_configs, _ = input_utils.tree_flatten_with_names(
         feature_configs)
-    jax.config.update('jax_array', True)
 
 
 
