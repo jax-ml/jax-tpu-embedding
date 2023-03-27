@@ -263,15 +263,17 @@ class TPUEmbedding(object):
       raise ValueError("`cores_per_replica = {}` is not allowed, legal range is"
                        "1 <= cores_per_replica <= {}".format(
                            cores_per_replica, jax.device_count()))
-
     # Setup device specs.
     self._host_id = _get_task_id()
     self._num_hosts = jax.process_count()
 
+    self._feature_configs = feature_configs
+    self._optimizer = optimizer
+
     # Create config_utils.TpuEmbeddingConfig instance.
     self._tpu_embedding_config = config_utils.create_tpu_embedding_config(
-        feature_configs=feature_configs,
-        optimizer=optimizer,
+        feature_configs=self._feature_configs,
+        optimizer=self._optimizer,
         pipeline_execution_with_tensor_core=pipeline_execution_with_tensor_core,
         num_hosts=self._num_hosts,
         num_tensor_cores=jax.device_count(),
@@ -279,7 +281,6 @@ class TPUEmbedding(object):
 
     self._cores_per_replica = cores_per_replica
     self._table_config_list = self._tpu_embedding_config.table_config_list
-    self._feature_configs = feature_configs
     self._output_shapes = self._tpu_embedding_config.output_shapes
     self._dynamic_learning_rates = (
         self._tpu_embedding_config.dynamic_learning_rates
@@ -675,3 +676,11 @@ class TPUEmbedding(object):
   @property
   def config_proto(self) -> config_utils.TPUEmbeddingConfigurationProto:
     return self._config_proto  # pytype: disable=attribute-error
+
+  @property
+  def feature_configs(self) -> Optional[NestedFeatureConfig]:
+    return self._feature_configs
+
+  @property
+  def optimizer(self) -> Optional[TPUEmbeddingOptimizer]:
+    return self._optimizer

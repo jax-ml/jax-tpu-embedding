@@ -20,6 +20,7 @@ import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.core.framework import tensor_pb2
 from tensorflow.core.protobuf.tpu import tpu_embedding_configuration_pb2
+from tensorflow.python.tpu import tpu_embedding_v2_utils
 # pylint: enable=g-direct-tensorflow-import
 
 
@@ -37,7 +38,9 @@ NestedFeatureConfig = Nested[FeatureConfig]
 TPUEmbeddingConfigurationProto = (
     tpu_embedding_configuration_pb2.TPUEmbeddingConfiguration
 )
+TPUEmbeddingOptimizer = tpu_embedding_v2_utils._Optimizer  # pylint: disable=protected-access
 
 # Special field names.
 EMBED_PLACEMENT = 'host'
 NON_EMBED_PLACEMENT = 'device'
+EMBED_ACTV_KEY = 'embedding_actvs'
