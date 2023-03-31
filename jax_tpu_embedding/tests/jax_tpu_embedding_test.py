@@ -33,8 +33,6 @@ import numpy as np
 import optax
 import tensorflow as tf
 
-from tensorflow.python.eager import context  # pylint: disable=g-direct-tensorflow-import
-
 Array = jax.Array
 FrozenDict = flax_scope.FrozenDict
 FrozenVariableDict = flax_scope.FrozenVariableDict
@@ -43,7 +41,7 @@ OptState = optax.OptState
 _LEARNING_RATE = 0.1
 
 
-class JaxTpuEmbeddingTestBase(tf.test.TestCase):
+class JaxTpuEmbeddingTestBase(parameterized.TestCase):
 
   class JaxDense(nn.Module):
     """Jax single dense layer."""
@@ -79,13 +77,12 @@ class JaxTpuEmbeddingTestBase(tf.test.TestCase):
     return init_params
 
 
-class JaxJaxTpuEmbeddingTest(parameterized.TestCase, JaxTpuEmbeddingTestBase):
+class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
   """Test Jax JaxTpuEmbedding APIs."""
 
   def setUp(self):
     """Initialize tpu embedding system."""
     jte_utils.init_tpu_system()
-    jax.clear_backends()
     super().setUp()
 
     self.split_fn = lambda xs: {'host': xs[0], 'device': xs[1]}
@@ -99,7 +96,6 @@ class JaxJaxTpuEmbeddingTest(parameterized.TestCase, JaxTpuEmbeddingTestBase):
 
     # Clear up tpu embedding
     jte_utils.shutdown_tpu_system()
-    context._reset_context()
 
   def _create_train_state(self) -> TrainState:
     """Initializes model parameters and optimizer state.
@@ -293,12 +289,12 @@ class JaxJaxTpuEmbeddingTest(parameterized.TestCase, JaxTpuEmbeddingTestBase):
       # Since loss is replicated and compute by reduction mean, it should be
       # equal to self.expect_loss average.
       expect_loss = np.mean(self.expected_loss)
-      self.assertAllClose(
-          loss.device_buffers[0], expect_loss, rtol=1e-7, atol=1e-7)
-      self.assertAllClose(loss.device_buffers[1], expect_loss)
+      self.assertAlmostEqual(
+          loss.device_buffers[0], expect_loss)
+      self.assertAlmostEqual(loss.device_buffers[1], expect_loss)
 
 
-class TFJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase, parameterized.TestCase):
+class TFJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase, tf.test.TestCase):
   """Test TF JaxTpuEmbedding API gives same expected results."""
 
   def setUp(self):
