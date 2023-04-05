@@ -684,3 +684,7 @@ class TPUEmbedding(object):
   @property
   def optimizer(self) -> Optional[TPUEmbeddingOptimizer]:
     return self._optimizer
+
+  @property
+  def is_initialized(self) -> bool:
+    return self._is_initialized
