@@ -74,7 +74,6 @@ RUN pip3 install pip six numpy wheel setuptools mock 'future>=0.17.1'
 RUN mv jax_tpu_embedding/jax_tpu_embedding/pip_package /jax_tpu_embedding/
 RUN cd /jax_tpu_embedding && bash pip_package/build.sh
 
-
 WORKDIR /
 
 CMD ["/bin/bash"]
