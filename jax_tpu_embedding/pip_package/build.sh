@@ -57,6 +57,7 @@ write_action_env_to_bazelrc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 
 bazel clean
 bazel build ...
+bazel test  --test_output=all --test_verbose_timeout_warnings   --  jax_tpu_embedding/... -jax_tpu_embedding/examples:input_utils_test.py
 
 # TODO: Run some tests
 

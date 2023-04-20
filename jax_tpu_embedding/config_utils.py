@@ -1,4 +1,4 @@
-# Copyright 2022 The jax_tpu_embedding Authors.
+# Copyright 2023 The jax_tpu_embedding Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ LearningRate = Union[float, Callable[[], float]]
 Optimizer = tpu_embedding_v2_utils._Optimizer  # pylint:disable=protected-access
 
 TableConfig = pytype_utils.TableConfig
+TensorProto = pytype_utils.TensorProto
 FeatureConfig = pytype_utils.FeatureConfig
 NestedFeatureConfig = pytype_utils.NestedFeatureConfig
 TPUEmbeddingConfigurationProto = pytype_utils.TPUEmbeddingConfigurationProto
@@ -97,7 +98,6 @@ def create_tpu_embedding_config(
     An instance of TpuEmbeddingConfig.
   """
 
-  # TODO(zhonglinhan) : infer output shape when it's not given.
   output_shapes = []
   flatten_feature_configs, _ = jax.tree_util.tree_flatten(feature_configs)
   for feature in flatten_feature_configs:
@@ -352,22 +352,42 @@ def _all_gather_configs(config_type: str,
     """Create configure key for each process."""
     return "{type}_config_by_process_{id}".format(type=config_type, id=pid)
 
-  # Add key value store into coordination service.
-  # Note: here and following we encode local_config_bytes to `cp437` due to
-  # utf-8 or ascii decoding would not return results decoded same as original.
-  global_state.client.key_value_set(
-      key=_get_config_key(config_type, current_pid),
-      value=local_config_bytes.decode("cp437"))
+  # Get value for a given key store into coordination service.
+  def _get_key_value(key: str) -> bytes:
+    # Checking `blocking_key_value_get_bytes` API for backwards compatibilty
+    # And falling back to blocking_key_value_get.
+    if hasattr(global_state.client, "blocking_key_value_get_bytes"):
+      return global_state.client.blocking_key_value_get_bytes(
+          key=key, timeout_in_ms=timeout_in_sec * 1000)
+    else:
+      # TODO remove blocking_key_value_get fallback when most user migrate to
+      # Jax 0.4.5+.
+      gathered_config_str = global_state.client.blocking_key_value_get(
+          key=key, timeout_in_ms=timeout_in_sec * 1000)
+      # Here and following we encode local_config_bytes to `cp437` due to utf-8
+      # or ascii decoding would not return results decoded same as original.
+      return gathered_config_str.encode("cp437")
 
-  all_configs = []
+  # Add key value store into coordination service.
+  def _set_key_value(key: str, value: bytes) -> None:
+    if hasattr(global_state.client, "blocking_key_value_get_bytes"):
+      global_state.client.key_value_set(key=key, value=value)
+    else:
+      global_state.client.key_value_set(
+          key=key,
+          value=local_config_bytes.decode("cp437"))
+
+  _set_key_value(
+      key=_get_config_key(config_type, current_pid),
+      value=local_config_bytes)
+
+  all_configs = [b"" for _ in range(jax.process_count())]
   for pid in range(jax.process_count()):
     if pid == current_pid:
-      all_configs.append(local_config_bytes)
+      all_configs[pid] = local_config_bytes
     else:
-      gathered_config_str = global_state.client.blocking_key_value_get(
-          key=_get_config_key(config_type, pid),
-          timeout_in_ms=timeout_in_sec * 1000)
-      all_configs.append(gathered_config_str.encode("cp437"))
+      all_configs[pid] = _get_key_value(key=_get_config_key(config_type, pid))
+
   return all_configs
 
 
@@ -392,3 +412,24 @@ def maybe_all_gather_configs(config_type: str,
         local_config_bytes=local_config,
         timeout_in_sec=timeout_in_sec)
   return [local_config]
+
+
+def create_mask_proto(tuple_mask: np.ndarray) -> TensorProto:
+  """Create TensorProto for Tuple mask.
+
+  When using software deduplication, the output of deduplication is XLA tuple,
+  including integer elements and floating point elements. `tuple_mask` consists
+  of 0 or 1. 1 means floating point type, 0 means integer type.
+
+  Args:
+    tuple_mask: A np.ndarray represents tuple element is floating point type.
+
+  Returns:
+    A TensorProto of `tuple_mask`.
+  """
+  mask_shape = tf.TensorShape(tuple_mask.shape)
+  mask_tensor_proto = TensorProto(
+      dtype=tf.int32.as_datatype_enum, tensor_shape=mask_shape.as_proto()
+  )
+  mask_tensor_proto.int_val.extend(tuple_mask.ravel())
+  return mask_tensor_proto

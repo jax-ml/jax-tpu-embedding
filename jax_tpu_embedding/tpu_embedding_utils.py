@@ -1,4 +1,4 @@
-# Copyright 2022 The jax_tpu_embedding Authors.
+# Copyright 2023 The jax_tpu_embedding Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ TableConfig = tf.tpu.experimental.embedding.TableConfig
 def init_tpu_system():
   """Initialize tpu system for tpu embedding."""
   # As Jax TPUEmbedding also use coordination service to initialize
-  # embedding engine, setting `enable_coordination_service` to `False` 
+  # embedding engine, setting `enable_coordination_service` to `False`
   # in dtensor to avoid potential conflict.
   tf.experimental.dtensor.initialize_accelerator_system(
       enable_coordination_service=False)

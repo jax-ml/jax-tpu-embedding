@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Workspace file for Jax Tpu Embedding."""
+
 load("//jax_tpu_embedding:build_defs.bzl", "jte_targets")  # @unused
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 

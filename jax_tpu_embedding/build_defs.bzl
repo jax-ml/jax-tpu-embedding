@@ -131,6 +131,7 @@ for d in import_str.split(' '):
   # internal build_defs.bzl imports code
   importlib.import_module(d)
 # End of auto-generated code.
+
 EOF
         """ % (source_target, exp_sources),
     )
