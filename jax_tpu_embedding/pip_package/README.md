@@ -2,8 +2,6 @@
 
 Update the version number in setup.py and commit it.
 
-SKIP: Copy the package using the script `export/copy_to_local_paxml.sh` or through git clone.
-
 In the following steps, we assume that the repo is stored at /tmp/jax_tpu_embedding.
 
 After the docker file has been tested on a TPU VM, the following 
