@@ -20,6 +20,7 @@ Demonstrates how to use jax_tpu_embedding with pjit
 import functools
 import math
 from typing import Dict, Sequence, Tuple, Union
+
 from absl import app
 from absl import flags
 from flax.core import scope as flax_scope
@@ -28,8 +29,8 @@ from flax.training import common_utils
 from flax.training.train_state import TrainState
 import jax
 from jax.experimental import pjit
-from jax.experimental.maps import Mesh
 import jax.numpy as jnp
+from jax.sharding import Mesh
 from jax.sharding import PartitionSpec
 from jax_tpu_embedding import input_utils
 from jax_tpu_embedding import tpu_embedding as jte
@@ -37,6 +38,7 @@ from jax_tpu_embedding import tpu_embedding_utils
 import numpy as np
 import optax
 import tensorflow as tf
+
 
 jax.distributed.initialize()
 tpu_embedding_utils.init_tpu_system()
