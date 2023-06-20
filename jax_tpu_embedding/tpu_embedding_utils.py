@@ -14,10 +14,12 @@
 
 """Utils support load or retrieve TPU embedding variables."""
 
-from typing import List, Mapping
+from typing import List, Mapping, Optional
 
 from absl import flags
 from absl import logging
+import jax
+from jax_tpu_embedding import pytype_utils
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.dtensor.python import accelerator_util
@@ -25,7 +27,10 @@ from tensorflow.dtensor.python import gen_dtensor_ops
 from tensorflow.python.eager import context
 # pylint: enable=g-direct-tensorflow-import
 
-TableConfig = tf.tpu.experimental.embedding.TableConfig
+GlobalHostArray = pytype_utils.GlobalHostArray
+NestedStruct = pytype_utils.NestedStruct
+TableConfig = pytype_utils.TableConfig
+RestoreArgs = pytype_utils.RestoreArgs
 
 
 def init_tpu_system():
@@ -85,10 +90,10 @@ def _local_shard_size(total_rows: int, num_shards: int, shard_id: int) -> int:
   return shard_size
 
 
-def create_tables_variables(
+def create_tables_variables_from_config(
     shard_id: int, num_shards: int, table_config_list: List[TableConfig]
-) -> Mapping[str, Mapping[str, tf.Tensor]]:
-  """Create all table variables of parameters and slot_variables.
+) -> NestedStruct[tf.Tensor]:
+  """Create table variables of parameters and slot_variables from table config.
 
   Args:
     shard_id: shard id of variables to create.
@@ -96,8 +101,9 @@ def create_tables_variables(
     table_config_list: A list of all table config.
 
   Returns:
-    A nested dictionary of tensors. Outer dictionary is indexed by table's name
-    while the inner is indexed by variable names (`parameters` and slot names).
+    A nested dictionary of tf tensors. Outer dictionary is indexed by table's 
+    name while the inner is indexed by variable names (`parameters` and slot 
+    names).
   """
 
   def _create_per_table(table_config: TableConfig) -> Mapping[str, tf.Tensor]:
@@ -141,9 +147,80 @@ def create_tables_variables(
   return tables_variables
 
 
-def load_embedding_tables_impl(table_config_list: List[TableConfig],
-                               config_proto_str: bytes, host_id: int,
-                               num_hosts: int) -> None:
+def create_table_variables_from_gha(
+    table_gha_variables: NestedStruct[GlobalHostArray],
+    shard_id: int,
+    num_shards: int,
+    table_config_list: List[TableConfig]):
+  """Create table variables of parameters and slot_variables from table config.
+
+  Args:
+    table_gha_variables: A nested of
+    shard_id: shard id of variables to create.
+    num_shards: total number of shards.
+    table_config_list: A list of all table config.
+
+  Returns:
+    A nested dictionary of tf.Tensor. Outer dictionary is indexed by table's
+    name while the inner is indexed by variable names (`parameters` and slot
+    names).
+  """
+
+  table_gha_variables = dict(table_gha_variables)
+  for tb_cfg in table_config_list:
+    global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
+
+    variable_names = ['parameters'] + tb_cfg.optimizer._slot_names()  # pylint: disable=protected-access
+    for var_name in variable_names:
+      tvar = table_gha_variables[tb_cfg.name][var_name]
+      assert tvar.shard_id == shard_id
+      assert tvar.num_shards == num_shards
+      assert tvar.global_shape == global_shape
+
+    table_gha_variables[tb_cfg.name] = jax.tree_map(
+        lambda x: tf.constant(x.data, dtype=tf.float32),
+        table_gha_variables[tb_cfg.name])
+
+  return table_gha_variables
+
+
+def create_tables_restore_args(
+    shard_id: int,
+    num_shards: int,
+    table_config_list: List[TableConfig],
+) -> NestedStruct[RestoreArgs]:
+  """Creates RestoreArgs for all table and slot variables.
+
+  Args:
+    shard_id: shard id of variables to create.
+    num_shards: total number of shards.
+    table_config_list: A list of all table config.
+
+  Returns:
+    A nested dictionary of checkpoint.RestoreArgs.
+  """
+
+  embed_restore_args = {}
+  for tb_cfg in table_config_list:
+    restore_arg = RestoreArgs(
+        restore_type=GlobalHostArray,
+        shard_id=shard_id,
+        num_shards=num_shards)
+
+    embed_restore_args[tb_cfg.name] = {'parameters': restore_arg}
+    for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
+      embed_restore_args[tb_cfg.name][slot_name] = restore_arg
+
+  return embed_restore_args
+
+
+def load_embedding_tables_impl(
+    table_config_list: List[TableConfig],
+    config_proto_str: bytes,
+    host_id: int,
+    num_hosts: int,
+    embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None,
+) -> None:
   """Load parameters and slot variables of embedding tables.
 
   Args:
@@ -152,11 +229,20 @@ def load_embedding_tables_impl(table_config_list: List[TableConfig],
     host_id: This also represents shard id of table variables to load, as each
       host will only have one shard.
     num_hosts: This also represents num of shards of table variables.
+    embedding_variables: If not None, it should be a nested dictionary of
+      GlobalHostArray.
   """
-  embedding_variables = create_tables_variables(
-      shard_id=host_id,
-      num_shards=num_hosts,
-      table_config_list=table_config_list)
+  if embedding_variables is None:
+    embedding_variables = create_tables_variables_from_config(
+        shard_id=host_id,
+        num_shards=num_hosts,
+        table_config_list=table_config_list)
+  else:
+    embedding_variables = create_table_variables_from_gha(
+        embedding_variables,
+        shard_id=host_id,
+        num_shards=num_hosts,
+        table_config_list=table_config_list)
 
   @tf.function
   def load_fn(table_config_list: List[TableConfig],
@@ -186,7 +272,7 @@ def load_embedding_tables_impl(table_config_list: List[TableConfig],
 
 def retrieve_embedding_tables_impl(
     table_config_list: List[TableConfig], config_proto_str: bytes, host_id: int,
-    num_hosts: int) -> Mapping[str, Mapping[str, tf.Tensor]]:
+    num_hosts: int) -> NestedStruct[tf.Tensor]:
   """Retrieve embeddings variables from embedding engine to CPU host.
 
   Args:
@@ -203,7 +289,7 @@ def retrieve_embedding_tables_impl(
   @tf.function
   def retrieve_fn(table_config_list: List[TableConfig], config_proto_str: str,
                   host_id: int,
-                  num_hosts: int) -> Mapping[str, Mapping[str, tf.Tensor]]:
+                  num_hosts: int) -> NestedStruct[tf.Tensor]:
     """Retrieve embedding from embedding engine."""
 
     # Dictionary of all embedding tables' variables.

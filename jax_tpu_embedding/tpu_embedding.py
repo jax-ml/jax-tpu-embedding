@@ -16,9 +16,10 @@
 
 import copy
 import dataclasses
+import functools
 import os
 import re
-from typing import List, Mapping, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -32,9 +33,11 @@ import tensorflow as tf
 
 from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
 
+GlobalHostArray = pytype_utils.GlobalHostArray
 TensorType = pytype_utils.TensorType
 NestedTfTensor = pytype_utils.NestedTfTensor
 Nested = pytype_utils.Nested
+NestedStruct = pytype_utils.NestedStruct
 NestedFeatureConfig = config_utils.NestedFeatureConfig
 TPUEmbeddingOptimizer = config_utils.Optimizer
 
@@ -266,18 +269,23 @@ class TPUEmbedding(object):
     # Setup device specs.
     self._host_id = _get_task_id()
     self._num_hosts = jax.process_count()
+    self._num_tensor_cores = jax.device_count()
 
     self._feature_configs = feature_configs
     self._optimizer = optimizer
+    self._pipeline_execution_with_tensor_core = (
+        pipeline_execution_with_tensor_core
+    )
+    self._cores_per_replica = cores_per_replica
 
     # Create config_utils.TpuEmbeddingConfig instance.
     self._tpu_embedding_config = config_utils.create_tpu_embedding_config(
         feature_configs=self._feature_configs,
         optimizer=self._optimizer,
-        pipeline_execution_with_tensor_core=pipeline_execution_with_tensor_core,
+        pipeline_execution_with_tensor_core=self._pipeline_execution_with_tensor_core,
         num_hosts=self._num_hosts,
-        num_tensor_cores=jax.device_count(),
-        cores_per_replica=cores_per_replica)
+        num_tensor_cores=self._num_tensor_cores,
+        cores_per_replica=self._cores_per_replica)
 
     self._cores_per_replica = cores_per_replica
     self._table_config_list = self._tpu_embedding_config.table_config_list
@@ -290,6 +298,15 @@ class TPUEmbedding(object):
     # TPUEmbedding software deduplication tuple mask and data.
     self._dedup_tuple_mask = None
     self._dedup_tuple_tensors = None
+
+    # Create restore args for checkpoint restoration.
+    self._embedding_restore_args = (
+        tpu_embedding_utils.create_tables_restore_args(
+            shard_id=self._host_id,
+            num_shards=self._num_hosts,
+            table_config_list=self._table_config_list,
+        )
+    )
 
   def initialize_tpu_embedding(self):
     """Initializae tpu embedding.
@@ -355,28 +372,64 @@ class TPUEmbedding(object):
     )
     logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
-  def load_embedding_tables(self) -> None:
+  def load_embedding_tables(
+      self,
+      embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None
+    ) -> None:
     """Load tables' variables on the embedding engine to given set of tensors.
+
+    Args:
+      embedding_variables: If not None, load variables of embeddings in
+        GlobalHostArray; if None, load embedding variables created by
+        initializers.
     """
     tpu_embedding_utils.load_embedding_tables_impl(
         table_config_list=self._table_config_list,
         config_proto_str=self._config_proto.SerializeToString(),
         host_id=self._host_id,
-        num_hosts=self._num_hosts)
+        num_hosts=self._num_hosts,
+        embedding_variables=embedding_variables)
 
-  def retrieve_embedding_tables(self) -> Mapping[str, Mapping[str, TensorType]]:
+  def retrieve_embedding_tables(
+      self, as_gha=False
+      ) -> Union[NestedStruct[TensorType], NestedStruct[GlobalHostArray]]:
     """Retrieve tables variables from embedding engine.
+
+    Args:
+      as_gha: If True, converts returned tables and slots to GlobalHostArray to
+        save in Orbax checkpoints.
 
     Returns:
       A dict of dict of list of tensors. The outer dict is indexed by table's
       name. The inner dict is indexed by slot names and the final list is the
       list of per host tensors.
     """
-    return tpu_embedding_utils.retrieve_embedding_tables_impl(
+    retrieved_tables = tpu_embedding_utils.retrieve_embedding_tables_impl(
         table_config_list=self._table_config_list,
         config_proto_str=self._config_proto.SerializeToString(),
         host_id=self._host_id,
-        num_hosts=self._num_hosts)
+        num_hosts=self._num_hosts,
+    )
+
+    if not as_gha:
+      return retrieved_tables
+
+    def _create_gha(tf_tensor: TensorType, global_shape: Tuple[int, int]):
+      return GlobalHostArray(
+          data=tf_tensor.numpy(),
+          global_shape=global_shape,
+          shard_id=self._host_id,
+          num_shards=self._num_hosts,
+      )
+
+    retrieved_tables = dict(retrieved_tables)
+    for tb_cfg in self._table_config_list:
+      global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
+      gha_creator = functools.partial(_create_gha, global_shape=global_shape)
+      retrieved_tables[tb_cfg.name] = jax.tree_map(
+          gha_creator, retrieved_tables[tb_cfg.name])
+
+    return retrieved_tables
 
   def _is_empty_dedup_mask(self):
     return self._dedup_tuple_mask.tensor_shape.dim[0].size == 0
@@ -688,3 +741,7 @@ class TPUEmbedding(object):
   @property
   def is_initialized(self) -> bool:
     return self._is_initialized
+
+  @property
+  def restore_args(self) -> NestedStruct[pytype_utils.RestoreArgs]:
+    return self._embedding_restore_args

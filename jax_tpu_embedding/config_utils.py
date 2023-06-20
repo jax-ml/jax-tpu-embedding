@@ -25,12 +25,8 @@ from jax_tpu_embedding import pytype_utils
 import numpy as np
 import tensorflow as tf
 
-# pylint: disable=g-direct-tensorflow-import
-from tensorflow.python.tpu import tpu_embedding_v2_utils
-# pylint: enable=g-direct-tensorflow-import
-
 LearningRate = Union[float, Callable[[], float]]
-Optimizer = tpu_embedding_v2_utils._Optimizer  # pylint:disable=protected-access
+Optimizer = pytype_utils.TPUEmbeddingOptimizer
 
 TableConfig = pytype_utils.TableConfig
 TensorProto = pytype_utils.TensorProto

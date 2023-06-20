@@ -14,8 +14,9 @@
 
 """Pytype Utils."""
 
-from typing import Any, Dict, List, Tuple, TypeVar, Union, Iterable
+from typing import Any, Dict, List, Mapping, Tuple, TypeVar, Union, Iterable
 
+from jax_tpu_embedding import checkpoint
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.core.framework import tensor_pb2
@@ -26,6 +27,7 @@ from tensorflow.python.tpu import tpu_embedding_v2_utils
 
 T = TypeVar('T')
 Nested = Union[T, Tuple[Any, ...], List[Any], Dict[str, Any], Iterable]
+NestedStruct = Union[Dict[str, Dict[str, T]], Mapping[str, Mapping[str, T]]]
 
 TensorType = Union[tf.Tensor, tf.SparseTensor]
 TensorProto = tensor_pb2.TensorProto
@@ -39,6 +41,10 @@ TPUEmbeddingConfigurationProto = (
     tpu_embedding_configuration_pb2.TPUEmbeddingConfiguration
 )
 TPUEmbeddingOptimizer = tpu_embedding_v2_utils._Optimizer  # pylint: disable=protected-access
+
+# TPUEmbedding checkpoints
+GlobalHostArray = checkpoint.GlobalHostArray
+RestoreArgs = checkpoint.RestoreArgs
 
 # Special field names.
 EMBED_PLACEMENT = 'host'

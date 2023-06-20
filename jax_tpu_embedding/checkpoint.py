@@ -19,7 +19,7 @@ import os
 from typing import Any, Dict, List, Optional, cast
 
 import jax
-from jax.experimental.array_serialization.serialization import get_tensorstore_spec
+from jax.experimental.array_serialization import serialization
 import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint as orbax_ckpt
@@ -191,7 +191,7 @@ class GlobalHostArrayHandler(TypeHandler):
     if info.path is None:
       raise ValueError('Must construct serialization path.')
     path = os.fspath(info.path)
-    tspec = get_tensorstore_spec(path)
+    tspec = serialization.get_tensorstore_spec(path)
     if value is not None:
       tspec['metadata'] = _get_metadata(value)  # pylint: disable=protected-access
       # del tspec['metadata']['dtype']
