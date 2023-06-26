@@ -99,7 +99,7 @@ def _get_metadata(arr: GlobalHostArray) -> Dict[str, Any]:
   }
 
 
-async def _serialize(arr: GlobalHostArray, tspec, commit_futures=None):
+async def _serialize(arr: GlobalHostArray, tspec):
   """Writes a GlobalHostArray data into tensor store."""
   def _spec_has_metadata(tree):
     if not isinstance(tree, dict):
@@ -110,18 +110,15 @@ async def _serialize(arr: GlobalHostArray, tspec, commit_futures=None):
   if not _spec_has_metadata(tspec):
     tspec['metadata'] = _get_metadata(arr)
 
+  commit_futures = []
+
   if jax.process_index() == 0:
     open_future = ts.open(
         ts.Spec(tspec),
         create=True,
         open=True,
         context=_DEFAULT_TS_CONTEXT)
-    # Asynchronous case.
-    if commit_futures is not None:
-      assert isinstance(commit_futures, list)
-      commit_futures.append(open_future)
-    else:
-      await open_future
+    commit_futures.append(open_future)
 
   ts_writer = await ts.open(
       ts.Spec(tspec),
@@ -131,7 +128,8 @@ async def _serialize(arr: GlobalHostArray, tspec, commit_futures=None):
 
   write_future = ts_writer[arr.index].write(arr.data)
   await write_future.copy
-  return [write_future.commit]
+  commit_futures += [write_future.commit]
+  return commit_futures
 
 
 async def _deserialize(restore_args: RestoreArgs,
@@ -194,7 +192,6 @@ class GlobalHostArrayHandler(TypeHandler):
     tspec = serialization.get_tensorstore_spec(path)
     if value is not None:
       tspec['metadata'] = _get_metadata(value)  # pylint: disable=protected-access
-      # del tspec['metadata']['dtype']
     return tspec
 
   async def serialize(
@@ -203,10 +200,7 @@ class GlobalHostArrayHandler(TypeHandler):
       info: ParamInfo,
       args: Optional[orbax_ckpt.SaveArgs] = None) -> List[orbax_ckpt.Future]:
     """See superclass documentation."""
-    commit_futures = []
-    await _serialize(
-        value, self._get_json_tspec(info, value), commit_futures=commit_futures)
-    return commit_futures
+    return await _serialize(value, self._get_json_tspec(info, value))
 
   async def deserialize(
       self,
@@ -216,8 +210,7 @@ class GlobalHostArrayHandler(TypeHandler):
     if args is None:
       raise ValueError('RestoreArgs cannot be None.')
     args = cast(RestoreArgs, args)
-    arr = await _deserialize(args, self._get_json_tspec(info))
-    return arr
+    return await _deserialize(args, self._get_json_tspec(info))
 
 
 orbax_ckpt.type_handlers.register_type_handler(GlobalHostArray,
