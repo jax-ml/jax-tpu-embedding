@@ -124,7 +124,8 @@ def create_feature_config(
 
 
 def create_global_mesh(
-    mesh_shape: tuple[int, ...], axis_names: Sequence[jax.pxla.MeshAxisName]
+    mesh_shape: tuple[int, ...],
+    axis_names: Sequence[jax.interpreters.pxla.MeshAxisName],
 ) -> Mesh:
   size = np.prod(mesh_shape)
   if len(jax.devices()) < size:
@@ -134,4 +135,3 @@ def create_global_mesh(
   mesh_devices = np.array(devices[:size]).reshape(mesh_shape)
   global_mesh = Mesh(mesh_devices, axis_names)
   return global_mesh
-
