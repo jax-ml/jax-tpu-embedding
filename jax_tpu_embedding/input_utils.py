@@ -89,10 +89,6 @@ def make_pmap_array_fn(
     and put along devices which returns nested structure of jax.Array.
   """
 
-  # TODO(zhonglinhan): remove this when jax.Array is fully used as default.
-  if not jax.config.jax_array:
-    raise ValueError('Must use jax array as default.')
-
   devices = devices or jax.local_devices()
 
   def _put_sharded(xs):
