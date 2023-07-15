@@ -295,17 +295,24 @@ def main(_):
 
     new_train_state = pjit.pjit(
         lambda x: x,
-        in_axis_resources=None,
-        out_axis_resources=axis_resources,
-        keep_unused=True)(train_state)
+        in_shardings=None,
+        out_shardings=axis_resources,
+        keep_unused=True,
+    )(train_state)
 
     for step in range(num_steps):
       inputs = next(dummy_iter)
       loss, new_train_state = pjit.pjit(
           train_step_fn,
-          in_axis_resources=(axis_resources, PartitionSpec('x',)),
-          out_axis_resources=(None, axis_resources),
-          keep_unused=True)(new_train_state, inputs['device']['watches_target'])
+          in_shardings=(
+              axis_resources,
+              PartitionSpec(
+                  'x',
+              ),
+          ),
+          out_shardings=(None, axis_resources),
+          keep_unused=True,
+      )(new_train_state, inputs['device']['watches_target'])
       print('train_step = ', step, 'loss = ', loss)
 
 
