@@ -14,20 +14,21 @@
 
 """TPU Embedding CheckpointHandler."""
 
+import asyncio
 import dataclasses
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Sequence, cast
 
 import jax
 from jax.experimental.array_serialization import serialization
 import jax.numpy as jnp
 import numpy as np
-import orbax.checkpoint as orbax_ckpt
+import orbax.checkpoint as ocp
 import tensorstore as ts
 
 Index = tuple[slice, ...]
-ParamInfo = orbax_ckpt.pytree_checkpoint_handler.ParamInfo
-TypeHandler = orbax_ckpt.type_handlers.TypeHandler
+ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
+TypeHandler = ocp.type_handlers.TypeHandler
 Shape = tuple[int, int]
 _DEFAULT_TS_CONTEXT = ts.Context({'file_io_concurrency': {'limit': 128}})
 
@@ -81,7 +82,7 @@ class GlobalHostArray:
 
 
 @dataclasses.dataclass
-class RestoreArgs(orbax_ckpt.RestoreArgs):
+class RestoreArgs(ocp.RestoreArgs):
   shard_id: Optional[int] = None
   num_shards: Optional[int] = None
   global_shape: Optional[Shape] = None
@@ -196,22 +197,42 @@ class GlobalHostArrayHandler(TypeHandler):
 
   async def serialize(
       self,
-      value: GlobalHostArray,
-      info: ParamInfo,
-      args: Optional[orbax_ckpt.SaveArgs] = None) -> List[orbax_ckpt.Future]:
+      values: Sequence[GlobalHostArray],
+      infos: Sequence[ParamInfo],
+      args: Optional[Sequence[ocp.SaveArgs]] = None,
+  ) -> Sequence[ocp.Future]:
     """See superclass documentation."""
-    return await _serialize(value, self._get_json_tspec(info, value))
+    del args
+
+    async def _serialize_values():
+      serialize_ops = []
+      for value, info in zip(values, infos):
+        serialize_ops.append(
+            _serialize(value, self._get_json_tspec(info, value))
+        )
+      return await asyncio.gather(*serialize_ops)
+
+    return await _serialize_values()
 
   async def deserialize(
       self,
-      info: ParamInfo,
-      args: Optional[orbax_ckpt.RestoreArgs] = None) -> GlobalHostArray:
+      infos: Sequence[ParamInfo],
+      args: Optional[Sequence[ocp.RestoreArgs]] = None,
+  ) -> Sequence[GlobalHostArray]:
     """See superclass documentation."""
     if args is None:
       raise ValueError('RestoreArgs cannot be None.')
-    args = cast(RestoreArgs, args)
-    return await _deserialize(args, self._get_json_tspec(info))
+
+    async def _deserialize_values():
+      deserialize_ops = []
+      for info, arg in zip(infos, args):
+        arg = cast(RestoreArgs, arg)
+        deserialize_ops.append(_deserialize(arg, self._get_json_tspec(info)))
+      return await asyncio.gather(*deserialize_ops)
+
+    return await _deserialize_values()
 
 
-orbax_ckpt.type_handlers.register_type_handler(GlobalHostArray,
-                                               GlobalHostArrayHandler())
+ocp.type_handlers.register_type_handler(
+    GlobalHostArray, GlobalHostArrayHandler()
+)
