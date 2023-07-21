@@ -69,14 +69,17 @@ class GlobalHostArray:
 
   def __post_init__(self):
     # TODO(zhonglinhan): need support uneven sharding.
-    if self.global_shape[0] % self.num_shards != 0:
+    if self.global_shape and self.global_shape[0] % self.num_shards != 0:
       raise ValueError(
           f'Only support evenly sharded, as total number of rows = '
           f'{self.global_shape[0]} and num_shards = {self.num_shards}')
-    local_nrows = self.data.shape[0]
 
-    # TODO(zhonglinhan): compute index when not evenly sharded.
-    self.index = _get_index(local_nrows, self.shard_id)
+    if self.data.shape:
+      local_nrows = self.data.shape[0]
+      # TODO(zhonglinhan): compute index when not evenly sharded.
+      self.index = _get_index(local_nrows, self.shard_id)
+    else:
+      self.index = ()
     self.dtype = self.data.dtype
     self.local_shape = self.data.shape
 

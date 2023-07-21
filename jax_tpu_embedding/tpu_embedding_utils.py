@@ -19,6 +19,7 @@ from typing import List, Mapping, Optional
 from absl import flags
 from absl import logging
 import jax
+import jax.numpy as jnp
 from jax_tpu_embedding import pytype_utils
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
@@ -212,6 +213,29 @@ def create_tables_restore_args(
       embed_restore_args[tb_cfg.name][slot_name] = restore_arg
 
   return embed_restore_args
+
+
+def create_table_shape_dtype_struct(
+    table_config_list: List[TableConfig],
+) -> NestedStruct[jax.ShapeDtypeStruct]:
+  """Creates RestoreArgs for all table and slot variables.
+
+  Args:
+    table_config_list: A list of all table config.
+
+  Returns:
+    A nested dictionary of jax.ShapeDtyeStruct.
+  """
+  embed_shape_dtypes = {}
+  for tb_cfg in table_config_list:
+    global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
+
+    shape_and_dtype = jax.ShapeDtypeStruct(global_shape, jnp.float32)
+    embed_shape_dtypes[tb_cfg.name] = {'parameters': shape_and_dtype}
+    for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
+      embed_shape_dtypes[tb_cfg.name][slot_name] = shape_and_dtype
+
+  return embed_shape_dtypes
 
 
 def load_embedding_tables_impl(

@@ -307,6 +307,12 @@ class TPUEmbedding(object):
             table_config_list=self._table_config_list,
         )
     )
+    # Create shape and dtype for checkpoint restoration.
+    self._embedding_shape_dtypes = (
+        tpu_embedding_utils.create_table_shape_dtype_struct(
+            table_config_list=self._table_config_list
+        )
+    )
 
   def initialize_tpu_embedding(self):
     """Initializae tpu embedding.
@@ -745,3 +751,7 @@ class TPUEmbedding(object):
   @property
   def restore_args(self) -> NestedStruct[pytype_utils.RestoreArgs]:
     return self._embedding_restore_args
+
+  @property
+  def shape_and_dtypes(self) -> NestedStruct[jax.ShapeDtypeStruct]:
+    return self._embedding_shape_dtypes
