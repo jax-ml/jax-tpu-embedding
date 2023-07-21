@@ -34,8 +34,6 @@ import optax
 import tensorflow as tf
 
 Array = jax.Array
-FrozenDict = flax_scope.FrozenDict
-FrozenVariableDict = flax_scope.FrozenVariableDict
 OptState = optax.OptState
 
 _LEARNING_RATE = 0.1
@@ -234,14 +232,14 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
 
     train_state = self._create_train_state()
 
-    params_pspecs = FrozenDict({
+    params_pspecs = {
         'params': {
             'Dense_0': {
                 'kernel': P('x', None),
                 'bias': P('x',),
             },
         },
-    })
+    }
 
     train_state_pspecs = TrainState(
         step=P(), apply_fn=train_state.apply_fn,
