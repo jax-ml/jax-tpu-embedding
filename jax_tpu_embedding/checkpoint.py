@@ -17,7 +17,7 @@
 import asyncio
 import dataclasses
 import os
-from typing import Any, Dict, List, Optional, Sequence, cast
+from typing import Any, Dict, List, Optional, Sequence, Union, cast
 
 import jax
 from jax.experimental.array_serialization import serialization
@@ -29,7 +29,7 @@ import tensorstore as ts
 Index = tuple[slice, ...]
 ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
 TypeHandler = ocp.type_handlers.TypeHandler
-Shape = tuple[int, int]
+Shape = Union[tuple[int, int], tuple]
 _DEFAULT_TS_CONTEXT = ts.Context({'file_io_concurrency': {'limit': 128}})
 
 
