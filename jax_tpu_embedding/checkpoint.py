@@ -17,13 +17,14 @@
 import asyncio
 import dataclasses
 import os
-from typing import Any, Dict, List, Optional, Sequence, Union, cast
+from typing import Any, Dict, Optional, Sequence, Union, cast
 
 import jax
 from jax.experimental.array_serialization import serialization
 import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint as ocp
+from orbax.checkpoint import value_metadata
 import tensorstore as ts
 
 Index = tuple[slice, ...]
@@ -182,6 +183,15 @@ async def _deserialize(restore_args: RestoreArgs,
       num_shards=num_shards)
 
 
+def _array_metadata_from_tensorstore(t: Any) -> value_metadata.ArrayMetadata:
+  # TODO(b/284185400): Set sharding property.
+  return value_metadata.ArrayMetadata(
+      shape=t.shape,
+      dtype=jnp.dtype(t.dtype.name),
+      shards=None,
+  )
+
+
 class GlobalHostArrayHandler(TypeHandler):
   """Serialize/deserialize logic to allow integration with PyTreeCheckpointHandler.
   """
@@ -197,6 +207,21 @@ class GlobalHostArrayHandler(TypeHandler):
     if value is not None:
       tspec['metadata'] = _get_metadata(value)  # pylint: disable=protected-access
     return tspec
+
+  def typestr(self) -> str:
+    return 'GlobalHostArray'
+
+  async def metadata(
+      self, infos: Sequence[ParamInfo]
+  ) -> Sequence[value_metadata.ArrayMetadata]:
+    open_ops = []
+    for info in infos:
+      tspec = self._get_json_tspec(info)
+      open_ops.append(
+          ts.open(ts.Spec(tspec), open=True, context=_DEFAULT_TS_CONTEXT)
+      )
+    tensorstores = await asyncio.gather(*open_ops)
+    return [_array_metadata_from_tensorstore(t) for t in tensorstores]
 
   async def serialize(
       self,
