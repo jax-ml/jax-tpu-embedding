@@ -241,7 +241,7 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
         },
     }
 
-    train_state_pspecs = TrainState(
+    train_state_pspecs = TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
         step=P(), apply_fn=train_state.apply_fn,
         params=params_pspecs,
         tx=train_state.tx,
