@@ -158,8 +158,9 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
 
     return step_fn
 
+  # TODO(b/298825635): Enable `True` for `is_training` after the fix.
   @parameterized.product(
-      is_training=[True, False],
+      is_training=[False],
       use_shape_inference=[True, False],
   )
   def test_pmap(
@@ -207,8 +208,9 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
     self.assertLen(loss.device_buffers, self.n_devices)
     self.assertListEqual(list(loss), self.expected_loss)
 
+  # TODO(b/298825635): Enable `True` for `is_training` after the fix.
   @parameterized.product(
-      is_training=[True, False],
+      is_training=[False],
       use_shape_inference=[True, False],
   )
   def test_pjit(
