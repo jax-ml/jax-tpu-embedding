@@ -187,8 +187,8 @@ def _array_metadata_from_tensorstore(t: Any) -> value_metadata.ArrayMetadata:
   # TODO(b/284185400): Set sharding property.
   return value_metadata.ArrayMetadata(
       shape=t.shape,
+      sharding=None,
       dtype=jnp.dtype(t.dtype.name),
-      shards=None,
   )
 
 
