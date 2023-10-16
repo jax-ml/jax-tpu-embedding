@@ -42,7 +42,7 @@ import tensorflow as tf
 
 jax.distributed.initialize()
 tpu_embedding_utils.init_tpu_system()
-Array = Union[jnp.ndarray, jnp.DeviceArray]
+Array = Union[jnp.ndarray, jnp.DeviceArray]  # pytype: disable=module-attr
 Initializer = jax.nn.initializers.Initializer
 
 NUM_TARGET_IDS = 5
@@ -331,7 +331,7 @@ def get_sharded_axis_resources(train_state):
       },
   })
 
-  return TrainState(
+  return TrainState(  # pytype: disable=wrong-arg-types
       step=PartitionSpec(), apply_fn=train_state.apply_fn,
       params=params_resources,
       tx=train_state.tx,

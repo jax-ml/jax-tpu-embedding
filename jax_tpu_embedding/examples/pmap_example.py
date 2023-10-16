@@ -37,7 +37,7 @@ import tensorflow as tf
 
 jax.distributed.initialize()
 tpu_embedding_utils.init_tpu_system()
-Array = Union[jnp.ndarray, jnp.DeviceArray]
+Array = Union[jnp.ndarray, jnp.DeviceArray]  # pytype: disable=module-attr
 Initializer = jax.nn.initializers.Initializer
 
 
