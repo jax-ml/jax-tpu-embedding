@@ -679,7 +679,7 @@ class TPUEmbedding(object):
     """
 
     def _generate_enqueue_op(flat_inputs: List[TensorType],
-                             flat_weights: Optional[List[TensorType]],
+                             flat_weights: List[Optional[TensorType]],
                              flat_features: Sequence[Tuple[
                                  str, config_utils.FeatureConfig]],
                              device_ordinal: int,
