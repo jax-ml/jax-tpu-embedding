@@ -183,9 +183,13 @@ async def _deserialize(restore_args: RestoreArgs,
       num_shards=num_shards)
 
 
-def _array_metadata_from_tensorstore(t: Any) -> value_metadata.ArrayMetadata:
+def _array_metadata_from_tensorstore(
+    t: Any, info: ParamInfo
+) -> value_metadata.ArrayMetadata:
   # TODO(b/284185400): Set sharding property.
   return value_metadata.ArrayMetadata(
+      name=info.name,
+      directory=info.parent_dir,
       shape=t.shape,
       sharding=None,
       dtype=jnp.dtype(t.dtype.name),
@@ -221,7 +225,10 @@ class GlobalHostArrayHandler(TypeHandler):
           ts.open(ts.Spec(tspec), open=True, context=_DEFAULT_TS_CONTEXT)
       )
     tensorstores = await asyncio.gather(*open_ops)
-    return [_array_metadata_from_tensorstore(t) for t in tensorstores]
+    return [
+        _array_metadata_from_tensorstore(t, info)
+        for t, info in zip(tensorstores, infos)
+    ]
 
   async def serialize(
       self,
