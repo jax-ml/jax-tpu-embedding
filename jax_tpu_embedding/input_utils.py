@@ -101,6 +101,12 @@ def make_pmap_array_fn(
   return _create_array_fn
 
 
+def _tensor_to_array(x: tf.Tensor) -> jax.numpy.ndarray:
+  if not isinstance(x, tf.Tensor):
+    raise ValueError('Value to shard is not a tf.Tensor.')
+  return x._numpy()  # pylint: disable=protected-access
+
+
 def make_pjit_array_fn(
     global_mesh: Mesh,
     pspecs: Nested[PartitionSpec]) -> Callable[..., Nested[Array]]:
@@ -114,16 +120,24 @@ def make_pjit_array_fn(
     A callable function returns a PyTree of jax.Array.
   """
 
-  def _tensor_to_array(x: tf.Tensor) -> jax.numpy.ndarray:
-    if not isinstance(x, tf.Tensor):
-      raise ValueError('Value to shard is not a tf.Tensor.')
-    return x._numpy()  # pylint: disable=protected-access
-
   def _create_jax_array_fn(xs: NestedTfTensor) -> Nested[Array]:
     host_arrays = jax.tree_util.tree_map(_tensor_to_array, xs)
     return multihost_utils.host_local_array_to_global_array(
         host_arrays, global_mesh, pspecs)
   return _create_jax_array_fn
+
+
+def make_np_array_fn() -> Callable[..., Nested[Array]]:
+  """Example function of creating jax.numpy.ndarray from local host data.
+
+  Returns:
+    A callable function returns a PyTree of jax.Array.
+  """
+
+  def _create_np_array_fn(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
+    return jax.tree_util.tree_map(_tensor_to_array, xs)
+
+  return _create_np_array_fn
 
 
 def split_and_prefetch_to_host_and_devices(
