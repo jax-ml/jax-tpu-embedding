@@ -314,15 +314,6 @@ class TPUEmbedding(object):
         )
     )
 
-  @property
-  def dedup_tuple_mask(self):
-    if self._dedup_tuple_mask is None:
-      raise ValueError(
-          "_dedup_tuple_mask not initialized. Was initialize_tpu_embedding()"
-          " called?"
-      )
-    return self._dedup_tuple_mask
-
   def initialize_tpu_embedding(self):
     """Initializae tpu embedding.
 
@@ -385,7 +376,7 @@ class TPUEmbedding(object):
     self._dedup_tuple_mask = _get_tuple_mask(
         self._config_proto.SerializeToString()
     )
-    logging.info("Get deduplication tuple mask : %s", self.dedup_tuple_mask)
+    logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
   def load_embedding_tables(
       self,
@@ -447,7 +438,7 @@ class TPUEmbedding(object):
     return retrieved_tables
 
   def _is_empty_dedup_mask(self):
-    return self.dedup_tuple_mask.tensor_shape.dim[0].size == 0
+    return self._dedup_tuple_mask.tensor_shape.dim[0].size == 0
 
   def apply_gradients(self,
                       gradients: NestedTfTensor,
@@ -520,7 +511,7 @@ class TPUEmbedding(object):
       deduplication_data = tpu_ops.merge_dedup_data(
           integer_tensor=dedup_tuple_integers,
           float_tensor=dedup_tuple_floats,
-          tuple_mask=self.dedup_tuple_mask.SerializeToString(),
+          tuple_mask=self._dedup_tuple_mask.SerializeToString(),
           config=self._config_proto.SerializeToString(),
       )
 
@@ -536,8 +527,7 @@ class TPUEmbedding(object):
       # Apply the name tag to the op.
       if name is not None:
         _add_key_attr(op, name)
-    if self._dedup_tuple_tensors is None:
-      raise ValueError("_dedup_tuple_tensors not initialized.")
+
     jax2tf.call_tf(_gradients_fn, has_side_effects=False)(
         gradients,
         self._dedup_tuple_tensors.integers,
@@ -564,7 +554,7 @@ class TPUEmbedding(object):
           deduplication_data,
           integer_type=tf.uint32,
           float_type=tf.float32,
-          tuple_mask=self.dedup_tuple_mask.SerializeToString(),
+          tuple_mask=self._dedup_tuple_mask.SerializeToString(),
           config=self._config_proto.SerializeToString(),
       )
       return tuple_integers, tuple_floats
@@ -600,7 +590,7 @@ class TPUEmbedding(object):
       deduplication_data = tpu_ops.merge_dedup_data(
           integer_tensor=dedup_tuple_integers,
           float_tensor=dedup_tuple_floats,
-          tuple_mask=self.dedup_tuple_mask.SerializeToString(),
+          tuple_mask=self._dedup_tuple_mask.SerializeToString(),
           config=self._config_proto.SerializeToString(),
       )
 
