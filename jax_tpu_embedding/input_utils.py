@@ -101,6 +101,12 @@ def make_pmap_array_fn(
   return _create_array_fn
 
 
+def _tensor_to_array(x: tf.Tensor) -> jax.numpy.ndarray:
+  if not isinstance(x, tf.Tensor):
+    raise ValueError('Value to shard is not a tf.Tensor.')
+  return x._numpy()  # pylint: disable=protected-access
+
+
 def make_pjit_array_fn(
     global_mesh: Mesh,
     pspecs: Nested[PartitionSpec]) -> Callable[..., Nested[Array]]:
@@ -114,16 +120,15 @@ def make_pjit_array_fn(
     A callable function returns a PyTree of jax.Array.
   """
 
-  def _tensor_to_array(x: tf.Tensor) -> jax.numpy.ndarray:
-    if not isinstance(x, tf.Tensor):
-      raise ValueError('Value to shard is not a tf.Tensor.')
-    return x._numpy()  # pylint: disable=protected-access
-
   def _create_jax_array_fn(xs: NestedTfTensor) -> Nested[Array]:
-    host_arrays = jax.tree_util.tree_map(_tensor_to_array, xs)
+    host_arrays = create_np_array_fn(xs)
     return multihost_utils.host_local_array_to_global_array(
         host_arrays, global_mesh, pspecs)
   return _create_jax_array_fn
+
+
+def create_np_array_fn(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
+  return jax.tree_util.tree_map(_tensor_to_array, xs)
 
 
 def split_and_prefetch_to_host_and_devices(
@@ -153,7 +158,8 @@ def split_and_prefetch_to_host_and_devices(
       `split_fn`, it can yields converted results of host input split or may not
       need to yield anything when it's only feed input to host.
     device_input_fn: a function that takes 'device' split from `split_fn`,
-      convert to device input to jax.Array along applicable devices to be put.
+      convert to device input to jax.Array along applicable devices, or numpy
+      arrays to be put.
     buffer_size: the size of the prefetch buffer, default number is 2 to avoid
       unnecessary memory allocation.
 
