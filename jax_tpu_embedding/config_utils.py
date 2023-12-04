@@ -19,6 +19,7 @@ import dataclasses
 import math
 from typing import Callable, Dict, List, Optional, Union
 
+from absl import flags
 import jax
 from jax._src import distributed
 from jax_tpu_embedding import pytype_utils
@@ -37,6 +38,13 @@ TPUEmbeddingConfigurationProto = pytype_utils.TPUEmbeddingConfigurationProto
 OutputShape = Union[List[int], tf.TensorShape]
 
 global_state = distributed.global_state
+
+_COORDINATION_SERVICE_TIMEOUT = flags.DEFINE_integer(
+    "coordination_service_timeout",
+    100,
+    "The timeout value in seconds for the API of getting key-value pair in"
+    " Coordination Service.",
+)
 
 
 @dataclasses.dataclass
@@ -328,7 +336,7 @@ def set_additional_fields(config_proto: TPUEmbeddingConfigurationProto):
 
 def _all_gather_configs(config_type: str,
                         local_config_bytes: bytes,
-                        timeout_in_sec: int = 100) -> List[bytes]:
+                        timeout_in_sec: int) -> List[bytes]:
   """All gather configs from each client.
 
   Args:
@@ -388,8 +396,7 @@ def _all_gather_configs(config_type: str,
 
 
 def maybe_all_gather_configs(config_type: str,
-                             local_config: bytes,
-                             timeout_in_sec: int = 100) -> List[bytes]:
+                             local_config: bytes) -> List[bytes]:
   """When there is more than one process, apply `_all_gather_configs`.
 
   Args:
@@ -406,7 +413,7 @@ def maybe_all_gather_configs(config_type: str,
     return _all_gather_configs(
         config_type=config_type,
         local_config_bytes=local_config,
-        timeout_in_sec=timeout_in_sec)
+        timeout_in_sec=_COORDINATION_SERVICE_TIMEOUT.value)
   return [local_config]
 
 
