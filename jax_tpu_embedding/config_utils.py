@@ -402,8 +402,6 @@ def maybe_all_gather_configs(config_type: str,
   Args:
     config_type: A string that to claim config type
     local_config: A bytes from local client.
-    timeout_in_sec: Timeout seconds of calling coordination service in
-      `_all_gather`.
 
   Returns:
     A list of gathered local_config from all processes, when there is only one
