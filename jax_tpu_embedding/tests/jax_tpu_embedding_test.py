@@ -205,7 +205,7 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
     pmap_step_fn = jax.pmap(step_fn, axis_name='x')
     loss, _ = pmap_step_fn(feature['device']['dense'], train_state)
     self.assertIsInstance(loss, Array)
-    self.assertLen(loss.device_buffers, self.n_devices)
+    self.assertLen(loss.addressable_shards, self.n_devices)
     self.assertListEqual(list(loss), self.expected_loss)
 
   # TODO(b/298825635): Enable `True` for `is_training` after the fix.
@@ -284,14 +284,14 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
           keep_unused=True)(
               feature['device']['dense'], train_state)
       self.assertIsInstance(loss, Array)
-      self.assertLen(loss.device_buffers, self.n_devices)
+      self.assertLen(loss.addressable_shards, self.n_devices)
 
       # Since loss is replicated and compute by reduction mean, it should be
       # equal to self.expect_loss average.
       expect_loss = np.mean(self.expected_loss)
       self.assertAlmostEqual(
-          loss.device_buffers[0], expect_loss)
-      self.assertAlmostEqual(loss.device_buffers[1], expect_loss)
+          loss.addressable_data(0), expect_loss)
+      self.assertAlmostEqual(loss.addressable_data(1), expect_loss)
 
 
 class TFJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase, tf.test.TestCase):
