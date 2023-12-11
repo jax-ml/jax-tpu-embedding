@@ -34,13 +34,14 @@ TableConfig = pytype_utils.TableConfig
 RestoreArgs = pytype_utils.RestoreArgs
 
 
-def init_tpu_system():
+def init_tpu_system(enable_megacore=False):
   """Initialize tpu system for tpu embedding."""
   # As Jax TPUEmbedding also use coordination service to initialize
   # embedding engine, setting `enable_coordination_service` to `False`
   # in dtensor to avoid potential conflict.
   tf.experimental.dtensor.initialize_accelerator_system(
-      enable_coordination_service=False)
+      enable_coordination_service=False,
+      experimental_enable_megcore=enable_megacore)
   # TODO(b/259131699): delete this when add mlir bridge support.
   tf.config.experimental.disable_mlir_bridge()
 
