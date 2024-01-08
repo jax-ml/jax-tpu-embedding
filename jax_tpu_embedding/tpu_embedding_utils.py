@@ -20,6 +20,8 @@ from absl import flags
 from absl import logging
 import jax
 import jax.numpy as jnp
+from jax.experimental import jax2tf
+from jax_tpu_embedding import config_utils
 from jax_tpu_embedding import pytype_utils
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
@@ -28,6 +30,7 @@ from tensorflow.dtensor.python import gen_dtensor_ops
 from tensorflow.python.eager import context
 # pylint: enable=g-direct-tensorflow-import
 
+from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
 
 GlobalHostArray = pytype_utils.GlobalHostArray
 NestedStruct = pytype_utils.NestedStruct
@@ -71,6 +74,31 @@ def shutdown_tpu_system():
   # reset TF context to stop gRPC servers.
   context._reset_context()  # pylint: disable=protected-access
   context.context()._clear_caches()  # pylint: disable=protected-access
+
+
+def get_tuple_mask(config_str: bytes) -> pytype_utils.TensorProto:
+  """Get deduplication data tuple mask.
+
+  Deduplication data is a xla tuple of integer or float 1-D tensors. This op is
+  to generate a mask to respresent type and span size of these tensors.
+
+  Args:
+    config_str: A serialized string of TPUEmbeddingConfiguration.
+
+  Returns:
+    A tensor proto of tuple mask, whose first column is 0 or 1 to represent
+    integer or float correspondingly, and second column is span size of each
+    element in this tuple.
+  """
+
+  def _compute_dedup_tuple_mask():
+    return tpu_ops.compute_dedup_data_tuple_mask(config_str)
+
+  tuple_mask = jax2tf.call_tf(
+      _compute_dedup_tuple_mask, has_side_effects=False
+  )()
+  dedup_tuple_mask_proto = config_utils.create_mask_proto(tuple_mask)
+  return dedup_tuple_mask_proto
 
 
 def _local_shard_size(total_rows: int, num_shards: int, shard_id: int) -> int:

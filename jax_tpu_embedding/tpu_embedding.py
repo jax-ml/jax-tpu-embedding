@@ -74,31 +74,6 @@ def _get_task_id() -> int:
   return task_id
 
 
-def _get_tuple_mask(config_str: bytes) -> pytype_utils.TensorProto:
-  """Get deduplication data tuple mask.
-
-  Deduplication data is a xla tuple of integer or float 1-D tensors. This op is
-  to generate a mask to respresent type and span size of these tensors.
-
-  Args:
-    config_str: A serialized string of TPUEmbeddingConfiguration.
-
-  Returns:
-    A tensor proto of tuple mask, whose first column is 0 or 1 to represent
-    integer or float correspondingly, and second column is span size of each
-    element in this tuple.
-  """
-
-  def _compute_dedup_tuple_mask():
-    return tpu_ops.compute_dedup_data_tuple_mask(config_str)
-
-  tuple_mask = jax2tf.call_tf(
-      _compute_dedup_tuple_mask, has_side_effects=False
-  )()
-  dedup_tuple_mask_proto = config_utils.create_mask_proto(tuple_mask)
-  return dedup_tuple_mask_proto
-
-
 @dataclasses.dataclass
 class DeduplicationTuple:
   """Deduplication Tuple."""
@@ -304,7 +279,12 @@ class TPUEmbedding(object):
     self._is_initialized = True
     logging.info("Successfully Initialized TPUEmbedding devices.")
 
-    self._dedup_tuple_mask = _get_tuple_mask(original_config_str)
+    if start_remote_python:
+      self._dedup_tuple_mask = embedding_config_manager.get_tuple_mask()
+    else:
+      self._dedup_tuple_mask = tpu_embedding_utils.get_tuple_mask(
+          original_config_str
+      )
     logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
   def load_embedding_tables(
