@@ -19,9 +19,7 @@ import dataclasses
 import math
 from typing import Callable, Dict, List, Optional, Union
 
-from absl import flags
 import jax
-from jax._src import distributed
 from jax_tpu_embedding import pytype_utils
 import numpy as np
 import tensorflow as tf
@@ -36,15 +34,6 @@ NestedFeatureConfig = pytype_utils.NestedFeatureConfig
 TPUEmbeddingConfigurationProto = pytype_utils.TPUEmbeddingConfigurationProto
 
 OutputShape = Union[List[int], tf.TensorShape]
-
-global_state = distributed.global_state
-
-_COORDINATION_SERVICE_TIMEOUT = flags.DEFINE_integer(
-    "coordination_service_timeout",
-    100,
-    "The timeout value in seconds for the API of getting key-value pair in"
-    " Coordination Service.",
-)
 
 
 @dataclasses.dataclass
@@ -208,7 +197,7 @@ def count_table_feature_numbers(
 
 
 def create_config_proto(
-    tpu_embedding_config: TpuEmbeddingConfigSpecs
+    tpu_embedding_config: TpuEmbeddingConfigSpecs,
 ) -> TPUEmbeddingConfigurationProto:
   """Creates TPUEmbeddingConfiguration proto initialize TPU embedding engine.
 
@@ -332,87 +321,6 @@ def set_additional_fields(config_proto: TPUEmbeddingConfigurationProto):
     if table_descriptor.num_features != 0:
       raise ValueError(f"Table {table_id} already has `num_features`.")
     table_descriptor.num_features = table_num_features[table_id]
-
-
-def _all_gather_configs(config_type: str,
-                        local_config_bytes: bytes,
-                        timeout_in_sec: int) -> List[bytes]:
-  """All gather configs from each client.
-
-  Args:
-    config_type: A string that to claim config type like `memory` or `network`
-      it will be used to create key of config by client id to store and lookup
-      in coordination service.
-    local_config_bytes: A bytes to store in coordination service.
-    timeout_in_sec: Timeout seconds when get value from coordination service.
-
-  Returns:
-    A list all `local_config_bytes` value put into coordination service by each
-    client.
-  """
-  current_pid = jax.process_index()
-
-  def _get_config_key(config_type: str, pid: int) -> str:
-    """Create configure key for each process."""
-    return "{type}_config_by_process_{id}".format(type=config_type, id=pid)
-
-  # Get value for a given key store into coordination service.
-  def _get_key_value(key: str) -> bytes:
-    # Checking `blocking_key_value_get_bytes` API for backwards compatibilty
-    # And falling back to blocking_key_value_get.
-    if hasattr(global_state.client, "blocking_key_value_get_bytes"):
-      return global_state.client.blocking_key_value_get_bytes(
-          key=key, timeout_in_ms=timeout_in_sec * 1000)
-    else:
-      # TODO remove blocking_key_value_get fallback when most user migrate to
-      # Jax 0.4.5+.
-      gathered_config_str = global_state.client.blocking_key_value_get(
-          key=key, timeout_in_ms=timeout_in_sec * 1000)
-      # Here and following we encode local_config_bytes to `cp437` due to utf-8
-      # or ascii decoding would not return results decoded same as original.
-      return gathered_config_str.encode("cp437")
-
-  # Add key value store into coordination service.
-  def _set_key_value(key: str, value: bytes) -> None:
-    if hasattr(global_state.client, "blocking_key_value_get_bytes"):
-      global_state.client.key_value_set(key=key, value=value)
-    else:
-      global_state.client.key_value_set(
-          key=key,
-          value=local_config_bytes.decode("cp437"))
-
-  _set_key_value(
-      key=_get_config_key(config_type, current_pid),
-      value=local_config_bytes)
-
-  all_configs = [b"" for _ in range(jax.process_count())]
-  for pid in range(jax.process_count()):
-    if pid == current_pid:
-      all_configs[pid] = local_config_bytes
-    else:
-      all_configs[pid] = _get_key_value(key=_get_config_key(config_type, pid))
-
-  return all_configs
-
-
-def maybe_all_gather_configs(config_type: str,
-                             local_config: bytes) -> List[bytes]:
-  """When there is more than one process, apply `_all_gather_configs`.
-
-  Args:
-    config_type: A string that to claim config type
-    local_config: A bytes from local client.
-
-  Returns:
-    A list of gathered local_config from all processes, when there is only one
-    process, the list only has input local_config.
-  """
-  if jax.process_count() > 1:
-    return _all_gather_configs(
-        config_type=config_type,
-        local_config_bytes=local_config,
-        timeout_in_sec=_COORDINATION_SERVICE_TIMEOUT.value)
-  return [local_config]
 
 
 def create_mask_proto(tuple_mask: np.ndarray) -> TensorProto:

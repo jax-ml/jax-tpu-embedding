@@ -26,9 +26,11 @@ import jax
 from jax.experimental import jax2tf
 import jax.numpy as jnp
 from jax_tpu_embedding import config_utils
+from jax_tpu_embedding import coordination_service_utils
 from jax_tpu_embedding import input_utils
 from jax_tpu_embedding import pytype_utils
 from jax_tpu_embedding import tpu_embedding_utils
+from jax_tpu_embedding.google import tpu_embedding_pathways_utils
 import tensorflow as tf
 
 from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
@@ -55,115 +57,6 @@ def _add_key_attr(op: tf.Operation, name: str):
   op._set_attr(  # pylint: disable=protected-access
       "_tpu_embedding_layer",
       tf.compat.v1.AttrValue(s=tf.compat.as_bytes(name)))
-
-
-def _initialize_fn(config_str: bytes) -> None:
-  """TF function for initializing tpu embedding rewrite.
-
-  Reusing logic from `tpu/graph_rewrite/configure_tpu_embedding_rewrite_pass.cc`
-  to lower tpu_embedding_initialize to:
-  1) execute_tpu_embedding_partitioner: to compute common config for each host.
-  2) configure_tpu_embedding_memory: hbm memory configuration.
-  3) collate_tpu_embedding_memory to merge memory configuration of each host.
-  4) configure_tpu_embedding_host: configure tpu embedding on each host.
-  5) connect_tpu_embedding_hosts: connect hosts with output from step 4) which
-    describe metadata of that host.
-  6) finalize_tpu_embedding: update tpu system with results of initialization.
-  As step 3) and 5) needs intermediate configurations from other hosts, we need
-  apply all gather for these configurations on each host.
-
-  Also, for better performance, these ops need to run in graph/tf.function.
-  Therefore, we have three inner functions to execute all 6 steps above.
-
-  Args:
-    config_str: Serialized tpu embedding config proto string.
-  """
-
-  @tf.function
-  def create_memory_config(config_str):
-    """Execute embedding partitioner and configure memory for embedding.
-
-    `execute_tpu_embedding_partitioner` is to run the embedding engine
-    partitioner as well as calculate the HBM size (in bytes) required for
-    embedding engine operation.
-    `configure_tpu_embedding_memory` is to initialize the HBM memory addresses
-    and segments on each host, allocating HBM memory used by embedding engine.
-
-    Args:
-      config_str: Serialized tpu embedding configuration string.
-
-    Returns:
-      common_config: An encoded string  proto containing meta data about TPU
-        Embedding partitioner output and HBM size required.
-      memory_config: HbmBuffer configuration containing metadata about memory
-        allocations reserved for tpu embedding.
-    """
-    common_config = tpu_ops.execute_tpu_embedding_partitioner(config_str)
-    memory_config = tpu_ops.configure_tpu_embedding_memory(common_config)
-    return common_config, memory_config
-
-  @tf.function
-  def create_network_config(common_config, memory_configs, config_str):
-    """Merge memory configs and configure TPUEmbedding host software.
-
-    `collate_tpu_embedding_memory` merges the memory configurations of all hosts
-    into one. `configure_tpu_embedding_host` is to set up the embedding engine
-    host software on a given host.
-
-    Args:
-      common_config: An encoded string proto contains meta data about TPU
-        Embedding partitioner output and HBM size required.
-      memory_configs: A list of HbmBuffer configuration from all hosts.
-      config_str: Serialized tpu embedding configuration string.
-
-    Returns:
-      merged_memory_config: An encoded string of HbmBuffer configuration protos
-        containing metadata about memory allocations for TPUEmbedding across
-        all hosts.
-      network_config: A string contains metadata about the hostname and RPC port
-        used for communication with this host.
-    """
-    merged_memory_config = tpu_ops.collate_tpu_embedding_memory(memory_configs)
-    network_config = tpu_ops.configure_tpu_embedding_host(
-        common_config, merged_memory_config, config_str)
-    return merged_memory_config, network_config
-
-  @tf.function
-  def connect_embedding_hosts(network_configs, common_config,
-                              merged_mem_config):
-    """Connect each host and update global tpu embedding setting.
-
-    `connect_tpu_embedding_hosts` is to set up gRPC connections between host
-    software of embedding engine on each host. `finalize_tpu_embedding` is used
-    to update TpuMeshCommonState and TpuSystemConfiguration objects with the
-    results of the TPU embedding initialization.
-
-    Args:
-      network_configs: A list of network configs on each host.
-      common_config: An encoded string proto contains meta data about TPU
-        Embedding partitioner output and HBM size required. This is to update
-        TPU embedding engine setup in `finalize_tpu_embedding`.
-      merged_mem_config: A encoded string proto containing metadata about the
-        memory allocations reserved for TPUEmbedding over all hosts.
-    """
-    tpu_ops.connect_tpu_embedding_hosts(network_configs)
-    tpu_ops.finalize_tpu_embedding(common_config, merged_mem_config)
-
-  common_config, mem_config = create_memory_config(config_str)
-
-  # Gather other memory configs to merge when there are multi clients.
-  all_mem_configs = config_utils.maybe_all_gather_configs(
-      config_type="memory", local_config=mem_config.numpy())
-
-  merged_memory_config, network_config = create_network_config(
-      common_config, all_mem_configs, config_str)
-
-  # Gather other network configs to connect when there are multi clients.
-  all_network_configs = config_utils.maybe_all_gather_configs(
-      config_type="network", local_config=network_config.numpy())
-
-  connect_embedding_hosts(all_network_configs, common_config,
-                          merged_memory_config)
 
 
 def _get_task_id() -> int:
@@ -236,11 +129,14 @@ class DequeueOutput:
 class TPUEmbedding(object):
   """The TPUEmbedding mid level API for Jax users."""
 
-  def __init__(self,
-               feature_configs: Optional[NestedFeatureConfig] = None,
-               optimizer: Optional[TPUEmbeddingOptimizer] = None,
-               pipeline_execution_with_tensor_core: bool = False,
-               cores_per_replica: Optional[int] = None):
+  def __init__(
+      self,
+      feature_configs: Optional[NestedFeatureConfig] = None,
+      optimizer: Optional[TPUEmbeddingOptimizer] = None,
+      pipeline_execution_with_tensor_core: bool = False,
+      cores_per_replica: Optional[int] = None,
+      use_pathways: bool = False,
+  ):
     """Creates jax TPUEmbedding object.
 
     Args:
@@ -253,10 +149,11 @@ class TPUEmbedding(object):
         computations will overlap with the TensorCore computations (and hence
         will be one step old). Set to True for improved performance.
       cores_per_replica: default 1 using pmap. If it is greater than, it will
-        enable embedding engine spmd. Note that range of is
-        [1, total_tensor_cores], i.e. the maximum is all avaibale cores.
-        For pjit users, always set this based on cores for each model replica.
-        For pjit data parallelism user, it should be set as jax.device_count().
+        enable embedding engine spmd. Note that range of is [1,
+        total_tensor_cores], i.e. the maximum is all avaibale cores. For pjit
+        users, always set this based on cores for each model replica. For pjit
+        data parallelism user, it should be set as jax.device_count().
+      use_pathways: Whether to use Pathways as the backend.
 
     Raises:
       ValueError: when cores_per_replica is not legal.
@@ -313,9 +210,15 @@ class TPUEmbedding(object):
             table_config_list=self._table_config_list
         )
     )
+    self._use_pathways = use_pathways
 
-  def initialize_tpu_embedding(self):
-    """Initializae tpu embedding.
+  def initialize_tpu_embedding(
+      self,
+      start_remote_python: bool = False,
+      num_shards: int | None = None,
+      coordinator_address: str | None = None,
+  ):
+    """Initialize tpu embedding.
 
     Check if tpu embedding system is already initialized. If not, initialize
     with `initialize_fn`.
@@ -331,7 +234,7 @@ class TPUEmbedding(object):
     double initialization of the service.
 
     Also note that, when user need to make output shape inference, user should
-    not explicitly call `initialize_tpu_embedding`. It will be called in side
+    not explicitly call `initialize_tpu_embedding`. It will be called inside
     of `enqueue` after inferring output shapes from first input batch.
 
     The initialization would be like:
@@ -352,6 +255,19 @@ class TPUEmbedding(object):
     tpu_embedding_layer.enqueue(...)
     ```
 
+    Args:
+      start_remote_python: Whether to start remote Python to initialize the
+        embedding configuration from this function. This can be False even if
+        the backend is Pathways since we have the case where this is done inside
+        `enqueue` (Example 2) which is already placed in a remote Python. But if
+        it is True, the backend has to be Pathways.
+      num_shards: Number of shards in Pathways. This is only applicable if
+        `start_remote_python` is True.
+      coordinator_address: The network address of the coordinator task which all
+        the coordination clients can connect to. This is only applicable if
+        `start_remote_python` is True, since Coordination Service needs to be
+        deployed separately in the remote Python.
+
     Raises:
       RuntimeError: If tpu embedding is already initialized on TPU.
     """
@@ -363,19 +279,32 @@ class TPUEmbedding(object):
           "using multiple TPUEmbedding instances in a TPU scope which is "
           "unsupported.")
 
+    original_config_str = self._config_proto.SerializeToString()
     # As input config proto needs field populating in `populate_config`, this
     # copy is to avoid to change original config proto.
     copied_proto = copy.deepcopy(self._config_proto)
     config_utils.set_additional_fields(copied_proto)
 
-    logging.info("TPU Embedding Configuration: %s", str(copied_proto))
-    _initialize_fn(copied_proto.SerializeToString())
+    logging.info("TPU Embedding Configuration: %s", copied_proto)
+    new_config_str = copied_proto.SerializeToString()
+    embedding_config_manager = (
+        tpu_embedding_pathways_utils.EmbeddingConfigManager()
+    )
+    if start_remote_python:
+      embedding_config_manager.init_embedding_config(
+          original_config_str,
+          new_config_str,
+          num_shards,
+          coordinator_address,
+      )
+    else:
+      coordination_service_utils.initialize_fn(
+          new_config_str, jax.process_index(), jax.process_count()
+      )
     self._is_initialized = True
     logging.info("Successfully Initialized TPUEmbedding devices.")
 
-    self._dedup_tuple_mask = _get_tuple_mask(
-        self._config_proto.SerializeToString()
-    )
+    self._dedup_tuple_mask = _get_tuple_mask(original_config_str)
     logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
   def load_embedding_tables(

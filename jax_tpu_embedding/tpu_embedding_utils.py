@@ -28,6 +28,7 @@ from tensorflow.dtensor.python import gen_dtensor_ops
 from tensorflow.python.eager import context
 # pylint: enable=g-direct-tensorflow-import
 
+
 GlobalHostArray = pytype_utils.GlobalHostArray
 NestedStruct = pytype_utils.NestedStruct
 TableConfig = pytype_utils.TableConfig
