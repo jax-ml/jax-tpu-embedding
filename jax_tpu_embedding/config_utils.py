@@ -198,12 +198,17 @@ def count_table_feature_numbers(
 
 def create_config_proto(
     tpu_embedding_config: TpuEmbeddingConfigSpecs,
+    recreate_table_config_list: bool = False,
 ) -> TPUEmbeddingConfigurationProto:
   """Creates TPUEmbeddingConfiguration proto initialize TPU embedding engine.
 
   Args:
     tpu_embedding_config: A TpuEmbeddingConfig instance. It includes info to be
       used to create configuration proto.
+    recreate_table_config_list: Whether to recreate table_config_list. This is
+      for the case where the contents in table_config_list have been changed.
+      For example, when the object holding table_config_list has gone through a
+      deep copy.
 
   Raises:
     ValueError: When table_config_list or output_shapes is empty.
@@ -249,6 +254,14 @@ def create_config_proto(
     table.optimizer._set_optimization_parameters(parameters)  # pylint: disable=protected-access
     config_proto.table_descriptor.append(table_descriptor)
 
+  if recreate_table_config_list:
+    flatten_feature_config, _ = jax.tree_util.tree_flatten(
+        tpu_embedding_config.feature_config
+    )
+    tpu_embedding_config.table_config_list = []
+    for feature in flatten_feature_config:
+      if feature.table not in tpu_embedding_config.table_config_list:
+        tpu_embedding_config.table_config_list.append(feature.table)
   table_to_id = {
       table: i for i, table in enumerate(tpu_embedding_config.table_config_list)
   }

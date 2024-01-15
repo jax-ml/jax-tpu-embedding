@@ -247,7 +247,9 @@ class TPUEmbedding(object):
       RuntimeError: If tpu embedding is already initialized on TPU.
     """
     self._config_proto = config_utils.create_config_proto(
-        self._tpu_embedding_config)
+        self._tpu_embedding_config,
+        self._use_pathways and not start_remote_python,
+    )
     if tpu_ops.is_tpu_embedding_initialized():
       raise RuntimeError(
           "TPU is already initialized for embeddings. This may be caused by "
@@ -646,6 +648,14 @@ class TPUEmbedding(object):
     return self._config_proto  # pytype: disable=attribute-error
 
   @property
+  def dedup_tuple_mask(self) -> pytype_utils.TensorProto:
+    return self._dedup_tuple_mask
+
+  @property
+  def output_shapes(self) -> List[config_utils.OutputShape]:
+    return self._output_shapes
+
+  @property
   def feature_configs(self) -> Optional[NestedFeatureConfig]:
     return self._feature_configs
 
@@ -664,3 +674,18 @@ class TPUEmbedding(object):
   @property
   def shape_and_dtypes(self) -> NestedStruct[jax.ShapeDtypeStruct]:
     return self._embedding_shape_dtypes
+
+  def set_config_proto(
+      self, config_proto: config_utils.TPUEmbeddingConfigurationProto
+  ):
+    self._config_proto = config_proto
+
+  def set_dedup_tuple_mask(self, dedup_tuple_mask: pytype_utils.TensorProto):
+    self._dedup_tuple_mask = dedup_tuple_mask
+
+  def set_output_shapes(self, output_shapes: List[config_utils.OutputShape]):
+    self._tpu_embedding_config.output_shapes = output_shapes
+    self._output_shapes = output_shapes
+
+  def set_is_initialized(self, is_initialized: bool):
+    self._is_initialized = is_initialized
