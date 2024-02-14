@@ -1,4 +1,4 @@
-# Copyright 2023 The jax_tpu_embedding Authors.
+# Copyright 2024 The jax_tpu_embedding Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ TensorType = pytype_utils.TensorType
 NestedTfTensor = pytype_utils.NestedTfTensor
 Nested = pytype_utils.Nested
 NestedStruct = pytype_utils.NestedStruct
+TPUEmbeddingConfigurationProto = pytype_utils.TPUEmbeddingConfigurationProto
 NestedFeatureConfig = config_utils.NestedFeatureConfig
 TPUEmbeddingOptimizer = config_utils.Optimizer
 
@@ -187,11 +188,55 @@ class TPUEmbedding(object):
     )
     self._use_pathways = use_pathways
 
+  def _remote_initialize_tpu_embedding(
+      self,
+      config_proto: TPUEmbeddingConfigurationProto,
+      num_shards: int,
+      coordinator_address: str,
+      embedding_manager: tpu_embedding_pathways_utils.EmbeddingManager,
+  ) -> pytype_utils.TensorProto:
+    """Initializes TPU embedding using remote Python.
+
+    Args:
+      config_proto: A configuration proto.
+      num_shards: Number of shards in Pathways.
+      coordinator_address: The network address of the coordinator task which all
+        the coordination clients can connect to.
+      embedding_manager: The object to manage the remote Python execution.
+
+    Returns:
+      Tensor proto of tuple mask.
+
+    Raises:
+      RuntimeError: If TPU embedding is already initialized.
+    """
+    original_config_str, new_config_str = (
+        tpu_embedding_utils.get_original_and_new_config(config_proto)
+    )
+    embedding_manager.init_embedding_config(
+        original_config_str,
+        new_config_str,
+        num_shards,
+        coordinator_address,
+    )
+    if embedding_manager.is_initialized():
+      raise RuntimeError(
+          "TPU is already initialized for embeddings. This may be caused by "
+          "using multiple TPUEmbedding instances in a TPU scope which is "
+          "unsupported."
+      )
+
+    embedding_manager.initialize()
+    return embedding_manager.get_tuple_mask()
+
   def initialize_tpu_embedding(
       self,
       start_remote_python: bool = False,
       num_shards: int | None = None,
       coordinator_address: str | None = None,
+      embedding_manager: (
+          tpu_embedding_pathways_utils.EmbeddingManager | None
+      ) = None,
   ):
     """Initialize tpu embedding.
 
@@ -242,6 +287,8 @@ class TPUEmbedding(object):
         the coordination clients can connect to. This is only applicable if
         `start_remote_python` is True, since Coordination Service needs to be
         deployed separately in the remote Python.
+      embedding_manager: The object to manage the remote Python execution. This
+        is only applicable if `start_remote_python` is True.
 
     Raises:
       RuntimeError: If tpu embedding is already initialized on TPU.
@@ -250,62 +297,75 @@ class TPUEmbedding(object):
         self._tpu_embedding_config,
         self._use_pathways and not start_remote_python,
     )
-    if tpu_ops.is_tpu_embedding_initialized():
-      raise RuntimeError(
-          "TPU is already initialized for embeddings. This may be caused by "
-          "using multiple TPUEmbedding instances in a TPU scope which is "
-          "unsupported.")
-
-    original_config_str = self._config_proto.SerializeToString()
-    # As input config proto needs field populating in `populate_config`, this
-    # copy is to avoid to change original config proto.
-    copied_proto = copy.deepcopy(self._config_proto)
-    config_utils.set_additional_fields(copied_proto)
-
-    logging.info("TPU Embedding Configuration: %s", copied_proto)
-    new_config_str = copied_proto.SerializeToString()
-    embedding_config_manager = (
-        tpu_embedding_pathways_utils.EmbeddingConfigManager()
-    )
     if start_remote_python:
-      embedding_config_manager.init_embedding_config(
-          original_config_str,
-          new_config_str,
-          num_shards,
-          coordinator_address,
+      assert embedding_manager is not None
+      self._dedup_tuple_mask = self._remote_initialize_tpu_embedding(
+          self._config_proto, num_shards, coordinator_address, embedding_manager
       )
+      self._is_initialized = True
+      logging.info("Successfully Initialized TPUEmbedding devices.")
+      logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
     else:
+      if tpu_ops.is_tpu_embedding_initialized():
+        raise RuntimeError(
+            "TPU is already initialized for embeddings. This may be caused by "
+            "using multiple TPUEmbedding instances in a TPU scope which is "
+            "unsupported."
+        )
+
+      original_config_str, new_config_str = (
+          tpu_embedding_utils.get_original_and_new_config(self._config_proto)
+      )
       coordination_service_utils.initialize_fn(
           new_config_str, jax.process_index(), jax.process_count()
       )
-    self._is_initialized = True
-    logging.info("Successfully Initialized TPUEmbedding devices.")
+      self._is_initialized = True
+      logging.info("Successfully Initialized TPUEmbedding devices.")
 
-    if start_remote_python:
-      self._dedup_tuple_mask = embedding_config_manager.get_tuple_mask()
-    else:
       self._dedup_tuple_mask = tpu_embedding_utils.get_tuple_mask(
           original_config_str
       )
-    logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
+      logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
   def load_embedding_tables(
       self,
-      embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None
-    ) -> None:
+      embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None,
+      start_remote_python: bool = False,
+      num_shards: int | None = None,
+      embedding_manager: (
+          tpu_embedding_pathways_utils.EmbeddingManager | None
+      ) = None,
+  ) -> None:
     """Load tables' variables on the embedding engine to given set of tensors.
 
     Args:
       embedding_variables: If not None, load variables of embeddings in
         GlobalHostArray; if None, load embedding variables created by
         initializers.
+      start_remote_python: See the comment in `initialize_tpu_embedding`.
+      num_shards: Number of shards in Pathways. This is only applicable if
+        `start_remote_python` is True.
+      embedding_manager: The object to manage the remote Python execution. This
+        is only applicable if `start_remote_python` is True.
     """
-    tpu_embedding_utils.load_embedding_tables_impl(
-        table_config_list=self._table_config_list,
-        config_proto_str=self._config_proto.SerializeToString(),
-        host_id=self._host_id,
-        num_hosts=self._num_hosts,
-        embedding_variables=embedding_variables)
+    if start_remote_python:
+      assert embedding_manager is not None
+      if not embedding_manager.load_embedding_tables_initialized():
+        embedding_manager.init_embedding_tables(
+            table_config_list=self._table_config_list,
+            config_proto_str=self._config_proto.SerializeToString(),
+            num_shards=num_shards,
+            embedding_variables=embedding_variables,
+        )
+      embedding_manager.load_embedding_tables()
+    else:
+      tpu_embedding_utils.load_embedding_tables_impl(
+          table_config_list=self._table_config_list,
+          config_proto_str=self._config_proto.SerializeToString(),
+          host_id=self._host_id,
+          num_hosts=self._num_hosts,
+          embedding_variables=embedding_variables,
+      )
 
   def retrieve_embedding_tables(
       self, as_gha=False

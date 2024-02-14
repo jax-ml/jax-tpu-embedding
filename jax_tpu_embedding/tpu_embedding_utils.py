@@ -1,4 +1,4 @@
-# Copyright 2023 The jax_tpu_embedding Authors.
+# Copyright 2024 The jax_tpu_embedding Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
 
 """Utils support load or retrieve TPU embedding variables."""
 
+import copy
 from typing import List, Mapping, Optional
 
 from absl import flags
 from absl import logging
 import jax
-import jax.numpy as jnp
 from jax.experimental import jax2tf
+import jax.numpy as jnp
 from jax_tpu_embedding import config_utils
 from jax_tpu_embedding import pytype_utils
 import tensorflow as tf
@@ -34,8 +35,9 @@ from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint
 
 GlobalHostArray = pytype_utils.GlobalHostArray
 NestedStruct = pytype_utils.NestedStruct
-TableConfig = pytype_utils.TableConfig
 RestoreArgs = pytype_utils.RestoreArgs
+TableConfig = pytype_utils.TableConfig
+TPUEmbeddingConfigurationProto = pytype_utils.TPUEmbeddingConfigurationProto
 
 
 def init_tpu_system(enable_megacore=False):
@@ -389,3 +391,27 @@ def retrieve_embedding_tables_impl(
       config_proto_str=config_proto_str,
       host_id=host_id,
       num_hosts=num_hosts)
+
+
+def get_original_and_new_config(
+    config_proto: TPUEmbeddingConfigurationProto,
+) -> tuple[bytes, bytes]:
+  """Gets original and new config proto.
+
+     The new config proto has additional fields set.
+
+  Args:
+    config_proto: A configuration proto.
+
+  Returns:
+    A tuple of original config and new config in bytes.
+  """
+  original_config_str = config_proto.SerializeToString()
+  # As input config proto needs field populating in `populate_config`, this
+  # copy is to avoid to change original config proto.
+  copied_proto = copy.deepcopy(config_proto)
+  config_utils.set_additional_fields(copied_proto)
+
+  logging.info('TPU Embedding Configuration: %s', copied_proto)
+  new_config_str = copied_proto.SerializeToString()
+  return original_config_str, new_config_str
