@@ -24,6 +24,7 @@ from jax.experimental import jax2tf
 import jax.numpy as jnp
 from jax_tpu_embedding import config_utils
 from jax_tpu_embedding import pytype_utils
+import numpy as np
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.dtensor.python import accelerator_util
@@ -79,7 +80,7 @@ def shutdown_tpu_system():
 
 
 def get_tuple_mask(config_str: bytes) -> pytype_utils.TensorProto:
-  """Get deduplication data tuple mask.
+  """Gets deduplication data tuple mask.
 
   Deduplication data is a xla tuple of integer or float 1-D tensors. This op is
   to generate a mask to respresent type and span size of these tensors.
@@ -100,6 +101,48 @@ def get_tuple_mask(config_str: bytes) -> pytype_utils.TensorProto:
       _compute_dedup_tuple_mask, has_side_effects=False
   )()
   dedup_tuple_mask_proto = config_utils.create_mask_proto(tuple_mask)
+  return dedup_tuple_mask_proto
+
+
+def get_tuple_mask_pmap(config_str: bytes) -> pytype_utils.TensorProto:
+  """Gets deduplication data tuple mask through pmap.
+
+  Args:
+    config_str: A serialized string of TPUEmbeddingConfiguration.
+
+  Returns:
+    A tensor proto of tuple mask, whose first column is 0 or 1 to represent
+    integer or float correspondingly, and second column is span size of each
+    element in this tuple.
+  """
+
+  def _compute_dedup_data_size_tf():
+    return tpu_ops.compute_dedup_data_size(config_str)
+
+  def _compute_dedup_tuple_mask_tf():
+    return tpu_ops.compute_dedup_data_tuple_mask(config_str)
+
+  def _compute_dedup_data_size(_):
+    return jax2tf.call_tf(
+        _compute_dedup_data_size_tf,
+        has_side_effects=False,
+    )()
+
+  def _compute_dedup_tuple_mask(dummy):
+    return jax2tf.call_tf(
+        _compute_dedup_tuple_mask_tf,
+        has_side_effects=False,
+        output_shape_dtype=jax.ShapeDtypeStruct(
+            shape=(dummy.shape[0], 2), dtype=jnp.int32
+        ),
+    )()
+
+  device = jax.devices()[0]
+  dummy = np.zeros(1)
+  num_elements = jax.pmap(_compute_dedup_data_size, devices=[device])(dummy)
+  dummy = np.array([np.zeros(num_elements)])
+  tuple_mask = jax.pmap(_compute_dedup_tuple_mask, devices=[device])(dummy)
+  dedup_tuple_mask_proto = config_utils.create_mask_proto(tuple_mask[0])
   return dedup_tuple_mask_proto
 
 
@@ -393,10 +436,10 @@ def retrieve_embedding_tables_impl(
       num_hosts=num_hosts)
 
 
-def get_original_and_new_config(
+def get_new_config(
     config_proto: TPUEmbeddingConfigurationProto,
-) -> tuple[bytes, bytes]:
-  """Gets original and new config proto.
+) -> bytes:
+  """Gets the new config proto.
 
      The new config proto has additional fields set.
 
@@ -404,9 +447,8 @@ def get_original_and_new_config(
     config_proto: A configuration proto.
 
   Returns:
-    A tuple of original config and new config in bytes.
+    A new config in bytes.
   """
-  original_config_str = config_proto.SerializeToString()
   # As input config proto needs field populating in `populate_config`, this
   # copy is to avoid to change original config proto.
   copied_proto = copy.deepcopy(config_proto)
@@ -414,4 +456,4 @@ def get_original_and_new_config(
 
   logging.info('TPU Embedding Configuration: %s', copied_proto)
   new_config_str = copied_proto.SerializeToString()
-  return original_config_str, new_config_str
+  return new_config_str

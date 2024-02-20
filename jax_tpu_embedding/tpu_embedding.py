@@ -14,7 +14,6 @@
 
 """Jax Mid level API for TPU Embedding."""
 
-import copy
 import dataclasses
 import functools
 import os
@@ -167,6 +166,7 @@ class TPUEmbedding(object):
         self._tpu_embedding_config.dynamic_learning_rates
         )
     self._is_initialized = False
+    self._config_proto = None
 
     # TPUEmbedding software deduplication tuple mask and data.
     self._dedup_tuple_mask = None
@@ -194,7 +194,7 @@ class TPUEmbedding(object):
       num_shards: int,
       coordinator_address: str,
       embedding_manager: tpu_embedding_pathways_utils.EmbeddingManager,
-  ) -> pytype_utils.TensorProto:
+  ):
     """Initializes TPU embedding using remote Python.
 
     Args:
@@ -204,17 +204,11 @@ class TPUEmbedding(object):
         the coordination clients can connect to.
       embedding_manager: The object to manage the remote Python execution.
 
-    Returns:
-      Tensor proto of tuple mask.
-
     Raises:
       RuntimeError: If TPU embedding is already initialized.
     """
-    original_config_str, new_config_str = (
-        tpu_embedding_utils.get_original_and_new_config(config_proto)
-    )
+    new_config_str = tpu_embedding_utils.get_new_config(config_proto)
     embedding_manager.init_embedding_config(
-        original_config_str,
         new_config_str,
         num_shards,
         coordinator_address,
@@ -227,7 +221,6 @@ class TPUEmbedding(object):
       )
 
     embedding_manager.initialize()
-    return embedding_manager.get_tuple_mask()
 
   def initialize_tpu_embedding(
       self,
@@ -275,6 +268,10 @@ class TPUEmbedding(object):
     tpu_embedding_layer.enqueue(...)
     ```
 
+    We do not create deduplication tuple mask when we use remote Python since
+    doing that means running an Op on TPU which should go through an XLA
+    component in Pathways.
+
     Args:
       start_remote_python: Whether to start remote Python to initialize the
         embedding configuration from this function. This can be False even if
@@ -299,12 +296,11 @@ class TPUEmbedding(object):
     )
     if start_remote_python:
       assert embedding_manager is not None
-      self._dedup_tuple_mask = self._remote_initialize_tpu_embedding(
+      self._remote_initialize_tpu_embedding(
           self._config_proto, num_shards, coordinator_address, embedding_manager
       )
       self._is_initialized = True
       logging.info("Successfully Initialized TPUEmbedding devices.")
-      logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
     else:
       if tpu_ops.is_tpu_embedding_initialized():
         raise RuntimeError(
@@ -313,19 +309,27 @@ class TPUEmbedding(object):
             "unsupported."
         )
 
-      original_config_str, new_config_str = (
-          tpu_embedding_utils.get_original_and_new_config(self._config_proto)
-      )
+      new_config_str = tpu_embedding_utils.get_new_config(self._config_proto)
       coordination_service_utils.initialize_fn(
           new_config_str, jax.process_index(), jax.process_count()
       )
       self._is_initialized = True
       logging.info("Successfully Initialized TPUEmbedding devices.")
+      if not self._use_pathways:
+        self._dedup_tuple_mask = tpu_embedding_utils.get_tuple_mask(
+            self._config_proto.SerializeToString()
+        )
+        logging.info(
+            "Get deduplication tuple mask : %s", self._dedup_tuple_mask
+        )
 
-      self._dedup_tuple_mask = tpu_embedding_utils.get_tuple_mask(
-          original_config_str
-      )
-      logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
+  def create_dedup_tuple_mask(self):
+    if self._dedup_tuple_mask:
+      return
+    self._dedup_tuple_mask = tpu_embedding_utils.get_tuple_mask_pmap(
+        self._config_proto.SerializeToString()
+    )
+    logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
   def load_embedding_tables(
       self,
