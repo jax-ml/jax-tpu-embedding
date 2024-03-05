@@ -185,6 +185,7 @@ def split_and_prefetch_to_host_and_devices(
     enqueue(1)
 
 
+@tf.function
 def shard_inputs(inputs: Nested[TensorType],
                  num_shards: int) -> List[Nested[TensorType]]:
   """Shards inputs with same tree def.
