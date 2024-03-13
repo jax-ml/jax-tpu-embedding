@@ -179,7 +179,15 @@ def split_and_prefetch_to_host_and_devices(
           NON_EMBED_PLACEMENT: device_input_fn(data[NON_EMBED_PLACEMENT])
       })
 
-  enqueue(buffer_size)  # Fill up the buffer.
+  # Prefetch `buffer_size` elements. Users need to make sure their training
+  # steps consume all the prefetched elements. Also `buffer_size` should not be
+  # too large since that would saturate the capacity of the underlying runtime.
+  enqueue(buffer_size)
+  while queue:
+    yield queue.popleft()
+
+  # Now fetch one element at a time.
+  enqueue(1)
   while queue:
     yield queue.popleft()
     enqueue(1)
