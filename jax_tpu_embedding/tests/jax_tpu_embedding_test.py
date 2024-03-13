@@ -90,7 +90,6 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
     super().tearDown()
 
     # Reset PjRt client.
-    jax.clear_backends()
 
     # Clear up tpu embedding
     jte_utils.shutdown_tpu_system()
@@ -308,7 +307,6 @@ class TFJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase, tf.test.TestCase):
 
   def tearDown(self):
     # tear down for dtensor.
-    jax.clear_backends()
     tf.tpu.experimental.shutdown_tpu_system()
     super().tearDown()
 
