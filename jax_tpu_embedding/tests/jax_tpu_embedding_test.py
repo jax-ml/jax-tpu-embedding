@@ -23,6 +23,7 @@ from flax.core import scope as flax_scope
 from flax.training.train_state import TrainState
 import jax
 from jax.experimental import pjit
+import jax.extend as jex
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 from jax_tpu_embedding import input_utils
@@ -90,7 +91,7 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
     super().tearDown()
 
     # Reset PjRt client.
-    jax.clear_backends()
+    jex.backend.clear_backends()
 
     # Clear up tpu embedding
     jte_utils.shutdown_tpu_system()
@@ -308,7 +309,7 @@ class TFJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase, tf.test.TestCase):
 
   def tearDown(self):
     # tear down for dtensor.
-    jax.clear_backends()
+    jex.backend.clear_backends()
     tf.tpu.experimental.shutdown_tpu_system()
     super().tearDown()
 
