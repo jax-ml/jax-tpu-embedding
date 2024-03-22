@@ -30,6 +30,7 @@ from jax_tpu_embedding import input_utils
 from jax_tpu_embedding import pytype_utils
 from jax_tpu_embedding import tpu_embedding_utils
 from jax_tpu_embedding.google import tpu_embedding_pathways_utils
+import numpy as np
 import tensorflow as tf
 
 from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
@@ -331,36 +332,57 @@ class TPUEmbedding(object):
     )
     logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
+  def init_embedding_tables(
+      self,
+      num_shards: int,
+      embedding_manager: tpu_embedding_pathways_utils.EmbeddingManager,
+      retrieve_specs: NestedStruct[jax.ShapeDtypeStruct],
+      embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None,
+  ):
+    """Initialize embedding tables.
+
+    This is only meaningful when using Pathways.
+
+    Args:
+      num_shards: Number of shards in Pathways.
+      embedding_manager: The object to manage the remote Python execution.
+      retrieve_specs: The specs for embedding tables.
+      embedding_variables: If not None, initialize variables of embeddings in
+        GlobalHostArray; if None, initialize embedding variables created by
+        initializers.
+    """
+    embedding_manager.init_embedding_tables(
+        table_config_list=self._table_config_list,
+        config_proto_str=self._config_proto.SerializeToString(),
+        num_shards=num_shards,
+        retrieve_specs=retrieve_specs,
+        embedding_variables=embedding_variables,
+    )
+
   def load_embedding_tables(
       self,
       embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None,
       start_remote_python: bool = False,
-      num_shards: int | None = None,
       embedding_manager: (
           tpu_embedding_pathways_utils.EmbeddingManager | None
       ) = None,
   ) -> None:
     """Load tables' variables on the embedding engine to given set of tensors.
 
+    When using remote Python to load embedding tables, the remote Python must
+    have been initialized before running this function.
+
     Args:
       embedding_variables: If not None, load variables of embeddings in
         GlobalHostArray; if None, load embedding variables created by
         initializers.
       start_remote_python: See the comment in `initialize_tpu_embedding`.
-      num_shards: Number of shards in Pathways. This is only applicable if
-        `start_remote_python` is True.
       embedding_manager: The object to manage the remote Python execution. This
         is only applicable if `start_remote_python` is True.
     """
     if start_remote_python:
       assert embedding_manager is not None
-      if not embedding_manager.load_embedding_tables_initialized():
-        embedding_manager.init_embedding_tables(
-            table_config_list=self._table_config_list,
-            config_proto_str=self._config_proto.SerializeToString(),
-            num_shards=num_shards,
-            embedding_variables=embedding_variables,
-        )
+      assert embedding_manager.embedding_tables_initialized()
       embedding_manager.load_embedding_tables()
     else:
       tpu_embedding_utils.load_embedding_tables_impl(
@@ -372,36 +394,63 @@ class TPUEmbedding(object):
       )
 
   def retrieve_embedding_tables(
-      self, as_gha=False
-      ) -> Union[NestedStruct[TensorType], NestedStruct[GlobalHostArray]]:
+      self,
+      as_gha=False,
+      start_remote_python: bool = False,
+      embedding_manager: (
+          tpu_embedding_pathways_utils.EmbeddingManager | None
+      ) = None,
+  ) -> Union[
+      NestedStruct[np.ndarray],
+      NestedStruct[TensorType],
+      NestedStruct[GlobalHostArray],
+  ]:
     """Retrieve tables variables from embedding engine.
 
     Args:
       as_gha: If True, converts returned tables and slots to GlobalHostArray to
         save in Orbax checkpoints.
+      start_remote_python: See the comment in `initialize_tpu_embedding`.
+      embedding_manager: The object to manage the remote Python execution. This
+        is only applicable if `start_remote_python` is True.
 
     Returns:
       A dict of dict of list of tensors. The outer dict is indexed by table's
       name. The inner dict is indexed by slot names and the final list is the
       list of per host tensors.
     """
-    retrieved_tables = tpu_embedding_utils.retrieve_embedding_tables_impl(
-        table_config_list=self._table_config_list,
-        config_proto_str=self._config_proto.SerializeToString(),
-        host_id=self._host_id,
-        num_hosts=self._num_hosts,
-    )
+    if start_remote_python:
+      assert embedding_manager is not None
+      assert embedding_manager.embedding_tables_initialized()
+      retrieved_tables = embedding_manager.retrieve_embedding_tables()
+    else:
+      retrieved_tables = tpu_embedding_utils.retrieve_embedding_tables_impl(
+          table_config_list=self._table_config_list,
+          config_proto_str=self._config_proto.SerializeToString(),
+          host_id=self._host_id,
+          num_hosts=self._num_hosts,
+      )
 
     if not as_gha:
       return retrieved_tables
 
-    def _create_gha(tf_tensor: TensorType, global_shape: Tuple[int, int]):
-      return GlobalHostArray(
-          data=tf_tensor.numpy(),
-          global_shape=global_shape,
-          shard_id=self._host_id,
-          num_shards=self._num_hosts,
-      )
+    def _create_gha(
+        data: Union[TensorType, np.ndarray], global_shape: Tuple[int, int]
+    ):
+      if isinstance(data, np.ndarray):
+        return GlobalHostArray(
+            data=data,
+            global_shape=global_shape,
+            shard_id=self._host_id,
+            num_shards=self._num_hosts,
+        )
+      else:
+        return GlobalHostArray(
+            data=data.numpy(),
+            global_shape=global_shape,
+            shard_id=self._host_id,
+            num_shards=self._num_hosts,
+        )
 
     retrieved_tables = dict(retrieved_tables)
     for tb_cfg in self._table_config_list:
@@ -738,6 +787,10 @@ class TPUEmbedding(object):
   @property
   def shape_and_dtypes(self) -> NestedStruct[jax.ShapeDtypeStruct]:
     return self._embedding_shape_dtypes
+
+  @property
+  def table_config_list(self) -> List[config_utils.TableConfig]:
+    return self._table_config_list
 
   def set_config_proto(
       self, config_proto: config_utils.TPUEmbeddingConfigurationProto
