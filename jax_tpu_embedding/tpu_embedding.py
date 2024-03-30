@@ -163,11 +163,13 @@ class TPUEmbedding(object):
     self._cores_per_replica = cores_per_replica
     self._table_config_list = self._tpu_embedding_config.table_config_list
     self._output_shapes = self._tpu_embedding_config.output_shapes
+    self._output_shapes_ready = False
     self._dynamic_learning_rates = (
         self._tpu_embedding_config.dynamic_learning_rates
         )
     self._is_initialized = False
     self._config_proto = None
+    self._config_proto_ready = False
 
     # TPUEmbedding software deduplication tuple mask and data.
     self._dedup_tuple_mask = None
@@ -295,6 +297,7 @@ class TPUEmbedding(object):
         self._tpu_embedding_config,
         self._use_pathways and not start_remote_python,
     )
+    self._config_proto_ready = True
     if start_remote_python:
       assert embedding_manager is not None
       self._remote_initialize_tpu_embedding(
@@ -674,6 +677,7 @@ class TPUEmbedding(object):
       )
       self._tpu_embedding_config.output_shapes = inferred_output_shapes
       self._output_shapes = inferred_output_shapes
+      self._output_shapes_ready = True
       logging.info(
           "Using shape inference mode, initializing embedding layer and loading"
           " embedding weights in first enqueue call."
@@ -792,6 +796,14 @@ class TPUEmbedding(object):
   def table_config_list(self) -> List[config_utils.TableConfig]:
     return self._table_config_list
 
+  @property
+  def config_proto_ready(self) -> bool:
+    return self._config_proto_ready
+
+  @property
+  def output_shapes_ready(self) -> bool:
+    return self._output_shapes_ready
+
   def set_config_proto(
       self, config_proto: config_utils.TPUEmbeddingConfigurationProto
   ):
@@ -803,6 +815,3 @@ class TPUEmbedding(object):
   def set_output_shapes(self, output_shapes: List[config_utils.OutputShape]):
     self._tpu_embedding_config.output_shapes = output_shapes
     self._output_shapes = output_shapes
-
-  def set_is_initialized(self, is_initialized: bool):
-    self._is_initialized = is_initialized
