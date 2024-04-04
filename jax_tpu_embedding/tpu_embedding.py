@@ -190,6 +190,11 @@ class TPUEmbedding(object):
         )
     )
     self._use_pathways = use_pathways
+    self._tpu_topology = tpu_embedding_pathways_utils.get_tpu_topology()
+    self._embedding_partitions = None
+    self._embedding_partitions_ready = False
+    self._hbm_buffers_config = None
+    self._hbm_buffers_config_ready = False
 
   def _remote_initialize_tpu_embedding(
       self,
@@ -216,7 +221,7 @@ class TPUEmbedding(object):
         num_shards,
         coordinator_address,
     )
-    if embedding_manager.is_initialized():
+    if embedding_manager.is_initialized()[0]:
       raise RuntimeError(
           "TPU is already initialized for embeddings. This may be caused by "
           "using multiple TPUEmbedding instances in a TPU scope which is "
@@ -224,6 +229,12 @@ class TPUEmbedding(object):
       )
 
     embedding_manager.initialize()
+    self._embedding_partitions = np.asanyarray(
+        embedding_manager.embedding_partitions()[0], dtype=np.bytes_
+    ).tobytes()
+    self._hbm_buffers_config = np.asanyarray(
+        embedding_manager.hbm_buffers_config()[0], dtype=np.bytes_
+    ).tobytes()
 
   def initialize_tpu_embedding(
       self,
@@ -314,9 +325,21 @@ class TPUEmbedding(object):
         )
 
       new_config_str = tpu_embedding_utils.get_new_config(self._config_proto)
-      coordination_service_utils.initialize_fn(
-          new_config_str, jax.process_index(), jax.process_count()
-      )
+      if self._use_pathways:
+        result = coordination_service_utils.initialize_fn(
+            new_config_str, jax.process_index(), jax.process_count(), None, True
+        )
+        assert result is not None
+        self._embedding_partitions, self._hbm_buffers_config = (
+            result[0].numpy(),
+            result[1].numpy(),
+        )
+        self._embedding_partitions_ready = True
+        self._hbm_buffers_config_ready = True
+      else:
+        coordination_service_utils.initialize_fn(
+            new_config_str, jax.process_index(), jax.process_count()
+        )
       self._is_initialized = True
       logging.info("Successfully Initialized TPUEmbedding devices.")
       if not self._use_pathways:
@@ -331,7 +354,10 @@ class TPUEmbedding(object):
     if self._dedup_tuple_mask:
       return
     self._dedup_tuple_mask = tpu_embedding_utils.get_tuple_mask_pmap(
-        self._config_proto.SerializeToString()
+        self._config_proto.SerializeToString(),
+        self._embedding_partitions,
+        self._hbm_buffers_config,
+        self._tpu_topology,
     )
     logging.info("Get deduplication tuple mask : %s", self._dedup_tuple_mask)
 
@@ -542,14 +568,29 @@ class TPUEmbedding(object):
           config=self._config_proto.SerializeToString(),
       )
 
-      op = tpu_ops.xla_send_tpu_embedding_gradients(
-          gradients=updated_gradients,
-          learning_rates=[
-              tf.cast(fn(), dtype=tf.float32)
-              for fn in self._dynamic_learning_rates
-          ],
-          deduplication_data=deduplication_data,
-          config=self._config_proto.SerializeToString())
+      if self._use_pathways:
+        op = tpu_ops.xla_send_tpu_embedding_gradients_v2(
+            gradients=updated_gradients,
+            learning_rates=[
+                tf.cast(fn(), dtype=tf.float32)
+                for fn in self._dynamic_learning_rates
+            ],
+            deduplication_data=deduplication_data,
+            config=self._config_proto.SerializeToString(),
+            embedding_partitions=self._embedding_partitions,
+            hbm_buffers_config=self._hbm_buffers_config,
+            tpu_topology=self._tpu_topology,
+        )
+      else:
+        op = tpu_ops.xla_send_tpu_embedding_gradients(
+            gradients=updated_gradients,
+            learning_rates=[
+                tf.cast(fn(), dtype=tf.float32)
+                for fn in self._dynamic_learning_rates
+            ],
+            deduplication_data=deduplication_data,
+            config=self._config_proto.SerializeToString(),
+        )
 
       # Apply the name tag to the op.
       if name is not None:
@@ -574,9 +615,19 @@ class TPUEmbedding(object):
     """
 
     def _dedup_fn():
-      deduplication_data = tpu_ops.xla_recv_tpu_embedding_deduplication_data(
-          config=self._config_proto.SerializeToString()
-      )
+      if self._use_pathways:
+        deduplication_data = (
+            tpu_ops.xla_recv_tpu_embedding_deduplication_data_v2(
+                config=self._config_proto.SerializeToString(),
+                embedding_partitions=self._embedding_partitions,
+                hbm_buffers_config=self._hbm_buffers_config,
+                tpu_topology=self._tpu_topology,
+            )
+        )
+      else:
+        deduplication_data = tpu_ops.xla_recv_tpu_embedding_deduplication_data(
+            config=self._config_proto.SerializeToString(),
+        )
       tuple_integers, tuple_floats = tpu_ops.split_dedup_data(
           deduplication_data,
           integer_type=tf.uint32,
@@ -623,10 +674,21 @@ class TPUEmbedding(object):
 
       # The activations returned by this op are per feature.
       # here num_tables is num_outputs when using feature descriptor
-      activations = tpu_ops.xla_recv_tpu_embedding_activations(
-          deduplication_data=deduplication_data,
-          num_tables=len(self._config_proto.feature_descriptor),
-          config=self._config_proto.SerializeToString())
+      if self._use_pathways:
+        activations = tpu_ops.xla_recv_tpu_embedding_activations_v2(
+            deduplication_data=deduplication_data,
+            num_tables=len(self._config_proto.feature_descriptor),
+            config=self._config_proto.SerializeToString(),
+            embedding_partitions=self._embedding_partitions,
+            hbm_buffers_config=self._hbm_buffers_config,
+            tpu_topology=self._tpu_topology,
+        )
+      else:
+        activations = tpu_ops.xla_recv_tpu_embedding_activations(
+            deduplication_data=deduplication_data,
+            num_tables=len(self._config_proto.feature_descriptor),
+            config=self._config_proto.SerializeToString(),
+        )
 
       # Apply the name tag to the op.
       if name is not None:
@@ -773,6 +835,14 @@ class TPUEmbedding(object):
     return self._output_shapes
 
   @property
+  def embedding_partitions(self) -> bytes:
+    return self._embedding_partitions
+
+  @property
+  def hbm_buffers_config(self) -> bytes:
+    return self._hbm_buffers_config
+
+  @property
   def feature_configs(self) -> Optional[NestedFeatureConfig]:
     return self._feature_configs
 
@@ -797,12 +867,22 @@ class TPUEmbedding(object):
     return self._table_config_list
 
   @property
+  def tpu_topology(self) -> bytes:
+    return self._tpu_topology
+
+  @property
   def config_proto_ready(self) -> bool:
     return self._config_proto_ready
 
   @property
   def output_shapes_ready(self) -> bool:
     return self._output_shapes_ready
+
+  def embedding_partitions_ready(self) -> bool:
+    return self._embedding_partitions_ready
+
+  def hbm_buffers_config_ready(self) -> bool:
+    return self._hbm_buffers_config_ready
 
   def set_config_proto(
       self, config_proto: config_utils.TPUEmbeddingConfigurationProto
@@ -815,3 +895,9 @@ class TPUEmbedding(object):
   def set_output_shapes(self, output_shapes: List[config_utils.OutputShape]):
     self._tpu_embedding_config.output_shapes = output_shapes
     self._output_shapes = output_shapes
+
+  def set_embedding_partitions(self, embedding_partitions: bytes):
+    self._embedding_partitions = embedding_partitions
+
+  def set_hbm_buffers_config(self, hbm_buffers_config: bytes):
+    self._hbm_buffers_config = hbm_buffers_config

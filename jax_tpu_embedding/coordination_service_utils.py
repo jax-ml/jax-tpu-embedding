@@ -178,7 +178,8 @@ def initialize_fn(
     current_task: int,
     num_tasks: int,
     client: xla_extension.DistributedRuntimeClient | None = None,
-) -> None:
+    use_v2: bool = False,
+) -> Tuple[tf.Tensor, tf.Tensor] | None:
   """TF function for initializing tpu embedding rewrite.
 
   Reusing logic from `tpu/graph_rewrite/configure_tpu_embedding_rewrite_pass.cc`
@@ -201,6 +202,12 @@ def initialize_fn(
     current_task: ID of the current task.
     num_tasks: Number of tasks with Coordination Service deployed.
     client: The client of Coordination Service.
+    use_v2: Whether to use V2 Ops. In this case the Op for finalizing TPU
+      embedding.
+
+  Returns:
+    Embedding partitions and HBM buffers config when using
+    `finalize_tpu_embedding_v2`.
   """
 
   @tf.function
@@ -255,8 +262,8 @@ def initialize_fn(
 
   @tf.function
   def connect_embedding_hosts(
-      network_configs, common_config, merged_mem_config
-  ):
+      network_configs, common_config, merged_mem_config, use_v2
+  ) -> Tuple[tf.Tensor, tf.Tensor] | None:
     """Connect each host and update global tpu embedding setting.
 
     `connect_tpu_embedding_hosts` is to set up gRPC connections between host
@@ -271,9 +278,17 @@ def initialize_fn(
         TPU embedding engine setup in `finalize_tpu_embedding`.
       merged_mem_config: A encoded string proto containing metadata about the
         memory allocations reserved for TPUEmbedding over all hosts.
+      use_v2: Whether to use V2 Ops. In this case the Op for finalizing TPU
+        embedding.
+
+    Returns:
+      Embedding partitions and HBM buffers config if `use_v2` is true.
     """
     tpu_ops.connect_tpu_embedding_hosts(network_configs)
-    tpu_ops.finalize_tpu_embedding(common_config, merged_mem_config)
+    if use_v2:
+      return tpu_ops.finalize_tpu_embedding_v2(common_config, merged_mem_config)
+    else:
+      tpu_ops.finalize_tpu_embedding(common_config, merged_mem_config)
 
   common_config, mem_config = create_memory_config(config_str)
 
@@ -299,6 +314,6 @@ def initialize_fn(
       client=client,
   )
 
-  connect_embedding_hosts(
-      all_network_configs, common_config, merged_memory_config
+  return connect_embedding_hosts(
+      all_network_configs, common_config, merged_memory_config, use_v2
   )

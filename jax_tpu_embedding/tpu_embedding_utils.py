@@ -104,11 +104,19 @@ def get_tuple_mask(config_str: bytes) -> pytype_utils.TensorProto:
   return dedup_tuple_mask_proto
 
 
-def get_tuple_mask_pmap(config_str: bytes) -> pytype_utils.TensorProto:
+def get_tuple_mask_pmap(
+    config_str: bytes,
+    embedding_partitions: bytes,
+    hbm_buffers_config: bytes,
+    tpu_topology: bytes,
+) -> pytype_utils.TensorProto:
   """Gets deduplication data tuple mask through pmap.
 
   Args:
     config_str: A serialized string of TPUEmbeddingConfiguration.
+    embedding_partitions: A serialized string of EmbeddingPartitionsProto.
+    hbm_buffers_config: A serialized string of HbmBuffersConfig.
+    tpu_topology: A serialized string of TpuTopologyArgsProto.
 
   Returns:
     A tensor proto of tuple mask, whose first column is 0 or 1 to represent
@@ -117,10 +125,14 @@ def get_tuple_mask_pmap(config_str: bytes) -> pytype_utils.TensorProto:
   """
 
   def _compute_dedup_data_size_tf():
-    return tpu_ops.compute_dedup_data_size(config_str)
+    return tpu_ops.compute_dedup_data_size_v2(
+        config_str, embedding_partitions, hbm_buffers_config, tpu_topology
+    )
 
   def _compute_dedup_tuple_mask_tf():
-    return tpu_ops.compute_dedup_data_tuple_mask(config_str)
+    return tpu_ops.compute_dedup_data_tuple_mask_v2(
+        config_str, embedding_partitions, hbm_buffers_config, tpu_topology
+    )
 
   def _compute_dedup_data_size(_):
     return jax2tf.call_tf(
