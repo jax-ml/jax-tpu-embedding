@@ -64,6 +64,8 @@ def prepare_devices_data(
     if isinstance(x, tf.Tensor):
       # Use _numpy() for zero-copy conversion between TF and NumPy.
       x = x._numpy()  # pylint: disable=protected-access
+    elif isinstance(x, tf.RaggedTensor):
+      x = x.to_tensor()._numpy()  # pylint: disable=protected-access
 
     # reshape (batch_size, ...) to
     # (local_devices, device_batch_size, ...)
