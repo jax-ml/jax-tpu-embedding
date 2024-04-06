@@ -63,15 +63,15 @@ def _add_key_attr(op: tf.Operation, name: str):
 def _get_task_id() -> int:
   """Get TPU task id."""
 
-  task_id = None
   if "BORG_TASK_HANDLE" in os.environ:
     handle = os.getenv("BORG_TASK_HANDLE")
     task_id_str, _, _ = _TASK_HANDLE_RE.match(handle).groups()  # pytype: disable=attribute-error  # re-none
     task_id = int(task_id_str)
   else:
-    logging.warning("`BORG_TASK_HANDLE` is not found, using "
-                    "`tf.experimental.dtensor.client_id()`.")
-    task_id = tf.experimental.dtensor.client_id()
+    logging.info(
+        "`BORG_TASK_HANDLE` is not found, using `jax.process_index()`."
+    )
+    task_id = jax.process_index()
   return task_id
 
 
