@@ -190,6 +190,7 @@ class TPUEmbedding(object):
         )
     )
     self._use_pathways = use_pathways
+    self._num_local_devices = jax.local_device_count()
     self._tpu_topology = tpu_embedding_pathways_utils.get_tpu_topology()
     self._embedding_partitions = None
     self._embedding_partitions_ready = False
@@ -327,7 +328,7 @@ class TPUEmbedding(object):
       new_config_str = tpu_embedding_utils.get_new_config(self._config_proto)
       if self._use_pathways:
         result = coordination_service_utils.initialize_fn(
-            new_config_str, jax.process_index(), jax.process_count(), None, True
+            new_config_str, self._host_id, self._num_hosts, None, True
         )
         assert result is not None
         self._embedding_partitions, self._hbm_buffers_config = (
@@ -338,7 +339,7 @@ class TPUEmbedding(object):
         self._hbm_buffers_config_ready = True
       else:
         coordination_service_utils.initialize_fn(
-            new_config_str, jax.process_index(), jax.process_count()
+            new_config_str, self._host_id, self._num_hosts,
         )
       self._is_initialized = True
       logging.info("Successfully Initialized TPUEmbedding devices.")
@@ -797,7 +798,7 @@ class TPUEmbedding(object):
     flat_feature_with_names, configs_treedef = (
         input_utils.tree_flatten_with_names(self._feature_configs)
     )
-    for device_id in range(jax.local_device_count()):
+    for device_id in range(self._num_local_devices):
       flat_inputs, inputs_treedef = jax.tree_util.tree_flatten(
           features[device_id])
 
@@ -865,6 +866,10 @@ class TPUEmbedding(object):
   @property
   def table_config_list(self) -> List[config_utils.TableConfig]:
     return self._table_config_list
+
+  @property
+  def num_local_devices(self) -> int:
+    return self._num_local_devices
 
   @property
   def tpu_topology(self) -> bytes:

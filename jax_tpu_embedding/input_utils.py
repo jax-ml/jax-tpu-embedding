@@ -15,8 +15,9 @@
 """Input utils supports."""
 
 import collections
+import functools
 import itertools
-from typing import Any, Callable, NamedTuple, Optional, Tuple, Iterator, Sequence, Dict, List, Union
+from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -397,6 +398,25 @@ def prepare_data_to_enqueue(
                                  path_name=path_name)
 
 
+def _prefetch_fn(
+    xs: TensorType, enqueue_fn: Callable[..., None], num_local_devices: int
+) -> Tuple[()]:
+  """Apply prefetch input to tf enqueue function.
+
+  Args:
+    xs: A tf.Tensor or tf.SparseTensor input slice.
+    enqueue_fn: a callable function for tpu_embedding_layer to enqueue.
+    num_local_devices: The number of local devices.
+
+  Returns:
+    Empty tuple as enqueue has no output. Prefetch function for host need has
+    output to yield.
+  """
+  xs = shard_inputs(xs, num_local_devices)
+  enqueue_fn(features=xs)
+  return ()
+
+
 def enqueue_prefetch(
     enqueue_fn: Callable[..., None]) -> Callable[..., Tuple[()]]:
   """Split host inputs for enqueue op of each device, and execute enqueue.
@@ -408,21 +428,32 @@ def enqueue_prefetch(
     A function call to shard inputs for each local device and execute enqueue.
   """
 
-  def _prefetch_fn(xs: TensorType) -> Tuple[()]:
-    """Apply prefetch input to tf enqueue function.
+  return functools.partial(
+      _prefetch_fn,
+      enqueue_fn=enqueue_fn,
+      num_local_devices=jax.local_device_count(),
+  )
 
-    Args:
-      xs: A tf.Tensor or tf.SparseTensor input slice.
 
-    Returns:
-      Empty tuple as enqueue has no output. Prefetch function for host need has
-      output to yield.
-    """
-    xs = shard_inputs(xs, num_shards=jax.local_device_count())
-    enqueue_fn(features=xs)
-    return ()
+def enqueue_prefetch_v2(
+    enqueue_fn: Callable[..., None], num_local_devices: int
+) -> Callable[..., Tuple[()]]:
+  """Split host inputs for enqueue op of each device, and execute enqueue.
 
-  return _prefetch_fn
+  This function is used when the number of local devices must be obtained from
+  client.
+
+  Args:
+    enqueue_fn: a callable function for tpu_embedding_layer to enqueue.
+    num_local_devices: The number of local devices.
+
+  Returns:
+    A function call to shard inputs for each local device and execute enqueue.
+  """
+
+  return functools.partial(
+      _prefetch_fn, enqueue_fn=enqueue_fn, num_local_devices=num_local_devices
+  )
 
 
 def _get_dense_output_shape(
