@@ -72,7 +72,7 @@ def prepare_devices_data(
     # (local_devices, device_batch_size, ...)
     return x.reshape((local_device_count, -1) + x.shape[1:])
 
-  return jax.tree_map(_shard, xs)
+  return jax.tree_util.tree_map(_shard, xs)
 
 
 def make_pmap_array_fn(
@@ -99,7 +99,7 @@ def make_pmap_array_fn(
 
   def _create_array_fn(xs: NestedTfTensor) -> Nested[Array]:
     xs = prepare_devices_data(xs)
-    return jax.tree_map(_put_sharded, xs)
+    return jax.tree_util.tree_map(_put_sharded, xs)
 
   return _create_array_fn
 
