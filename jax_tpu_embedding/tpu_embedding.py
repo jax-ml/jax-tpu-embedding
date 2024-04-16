@@ -18,7 +18,7 @@ import dataclasses
 import functools
 import os
 import re
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -112,6 +112,7 @@ class TPUEmbedding(object):
       pipeline_execution_with_tensor_core: bool = False,
       cores_per_replica: Optional[int] = None,
       use_pathways: bool = False,
+      input_split_fn: Callable[..., dict[str, Any]] | None = None,
   ):
     """Creates jax TPUEmbedding object.
 
@@ -130,6 +131,9 @@ class TPUEmbedding(object):
         users, always set this based on cores for each model replica. For pjit
         data parallelism user, it should be set as jax.device_count().
       use_pathways: Whether to use Pathways as the backend.
+      input_split_fn: A callable function takes elements from iterator, yields
+        splits pytree of host and device batches in a dictionary. This should be
+        supplied if users want to call `experimental_get_next`.
 
     Raises:
       ValueError: when cores_per_replica is not legal.
@@ -196,6 +200,7 @@ class TPUEmbedding(object):
     self._embedding_partitions_ready = False
     self._hbm_buffers_config = None
     self._hbm_buffers_config_ready = False
+    self._input_split_fn = input_split_fn
 
   def _remote_initialize_tpu_embedding(
       self,
@@ -906,3 +911,32 @@ class TPUEmbedding(object):
 
   def set_hbm_buffers_config(self, hbm_buffers_config: bytes):
     self._hbm_buffers_config = hbm_buffers_config
+
+  @tf.function
+  def experimental_get_next(
+      self,
+      iterator: tf.data.Iterator,
+      num_local_devices: int,
+      is_training: bool,
+  ) -> Mapping[str, tf.Tensor]:
+    """Get next batch of data and enqueue the sparse part.
+
+    This API is experimental and its behavior may change in the future.
+
+    Args:
+      iterator: an iterator that yields batched inputs for host and devices,
+        first dimension of each element is batch size.
+      num_local_devices: Number of local devices.
+      is_training: See the comment in `enqueue`.
+
+    Returns:
+      The dense part of data.
+    """
+    assert self._input_split_fn is not None
+    iterator = map(self._input_split_fn, iterator)
+    data = next(iterator)
+    features = input_utils.shard_inputs(
+        data[input_utils.EMBED_PLACEMENT], num_local_devices
+    )
+    self.enqueue(features, is_training=is_training)
+    return data[input_utils.NON_EMBED_PLACEMENT]
