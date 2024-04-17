@@ -298,6 +298,71 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
           flatten_feature_configs=self._flatten_feature_configs)
       _ = next(enqueue_inputs_iter)
 
+  def test_shard_and_pack_features(self):
+    features = {
+        'd0': tf.constant([1, 2, 3, 4, 5, 6]),
+        'd1': tf.constant([11, 12, 13]),
+        'd2': tf.constant([
+            [[21,], [22,]],
+            [[23,], [24,]],
+            [[25,], [26,]]]),
+        'f0': tf.constant([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+    }
+    pack_spec: input_utils.PackConfig = {
+        tf.int32.name: [
+            ('d0', tf.TensorShape([6])),
+            ('d1', tf.TensorShape([3])),
+            ('d2', tf.TensorShape([3, 2, 1]))],
+        tf.float32.name: [
+            ('f0', tf.TensorShape([6])),
+        ]}
+    packed = input_utils.shard_and_pack_features(features,
+                                                 pack_spec,
+                                                 num_shards=3)
+    expected = {
+        tf.int32.name: tf.constant([[1, 2, 11, 21, 22,],
+                                    [3, 4, 12, 23, 24,],
+                                    [5, 6, 13, 25, 26,]]),
+        tf.float32.name: tf.constant([[0.1, 0.2,],
+                                      [0.3, 0.4,],
+                                      [0.5, 0.6,],])
+    }
+    self.assertAllEqual(2, len(packed))
+    for dt, val in expected.items():
+      self.assertAllEqual(val, packed[dt])
+
+  def test_unpack_features(self):
+    pack_spec: input_utils.PackConfig = {
+        tf.int32.name: [
+            ('d0', tf.TensorShape([6])),
+            ('d1', tf.TensorShape([3])),
+            ('d2', tf.TensorShape([3, 2, 1]))],
+        tf.float32.name: [
+            ('f0', tf.TensorShape([6])),
+        ]}
+    packed_features = {
+        tf.int32.name: tf.constant([[1, 2, 11, 21, 22,],
+                                    [3, 4, 12, 23, 24,],
+                                    [5, 6, 13, 25, 26,]]),
+        tf.float32.name: tf.constant([[0.1, 0.2,],
+                                      [0.3, 0.4,],
+                                      [0.5, 0.6,],])
+    }
+    unpacked = input_utils.unpack_features(packed_features,
+                                           pack_spec,
+                                           num_shards=3)
+    print("HHB: ", unpacked)
+    expected = {
+        'd0': jax.numpy.array([1, 2, 3, 4, 5, 6]),
+        'd1': jax.numpy.array([11, 12, 13]),
+        'd2': jax.numpy.array([
+            [[21,], [22,]],
+            [[23,], [24,]],
+            [[25,], [26,]]]),
+        'f0': jax.numpy.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+    }
+    for key, value in expected.items():
+      self.assertAllEqual(value, unpacked[key])
 
 if __name__ == '__main__':
   tf.test.main()

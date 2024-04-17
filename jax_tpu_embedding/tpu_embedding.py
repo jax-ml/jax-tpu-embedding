@@ -918,7 +918,8 @@ class TPUEmbedding(object):
       iterator: tf.data.Iterator,
       num_local_devices: int,
       is_training: bool,
-  ) -> Mapping[str, tf.Tensor]:
+      pack_config: input_utils.PackConfig,
+  ) -> Tuple[Mapping[str, tf.Tensor]]:
     """Get next batch of data and enqueue the sparse part.
 
     This API is experimental and its behavior may change in the future.
@@ -928,6 +929,7 @@ class TPUEmbedding(object):
         first dimension of each element is batch size.
       num_local_devices: Number of local devices.
       is_training: See the comment in `enqueue`.
+      pack_config: configs for how the dense features are packed.
 
     Returns:
       The dense part of data.
