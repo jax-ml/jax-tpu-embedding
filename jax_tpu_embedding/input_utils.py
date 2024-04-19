@@ -553,12 +553,12 @@ def infer_output_shapes(
 
   return inferred_output_shapes
 
-PackConfig = Mapping[str, List[Tuple[str, tf.TensorShape]]]
+PackSpec = Mapping[str, List[Tuple[str, tf.TensorShape]]]
 
 
 @tf.function
 def shard_and_pack_features(features: Mapping[str, tf.Tensor],
-                            pack_spec: PackConfig,
+                            pack_spec: PackSpec,
                             num_shards: int) -> Mapping[str, tf.Tensor]:
   def _pack(spec: List[Tuple[str, List[int]]]) -> tf.Tensor:
     assert all(features[spec_name].shape == spec_shape
@@ -596,7 +596,7 @@ def shard_and_pack_tensors(features: List[tf.Tensor],
 
 
 def unpack_features(packed_features: Mapping[str, tf.Tensor],
-                    pack_spec: PackConfig,
+                    pack_spec: PackSpec,
                     num_shards: int) -> Mapping[str, jax.Array]:
   """Unpack features from the packed tensor.
 

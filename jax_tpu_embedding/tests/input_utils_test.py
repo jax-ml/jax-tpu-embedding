@@ -308,7 +308,7 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
             [[25,], [26,]]]),
         'f0': tf.constant([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
     }
-    pack_spec: input_utils.PackConfig = {
+    pack_spec: input_utils.PackSpec = {
         tf.int32.name: [
             ('d0', tf.TensorShape([6])),
             ('d1', tf.TensorShape([3])),
@@ -332,7 +332,7 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
       self.assertAllEqual(val, packed[dt])
 
   def test_unpack_features(self):
-    pack_spec: input_utils.PackConfig = {
+    pack_spec: input_utils.PackSpec = {
         tf.int32.name: [
             ('d0', tf.TensorShape([6])),
             ('d1', tf.TensorShape([3])),
