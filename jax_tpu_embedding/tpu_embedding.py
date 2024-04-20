@@ -205,7 +205,6 @@ class TPUEmbedding(object):
   def _remote_initialize_tpu_embedding(
       self,
       config_proto: TPUEmbeddingConfigurationProto,
-      num_shards: int,
       coordinator_address: str,
       embedding_manager: tpu_embedding_pathways_utils.EmbeddingManager,
   ):
@@ -213,7 +212,6 @@ class TPUEmbedding(object):
 
     Args:
       config_proto: A configuration proto.
-      num_shards: Number of shards in Pathways.
       coordinator_address: The network address of the coordinator task which all
         the coordination clients can connect to.
       embedding_manager: The object to manage the remote Python execution.
@@ -224,7 +222,7 @@ class TPUEmbedding(object):
     new_config_str = tpu_embedding_utils.get_new_config(config_proto)
     embedding_manager.init_embedding_config(
         new_config_str,
-        num_shards,
+        self._num_hosts,
         coordinator_address,
     )
     if embedding_manager.is_initialized()[0]:
@@ -245,7 +243,6 @@ class TPUEmbedding(object):
   def initialize_tpu_embedding(
       self,
       start_remote_python: bool = False,
-      num_shards: int | None = None,
       coordinator_address: str | None = None,
       embedding_manager: (
           tpu_embedding_pathways_utils.EmbeddingManager | None
@@ -298,8 +295,6 @@ class TPUEmbedding(object):
         the backend is Pathways since we have the case where this is done inside
         `enqueue` (Example 2) which is already placed in a remote Python. But if
         it is True, the backend has to be Pathways.
-      num_shards: Number of shards in Pathways. This is only applicable if
-        `start_remote_python` is True.
       coordinator_address: The network address of the coordinator task which all
         the coordination clients can connect to. This is only applicable if
         `start_remote_python` is True, since Coordination Service needs to be
@@ -318,7 +313,7 @@ class TPUEmbedding(object):
     if start_remote_python:
       assert embedding_manager is not None
       self._remote_initialize_tpu_embedding(
-          self._config_proto, num_shards, coordinator_address, embedding_manager
+          self._config_proto, coordinator_address, embedding_manager
       )
       self._is_initialized = True
       logging.info("Successfully Initialized TPUEmbedding devices.")
@@ -369,7 +364,6 @@ class TPUEmbedding(object):
 
   def init_embedding_tables(
       self,
-      num_shards: int,
       embedding_manager: tpu_embedding_pathways_utils.EmbeddingManager,
       retrieve_specs: NestedStruct[jax.ShapeDtypeStruct],
       embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None,
@@ -379,7 +373,6 @@ class TPUEmbedding(object):
     This is only meaningful when using Pathways.
 
     Args:
-      num_shards: Number of shards in Pathways.
       embedding_manager: The object to manage the remote Python execution.
       retrieve_specs: The specs for embedding tables.
       embedding_variables: If not None, initialize variables of embeddings in
@@ -389,7 +382,7 @@ class TPUEmbedding(object):
     embedding_manager.init_embedding_tables(
         table_config_list=self._table_config_list,
         config_proto_str=self._config_proto.SerializeToString(),
-        num_shards=num_shards,
+        num_shards=self._num_hosts,
         retrieve_specs=retrieve_specs,
         embedding_variables=embedding_variables,
     )
