@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, Iterator, List, Mapping, NamedTuple, Opt
 from absl import logging
 import jax
 from jax.experimental import multihost_utils
+import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import PartitionSpec
 from jax_tpu_embedding import pytype_utils
@@ -104,7 +105,7 @@ def make_pmap_array_fn(
   return _create_array_fn
 
 
-def _tensor_to_array(x: tf.Tensor) -> jax.numpy.ndarray:
+def _tensor_to_array(x: tf.Tensor) -> jnp.ndarray:
   if not isinstance(x, tf.Tensor):
     raise ValueError('Value to shard is not a tf.Tensor.')
   return x._numpy()  # pylint: disable=protected-access
@@ -130,7 +131,7 @@ def make_pjit_array_fn(
   return _create_jax_array_fn
 
 
-def create_np_array_fn(xs: NestedTfTensor) -> Nested[jax.numpy.ndarray]:
+def create_np_array_fn(xs: NestedTfTensor) -> Nested[jnp.ndarray]:
   return jax.tree_util.tree_map(_tensor_to_array, xs)
 
 
@@ -556,67 +557,84 @@ def infer_output_shapes(
 PackSpec = Mapping[str, List[Tuple[str, tf.TensorShape]]]
 
 
-@tf.function
-def shard_and_pack_features(features: Mapping[str, tf.Tensor],
-                            pack_spec: PackSpec,
-                            num_shards: int) -> Mapping[str, tf.Tensor]:
-  def _pack(spec: List[Tuple[str, List[int]]]) -> tf.Tensor:
-    assert all(features[spec_name].shape == spec_shape
-               for spec_name, spec_shape in spec)
-    feature_list = [features[spec_name] for spec_name, _ in spec]
-    return shard_and_pack_tensors(feature_list, num_shards)
+class Packer:
+  """A util for packing/unpacking the features."""
 
-  return {dt: _pack(spec) for dt, spec in pack_spec.items()}
+  def __init__(self, pack_spec: PackSpec, num_shards: int):
+    self._pack_spec = pack_spec
+    self._num_shards = num_shards
+    for _, specs in self._pack_spec.items():
+      assert all(s[1].num_elements() % self._num_shards == 0 for s in specs)
 
+  def shard_and_pack_features(
+      self, features: Mapping[str, tf.Tensor]
+  ) -> Mapping[str, tf.Tensor]:
+    """Shards features evenly and concat the results into one tensor.
 
-@tf.function
-def shard_and_pack_tensors(features: List[tf.Tensor],
-                           num_shards: int) -> tf.Tensor:
-  """Shards features evenly and concat the results into one tensor.
+    Tensors in the features can have different dtypes.
 
-  All tensors in inputs must have the same dtypes.
+    Args:
+      features: A list of tensors to shard.
 
-  Args:
-    features: a list of tensors to shard
-    num_shards: number of shards to split into
+    Returns:
+      A tensor with shape (num_shard, n) where n is the length of all features
+        concated.
+    """
 
-  Returns:
-    A tensor with shape (num_shard, n) where n is the length of all features
-      concated.
-  """
-  sharded_features = []
-  for t in features:
-    tensor_size = t.shape.num_elements()
-    assert tensor_size is not None
-    assert tensor_size % num_shards == 0
-    sharded_features.append(
-        tf.reshape(t, (num_shards, tensor_size // num_shards)))
-  # Concat features for each shard.
-  return tf.concat(sharded_features, axis=1)
+    def _pack(spec: List[Tuple[str, List[int]]]) -> tf.Tensor:
+      assert all(
+          features[spec_name].shape == spec_shape
+          for spec_name, spec_shape in spec
+      )
+      feature_list = [features[spec_name] for spec_name, _ in spec]
+      return self._shard_and_pack_tensors(feature_list)
 
+    return {dt: _pack(spec) for dt, spec in self._pack_spec.items()}
 
-def unpack_features(packed_features: Mapping[str, tf.Tensor],
-                    pack_spec: PackSpec,
-                    num_shards: int) -> Mapping[str, jax.Array]:
-  """Unpack features from the packed tensor.
+  def _shard_and_pack_tensors(self, features: List[tf.Tensor]) -> tf.Tensor:
+    """Shards features evenly and concat the results into one tensor.
 
-  Args:
-    packed_features: the packed features in one tensor.
-    pack_spec: shape information about the packing
-    num_shards: number of shards
+    All tensors in inputs must have the same dtypes.
 
-  Returns:
-    Unpacked features.
-  """
-  res = {}
-  for dt, specs in pack_spec.items():
-    packed = packed_features[dt]._numpy()
-    assert len(packed) == num_shards
-    assert all(s[1].num_elements() % num_shards == 0 for s in specs)
-    splits = [s[1].num_elements() // num_shards for s in specs]
-    for i in range(len(splits) - 1):
-      splits[i + 1] = splits[i + 1] + splits[i]
-    feature_splitted = jax.numpy.split(packed, splits, axis=1)
-    res = res | { name: jax.numpy.reshape(f, shape.dims)
-                  for ((name, shape), f) in zip(specs, feature_splitted)}
-  return res
+    Args:
+      features: A list of tensors to shard.
+
+    Returns:
+      A tensor with shape (num_shard, n) where n is the length of all features
+        concated.
+    """
+    sharded_features = []
+    for t in features:
+      tensor_size = t.shape.num_elements()
+      assert tensor_size is not None
+      assert tensor_size % self._num_shards == 0
+      sharded_features.append(
+          tf.reshape(t, (self._num_shards, tensor_size // self._num_shards))
+      )
+    # Concat features for each shard.
+    return tf.concat(sharded_features, axis=1)
+
+  def unpack_features(
+      self,
+      packed_features: Mapping[str, jax.Array],
+  ) -> Mapping[str, jax.Array]:
+    """Unpack features from the packed tensor.
+
+    Args:
+      packed_features: The packed features in one tensor.
+
+    Returns:
+      Unpacked features.
+    """
+    res = {}
+    for dt, specs in self._pack_spec.items():
+      assert len(packed_features[dt]) == self._num_shards
+      splits = [s[1].num_elements() // self._num_shards for s in specs]
+      for i in range(len(splits) - 1):
+        splits[i + 1] = splits[i + 1] + splits[i]
+      feature_split = jnp.split(packed_features[dt], splits, axis=1)
+      res = res | {
+          name: jnp.reshape(f, shape.dims)
+          for ((name, shape), f) in zip(specs, feature_split)
+      }
+    return res

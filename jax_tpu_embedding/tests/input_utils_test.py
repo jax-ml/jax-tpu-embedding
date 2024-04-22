@@ -16,6 +16,7 @@
 
 from absl.testing import parameterized
 import jax
+import jax.numpy as jnp
 from jax_tpu_embedding import input_utils
 from jax_tpu_embedding.tests import test_utils
 import tensorflow as tf
@@ -54,8 +55,6 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
         batch_size=test_utils.PER_CORE_BATCH_SIZE)
     self._flatten_feature_configs, _ = input_utils.tree_flatten_with_names(
         feature_configs)
-
-
 
   @parameterized.named_parameters(
       ('_unnested', tf.ones(shape=[
@@ -299,6 +298,17 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
       _ = next(enqueue_inputs_iter)
 
   def test_shard_and_pack_features(self):
+    pack_spec: input_utils.PackSpec = {
+        tf.int32.name: [
+            ('d0', tf.TensorShape([6])),
+            ('d1', tf.TensorShape([3])),
+            ('d2', tf.TensorShape([3, 2, 1])),
+        ],
+        tf.float32.name: [
+            ('f0', tf.TensorShape([6])),
+        ],
+    }
+    packer = input_utils.Packer(pack_spec, 3)
     features = {
         'd0': tf.constant([1, 2, 3, 4, 5, 6]),
         'd1': tf.constant([11, 12, 13]),
@@ -308,17 +318,7 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
             [[25,], [26,]]]),
         'f0': tf.constant([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
     }
-    pack_spec: input_utils.PackSpec = {
-        tf.int32.name: [
-            ('d0', tf.TensorShape([6])),
-            ('d1', tf.TensorShape([3])),
-            ('d2', tf.TensorShape([3, 2, 1]))],
-        tf.float32.name: [
-            ('f0', tf.TensorShape([6])),
-        ]}
-    packed = input_utils.shard_and_pack_features(features,
-                                                 pack_spec,
-                                                 num_shards=3)
+    packed = tf.function(packer.shard_and_pack_features)(features)
     expected = {
         tf.int32.name: tf.constant([[1, 2, 11, 21, 22,],
                                     [3, 4, 12, 23, 24,],
@@ -336,29 +336,83 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
         tf.int32.name: [
             ('d0', tf.TensorShape([6])),
             ('d1', tf.TensorShape([3])),
-            ('d2', tf.TensorShape([3, 2, 1]))],
+            ('d2', tf.TensorShape([3, 2, 1])),
+        ],
         tf.float32.name: [
             ('f0', tf.TensorShape([6])),
-        ]}
-    packed_features = {
-        tf.int32.name: tf.constant([[1, 2, 11, 21, 22,],
-                                    [3, 4, 12, 23, 24,],
-                                    [5, 6, 13, 25, 26,]]),
-        tf.float32.name: tf.constant([[0.1, 0.2,],
-                                      [0.3, 0.4,],
-                                      [0.5, 0.6,],])
+        ],
     }
-    unpacked = input_utils.unpack_features(packed_features,
-                                           pack_spec,
-                                           num_shards=3)
+    packer = input_utils.Packer(pack_spec, 3)
+    packed_features = {
+        tf.int32.name: jnp.array([
+            [
+                1,
+                2,
+                11,
+                21,
+                22,
+            ],
+            [
+                3,
+                4,
+                12,
+                23,
+                24,
+            ],
+            [
+                5,
+                6,
+                13,
+                25,
+                26,
+            ],
+        ]),
+        tf.float32.name: jnp.array([
+            [
+                0.1,
+                0.2,
+            ],
+            [
+                0.3,
+                0.4,
+            ],
+            [
+                0.5,
+                0.6,
+            ],
+        ]),
+    }
+    unpacked = jax.jit(packer.unpack_features)(packed_features)
     expected = {
-        'd0': jax.numpy.array([1, 2, 3, 4, 5, 6]),
-        'd1': jax.numpy.array([11, 12, 13]),
-        'd2': jax.numpy.array([
-            [[21,], [22,]],
-            [[23,], [24,]],
-            [[25,], [26,]]]),
-        'f0': jax.numpy.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+        'd0': jnp.array([1, 2, 3, 4, 5, 6]),
+        'd1': jnp.array([11, 12, 13]),
+        'd2': jnp.array([
+            [
+                [
+                    21,
+                ],
+                [
+                    22,
+                ],
+            ],
+            [
+                [
+                    23,
+                ],
+                [
+                    24,
+                ],
+            ],
+            [
+                [
+                    25,
+                ],
+                [
+                    26,
+                ],
+            ],
+        ]),
+        'f0': jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
     }
     for key, value in expected.items():
       self.assertAllEqual(value, unpacked[key])
