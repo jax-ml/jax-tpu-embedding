@@ -26,6 +26,9 @@ import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import PartitionSpec
 from jax_tpu_embedding import pytype_utils
+# Begin google-internal
+from jax_tpu_embedding.google import flatpack
+# End google-internal
 import tensorflow as tf
 import tree
 
@@ -33,6 +36,11 @@ import tree
 Array = jax.Array
 PyTree = Any
 Shape = Tuple[int, ...]
+PackerType = Any
+# Begin google-internal
+PackerType = flatpack.Packer
+# End google-internal
+
 
 Nested = pytype_utils.Nested
 NestedTfTensor = pytype_utils.NestedTfTensor
@@ -43,7 +51,8 @@ NON_EMBED_PLACEMENT = pytype_utils.NON_EMBED_PLACEMENT
 
 
 def prepare_devices_data(
-    xs: Union[NestedTfTensor, Nested[Array]]
+    xs: Union[NestedTfTensor, Nested[Array]],
+    packer: Optional[PackerType] = None,
 ) -> Nested[jax.numpy.ndarray]:
   """Converts device input batches to numpy and split it among local devices.
 
@@ -54,6 +63,8 @@ def prepare_devices_data(
     xs: batches to be reshaped (tree-map'able). It can only be tf.Tensor as
       tf.SparseTensor cannot be converted to numpy(). Or it can be the type of
       jax.Array.
+    packer: [Optional] A packer object that combines per device data (xs) on
+      cpu.
 
   Raises:
     ValueError: If any element is not a tf.Tensor.
@@ -73,11 +84,21 @@ def prepare_devices_data(
     # (local_devices, device_batch_size, ...)
     return x.reshape((local_device_count, -1) + x.shape[1:])
 
-  return jax.tree_util.tree_map(_shard, xs)
+  sharded = jax.tree_util.tree_map(_shard, xs)
+  if packer is None:
+    return sharded
+  packed_shards = []
+  #TODO(silkyarora): Figure out a way to avoid traversal per device, gather data
+  # to be packed in one pass.
+  for i in range(local_device_count):
+    shard = jax.tree_util.tree_map(lambda x: x[i], sharded)
+    packed_shards.append(packer.cpu_pack(shard))
+  return packed_shards
 
 
 def make_pmap_array_fn(
-    devices: Optional[Sequence[jax.Device]] = None
+    packer: Optional[PackerType] = None,
+    devices: Optional[Sequence[jax.Device]] = None,
 ) -> Callable[..., Nested[Array]]:
   """Example function of creating jax.Array for pmap from local host data.
 
@@ -87,6 +108,8 @@ def make_pmap_array_fn(
   Args:
     devices: the list of devices to which the arrays should be put. Defaults to
       the order of devices expected by `jax.pmap`.
+    packer: [Optional] A packer object that combines per device data (xs) on
+      cpu.
 
   Returns:
     A function takes inputs to devices, returns converted shards of such inputs,
@@ -99,8 +122,8 @@ def make_pmap_array_fn(
     return jax.device_put_sharded(list(xs), devices)
 
   def _create_array_fn(xs: NestedTfTensor) -> Nested[Array]:
-    xs = prepare_devices_data(xs)
-    return jax.tree_util.tree_map(_put_sharded, xs)
+    xs = prepare_devices_data(xs, packer)
+    return _put_sharded(xs) if packer else jax.tree_util.tree_map(_put_sharded, xs)
 
   return _create_array_fn
 
