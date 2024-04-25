@@ -50,6 +50,40 @@ EMBED_PLACEMENT = pytype_utils.EMBED_PLACEMENT
 NON_EMBED_PLACEMENT = pytype_utils.NON_EMBED_PLACEMENT
 
 
+def prepare_packed_device_data(
+    shard_fn: Callable[..., Any],
+    xs: Union[NestedTfTensor, Nested[Array]],
+    packer: PackerType,
+) -> Nested[jax.numpy.ndarray]:
+  """Converts device input batches to packed numpy data for local devices.
+
+  Args:
+    shard_fn: Callable that converts input batch to numy and shards
+    xs: batches to be reshaped (tree-map'able). It can only be tf.Tensor as
+      tf.SparseTensor cannot be converted to numpy(). Or it can be the type of
+      jax.Array.
+    packer: A packer object that combines per device data (xs) on cpu.
+
+  Raises:
+    ValueError: If any element is not a tf.Tensor.
+  Returns:
+    re-shaped converted xs in (local_devices, device_batch_size, ...)
+  """
+
+  local_device_count = jax.local_device_count()
+
+  leaves, treedefs = jax.tree.flatten(xs)
+  shard_and_split_fn = lambda x: list(shard_fn(x))
+  sharded_leaves = [shard_and_split_fn(l) for l in leaves]
+  split_leaves = [
+      [elm[i] for elm in sharded_leaves] for i in range(local_device_count)
+  ]
+  return [
+      packer.cpu_pack_with_flat_data(flat_tree, treedefs)
+      for flat_tree in split_leaves
+  ]
+
+
 def prepare_devices_data(
     xs: Union[NestedTfTensor, Nested[Array]],
     packer: Optional[PackerType] = None,
@@ -71,6 +105,7 @@ def prepare_devices_data(
   Returns:
     re-shaped converted xs in (local_devices, device_batch_size, ...)
   """
+
   local_device_count = jax.local_device_count()
 
   def _shard(x):
@@ -84,16 +119,10 @@ def prepare_devices_data(
     # (local_devices, device_batch_size, ...)
     return x.reshape((local_device_count, -1) + x.shape[1:])
 
-  sharded = jax.tree_util.tree_map(_shard, xs)
-  if packer is None:
-    return sharded
-  packed_shards = []
-  #TODO(silkyarora): Figure out a way to avoid traversal per device, gather data
-  # to be packed in one pass.
-  for i in range(local_device_count):
-    shard = jax.tree_util.tree_map(lambda x: x[i], sharded)
-    packed_shards.append(packer.cpu_pack(shard))
-  return packed_shards
+  if packer:
+    return prepare_packed_device_data(_shard, xs, packer)
+  
+  return jax.tree_util.tree_map(_shard, xs)
 
 
 def make_pmap_array_fn(
@@ -123,7 +152,11 @@ def make_pmap_array_fn(
 
   def _create_array_fn(xs: NestedTfTensor) -> Nested[Array]:
     xs = prepare_devices_data(xs, packer)
-    return _put_sharded(xs) if packer else jax.tree_util.tree_map(_put_sharded, xs)
+    return (
+        jax.device_put_sharded(xs, devices)
+        if packer
+        else jax.tree_util.tree_map(_put_sharded, xs)
+    )
 
   return _create_array_fn
 
