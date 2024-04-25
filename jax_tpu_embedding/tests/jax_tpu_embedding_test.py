@@ -159,9 +159,8 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
 
     return step_fn
 
-  # TODO(b/298825635): Enable `True` for `is_training` after the fix.
   @parameterized.product(
-      is_training=[False],
+      is_training=[True, False],
       use_shape_inference=[True, False],
   )
   def test_pmap(
@@ -198,7 +197,8 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
         iterator=iter(self.input_ds),
         split_fn=self.split_fn,
         host_input_fn=input_utils.enqueue_prefetch(enqueue_fn),
-        device_input_fn=device_input_fn)
+        device_input_fn=device_input_fn,
+        buffer_size=1)
 
     # Start one step training loop.
     feature = next(iterator)
@@ -209,9 +209,8 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
     self.assertLen(loss.addressable_shards, self.n_devices)
     self.assertListEqual(list(loss), self.expected_loss)
 
-  # TODO(b/298825635): Enable `True` for `is_training` after the fix.
   @parameterized.product(
-      is_training=[False],
+      is_training=[True, False],
       use_shape_inference=[True, False],
   )
   def test_pjit(
@@ -266,7 +265,8 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
         iterator=iter(self.input_ds),
         split_fn=self.split_fn,
         host_input_fn=input_utils.enqueue_prefetch(enqueue_fn),
-        device_input_fn=device_input_fn)
+        device_input_fn=device_input_fn,
+        buffer_size=1)
 
     # Train the model for one step.
     feature = next(iterator)
