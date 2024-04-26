@@ -299,94 +299,17 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
 
   def test_shard_and_pack_features(self):
     pack_spec: input_utils.PackSpec = {
-        tf.int32.name: [
-            ('d0', tf.TensorShape([6])),
-            ('d1', tf.TensorShape([3])),
-            ('d2', tf.TensorShape([3, 2, 1])),
-        ],
-        tf.float32.name: [
-            ('f0', tf.TensorShape([6])),
-        ],
+        'd0': {'e0': tf.TensorSpec(shape=[6], dtype=tf.int32)},
+        'd1': tf.TensorSpec(shape=[3], dtype=tf.int32),
+        'f0': tf.TensorSpec(shape=[6], dtype=tf.float32),
+        'd2': tf.TensorSpec(shape=[3, 2, 1], dtype=tf.int32),
     }
     packer = input_utils.Packer(pack_spec, 3)
     features = {
-        'd0': tf.constant([1, 2, 3, 4, 5, 6]),
+        'd0': {'e0': tf.constant([1, 2, 3, 4, 5, 6])},
         'd1': tf.constant([11, 12, 13]),
-        'd2': tf.constant([
-            [[21,], [22,]],
-            [[23,], [24,]],
-            [[25,], [26,]]]),
         'f0': tf.constant([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
-    }
-    packed = tf.function(packer.shard_and_pack_features)(features)
-    expected = {
-        tf.int32.name: tf.constant([[1, 2, 11, 21, 22,],
-                                    [3, 4, 12, 23, 24,],
-                                    [5, 6, 13, 25, 26,]]),
-        tf.float32.name: tf.constant([[0.1, 0.2,],
-                                      [0.3, 0.4,],
-                                      [0.5, 0.6,],])
-    }
-    self.assertAllEqual(2, len(packed))
-    for dt, val in expected.items():
-      self.assertAllEqual(val, packed[dt])
-
-  def test_unpack_features(self):
-    pack_spec: input_utils.PackSpec = {
-        tf.int32.name: [
-            ('d0', tf.TensorShape([6])),
-            ('d1', tf.TensorShape([3])),
-            ('d2', tf.TensorShape([3, 2, 1])),
-        ],
-        tf.float32.name: [
-            ('f0', tf.TensorShape([6])),
-        ],
-    }
-    packer = input_utils.Packer(pack_spec, 3)
-    packed_features = {
-        tf.int32.name: jnp.array([
-            [
-                1,
-                2,
-                11,
-                21,
-                22,
-            ],
-            [
-                3,
-                4,
-                12,
-                23,
-                24,
-            ],
-            [
-                5,
-                6,
-                13,
-                25,
-                26,
-            ],
-        ]),
-        tf.float32.name: jnp.array([
-            [
-                0.1,
-                0.2,
-            ],
-            [
-                0.3,
-                0.4,
-            ],
-            [
-                0.5,
-                0.6,
-            ],
-        ]),
-    }
-    unpacked = jax.jit(packer.unpack_features)(packed_features)
-    expected = {
-        'd0': jnp.array([1, 2, 3, 4, 5, 6]),
-        'd1': jnp.array([11, 12, 13]),
-        'd2': jnp.array([
+        'd2': tf.constant([
             [
                 [
                     21,
@@ -412,10 +335,73 @@ class InputUtilsTest(tf.test.TestCase, parameterized.TestCase):
                 ],
             ],
         ]),
-        'f0': jnp.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
     }
-    for key, value in expected.items():
-      self.assertAllEqual(value, unpacked[key])
+    packed = tf.function(packer.shard_and_pack_features)(features)
+    expected = {
+        tf.int32.name: tf.constant([
+            [
+                1,
+                2,
+                11,
+                21,
+                22,
+            ],
+            [
+                3,
+                4,
+                12,
+                23,
+                24,
+            ],
+            [
+                5,
+                6,
+                13,
+                25,
+                26,
+            ],
+        ]),
+        tf.float32.name: tf.constant([
+            [
+                0.1,
+                0.2,
+            ],
+            [
+                0.3,
+                0.4,
+            ],
+            [
+                0.5,
+                0.6,
+            ],
+        ]),
+    }
+    self.assertAllEqual(2, len(packed))
+    for dt, val in expected.items():
+      self.assertAllEqual(val, packed[dt])
+
+  def test_unpack_single_shard_features(self):
+    pack_spec: input_utils.PackSpec = {
+        'd0': {'e0': tf.TensorSpec(shape=[6], dtype=tf.int32)},
+        'd1': tf.TensorSpec(shape=[3], dtype=tf.int32),
+        'f0': tf.TensorSpec(shape=[6], dtype=tf.float32),
+        'd2': tf.TensorSpec(shape=[3, 2, 1], dtype=tf.int32),
+    }
+    packer = input_utils.Packer(pack_spec, 3)
+    packed_features = {
+        tf.int32.name: jnp.array([1, 2, 11, 21, 22]),
+        tf.float32.name: jnp.array([0.1, 0.2]),
+    }
+    unpacked = jax.jit(packer.unpack_single_shard_features)(packed_features)
+    expected = {
+        'd0': {'e0': [1, 2]},
+        'd1': [11],
+        'f0': [0.1, 0.2],
+        'd2': [[[21], [22]]],
+    }
+    unpacked = jax.tree.map(list, unpacked)
+    self.assertEqual(unpacked, expected)
+
 
 if __name__ == '__main__':
   tf.test.main()

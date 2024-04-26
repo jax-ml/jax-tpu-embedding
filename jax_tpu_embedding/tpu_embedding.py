@@ -201,6 +201,7 @@ class TPUEmbedding(object):
     self._hbm_buffers_config = None
     self._hbm_buffers_config_ready = False
     self._input_split_fn = input_split_fn
+    self._packer = None
 
   def _remote_initialize_tpu_embedding(
       self,
@@ -916,14 +917,17 @@ class TPUEmbedding(object):
   def set_hbm_buffers_config(self, hbm_buffers_config: bytes):
     self._hbm_buffers_config = hbm_buffers_config
 
+  def set_packer(self, pack_spec: input_utils.PackSpec):
+    self._packer = input_utils.Packer(pack_spec, self._num_local_devices)
+
   @tf.function
   def experimental_get_next(
       self,
       iterator: tf.data.Iterator,
       num_local_devices: int,
       is_training: bool,
-  ) -> Mapping[str, tf.Tensor]:
-    """Get next batch of data and enqueue the sparse part.
+  ) -> NestedTfTensor:
+    """Get next batch of data, enqueue the sparse part and pack the dense part.
 
     This API is experimental and its behavior may change in the future.
 
@@ -934,7 +938,7 @@ class TPUEmbedding(object):
       is_training: See the comment in `enqueue`.
 
     Returns:
-      The dense part of data.
+      The dense part of data with the dense features packed.
     """
     assert self._input_split_fn is not None
     iterator = map(self._input_split_fn, iterator)
@@ -943,4 +947,15 @@ class TPUEmbedding(object):
         data[input_utils.EMBED_PLACEMENT], num_local_devices
     )
     self.enqueue(features, is_training=is_training)
-    return data[input_utils.NON_EMBED_PLACEMENT]
+    dense_features = data[input_utils.NON_EMBED_PLACEMENT]
+    if self._packer:
+      dense_features = self._packer.shard_and_pack_features(
+          data[input_utils.NON_EMBED_PLACEMENT]
+      )
+    return dense_features
+
+  def unpack_single_shard_features(
+      self, packed_features: dict[str, jax.Array]
+  ) -> Any:
+    assert self._packer is not None
+    return self._packer.unpack_single_shard_features(packed_features)

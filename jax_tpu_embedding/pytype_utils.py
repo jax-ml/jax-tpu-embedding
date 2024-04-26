@@ -16,6 +16,7 @@
 
 from typing import Any, Dict, List, Mapping, Tuple, TypeVar, Union, Iterable
 
+import jax
 from jax_tpu_embedding import checkpoint
 import tensorflow as tf
 # pylint: disable=g-direct-tensorflow-import
@@ -32,6 +33,7 @@ NestedStruct = Union[Dict[str, Dict[str, T]], Mapping[str, Mapping[str, T]]]
 TensorType = Union[tf.Tensor, tf.SparseTensor]
 TensorProto = tensor_pb2.TensorProto
 NestedTfTensor = Nested[tf.Tensor]
+NestedJaxArray = Nested[jax.Array]
 
 # TPUEmbedding related Types
 TableConfig = tf.tpu.experimental.embedding.TableConfig

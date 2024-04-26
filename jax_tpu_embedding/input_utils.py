@@ -17,7 +17,7 @@
 import collections
 import functools
 import itertools
-from typing import Any, Callable, Dict, Iterator, List, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -40,10 +40,12 @@ PackerType = Any
 # Begin google-internal
 PackerType = flatpack.Packer
 # End google-internal
+PackSpec = pytype_utils.Nested[tf.TensorSpec]
 
 
 Nested = pytype_utils.Nested
 NestedTfTensor = pytype_utils.NestedTfTensor
+NestedJaxArray = pytype_utils.NestedJaxArray
 TensorType = pytype_utils.TensorType
 FeatureConfig = pytype_utils.FeatureConfig
 EMBED_PLACEMENT = pytype_utils.EMBED_PLACEMENT
@@ -51,7 +53,7 @@ NON_EMBED_PLACEMENT = pytype_utils.NON_EMBED_PLACEMENT
 
 
 def prepare_devices_data(
-    xs: Union[NestedTfTensor, Nested[Array]],
+    xs: Union[NestedTfTensor, NestedJaxArray],
     packer: Optional[PackerType] = None,
 ) -> Nested[jax.numpy.ndarray]:
   """Converts device input batches to numpy and split it among local devices.
@@ -88,7 +90,7 @@ def prepare_devices_data(
   if packer is None:
     return sharded
   packed_shards = []
-  #TODO(silkyarora): Figure out a way to avoid traversal per device, gather data
+  # TODO(silkyarora): Figure out a way to avoid traversal per device, gather data
   # to be packed in one pass.
   for i in range(local_device_count):
     shard = jax.tree_util.tree_map(lambda x: x[i], sharded)
@@ -96,20 +98,24 @@ def prepare_devices_data(
   return packed_shards
 
 
+def _device_put_sharded(xs, devices):
+  return jax.device_put_sharded(list(xs), devices)
+
+
 def make_pmap_array_fn(
     packer: Optional[PackerType] = None,
     devices: Optional[Sequence[jax.Device]] = None,
-) -> Callable[..., Nested[Array]]:
+) -> Callable[..., NestedJaxArray]:
   """Example function of creating jax.Array for pmap from local host data.
 
   Note that, this is a user define function. For this example, we assume user
   provides an iterator yields tf.Tensor, which can be customized.
 
   Args:
-    devices: the list of devices to which the arrays should be put. Defaults to
-      the order of devices expected by `jax.pmap`.
     packer: [Optional] A packer object that combines per device data (xs) on
       cpu.
+    devices: the list of devices to which the arrays should be put. Defaults to
+      the order of devices expected by `jax.pmap`.
 
   Returns:
     A function takes inputs to devices, returns converted shards of such inputs,
@@ -118,12 +124,13 @@ def make_pmap_array_fn(
 
   devices = devices or jax.local_devices()
 
-  def _put_sharded(xs):
-    return jax.device_put_sharded(list(xs), devices)
+  put_sharded = functools.partial(_device_put_sharded, devices=devices)
 
-  def _create_array_fn(xs: NestedTfTensor) -> Nested[Array]:
+  def _create_array_fn(xs: NestedTfTensor) -> NestedJaxArray:
     xs = prepare_devices_data(xs, packer)
-    return _put_sharded(xs) if packer else jax.tree_util.tree_map(_put_sharded, xs)
+    if packer:
+      return put_sharded(xs)
+    return jax.tree_util.tree_map(put_sharded, xs)
 
   return _create_array_fn
 
@@ -136,7 +143,7 @@ def _tensor_to_array(x: tf.Tensor) -> jnp.ndarray:
 
 def make_pjit_array_fn(
     global_mesh: Mesh,
-    pspecs: Nested[PartitionSpec]) -> Callable[..., Nested[Array]]:
+    pspecs: Nested[PartitionSpec]) -> Callable[..., NestedJaxArray]:
   """Example function of creating jax.Array from local host data.
 
   Args:
@@ -147,11 +154,29 @@ def make_pjit_array_fn(
     A callable function returns a PyTree of jax.Array.
   """
 
-  def _create_jax_array_fn(xs: NestedTfTensor) -> Nested[Array]:
+  def _create_jax_array_fn(xs: NestedTfTensor) -> NestedJaxArray:
     host_arrays = create_np_array_fn(xs)
     return multihost_utils.host_local_array_to_global_array(
         host_arrays, global_mesh, pspecs)
   return _create_jax_array_fn
+
+
+def create_jax_array_from_tensor_fn() -> Callable[..., NestedJaxArray]:
+  """Creates jax.Array from local host tensor.
+
+  Returns:
+    A callable function returns a PyTree of jax.Array.
+  """
+
+  put_sharded = functools.partial(
+      _device_put_sharded, devices=jax.local_devices()
+  )
+
+  def _create_jax_array_from_tensor_fn(xs: NestedTfTensor) -> NestedJaxArray:
+    arr = create_np_array_fn(xs)
+    return jax.tree_util.tree_map(put_sharded, arr)
+
+  return _create_jax_array_from_tensor_fn
 
 
 def create_np_array_fn(xs: NestedTfTensor) -> Nested[jnp.ndarray]:
@@ -220,7 +245,6 @@ def split_and_prefetch_to_host_and_devices(
     enqueue(1)
 
 
-@tf.function
 def shard_inputs(inputs: Nested[TensorType],
                  num_shards: int) -> List[Nested[TensorType]]:
   """Shards inputs with same tree def.
@@ -577,44 +601,59 @@ def infer_output_shapes(
 
   return inferred_output_shapes
 
-PackSpec = Mapping[str, List[Tuple[str, tf.TensorShape]]]
-
 
 class Packer:
   """A util for packing/unpacking the features."""
 
   def __init__(self, pack_spec: PackSpec, num_shards: int):
-    self._pack_spec = pack_spec
+    flatten_spec, _ = jax.tree_util.tree_flatten(pack_spec)
+    self._pack_type = jax.tree_util.tree_map(lambda x: x.dtype.name, pack_spec)
+    self._split_by_type = {}
+    self._shape_by_type = {}
     self._num_shards = num_shards
-    for _, specs in self._pack_spec.items():
-      assert all(s[1].num_elements() % self._num_shards == 0 for s in specs)
+    for f in flatten_spec:
+      if self._split_by_type.get(f.dtype.name) is None:
+        self._split_by_type[f.dtype.name] = []
+      if not self._split_by_type[f.dtype.name]:
+        elem = f.shape.num_elements() // self._num_shards
+      else:
+        elem = (
+            f.shape.num_elements() // self._num_shards
+            + self._split_by_type[f.dtype.name][-1]
+        )
+      self._split_by_type[f.dtype.name].append(elem)
+      if self._shape_by_type.get(f.dtype.name) is None:
+        self._shape_by_type[f.dtype.name] = []
+      self._shape_by_type[f.dtype.name].append(f.shape)
 
   def shard_and_pack_features(
-      self, features: Mapping[str, tf.Tensor]
-  ) -> Mapping[str, tf.Tensor]:
-    """Shards features evenly and concat the results into one tensor.
+      self, features: NestedTfTensor
+  ) -> Dict[str, tf.Tensor]:
+    """Shards features evenly and concatenate the results into one tensor.
 
     Tensors in the features can have different dtypes.
 
     Args:
-      features: A list of tensors to shard.
+      features: Nested tensors to shard.
 
     Returns:
-      A tensor with shape (num_shard, n) where n is the length of all features
-        concated.
+      A tensor with shape (`self._num_shard`, n) where n is the length of all
+      features concatenated.
     """
 
-    def _pack(spec: List[Tuple[str, List[int]]]) -> tf.Tensor:
-      assert all(
-          features[spec_name].shape == spec_shape
-          for spec_name, spec_shape in spec
-      )
-      feature_list = [features[spec_name] for spec_name, _ in spec]
-      return self._shard_and_pack_tensors(feature_list)
+    flatten_features, _ = jax.tree_util.tree_flatten(features)
 
-    return {dt: _pack(spec) for dt, spec in self._pack_spec.items()}
+    features_by_type = {}
+    for f in flatten_features:
+      if features_by_type.get(f.dtype.name) is None:
+        features_by_type[f.dtype.name] = []
+      features_by_type[f.dtype.name].append(f)
+    res = {}
+    for dt, feature_list in features_by_type.items():
+      res[dt] = self._shard_and_pack_tensors(feature_list)
+    return res
 
-  def _shard_and_pack_tensors(self, features: List[tf.Tensor]) -> tf.Tensor:
+  def _shard_and_pack_tensors(self, features: list[tf.Tensor]) -> tf.Tensor:
     """Shards features evenly and concat the results into one tensor.
 
     All tensors in inputs must have the same dtypes.
@@ -623,8 +662,8 @@ class Packer:
       features: A list of tensors to shard.
 
     Returns:
-      A tensor with shape (num_shard, n) where n is the length of all features
-        concated.
+      A tensor with shape (`self._num_shard`, n) where n is the length of all
+      features concatenated.
     """
     sharded_features = []
     for t in features:
@@ -634,30 +673,36 @@ class Packer:
       sharded_features.append(
           tf.reshape(t, (self._num_shards, tensor_size // self._num_shards))
       )
-    # Concat features for each shard.
+    # Concatenate features for each shard.
     return tf.concat(sharded_features, axis=1)
 
-  def unpack_features(
+  def unpack_single_shard_features(
       self,
-      packed_features: Mapping[str, jax.Array],
-  ) -> Mapping[str, jax.Array]:
-    """Unpack features from the packed tensor.
+      packed_features: Dict[str, jax.Array],
+  ) -> Any:
+    """Unpack features from the packed JAX Arrays.
+
+    This deals with only a single shard, and is suitable for use inside
+    `jax.pmap`.
 
     Args:
-      packed_features: The packed features in one tensor.
+      packed_features: The packed features in JAX Array.
 
     Returns:
-      Unpacked features.
+      Unpacked single shard features.
     """
-    res = {}
-    for dt, specs in self._pack_spec.items():
-      assert len(packed_features[dt]) == self._num_shards
-      splits = [s[1].num_elements() // self._num_shards for s in specs]
-      for i in range(len(splits) - 1):
-        splits[i + 1] = splits[i + 1] + splits[i]
-      feature_split = jnp.split(packed_features[dt], splits, axis=1)
-      res = res | {
-          name: jnp.reshape(f, shape.dims)
-          for ((name, shape), f) in zip(specs, feature_split)
-      }
-    return res
+
+    unpacked = {}
+    for dt, split in self._split_by_type.items():
+      feature_split = jnp.split(packed_features[dt], split, axis=0)
+      feature_split_reshaped = [
+          f.reshape(tuple([s[0] // self._num_shards] + s[1:]))
+          for s, f in zip(self._shape_by_type[dt], feature_split)
+      ]
+      unpacked[dt] = feature_split_reshaped[::-1]
+    # We make use of the fact that the traversal order of `tree_map` is
+    # consistent with the traversal order of `tree_flatten`. So popping
+    # `unpacked` after the reversal will reconstruct the original PyTree.
+    # That being said, we need to be careful if `tree_map` includes additional
+    # parallelism in the future which may break this.
+    return jax.tree_util.tree_map(lambda x: unpacked[x].pop(), self._pack_type)
