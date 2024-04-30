@@ -20,18 +20,17 @@ import os
 from typing import Any, Dict, Optional, Sequence, Union, cast
 
 import jax
-from jax.experimental.array_serialization import serialization
 import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint as ocp
 from orbax.checkpoint import value_metadata
 import tensorstore as ts
 
+
 Index = tuple[slice, ...]
 ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
 TypeHandler = ocp.type_handlers.TypeHandler
 Shape = Union[tuple[int, int], tuple]
-_DEFAULT_TS_CONTEXT = ts.Context({'file_io_concurrency': {'limit': 128}})
 
 
 def _get_shard_size(nrows, num_shards, shard_id):
@@ -85,51 +84,19 @@ class GlobalHostArray:
     self.local_shape = self.data.shape
 
 
-@dataclasses.dataclass
-class RestoreArgs(ocp.RestoreArgs):
-  shard_id: Optional[int] = None
-  num_shards: Optional[int] = None
-  global_shape: Optional[Shape] = None
-
-
-def _get_metadata(arr: GlobalHostArray) -> Dict[str, Any]:
-  dtype = np.dtype(arr.dtype).str
-  return {
-      'compressor': {
-          'id': 'gzip'
-      },
-      'shape': arr.global_shape,
-      'chunks': np.array(np.maximum(1, arr.local_shape)),
-      'dtype': dtype,
-  }
-
-
-async def _serialize(arr: GlobalHostArray, tspec):
+async def _serialize(arr: GlobalHostArray, tspec, ts_context: ts.Context):
   """Writes a GlobalHostArray data into tensor store."""
-  def _spec_has_metadata(tree):
-    if not isinstance(tree, dict):
-      return False
-    return 'metadata' in tree or any(
-        _spec_has_metadata(subtree) for _, subtree in tree.items())
-
-  if not _spec_has_metadata(tspec):
-    tspec['metadata'] = _get_metadata(arr)
-
   commit_futures = []
 
   if jax.process_index() == 0:
     open_future = ts.open(
-        ts.Spec(tspec),
-        create=True,
-        open=True,
-        context=_DEFAULT_TS_CONTEXT)
+        ts.Spec(tspec), create=True, open=True, context=ts_context
+    )
     commit_futures.append(open_future)
 
   ts_writer = await ts.open(
-      ts.Spec(tspec),
-      open=True,
-      assume_metadata=True,
-      context=_DEFAULT_TS_CONTEXT)
+      ts.Spec(tspec), open=True, assume_metadata=True, context=ts_context
+  )
 
   write_future = ts_writer[arr.index].write(arr.data)
   await write_future.copy
@@ -137,21 +104,19 @@ async def _serialize(arr: GlobalHostArray, tspec):
   return commit_futures
 
 
-async def _deserialize(restore_args: RestoreArgs,
-                       tspec: Dict[str, Any]) -> GlobalHostArray:
+async def _deserialize(
+    restore_args: 'GlobalHostArrayRestoreArgs',
+    tspec: Dict[str, Any],
+    ts_context: ts.Context,
+) -> GlobalHostArray:
   """Deserialize embedding tensor shard."""
 
   if restore_args is None:
     raise ValueError('Restore args for embedding checkpointing cannot be None.')
 
-  if restore_args.dtype is not None:
-    tspec = {
-        'base': tspec,
-        'driver': 'cast',
-        'dtype': jnp.dtype(restore_args.dtype).name,
-    }
+  tspec = ocp.type_handlers.get_cast_tspec_deserialize(tspec, restore_args)
 
-  t = await ts.open(ts.Spec(tspec), open=True, context=_DEFAULT_TS_CONTEXT)
+  t = await ts.open(ts.Spec(tspec), open=True, context=ts_context)
   global_shape = restore_args.global_shape
   global_shape = t.shape if global_shape is None else global_shape
 
@@ -200,18 +165,6 @@ class GlobalHostArrayHandler(TypeHandler):
   """Serialize/deserialize logic to allow integration with PyTreeCheckpointHandler.
   """
 
-  def _get_json_tspec(
-      self,
-      info: ParamInfo,
-      value: Optional[GlobalHostArray] = None) -> Dict[str, Any]:
-    if info.path is None:
-      raise ValueError('Must construct serialization path.')
-    path = os.fspath(info.path)
-    tspec = serialization.get_tensorstore_spec(path)
-    if value is not None:
-      tspec['metadata'] = _get_metadata(value)  # pylint: disable=protected-access
-    return tspec
-
   def typestr(self) -> str:
     return 'GlobalHostArray'
 
@@ -220,9 +173,18 @@ class GlobalHostArrayHandler(TypeHandler):
   ) -> Sequence[value_metadata.ArrayMetadata]:
     open_ops = []
     for info in infos:
-      tspec = self._get_json_tspec(info)
+      tspec = ocp.type_handlers._get_json_tspec(
+          info,
+          use_ocdbt=info.is_ocdbt_checkpoint,
+      )
       open_ops.append(
-          ts.open(ts.Spec(tspec), open=True, context=_DEFAULT_TS_CONTEXT)
+          ts.open(
+              ts.Spec(tspec),
+              open=True,
+              context=ocp.type_handlers.get_ts_context(
+                  use_ocdbt=info.is_ocdbt_checkpoint
+              ),
+          )
       )
     tensorstores = await asyncio.gather(*open_ops)
     return [
@@ -237,14 +199,27 @@ class GlobalHostArrayHandler(TypeHandler):
       args: Optional[Sequence[ocp.SaveArgs]] = None,
   ) -> Sequence[ocp.Future]:
     """See superclass documentation."""
-    del args
+    args = args or [ocp.SaveArgs()] * len(values)
+    ocp.type_handlers.check_input_arguments(args)
 
     async def _serialize_values():
       serialize_ops = []
-      for value, info in zip(values, infos):
-        serialize_ops.append(
-            _serialize(value, self._get_json_tspec(info, value))
+      for value, info, arg in zip(values, infos, args):
+        if not info.is_ocdbt_checkpoint:
+          raise ValueError('This handler only support OCDBT format.')
+        tspec = ocp.type_handlers.get_json_tspec_write(
+            info=info,
+            use_ocdbt=info.is_ocdbt_checkpoint,
+            global_shape=value.global_shape,
+            local_shape=value.local_shape,
+            dtype=value.dtype,
+            process_index=jax.process_index(),
+            arg=arg,
         )
+
+        ts_context = ocp.type_handlers.get_ts_context(info.is_ocdbt_checkpoint)
+        tspec = ocp.type_handlers.get_cast_tspec_serialize(tspec, value, arg)
+        serialize_ops.append(_serialize(value, tspec, ts_context))
       return await asyncio.gather(*serialize_ops)
 
     return await _serialize_values()
@@ -252,17 +227,33 @@ class GlobalHostArrayHandler(TypeHandler):
   async def deserialize(
       self,
       infos: Sequence[ParamInfo],
-      args: Optional[Sequence[ocp.RestoreArgs]] = None,
+      args: Optional[Sequence['GlobalHostArrayRestoreArgs']] = None,
   ) -> Sequence[GlobalHostArray]:
     """See superclass documentation."""
     if args is None:
       raise ValueError('RestoreArgs cannot be None.')
+    ocp.type_handlers.check_input_arguments(infos, args)
 
     async def _deserialize_values():
       deserialize_ops = []
       for info, arg in zip(infos, args):
-        arg = cast(RestoreArgs, arg)
-        deserialize_ops.append(_deserialize(arg, self._get_json_tspec(info)))
+        if not info.is_ocdbt_checkpoint:
+          await ocp.type_handlers._assert_parameter_files_exist(  # pylint: disable=protected-access
+              info.path, metadata_key=None, use_zarr3=info.use_zarr3
+          )
+        gha_restore_args = cast(GlobalHostArrayRestoreArgs, arg)
+        if not isinstance(gha_restore_args, GlobalHostArrayRestoreArgs):
+          raise TypeError(
+              'Restore args must be of type GlobalHostArrayRestoreArgs'
+          )
+        tspec = ocp.type_handlers._get_json_tspec(
+            info, use_ocdbt=info.is_ocdbt_checkpoint
+        )
+        tspec = ocp.type_handlers.get_cast_tspec_deserialize(tspec, arg)
+        ts_context = ocp.type_handlers.get_ts_context(info.is_ocdbt_checkpoint)
+        deserialize_ops.append(
+            _deserialize(gha_restore_args, tspec, ts_context)
+        )
       return await asyncio.gather(*deserialize_ops)
 
     return await _deserialize_values()
@@ -271,3 +262,10 @@ class GlobalHostArrayHandler(TypeHandler):
 ocp.type_handlers.register_type_handler(
     GlobalHostArray, GlobalHostArrayHandler()
 )
+
+
+@dataclasses.dataclass
+class GlobalHostArrayRestoreArgs(ocp.RestoreArgs):
+  shard_id: Optional[int] = None
+  num_shards: Optional[int] = None
+  global_shape: Optional[Shape] = None

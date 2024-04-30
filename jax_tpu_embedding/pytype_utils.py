@@ -46,7 +46,7 @@ TPUEmbeddingOptimizer = tpu_embedding_v2_utils._Optimizer  # pylint: disable=pro
 
 # TPUEmbedding checkpoints
 GlobalHostArray = checkpoint.GlobalHostArray
-RestoreArgs = checkpoint.RestoreArgs
+RestoreArgs = checkpoint.GlobalHostArrayRestoreArgs
 
 # Special field names.
 EMBED_PLACEMENT = 'host'
