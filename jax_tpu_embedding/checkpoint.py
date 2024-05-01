@@ -23,7 +23,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint as ocp
-from orbax.checkpoint import value_metadata
 import tensorstore as ts
 
 
@@ -150,9 +149,9 @@ async def _deserialize(
 
 def _array_metadata_from_tensorstore(
     t: Any, info: ParamInfo
-) -> value_metadata.ArrayMetadata:
+) -> ocp.metadata.ArrayMetadata:
   # TODO(b/284185400): Set sharding property.
-  return value_metadata.ArrayMetadata(
+  return ocp.metadata.ArrayMetadata(
       name=info.name,
       directory=info.parent_dir,
       shape=t.shape,
@@ -170,7 +169,7 @@ class GlobalHostArrayHandler(TypeHandler):
 
   async def metadata(
       self, infos: Sequence[ParamInfo]
-  ) -> Sequence[value_metadata.ArrayMetadata]:
+  ) -> Sequence[ocp.metadata.ArrayMetadata]:
     open_ops = []
     for info in infos:
       tspec = ocp.type_handlers._get_json_tspec(
