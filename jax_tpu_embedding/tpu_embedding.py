@@ -959,3 +959,16 @@ class TPUEmbedding(object):
   ) -> Any:
     assert self._packer is not None
     return self._packer.unpack_single_shard_features(packed_features)
+
+  def get_tpu_embedding_for_serving(self):
+    """Gets TF TPU embedding layer and tables for serving."""
+    feature_configs = self.feature_configs
+
+    embedding_layer_for_serving = (
+        tf.tpu.experimental.embedding.TPUEmbeddingForServing(
+            feature_config=feature_configs,
+            optimizer=tf.tpu.experimental.embedding.SGD(0.1),
+        )
+    )
+    embedding_tables_for_serving = self.retrieve_embedding_tables(as_gha=True)
+    return embedding_layer_for_serving, embedding_tables_for_serving
