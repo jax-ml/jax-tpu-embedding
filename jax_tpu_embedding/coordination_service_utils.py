@@ -173,6 +173,39 @@ def maybe_all_gather_configs(
   return [local_config]
 
 
+def update_task_id_and_global_core_array(
+    current_task: int,
+    num_tasks: int,
+    client: DistributedRuntimeClient | None = None,
+):
+  """When there is more than one process, update the global core array.
+
+  Args:
+    current_task: ID of the current task.
+    num_tasks: Number of tasks with Coordination Service deployed.
+    client: The client of Coordination Service.
+  """
+  if client is None:
+    client = global_state.client
+  if num_tasks > 1:
+    this_tpu_task_id = tpu_ops.get_tpu_task_id()
+    this_tpu_task_id = str(this_tpu_task_id.numpy()).encode("cp437")
+    shard_id_to_tpu_task_id = _all_gather_configs(
+        config_type="task_id",
+        local_config_bytes=this_tpu_task_id,
+        timeout_in_sec=_COORDINATION_SERVICE_TIMEOUT.value,
+        current_task=current_task,
+        num_tasks=num_tasks,
+        client=client,
+    )
+    tpu_task_id_to_shard_id = [0] * num_tasks
+    for shard_id, tpu_task_id in enumerate(shard_id_to_tpu_task_id):
+      tpu_task_id = int(tpu_task_id.decode("cp437"))
+      assert tpu_task_id >= 0 and tpu_task_id < num_tasks
+      tpu_task_id_to_shard_id[tpu_task_id] = shard_id
+    tpu_ops.update_task_id_and_global_core_array(tpu_task_id_to_shard_id)
+
+
 def initialize_fn(
     config_str: bytes,
     current_task: int,
@@ -290,6 +323,12 @@ def initialize_fn(
     else:
       tpu_ops.finalize_tpu_embedding(common_config, merged_mem_config)
 
+  if flags.FLAGS.create_tpu_embedding_states_from_global_tpu_system:
+    update_task_id_and_global_core_array(
+        current_task=current_task,
+        num_tasks=num_tasks,
+        client=client,
+    )
   common_config, mem_config = create_memory_config(config_str)
 
   # Gather other memory configs to merge when there are multi clients.
