@@ -18,7 +18,7 @@ import dataclasses
 import functools
 import os
 import re
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -112,6 +112,7 @@ class TPUEmbedding(object):
       pipeline_execution_with_tensor_core: bool = False,
       cores_per_replica: Optional[int] = None,
       use_pathways: bool = False,
+      coordinator_address: str | None = None,
       input_split_fn: Callable[..., dict[str, Any]] | None = None,
   ):
     """Creates jax TPUEmbedding object.
@@ -131,6 +132,8 @@ class TPUEmbedding(object):
         users, always set this based on cores for each model replica. For pjit
         data parallelism user, it should be set as jax.device_count().
       use_pathways: Whether to use Pathways as the backend.
+      coordinator_address: The network address of the coordinator task which all
+        the coordination clients can connect to.
       input_split_fn: A callable function takes elements from iterator, yields
         splits pytree of host and device batches in a dictionary. This should be
         supplied if users want to call `experimental_get_next`.
@@ -194,6 +197,7 @@ class TPUEmbedding(object):
         )
     )
     self._use_pathways = use_pathways
+    self._coordinator_address = coordinator_address
     self._num_local_devices = jax.local_device_count()
     self._tpu_topology = tpu_embedding_pathways_utils.get_tpu_topology()
     self._embedding_partitions = None
@@ -206,25 +210,23 @@ class TPUEmbedding(object):
   def _remote_initialize_tpu_embedding(
       self,
       config_proto: TPUEmbeddingConfigurationProto,
-      coordinator_address: str,
       embedding_manager: tpu_embedding_pathways_utils.EmbeddingManager,
   ):
     """Initializes TPU embedding using remote Python.
 
     Args:
       config_proto: A configuration proto.
-      coordinator_address: The network address of the coordinator task which all
-        the coordination clients can connect to.
       embedding_manager: The object to manage the remote Python execution.
 
     Raises:
       RuntimeError: If TPU embedding is already initialized.
     """
+    assert self._coordinator_address is not None
     new_config_str = tpu_embedding_utils.get_new_config(config_proto)
     embedding_manager.init_embedding_config(
         new_config_str,
         self._num_hosts,
-        coordinator_address,
+        self._coordinator_address,
     )
     if embedding_manager.is_initialized()[0]:
       raise RuntimeError(
@@ -244,7 +246,6 @@ class TPUEmbedding(object):
   def initialize_tpu_embedding(
       self,
       start_remote_python: bool = False,
-      coordinator_address: str | None = None,
       embedding_manager: (
           tpu_embedding_pathways_utils.EmbeddingManager | None
       ) = None,
@@ -296,10 +297,6 @@ class TPUEmbedding(object):
         the backend is Pathways since we have the case where this is done inside
         `enqueue` (Example 2) which is already placed in a remote Python. But if
         it is True, the backend has to be Pathways.
-      coordinator_address: The network address of the coordinator task which all
-        the coordination clients can connect to. This is only applicable if
-        `start_remote_python` is True, since Coordination Service needs to be
-        deployed separately in the remote Python.
       embedding_manager: The object to manage the remote Python execution. This
         is only applicable if `start_remote_python` is True.
 
@@ -314,7 +311,7 @@ class TPUEmbedding(object):
     if start_remote_python:
       assert embedding_manager is not None
       self._remote_initialize_tpu_embedding(
-          self._config_proto, coordinator_address, embedding_manager
+          self._config_proto, embedding_manager
       )
       self._is_initialized = True
       logging.info("Successfully Initialized TPUEmbedding devices.")
@@ -328,8 +325,18 @@ class TPUEmbedding(object):
 
       new_config_str = tpu_embedding_utils.get_new_config(self._config_proto)
       if self._use_pathways:
+        assert self._coordinator_address is not None
+        coordination_service, coordination_client = (
+            coordination_service_utils.init_coordination_service(
+                self._host_id, self._num_hosts, self._coordinator_address
+            )
+        )
         result = coordination_service_utils.initialize_fn(
-            new_config_str, self._host_id, self._num_hosts, None, True
+            new_config_str,
+            self._host_id,
+            self._num_hosts,
+            coordination_client,
+            True,
         )
         assert result is not None
         self._embedding_partitions, self._hbm_buffers_config = (
@@ -338,6 +345,9 @@ class TPUEmbedding(object):
         )
         self._embedding_partitions_ready = True
         self._hbm_buffers_config_ready = True
+        coordination_client.shutdown()
+        if coordination_service is not None:
+          coordination_service.shutdown()
       else:
         coordination_service_utils.initialize_fn(
             new_config_str, self._host_id, self._num_hosts,
