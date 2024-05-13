@@ -173,12 +173,12 @@ def maybe_all_gather_configs(
   return [local_config]
 
 
-def update_task_id_and_global_core_array(
+def maybe_update_task_id_and_global_core_array(
     current_task: int,
     num_tasks: int,
     client: DistributedRuntimeClient | None = None,
 ):
-  """When there is more than one process, update the global core array.
+  """When there is more than one process, update task ID and global core array.
 
   Args:
     current_task: ID of the current task.
@@ -324,7 +324,7 @@ def initialize_fn(
       tpu_ops.finalize_tpu_embedding(common_config, merged_mem_config)
 
   if flags.FLAGS.create_tpu_embedding_states_from_global_tpu_system:
-    update_task_id_and_global_core_array(
+    maybe_update_task_id_and_global_core_array(
         current_task=current_task,
         num_tasks=num_tasks,
         client=client,
