@@ -204,8 +204,7 @@ class GlobalHostArrayHandler(TypeHandler):
     async def _serialize_values():
       serialize_ops = []
       for value, info, arg in zip(values, infos, args):
-        if not info.is_ocdbt_checkpoint:
-          raise ValueError('This handler only support OCDBT format.')
+        # TODO: Add the OCDBT check back when b/340292264 is resolved.
         tspec = ocp.type_handlers.get_json_tspec_write(
             info=info,
             use_ocdbt=info.is_ocdbt_checkpoint,
