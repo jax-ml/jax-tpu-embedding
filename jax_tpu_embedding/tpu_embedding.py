@@ -506,7 +506,7 @@ class TPUEmbedding(object):
       else:
         global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
       gha_creator = functools.partial(_create_gha, global_shape=global_shape)
-      retrieved_tables[tb_cfg.name] = jax.tree_map(
+      retrieved_tables[tb_cfg.name] = jax.tree.map(
           gha_creator, retrieved_tables[tb_cfg.name])
 
     return retrieved_tables

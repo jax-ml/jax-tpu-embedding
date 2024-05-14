@@ -265,7 +265,7 @@ def create_table_variables_from_gha(
       assert tvar.num_shards == num_shards
       assert tvar.global_shape == global_shape
 
-    table_gha_variables[tb_cfg.name] = jax.tree_map(
+    table_gha_variables[tb_cfg.name] = jax.tree.map(
         lambda x: tf.constant(x.data, dtype=tf.float32),
         table_gha_variables[tb_cfg.name])
 
