@@ -19,6 +19,7 @@ import dataclasses
 import os
 from typing import Any, Dict, Optional, Sequence, Union, cast
 
+from absl import logging
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -205,7 +206,8 @@ class GlobalHostArrayHandler(TypeHandler):
       serialize_ops = []
       for value, info, arg in zip(values, infos, args):
         if not info.is_ocdbt_checkpoint:
-          raise ValueError('This handler only support OCDBT format.')
+          # TODO(b/340292264): Raise the following error instead.
+          logging.warning('This handler should only support OCDBT format.')
         tspec = ocp.type_handlers.get_json_tspec_write(
             info=info,
             use_ocdbt=info.is_ocdbt_checkpoint,
