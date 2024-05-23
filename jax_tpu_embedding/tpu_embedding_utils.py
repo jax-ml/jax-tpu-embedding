@@ -243,7 +243,7 @@ def create_table_variables_from_gha(
   """Create table variables of parameters and slot_variables from table config.
 
   Args:
-    table_gha_variables: A nested of
+    table_gha_variables: A nested structure of table variables.
     shard_id: shard id of variables to create.
     num_shards: total number of shards.
     table_config_list: A list of all table config.
