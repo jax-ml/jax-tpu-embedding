@@ -120,7 +120,11 @@ def _all_gather_configs(
 
   # Add key value store into coordination service.
   def _set_key_value(key: str, value: bytes) -> None:
-    if hasattr(client, "blocking_key_value_get_bytes"):
+    # TODO(hanyangtay): Remove this fallback when most users migrate to Jax
+    # 0.4.29+.
+    if hasattr(client, "key_value_set_bytes"):
+      client.key_value_set_bytes(key=key, value=value)
+    elif hasattr(client, "blocking_key_value_get_bytes"):
       client.key_value_set(key=key, value=value)  # pytype: disable=wrong-arg-types
     else:
       client.key_value_set(key=key, value=local_config_bytes.decode("cp437"))
