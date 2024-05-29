@@ -112,6 +112,7 @@ class TPUEmbedding(object):
       pipeline_execution_with_tensor_core: bool = False,
       cores_per_replica: Optional[int] = None,
       use_pathways: bool = False,
+      num_shards: int | None = None,
       coordinator_address: str | None = None,
       input_split_fn: Callable[..., dict[str, Any]] | None = None,
   ):
@@ -132,6 +133,8 @@ class TPUEmbedding(object):
         users, always set this based on cores for each model replica. For pjit
         data parallelism user, it should be set as jax.device_count().
       use_pathways: Whether to use Pathways as the backend.
+      num_shards: The number of shards for remote Python. This is meaningful
+        only when `use_pathways` is True.
       coordinator_address: The network address of the coordinator task which all
         the coordination clients can connect to.
       input_split_fn: A callable function takes elements from iterator, yields
@@ -148,7 +151,7 @@ class TPUEmbedding(object):
                            cores_per_replica, jax.device_count()))
     # Setup device specs.
     self._host_id = _get_task_id()
-    self._num_hosts = jax.process_count()
+    self._num_hosts = num_shards if use_pathways else jax.process_count()
     self._num_tensor_cores = jax.device_count()
 
     self._feature_configs = feature_configs
