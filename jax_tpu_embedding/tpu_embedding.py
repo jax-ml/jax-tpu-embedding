@@ -136,7 +136,8 @@ class TPUEmbedding(object):
       num_shards: The number of shards for remote Python. This is meaningful
         only when `use_pathways` is True.
       coordinator_address: The network address of the coordinator task which all
-        the coordination clients can connect to.
+        the coordination clients can connect to. This is meaningful only when
+        `use_pathways` is True.
       input_split_fn: A callable function takes elements from iterator, yields
         splits pytree of host and device batches in a dictionary. This should be
         supplied if users want to call `experimental_get_next`.
