@@ -20,6 +20,7 @@ from absl import flags
 from absl import logging
 from jax._src import distributed
 from jax._src.lib import xla_extension
+from jax_tpu_embedding.google import borg_utils
 import tensorflow as tf
 
 from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
@@ -39,6 +40,8 @@ _COORDINATION_SERVICE_TIMEOUT = flags.DEFINE_integer(
 def init_coordination_service(
     shard_index: int,
     num_shards: int,
+    coordinator_shard: int,
+    coordinator_bind_address: str,
     coordinator_address: str,
 ) -> Tuple[
     DistributedRuntimeService | None,
@@ -46,12 +49,14 @@ def init_coordination_service(
 ]:
   """Initializes Coordination Service.
 
-  The service should be started at only one shard (and shard 0 is picked), but
-  clients should be created and connect to the service in all the shards.
+  The service is started at `coordinator_shard`, and clients are created and
+  connect to the service in all the shards.
 
   Args:
     shard_index: Index of the shard in Pathways.
     num_shards: Number of shards in Pathways.
+    coordinator_shard: The shard index of the coordinator.
+    coordinator_bind_address: The network address of the coordinator to bind to.
     coordinator_address: The network address of the coordinator task which all
       the coordination clients can connect to.
 
@@ -59,11 +64,22 @@ def init_coordination_service(
     A pair of Coordination Service and client.
   """
   coordination_service = None
-  if shard_index == 0:
-    logging.info("Starting Coordination Service at %s", coordinator_address)
-    coordination_service = xla_extension.get_distributed_runtime_service(
-        coordinator_address, num_shards
+  start_coordination_service = False
+  if borg_utils.is_running_on_forge() and shard_index == coordinator_shard:
+    start_coordination_service = True
+  elif (
+      borg_utils.is_running_on_borg()
+      and borg_utils.get_task_id() == coordinator_shard
+  ):
+    start_coordination_service = True
+  if start_coordination_service:
+    logging.info(
+        "Starting Coordination Service at %s", coordinator_bind_address
     )
+    coordination_service = xla_extension.get_distributed_runtime_service(
+        coordinator_bind_address, num_shards
+    )
+  logging.info("Connecting to Coordination Service at %s", coordinator_address)
   coordination_client = xla_extension.get_distributed_runtime_client(
       coordinator_address, shard_index
   )

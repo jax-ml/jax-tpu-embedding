@@ -113,7 +113,6 @@ class TPUEmbedding(object):
       cores_per_replica: Optional[int] = None,
       use_pathways: bool = False,
       num_shards: int | None = None,
-      coordinator_address: str | None = None,
       input_split_fn: Callable[..., dict[str, Any]] | None = None,
   ):
     """Creates jax TPUEmbedding object.
@@ -135,9 +134,6 @@ class TPUEmbedding(object):
       use_pathways: Whether to use Pathways as the backend.
       num_shards: The number of shards for remote Python. This is meaningful
         only when `use_pathways` is True.
-      coordinator_address: The network address of the coordinator task which all
-        the coordination clients can connect to. This is meaningful only when
-        `use_pathways` is True.
       input_split_fn: A callable function takes elements from iterator, yields
         splits pytree of host and device batches in a dictionary. This should be
         supplied if users want to call `experimental_get_next`.
@@ -201,7 +197,6 @@ class TPUEmbedding(object):
         )
     )
     self._use_pathways = use_pathways
-    self._coordinator_address = coordinator_address
     self._num_local_devices = jax.local_device_count()
     self._tpu_topology = tpu_embedding_pathways_utils.get_tpu_topology()
     self._embedding_partitions = None
@@ -225,12 +220,10 @@ class TPUEmbedding(object):
     Raises:
       RuntimeError: If TPU embedding is already initialized.
     """
-    assert self._coordinator_address is not None
     new_config_str = tpu_embedding_utils.get_new_config(config_proto)
     embedding_manager.init_embedding_config(
         new_config_str,
         self._num_hosts,
-        self._coordinator_address,
     )
     if embedding_manager.is_initialized()[0]:
       raise RuntimeError(
@@ -329,10 +322,16 @@ class TPUEmbedding(object):
 
       new_config_str = tpu_embedding_utils.get_new_config(self._config_proto)
       if self._use_pathways:
-        assert self._coordinator_address is not None
+        coordinator_bind_address, coordinator_address = (
+            tpu_embedding_pathways_utils.get_coordinator_addresses()
+        )
         coordination_service, coordination_client = (
             coordination_service_utils.init_coordination_service(
-                self._host_id, self._num_hosts, self._coordinator_address
+                self._host_id,
+                self._num_hosts,
+                0,
+                coordinator_bind_address,
+                coordinator_address,
             )
         )
         result = coordination_service_utils.initialize_fn(
