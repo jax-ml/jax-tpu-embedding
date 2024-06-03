@@ -109,8 +109,8 @@ def _all_gather_configs(
           key=key, timeout_in_ms=timeout_in_sec * 1000
       )
     else:
-      # TODO remove blocking_key_value_get fallback when most user migrate to
-      # Jax 0.4.5+.
+      # TODO(b/344016223): remove blocking_key_value_get fallback when most
+      # users migrate to Jax 0.4.5+.
       gathered_config_str = client.blocking_key_value_get(
           key=key, timeout_in_ms=timeout_in_sec * 1000
       )
@@ -120,7 +120,11 @@ def _all_gather_configs(
 
   # Add key value store into coordination service.
   def _set_key_value(key: str, value: bytes) -> None:
-    if hasattr(client, "blocking_key_value_get_bytes"):
+    # TODO(b/344016223): Remove the fallbacks when the min supported Jax version
+    # is 0.4.5+.
+    if hasattr(client, "key_value_set_bytes"):
+      client.key_value_set_bytes(key=key, value=value)
+    elif hasattr(client, "blocking_key_value_get_bytes"):
       client.key_value_set(key=key, value=value)  # pytype: disable=wrong-arg-types
     else:
       client.key_value_set(key=key, value=local_config_bytes.decode("cp437"))
