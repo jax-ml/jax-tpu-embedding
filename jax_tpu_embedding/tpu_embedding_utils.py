@@ -260,10 +260,18 @@ def create_table_variables_from_gha(
 
     variable_names = ['parameters'] + tb_cfg.optimizer._slot_names()  # pylint: disable=protected-access
     for var_name in variable_names:
-      tvar = table_gha_variables[tb_cfg.name][var_name]
-      assert tvar.shard_id == shard_id
-      assert tvar.num_shards == num_shards
-      assert tvar.global_shape == global_shape
+      if isinstance(
+          table_gha_variables[tb_cfg.name][var_name], GlobalHostArray
+      ):
+        tvar = table_gha_variables[tb_cfg.name][var_name]
+        assert tvar.shard_id == shard_id
+        assert tvar.num_shards == num_shards
+        assert tvar.global_shape == global_shape
+      else:
+        for _, value in table_gha_variables[tb_cfg.name][var_name].items():
+          assert value.shard_id == shard_id
+          assert value.num_shards == num_shards
+          assert value.global_shape == global_shape
 
     table_gha_variables[tb_cfg.name] = jax.tree.map(
         lambda x: tf.constant(x.data, dtype=tf.float32),

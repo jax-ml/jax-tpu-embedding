@@ -28,7 +28,12 @@ from tensorflow.python.tpu import tpu_embedding_v2_utils
 
 T = TypeVar('T')
 Nested = Union[T, Tuple[Any, ...], List[Any], Dict[str, Any], Iterable]
-NestedStruct = Union[Dict[str, Dict[str, T]], Mapping[str, Mapping[str, T]]]
+NestedStruct = Union[
+    Dict[str, Dict[str, T]],
+    Mapping[str, Mapping[str, T]],
+    Dict[str, Dict[str, Dict[str, T]]],
+    Mapping[str, Mapping[str, Mapping[str, T]]],
+]
 
 TensorType = Union[tf.Tensor, tf.SparseTensor]
 TensorProto = tensor_pb2.TensorProto

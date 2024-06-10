@@ -139,6 +139,49 @@ def create_tpu_embedding_config(
       cores_per_replica=cores_per_replica)
 
 
+def create_tpu_embedding_configs(
+    feature_configs: List[NestedFeatureConfig],
+    optimizer: Optional[Optimizer],
+    pipeline_execution_with_tensor_core: bool,
+    num_hosts: int,
+    num_tensor_cores: int,
+    cores_per_replica: Optional[int] = None,
+) -> List[TpuEmbeddingConfigSpecs]:
+  """Creates a list of TpuEmbeddingConfigSpecs.
+
+  Args:
+    feature_configs: A list of nested structure of feature configs.
+    optimizer: An instance of tpu embedding optimizer or None for inference.
+    pipeline_execution_with_tensor_core: If True, the TPU embedding computations
+      will overlap with the TensorCore computations (and hence will be one step
+      old). Set to True for improved performance.
+    num_hosts: number of hosts.
+    num_tensor_cores: number of tensor cores.
+    cores_per_replica: number of cores for one replica. If None, config would be
+      for data parallelism only, if not None config will be set for SPMD.
+
+  Raises:
+      ValueError: If optimizer is not one of tf.tpu.experimental.embedding.(SGD,
+      Adam or Adagrad) or None.
+
+  Returns:
+    A list of TpuEmbeddingConfig.
+  """
+
+  tpu_embedding_configs = []
+  for feature_config in feature_configs:
+    tpu_embedding_config = create_tpu_embedding_config(
+        feature_config,
+        optimizer,
+        pipeline_execution_with_tensor_core,
+        num_hosts,
+        num_tensor_cores,
+        cores_per_replica,
+    )
+    tpu_embedding_configs.append(tpu_embedding_config)
+  return tpu_embedding_configs
+
+
 def compute_batch_size_per_core(
     config_proto: TPUEmbeddingConfigurationProto) -> int:
   """Computes tensor core batch size as the gcd of all input feature batch size.

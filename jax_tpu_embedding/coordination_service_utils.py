@@ -65,12 +65,7 @@ def init_coordination_service(
   """
   coordination_service = None
   start_coordination_service = False
-  if borg_utils.is_running_on_forge() and shard_index == coordinator_shard:
-    start_coordination_service = True
-  elif (
-      borg_utils.is_running_on_borg()
-      and borg_utils.get_task_id() == coordinator_shard
-  ):
+  if shard_index == coordinator_shard:
     start_coordination_service = True
   if start_coordination_service:
     logging.info(

@@ -102,33 +102,84 @@ class DequeueOutput:
   deduplication_tuple: DeduplicationTuple
 
 
+def _get_single_feature_configs(
+    feature_configs: NestedFeatureConfig | List[NestedFeatureConfig],
+    index: int,
+) -> NestedFeatureConfig:
+  """Returns a single feature config.
+
+  Args:
+    feature_configs: A nested structure, or a list of nested structure, or a
+      standalone instance of `tf.tpu.experimental.embedding.FeatureConfig`
+      configs.
+    index: The index of the feature config to return.
+
+  Returns:
+    A single feature config.
+  """
+  if isinstance(feature_configs, list):
+    assert index >= 0 and index < len(feature_configs)
+    return feature_configs[index]
+  else:
+    return feature_configs
+
+
+def _get_single_table_config_list(
+    table_config_list: (
+        List[config_utils.TableConfig] | List[List[config_utils.TableConfig]]
+    ),
+    index: int,
+) -> Any:
+  """Returns a single table config list.
+
+  Args:
+    table_config_list: A list, or a list of list of config data for embedding
+      tables.
+    index: The index of the table config to return.
+
+  Returns:
+    A single table config list.
+  """
+  is_list_of_list = all(isinstance(l, list) for l in table_config_list)
+  if not table_config_list:
+    is_list_of_list = False
+  if is_list_of_list:
+    assert index >= 0 and index < len(table_config_list)
+    return table_config_list[index]
+  else:
+    return table_config_list
+
+
 class TPUEmbedding(object):
   """The TPUEmbedding mid level API for Jax users."""
 
   def __init__(
       self,
-      feature_configs: Optional[NestedFeatureConfig] = None,
-      optimizer: Optional[TPUEmbeddingOptimizer] = None,
+      feature_configs: (
+          NestedFeatureConfig | List[NestedFeatureConfig] | None
+      ) = None,
+      optimizer: TPUEmbeddingOptimizer | None = None,
       pipeline_execution_with_tensor_core: bool = False,
-      cores_per_replica: Optional[int] = None,
+      cores_per_replica: int | None = None,
       use_pathways: bool = False,
       num_shards: int | None = None,
       input_split_fn: Callable[..., dict[str, Any]] | None = None,
   ):
-    """Creates jax TPUEmbedding object.
+    """Creates JAX TPUEmbedding object.
 
     Args:
-      feature_configs: A nested structure or a standalone instance of
-        `tf.tpu.experimental.embedding.FeatureConfig` configs.
+      feature_configs: A nested structure, or a list of nested structure, or a
+        standalone instance of `tf.tpu.experimental.embedding.FeatureConfig`
+        configs.
       optimizer: An instance of one of embedding optimizers like
         `tf.tpu.experimental.embedding.SGD`,
         `tf.tpu.experimental.embedding.Adam` etc.
       pipeline_execution_with_tensor_core: If True, the TPU embedding
         computations will overlap with the TensorCore computations (and hence
         will be one step old). Set to True for improved performance.
-      cores_per_replica: default 1 using pmap. If it is greater than, it will
+      cores_per_replica: default 1 using pmap. If it is greater than 1, it will
         enable embedding engine spmd. Note that range of is [1,
-        total_tensor_cores], i.e. the maximum is all avaibale cores. For pjit
+        total_tensor_cores], i.e. the maximum is all available cores. For pjit
         users, always set this based on cores for each model replica. For pjit
         data parallelism user, it should be set as jax.device_count().
       use_pathways: Whether to use Pathways as the backend.
@@ -146,7 +197,7 @@ class TPUEmbedding(object):
       raise ValueError("`cores_per_replica = {}` is not allowed, legal range is"
                        "1 <= cores_per_replica <= {}".format(
                            cores_per_replica, jax.device_count()))
-    # Setup device specs.
+    # Setup device specs. Host ID is not meaningful when using Pathways.
     self._host_id = _get_task_id()
     self._num_hosts = num_shards if use_pathways else jax.process_count()
     self._num_tensor_cores = jax.device_count()
@@ -159,21 +210,40 @@ class TPUEmbedding(object):
     self._cores_per_replica = cores_per_replica
 
     # Create config_utils.TpuEmbeddingConfig instance.
-    self._tpu_embedding_config = config_utils.create_tpu_embedding_config(
-        feature_configs=self._feature_configs,
-        optimizer=self._optimizer,
-        pipeline_execution_with_tensor_core=self._pipeline_execution_with_tensor_core,
-        num_hosts=self._num_hosts,
-        num_tensor_cores=self._num_tensor_cores,
-        cores_per_replica=self._cores_per_replica)
+    if isinstance(self._feature_configs, list):
+      self._tpu_embedding_config = config_utils.create_tpu_embedding_configs(
+          feature_configs=self._feature_configs,
+          optimizer=self._optimizer,
+          pipeline_execution_with_tensor_core=self._pipeline_execution_with_tensor_core,
+          num_hosts=self._num_hosts,
+          num_tensor_cores=self._num_tensor_cores,
+          cores_per_replica=self._cores_per_replica,
+      )
+      # We assume the output shapes and dynamic learning rates are the same
+      # across all the tasks. This may be relaxed in the future.
+      self._output_shapes = self._tpu_embedding_config[0].output_shapes
+      self._dynamic_learning_rates = self._tpu_embedding_config[
+          0
+      ].dynamic_learning_rates
+      self._table_config_list = []
+      for tpu_embedding_config in self._tpu_embedding_config:
+        self._table_config_list.append(tpu_embedding_config.table_config_list)
+    else:
+      self._tpu_embedding_config = config_utils.create_tpu_embedding_config(
+          feature_configs=self._feature_configs,
+          optimizer=self._optimizer,
+          pipeline_execution_with_tensor_core=self._pipeline_execution_with_tensor_core,
+          num_hosts=self._num_hosts,
+          num_tensor_cores=self._num_tensor_cores,
+          cores_per_replica=self._cores_per_replica,
+      )
+      self._table_config_list = self._tpu_embedding_config.table_config_list
+      self._output_shapes = self._tpu_embedding_config.output_shapes
+      self._dynamic_learning_rates = (
+          self._tpu_embedding_config.dynamic_learning_rates
+      )
 
-    self._cores_per_replica = cores_per_replica
-    self._table_config_list = self._tpu_embedding_config.table_config_list
-    self._output_shapes = self._tpu_embedding_config.output_shapes
     self._output_shapes_ready = False
-    self._dynamic_learning_rates = (
-        self._tpu_embedding_config.dynamic_learning_rates
-        )
     self._is_initialized = False
     self._config_proto = None
     self._config_proto_ready = False
@@ -183,21 +253,28 @@ class TPUEmbedding(object):
     self._dedup_tuple_tensors = None
 
     # Create restore args for checkpoint restoration.
+    table_config_list = _get_single_table_config_list(
+        self._table_config_list, 0
+    )
     self._embedding_restore_args = (
         tpu_embedding_utils.create_tables_restore_args(
             shard_id=self._host_id,
             num_shards=self._num_hosts,
-            table_config_list=self._table_config_list,
+            table_config_list=table_config_list,
         )
     )
     # Create shape and dtype for checkpoint restoration.
     self._embedding_shape_dtypes = (
         tpu_embedding_utils.create_table_shape_dtype_struct(
-            table_config_list=self._table_config_list
+            table_config_list=table_config_list,
         )
     )
     self._use_pathways = use_pathways
-    self._num_local_devices = jax.local_device_count()
+    if use_pathways:
+      assert jax.device_count() % self._num_hosts == 0
+      self._num_local_devices = jax.device_count() // self._num_hosts
+    else:
+      self._num_local_devices = jax.local_device_count()
     self._tpu_topology = tpu_embedding_pathways_utils.get_tpu_topology()
     self._embedding_partitions = None
     self._embedding_partitions_ready = False
@@ -300,8 +377,12 @@ class TPUEmbedding(object):
     Raises:
       RuntimeError: If tpu embedding is already initialized on TPU.
     """
+    if isinstance(self._tpu_embedding_config, list):
+      tpu_embedding_config = self._tpu_embedding_config[0]
+    else:
+      tpu_embedding_config = self._tpu_embedding_config
     self._config_proto = config_utils.create_config_proto(
-        self._tpu_embedding_config,
+        tpu_embedding_config,
         self._use_pathways and not start_remote_python,
     )
     self._config_proto_ready = True
@@ -427,8 +508,11 @@ class TPUEmbedding(object):
       assert embedding_manager.embedding_tables_initialized()
       embedding_manager.load_embedding_tables()
     else:
+      table_config_list = _get_single_table_config_list(
+          self._table_config_list, self._host_id
+      )
       tpu_embedding_utils.load_embedding_tables_impl(
-          table_config_list=self._table_config_list,
+          table_config_list=table_config_list,
           config_proto_str=self._config_proto.SerializeToString(),
           host_id=self._host_id,
           num_hosts=self._num_hosts,
@@ -457,14 +541,22 @@ class TPUEmbedding(object):
         is only applicable if `start_remote_python` is True.
 
     Returns:
-      A dict of dict of list of tensors. The outer dict is indexed by table's
-      name. The inner dict is indexed by slot names and the final list is the
-      list of per host tensors.
+      Either a dict of dict of list of tensors/numpy arrays/global host arrays.
+      The outer dict is indexed by table's name. The inner dict is indexed by
+      slot names and the final list is the list of per host data, or a dict
+      of dict of dict of tensors/numpy arrays/global host arrays, with the third
+      dict having shard number as the key and the per host data as the value.
     """
     if start_remote_python:
       assert embedding_manager is not None
       assert embedding_manager.embedding_tables_initialized()
       retrieved_tables = embedding_manager.retrieve_embedding_tables()
+      for outer_key, value in retrieved_tables.items():
+        for inner_key, inner_value in value.items():
+          sharded_table = {}
+          for shard_id in range(self._num_hosts):
+            sharded_table[f"shard_{shard_id}"] = inner_value[shard_id]
+          retrieved_tables[outer_key][inner_key] = sharded_table
     else:
       retrieved_tables = tpu_embedding_utils.retrieve_embedding_tables_impl(
           table_config_list=self._table_config_list,
@@ -472,6 +564,7 @@ class TPUEmbedding(object):
           host_id=self._host_id,
           num_hosts=self._num_hosts,
       )
+      retrieved_tables = dict(retrieved_tables)
 
     if not as_gha:
       return retrieved_tables
@@ -479,38 +572,51 @@ class TPUEmbedding(object):
     def _create_gha(
         data: Union[TensorType, np.ndarray, jax.Array],
         global_shape: Tuple[int, int],
+        shard_id: int,
     ):
       if isinstance(data, TensorType):
         return GlobalHostArray(
             data=data.numpy(),
             global_shape=global_shape,
-            shard_id=self._host_id,
+            shard_id=shard_id,
             num_shards=self._num_hosts,
         )
       elif isinstance(data, np.ndarray):
         return GlobalHostArray(
             data=data,
             global_shape=global_shape,
-            shard_id=self._host_id,
+            shard_id=shard_id,
             num_shards=self._num_hosts,
         )
       else:
         return GlobalHostArray(
             data=np.asarray(data),
             global_shape=global_shape,
-            shard_id=self._host_id,
+            shard_id=shard_id,
             num_shards=self._num_hosts,
         )
 
-    retrieved_tables = dict(retrieved_tables)
-    for tb_cfg in self._table_config_list:
+    table_config_list = _get_single_table_config_list(
+        self._table_config_list, 0
+    )
+    for tb_cfg in table_config_list:
+      global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
       if self._use_pathways:
-        global_shape = (self._num_hosts, tb_cfg.vocabulary_size, tb_cfg.dim)
+        sharded_gha = {}
+        for key, value in retrieved_tables[tb_cfg.name].items():
+          sharded_gha[key] = {}
+          for shard, data in value.items():
+            pos = shard.rfind("_")
+            shard_id = int(shard[pos + 1 :])
+            sharded_gha[key][shard] = _create_gha(data, global_shape, shard_id)
+        retrieved_tables[tb_cfg.name] = sharded_gha
       else:
-        global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
-      gha_creator = functools.partial(_create_gha, global_shape=global_shape)
-      retrieved_tables[tb_cfg.name] = jax.tree.map(
-          gha_creator, retrieved_tables[tb_cfg.name])
+        gha_creator = functools.partial(
+            _create_gha, global_shape=global_shape, shard_id=self._host_id
+        )
+        retrieved_tables[tb_cfg.name] = jax.tree.map(
+            gha_creator, retrieved_tables[tb_cfg.name]
+        )
 
     return retrieved_tables
 
@@ -541,11 +647,11 @@ class TPUEmbedding(object):
         dedup_tuple_integers: Optional[tf.Tensor] = None,
         dedup_tuple_floats: Optional[tf.Tensor] = None,
     ):
-      tf.nest.assert_same_structure(self._feature_configs, gradients)
+      feature_configs = _get_single_feature_configs(self._feature_configs, 0)
+      tf.nest.assert_same_structure(feature_configs, gradients)
       updated_gradients = []
       gradients_with_names, _ = input_utils.tree_flatten_with_names(gradients)
-      flatten_feature_configs, _ = jax.tree_util.tree_flatten(
-          self._feature_configs)
+      flatten_feature_configs, _ = jax.tree_util.tree_flatten(feature_configs)
       for (path,
            gradient), feature, output_shape in zip(gradients_with_names,
                                                    flatten_feature_configs,
@@ -719,7 +825,8 @@ class TPUEmbedding(object):
         _add_key_attr(activations[0].op, name)
 
       # Pack the list back into the same nested structure as the features.
-      return tf.nest.pack_sequence_as(self._feature_configs, activations)
+      feature_configs = _get_single_feature_configs(self._feature_configs, 0)
+      return tf.nest.pack_sequence_as(feature_configs, activations)
 
     return jax2tf.call_tf(_dequeue_fn, has_side_effects=False)(
         self._dedup_tuple_tensors.integers, self._dedup_tuple_tensors.floats
@@ -748,7 +855,7 @@ class TPUEmbedding(object):
       is_training: Defaults to `True`. If `False`, enqueue the batch as
         inference batch (forward pass only). Do not call `apply_gradients` when
         this is `False` as this may lead to a deadlock.
-       name: An optional name for the underlying op.
+      name: An optional name for the underlying op.
     """
     if not self._is_initialized:
       # Use output shapes inference mode when feature_configs did not provide
@@ -758,10 +865,15 @@ class TPUEmbedding(object):
       # For example, if we expect output feature activation shape is [B, N, E]
       # where E is embedding dimension, the output shape should be [B, N].
 
+      feature_configs = _get_single_feature_configs(self._feature_configs, 0)
       inferred_output_shapes = input_utils.infer_output_shapes(
-          features[0], self._feature_configs
+          features[0], feature_configs
       )
-      self._tpu_embedding_config.output_shapes = inferred_output_shapes
+      if isinstance(self._tpu_embedding_config, list):
+        for i in range(0, len(self._tpu_embedding_config)):
+          self._tpu_embedding_config[i].output_shapes = inferred_output_shapes
+      else:
+        self._tpu_embedding_config.output_shapes = inferred_output_shapes
       self._output_shapes = inferred_output_shapes
       self._output_shapes_ready = True
       logging.info(
@@ -798,11 +910,12 @@ class TPUEmbedding(object):
                                  str, config_utils.FeatureConfig]],
                              device_ordinal: int,
                              mode_override: str) -> tf.Operation:
-      """Generate correspoding enqueue op for given device."""
+      """Generate corresponding enqueue op for given device."""
       # Combiners of each table, listed in the same order as table configs.
-      combiners = [
-          table_config.combiner for table_config in self._table_config_list
-      ]
+      table_config_list = _get_single_table_config_list(
+          self._table_config_list, 0
+      )
+      combiners = [table_config.combiner for table_config in table_config_list]
 
       # sample_indices for sparse.
       enqueue_inputs = input_utils.prepare_data_to_enqueue(
@@ -818,8 +931,9 @@ class TPUEmbedding(object):
           combiners=combiners)
 
     mode_override = "train" if is_training else "inference"
+    feature_configs = _get_single_feature_configs(self._feature_configs, 0)
     flat_feature_with_names, configs_treedef = (
-        input_utils.tree_flatten_with_names(self._feature_configs)
+        input_utils.tree_flatten_with_names(feature_configs)
     )
     for device_id in range(self._num_local_devices):
       flat_inputs, inputs_treedef = jax.tree_util.tree_flatten(
@@ -867,7 +981,9 @@ class TPUEmbedding(object):
     return self._hbm_buffers_config
 
   @property
-  def feature_configs(self) -> Optional[NestedFeatureConfig]:
+  def feature_configs(
+      self,
+  ) -> Optional[NestedFeatureConfig] | Optional[List[NestedFeatureConfig]]:
     return self._feature_configs
 
   @property
@@ -887,7 +1003,9 @@ class TPUEmbedding(object):
     return self._embedding_shape_dtypes
 
   @property
-  def table_config_list(self) -> List[config_utils.TableConfig]:
+  def table_config_list(
+      self,
+  ) -> List[config_utils.TableConfig] | List[List[config_utils.TableConfig]]:
     return self._table_config_list
 
   @property
@@ -921,7 +1039,11 @@ class TPUEmbedding(object):
     self._dedup_tuple_mask = dedup_tuple_mask
 
   def set_output_shapes(self, output_shapes: List[config_utils.OutputShape]):
-    self._tpu_embedding_config.output_shapes = output_shapes
+    if isinstance(self._tpu_embedding_config, list):
+      for i in range(0, len(self._tpu_embedding_config)):
+        self._tpu_embedding_config[i].output_shapes = output_shapes
+    else:
+      self._tpu_embedding_config.output_shapes = output_shapes
     self._output_shapes = output_shapes
 
   def set_embedding_partitions(self, embedding_partitions: bytes):
