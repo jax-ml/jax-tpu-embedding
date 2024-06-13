@@ -102,28 +102,6 @@ class DequeueOutput:
   deduplication_tuple: DeduplicationTuple
 
 
-def _get_single_feature_configs(
-    feature_configs: NestedFeatureConfig | List[NestedFeatureConfig],
-    index: int,
-) -> NestedFeatureConfig:
-  """Returns a single feature config.
-
-  Args:
-    feature_configs: A nested structure, or a list of nested structure, or a
-      standalone instance of `tf.tpu.experimental.embedding.FeatureConfig`
-      configs.
-    index: The index of the feature config to return.
-
-  Returns:
-    A single feature config.
-  """
-  if isinstance(feature_configs, list):
-    assert index >= 0 and index < len(feature_configs)
-    return feature_configs[index]
-  else:
-    return feature_configs
-
-
 def _get_single_table_config_list(
     table_config_list: (
         List[config_utils.TableConfig] | List[List[config_utils.TableConfig]]
@@ -140,14 +118,11 @@ def _get_single_table_config_list(
   Returns:
     A single table config list.
   """
-  is_list_of_list = all(isinstance(l, list) for l in table_config_list)
-  if not table_config_list:
-    is_list_of_list = False
-  if is_list_of_list:
-    assert index >= 0 and index < len(table_config_list)
-    return table_config_list[index]
-  else:
-    return table_config_list
+  for table_config in table_config_list:
+    if isinstance(table_config, config_utils.TableConfig):
+      return table_config_list
+  assert index >= 0 and index < len(table_config_list)
+  return table_config_list[index]
 
 
 class TPUEmbedding(object):
@@ -170,7 +145,8 @@ class TPUEmbedding(object):
     Args:
       feature_configs: A nested structure, or a list of nested structure, or a
         standalone instance of `tf.tpu.experimental.embedding.FeatureConfig`
-        configs.
+        configs. It must be a list of nested structure if using Pathways (see 
+        below); and otherwise it must be the others.
       optimizer: An instance of one of embedding optimizers like
         `tf.tpu.experimental.embedding.SGD`,
         `tf.tpu.experimental.embedding.Adam` etc.
@@ -210,7 +186,7 @@ class TPUEmbedding(object):
     self._cores_per_replica = cores_per_replica
 
     # Create config_utils.TpuEmbeddingConfig instance.
-    if isinstance(self._feature_configs, list):
+    if use_pathways:
       self._tpu_embedding_config = config_utils.create_tpu_embedding_configs(
           feature_configs=self._feature_configs,
           optimizer=self._optimizer,
@@ -656,7 +632,11 @@ class TPUEmbedding(object):
         dedup_tuple_integers: Optional[tf.Tensor] = None,
         dedup_tuple_floats: Optional[tf.Tensor] = None,
     ):
-      feature_configs = _get_single_feature_configs(self._feature_configs, 0)
+      feature_configs = (
+          self._feature_configs
+          if not self._use_pathways
+          else self._feature_configs[0]
+      )
       tf.nest.assert_same_structure(feature_configs, gradients)
       updated_gradients = []
       gradients_with_names, _ = input_utils.tree_flatten_with_names(gradients)
@@ -834,7 +814,11 @@ class TPUEmbedding(object):
         _add_key_attr(activations[0].op, name)
 
       # Pack the list back into the same nested structure as the features.
-      feature_configs = _get_single_feature_configs(self._feature_configs, 0)
+      feature_configs = (
+          self._feature_configs
+          if not self._use_pathways
+          else self._feature_configs[0]
+      )
       return tf.nest.pack_sequence_as(feature_configs, activations)
 
     return jax2tf.call_tf(_dequeue_fn, has_side_effects=False)(
@@ -874,7 +858,11 @@ class TPUEmbedding(object):
       # For example, if we expect output feature activation shape is [B, N, E]
       # where E is embedding dimension, the output shape should be [B, N].
 
-      feature_configs = _get_single_feature_configs(self._feature_configs, 0)
+      feature_configs = (
+          self._feature_configs
+          if not self._use_pathways
+          else self._feature_configs[0]
+      )
       inferred_output_shapes = input_utils.infer_output_shapes(
           features[0], feature_configs
       )
@@ -940,7 +928,11 @@ class TPUEmbedding(object):
           combiners=combiners)
 
     mode_override = "train" if is_training else "inference"
-    feature_configs = _get_single_feature_configs(self._feature_configs, 0)
+    feature_configs = (
+        self._feature_configs
+        if not self._use_pathways
+        else self._feature_configs[0]
+    )
     flat_feature_with_names, configs_treedef = (
         input_utils.tree_flatten_with_names(feature_configs)
     )
