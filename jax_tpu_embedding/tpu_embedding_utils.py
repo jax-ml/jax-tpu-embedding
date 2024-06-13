@@ -284,13 +284,15 @@ def create_tables_restore_args(
     shard_id: int,
     num_shards: int,
     table_config_list: List[TableConfig],
+    create_all_shards: bool = False,
 ) -> NestedStruct[RestoreArgs]:
-  """Creates RestoreArgs for all table and slot variables.
+  """Creates RestoreArgs for tables and slot variables.
 
   Args:
     shard_id: shard id of variables to create.
     num_shards: total number of shards.
     table_config_list: A list of all table config.
+    create_all_shards: If True, create RestoreArgs for all shards.
 
   Returns:
     A nested dictionary of checkpoint.RestoreArgs.
@@ -298,25 +300,42 @@ def create_tables_restore_args(
 
   embed_restore_args = {}
   for tb_cfg in table_config_list:
-    restore_arg = RestoreArgs(
-        restore_type=GlobalHostArray,
-        shard_id=shard_id,
-        num_shards=num_shards)
-
-    embed_restore_args[tb_cfg.name] = {'parameters': restore_arg}
-    for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
-      embed_restore_args[tb_cfg.name][slot_name] = restore_arg
+    if create_all_shards:
+      embed_restore_args[tb_cfg.name] = {'parameters': {}}
+      for shard_id in range(num_shards):
+        restore_arg = RestoreArgs(
+            restore_type=GlobalHostArray,
+            shard_id=shard_id,
+            num_shards=num_shards,
+        )
+        embed_restore_args[tb_cfg.name]['parameters'][
+            f'shard_{shard_id}'
+        ] = restore_arg
+        for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
+          embed_restore_args[tb_cfg.name][slot_name][
+              f'shard_{shard_id}'
+          ] = restore_arg
+    else:
+      restore_arg = RestoreArgs(
+          restore_type=GlobalHostArray, shard_id=shard_id, num_shards=num_shards
+      )
+      embed_restore_args[tb_cfg.name] = {'parameters': restore_arg}
+      for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
+        embed_restore_args[tb_cfg.name][slot_name] = restore_arg
 
   return embed_restore_args
 
 
 def create_table_shape_dtype_struct(
     table_config_list: List[TableConfig],
+    num_shards: int | None = None,
 ) -> NestedStruct[jax.ShapeDtypeStruct]:
   """Creates RestoreArgs for all table and slot variables.
 
   Args:
     table_config_list: A list of all table config.
+    num_shards: If not None, it is the number of shards of table which stays in
+      the leaf nodes of the shape dtype struct.
 
   Returns:
     A nested dictionary of jax.ShapeDtyeStruct.
@@ -326,7 +345,14 @@ def create_table_shape_dtype_struct(
     global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
 
     shape_and_dtype = jax.ShapeDtypeStruct(global_shape, jnp.float32)
-    embed_shape_dtypes[tb_cfg.name] = {'parameters': shape_and_dtype}
+    if num_shards is not None:
+      embed_shape_dtypes = {tb_cfg.name: {'parameters': {}}}
+      for shard_id in range(num_shards):
+        embed_shape_dtypes[tb_cfg.name]['parameters'][
+            f'shard_{shard_id}'
+        ] = shape_and_dtype
+    else:
+      embed_shape_dtypes[tb_cfg.name] = {'parameters': shape_and_dtype}
     for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
       embed_shape_dtypes[tb_cfg.name][slot_name] = shape_and_dtype
 

@@ -261,14 +261,23 @@ class TPUEmbedding(object):
             shard_id=self._host_id,
             num_shards=self._num_hosts,
             table_config_list=table_config_list,
+            create_all_shards=use_pathways,
         )
     )
     # Create shape and dtype for checkpoint restoration.
-    self._embedding_shape_dtypes = (
-        tpu_embedding_utils.create_table_shape_dtype_struct(
-            table_config_list=table_config_list,
-        )
-    )
+    if use_pathways:
+      self._embedding_shape_dtypes = (
+          tpu_embedding_utils.create_table_shape_dtype_struct(
+              table_config_list=table_config_list,
+              num_shards=self._num_hosts,
+          )
+      )
+    else:
+      self._embedding_shape_dtypes = (
+          tpu_embedding_utils.create_table_shape_dtype_struct(
+              table_config_list=table_config_list,
+          )
+      )
     self._use_pathways = use_pathways
     if use_pathways:
       assert jax.device_count() % self._num_hosts == 0
