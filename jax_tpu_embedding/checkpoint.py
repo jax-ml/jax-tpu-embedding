@@ -181,9 +181,7 @@ class GlobalHostArrayHandler(TypeHandler):
           ts.open(
               ts.Spec(tspec),
               open=True,
-              context=ocp.type_handlers.get_ts_context(
-                  use_ocdbt=info.is_ocdbt_checkpoint
-              ),
+              context=info.ts_context,
           )
       )
     tensorstores = await asyncio.gather(*open_ops)
@@ -218,9 +216,8 @@ class GlobalHostArrayHandler(TypeHandler):
             arg=arg,
         )
 
-        ts_context = ocp.type_handlers.get_ts_context(info.is_ocdbt_checkpoint)
         tspec = ocp.type_handlers.get_cast_tspec_serialize(tspec, value, arg)
-        serialize_ops.append(_serialize(value, tspec, ts_context))
+        serialize_ops.append(_serialize(value, tspec, info.ts_context))
       return await asyncio.gather(*serialize_ops)
 
     return await _serialize_values()
@@ -251,9 +248,8 @@ class GlobalHostArrayHandler(TypeHandler):
             info, use_ocdbt=info.is_ocdbt_checkpoint
         )
         tspec = ocp.type_handlers.get_cast_tspec_deserialize(tspec, arg)
-        ts_context = ocp.type_handlers.get_ts_context(info.is_ocdbt_checkpoint)
         deserialize_ops.append(
-            _deserialize(gha_restore_args, tspec, ts_context)
+            _deserialize(gha_restore_args, tspec, info.ts_context)
         )
       return await asyncio.gather(*deserialize_ops)
 
