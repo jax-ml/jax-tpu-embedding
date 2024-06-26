@@ -260,6 +260,7 @@ def create_table_variables_from_gha(
 
     variable_names = ['parameters'] + tb_cfg.optimizer._slot_names()  # pylint: disable=protected-access
     for var_name in variable_names:
+      assert table_gha_variables[tb_cfg.name][var_name] is not None
       if isinstance(
           table_gha_variables[tb_cfg.name][var_name], GlobalHostArray
       ):
