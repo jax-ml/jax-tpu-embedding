@@ -302,20 +302,17 @@ def create_tables_restore_args(
   embed_restore_args = {}
   for tb_cfg in table_config_list:
     if create_all_shards:
-      embed_restore_args[tb_cfg.name] = {'parameters': {}}
-      for shard_id in range(num_shards):
-        restore_arg = RestoreArgs(
-            restore_type=GlobalHostArray,
-            shard_id=shard_id,
-            num_shards=num_shards,
-        )
-        embed_restore_args[tb_cfg.name]['parameters'][
-            f'shard_{shard_id}'
-        ] = restore_arg
-        for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
-          embed_restore_args[tb_cfg.name][slot_name][
-              f'shard_{shard_id}'
-          ] = restore_arg
+      embed_restore_args[tb_cfg.name] = {}
+      for slot_name in tb_cfg.optimizer._slot_names():  # pylint: disable=protected-access
+        embed_restore_args[tb_cfg.name][slot_name] = {}
+        for shard_id in range(num_shards):
+          embed_restore_args[tb_cfg.name][slot_name][f'shard_{shard_id}'] = (
+              RestoreArgs(
+                  restore_type=GlobalHostArray,
+                  shard_id=shard_id,
+                  num_shards=num_shards,
+              )
+          )
     else:
       restore_arg = RestoreArgs(
           restore_type=GlobalHostArray, shard_id=shard_id, num_shards=num_shards
