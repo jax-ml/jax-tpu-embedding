@@ -20,7 +20,6 @@ from absl import flags
 from absl import logging
 from jax._src import distributed
 from jax._src.lib import xla_extension
-from jax_tpu_embedding.google import borg_utils
 import tensorflow as tf
 
 from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
@@ -31,7 +30,7 @@ DistributedRuntimeService = xla_extension.DistributedRuntimeService
 
 _COORDINATION_SERVICE_TIMEOUT = flags.DEFINE_integer(
     "coordination_service_timeout",
-    100,
+    1000,
     "The timeout value in seconds for the API of getting key-value pair in"
     " Coordination Service.",
 )
