@@ -232,8 +232,8 @@ class TPUEmbedding(object):
     table_config_list = _get_single_table_config_list(
         self._table_config_list, 0
     )
-    self._embedding_restore_args = (
-        tpu_embedding_utils.create_tables_restore_args(
+    self._embedding_restore_args_gha = (
+        tpu_embedding_utils.create_tables_global_host_array_restore_args(
             shard_id=self._host_id,
             num_shards=self._num_hosts,
             table_config_list=table_config_list,
@@ -469,7 +469,9 @@ class TPUEmbedding(object):
 
   def load_embedding_tables(
       self,
-      embedding_variables: Optional[NestedStruct[GlobalHostArray]] = None,
+      embedding_variables: Optional[
+          NestedStruct[Union[GlobalHostArray, jax.Array]]
+      ] = None,
       start_remote_python: bool = False,
       embedding_manager: (
           tpu_embedding_pathways_utils.EmbeddingManager | None
@@ -482,8 +484,8 @@ class TPUEmbedding(object):
 
     Args:
       embedding_variables: If not None, load variables of embeddings in
-        GlobalHostArray; if None, load embedding variables created by
-        initializers.
+        GlobalHostArray or jax.Array; if None, load embedding variables created
+        by initializers.
       start_remote_python: See the comment in `initialize_tpu_embedding`.
       embedding_manager: The object to manage the remote Python execution. This
         is only applicable if `start_remote_python` is True.
@@ -504,9 +506,69 @@ class TPUEmbedding(object):
           embedding_variables=embedding_variables,
       )
 
+  def _create_jax_array(
+      self,
+      data: tf.Tensor,
+      global_shape: Tuple[int, int],
+  ) -> jax.Array:
+    if jax.local_device_count(backend="cpu") != 1:
+      raise ValueError(
+          "Only support when local_device_count(backend='cpu') == 1 but got"
+          f" local_device_count={jax.local_device_count(backend='cpu')}"
+      )
+
+    local_array = jax.device_put(
+        data.numpy(), jax.local_devices(backend="cpu")[0]
+    )
+
+    # make sure the local shape is evenly dividing the global shape
+    if (np.asarray(global_shape) / local_array.shape).prod(
+        dtype=np.int64
+    ) != self._num_hosts:
+      raise ValueError(
+          f"The local_array.shape={local_array.shape} doesn't divide the"
+          f" global_shape={global_shape} into {self._num_hosts} shards."
+      )
+
+    global_arr = jax.make_array_from_single_device_arrays(
+        shape=global_shape,
+        sharding=self._embedding_sharding(),
+        arrays=[local_array],
+    )
+    return global_arr
+
+  def _create_gha(
+      self,
+      data: Union[TensorType, np.ndarray, jax.Array],
+      global_shape: Tuple[int, int],
+      shard_id: int,
+  ) -> GlobalHostArray:
+    if isinstance(data, TensorType):
+      return GlobalHostArray(
+          data=data.numpy(),
+          global_shape=global_shape,
+          shard_id=shard_id,
+          num_shards=self._num_hosts,
+      )
+    elif isinstance(data, np.ndarray):
+      return GlobalHostArray(
+          data=data,
+          global_shape=global_shape,
+          shard_id=shard_id,
+          num_shards=self._num_hosts,
+      )
+    else:
+      return GlobalHostArray(
+          data=np.asarray(data),
+          global_shape=global_shape,
+          shard_id=shard_id,
+          num_shards=self._num_hosts,
+      )
+
   def retrieve_embedding_tables(
       self,
       as_gha=False,
+      as_jax_array=False,
       start_remote_python: bool = False,
       embedding_manager: (
           tpu_embedding_pathways_utils.EmbeddingManager | None
@@ -515,15 +577,20 @@ class TPUEmbedding(object):
       NestedStruct[np.ndarray],
       NestedStruct[TensorType],
       NestedStruct[GlobalHostArray],
+      NestedStruct[jax.Array],
   ]:
     """Retrieve tables variables from embedding engine.
 
     Args:
       as_gha: If True, converts returned tables and slots to GlobalHostArray to
-        save in Orbax checkpoints.
+        save in Orbax checkpoints. *
+      as_jax_array: If True, converts returned tables and slots to jax.Array to
+        save in Orbax checkpoints. *
       start_remote_python: See the comment in `initialize_tpu_embedding`.
       embedding_manager: The object to manage the remote Python execution. This
         is only applicable if `start_remote_python` is True.
+
+    * Note that only one of `as_gha` and `as_jax_array` can be True.
 
     Returns:
       Either a dict of dict of list of tensors/numpy arrays/global host arrays.
@@ -551,56 +618,47 @@ class TPUEmbedding(object):
       )
       retrieved_tables = dict(retrieved_tables)
 
-    if not as_gha:
+    if not as_gha and not as_jax_array:
       return retrieved_tables
 
-    def _create_gha(
-        data: Union[TensorType, np.ndarray, jax.Array],
-        global_shape: Tuple[int, int],
-        shard_id: int,
-    ):
-      if isinstance(data, TensorType):
-        return GlobalHostArray(
-            data=data.numpy(),
-            global_shape=global_shape,
-            shard_id=shard_id,
-            num_shards=self._num_hosts,
-        )
-      elif isinstance(data, np.ndarray):
-        return GlobalHostArray(
-            data=data,
-            global_shape=global_shape,
-            shard_id=shard_id,
-            num_shards=self._num_hosts,
-        )
-      else:
-        return GlobalHostArray(
-            data=np.asarray(data),
-            global_shape=global_shape,
-            shard_id=shard_id,
-            num_shards=self._num_hosts,
-        )
+    if as_gha and as_jax_array:
+      raise ValueError("as_gha and as_jax_array cannot be both True.")
 
     table_config_list = _get_single_table_config_list(
         self._table_config_list, 0
     )
+
     for tb_cfg in table_config_list:
       global_shape = (tb_cfg.vocabulary_size, tb_cfg.dim)
       if self._use_pathways:
-        sharded_gha = {}
+        if as_jax_array:
+          raise NotImplementedError(
+              "as_jax_array is not supported in pathways."
+          )
+        sharded_array = {}
         for key, value in retrieved_tables[tb_cfg.name].items():
-          sharded_gha[key] = {}
+          sharded_array[key] = {}
           for shard, data in value.items():
             pos = shard.rfind("_")
             shard_id = int(shard[pos + 1 :])
-            sharded_gha[key][shard] = _create_gha(data, global_shape, shard_id)
-        retrieved_tables[tb_cfg.name] = sharded_gha
+            sharded_array[key][shard] = self._create_gha(
+                data, global_shape, shard_id
+            )
+        retrieved_tables[tb_cfg.name] = sharded_array
       else:
-        gha_creator = functools.partial(
-            _create_gha, global_shape=global_shape, shard_id=self._host_id
-        )
+        if as_gha:
+          array_creator = functools.partial(
+              self._create_gha,
+              global_shape=global_shape,
+              shard_id=self._host_id,
+          )
+        else:
+          array_creator = functools.partial(
+              self._create_jax_array, global_shape=global_shape
+          )
+
         retrieved_tables[tb_cfg.name] = jax.tree.map(
-            gha_creator, retrieved_tables[tb_cfg.name]
+            array_creator, retrieved_tables[tb_cfg.name]
         )
 
     return retrieved_tables
@@ -961,6 +1019,25 @@ class TPUEmbedding(object):
       if name is not None:
         _add_key_attr(enqueue_op, name)
 
+  @functools.cache
+  def _embedding_sharding(self):
+    if self._use_pathways:
+      return None
+    else:
+      return tpu_embedding_utils.get_embedding_sharding(
+          local_shard_id=self._host_id
+      )
+
+  @functools.cache
+  def get_jax_array_restore_args(self):
+    if self._use_pathways:
+      return None
+    else:
+      return tpu_embedding_utils.create_tables_jax_array_restore_args(
+          sharding=self._embedding_sharding(),
+          table_config_list=self._table_config_list,
+      )
+
   @property
   def config_proto(self) -> config_utils.TPUEmbeddingConfigurationProto:
     return self._config_proto  # pytype: disable=attribute-error
@@ -997,7 +1074,7 @@ class TPUEmbedding(object):
 
   @property
   def restore_args(self) -> NestedStruct[pytype_utils.RestoreArgs]:
-    return self._embedding_restore_args
+    return self._embedding_restore_args_gha
 
   @property
   def shape_and_dtypes(self) -> NestedStruct[jax.ShapeDtypeStruct]:
