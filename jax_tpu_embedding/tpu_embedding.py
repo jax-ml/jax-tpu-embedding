@@ -287,7 +287,7 @@ class TPUEmbedding(object):
         new_config_str,
         self._num_hosts,
     )
-    if embedding_manager.is_initialized()[0]:
+    if np.array(embedding_manager.is_initialized())[0]:
       raise RuntimeError(
           "TPU is already initialized for embeddings. This may be caused by "
           "using multiple TPUEmbedding instances in a TPU scope which is "
@@ -607,7 +607,12 @@ class TPUEmbedding(object):
         for inner_key, inner_value in value.items():
           sharded_table = {}
           for shard_id in range(self._num_hosts):
-            sharded_table[f"shard_{shard_id}"] = inner_value[shard_id]
+            if jax.config.jax_pmap_no_rank_reduction:
+              sharded_table[f"shard_{shard_id}"] = np.array(
+                  inner_value[slice(shard_id, shard_id + 1)]
+              )[0]
+            else:
+              sharded_table[f"shard_{shard_id}"] = inner_value[shard_id]
           retrieved_tables[outer_key][inner_key] = sharded_table
     else:
       retrieved_tables = tpu_embedding_utils.retrieve_embedding_tables_impl(
