@@ -53,8 +53,6 @@ def init_tpu_system(enable_megacore=False):
   tf.experimental.dtensor.initialize_accelerator_system(
       enable_coordination_service=False,
       experimental_enable_megcore=enable_megacore)
-  # TODO(b/259131699): delete this when add mlir bridge support.
-  tf.config.experimental.disable_mlir_bridge()
 
 
 def is_tpu_use_tfrt() -> bool:
