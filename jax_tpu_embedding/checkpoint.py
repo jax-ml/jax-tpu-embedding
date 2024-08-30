@@ -28,7 +28,7 @@ import tensorstore as ts
 
 
 Index = tuple[slice, ...]
-ParamInfo = ocp.pytree_checkpoint_handler.ParamInfo
+ParamInfo = ocp.type_handlers.ParamInfo
 TypeHandler = ocp.type_handlers.TypeHandler
 Shape = Union[tuple[int, int], tuple]
 
