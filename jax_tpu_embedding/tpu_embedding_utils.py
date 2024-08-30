@@ -22,6 +22,7 @@ from absl import logging
 import jax
 from jax.experimental import multihost_utils
 from jax.experimental import jax2tf
+import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding import config_utils
 from jax_tpu_embedding import pytype_utils
@@ -63,6 +64,13 @@ def is_tpu_use_tfrt() -> bool:
 def shutdown_tpu_system():
   """Shuts down the TPU system."""
   context.async_wait()
+
+  # TODO(b/363278977): Maybe clean-up any repeated invocations of
+  # `clear_backends()` before this function was called.
+  # JAX runtime may have TPU program handles that will be invalid if TPU system
+  # is shutdown. Thus, we clear JAX backends to avoid accidental illegal access.
+  logging.info('Clearing JAX backends before shutting down TPU system.')
+  jex.backend.clear_backends()
 
   @tf.function
   def _shutdown_tpu_system():
