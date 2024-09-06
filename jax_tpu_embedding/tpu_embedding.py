@@ -778,7 +778,7 @@ class TPUEmbedding(object):
       if name is not None:
         _add_key_attr(op, name)
 
-    jax2tf.call_tf(_gradients_fn, has_side_effects=False)(
+    jax2tf.call_tf(_gradients_fn, has_side_effects=True)(
         gradients,
         self._dedup_tuple_tensors.integers,
         self._dedup_tuple_tensors.floats,
@@ -828,7 +828,7 @@ class TPUEmbedding(object):
       tuple_floats = jnp.zeros([1], dtype=jnp.float32)
     else:
       tuple_integers, tuple_floats = jax2tf.call_tf(
-          _dedup_fn, has_side_effects=False
+          _dedup_fn, has_side_effects=True
       )()
 
     self._dedup_tuple_tensors = DeduplicationTuple(
@@ -884,7 +884,7 @@ class TPUEmbedding(object):
       )
       return tf.nest.pack_sequence_as(feature_configs, activations)
 
-    return jax2tf.call_tf(_dequeue_fn, has_side_effects=False)(
+    return jax2tf.call_tf(_dequeue_fn, has_side_effects=True)(
         self._dedup_tuple_tensors.integers, self._dedup_tuple_tensors.floats
     )
 
