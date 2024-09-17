@@ -166,7 +166,7 @@ def build_embedding_configs(batch_size_per_device: int,
 
 
 def create_global_mesh(mesh_shape: Tuple[int, ...],
-                       axis_names: Sequence[jax.pxla.MeshAxisName]) -> Mesh:
+                       axis_names: Sequence[jax.pxla.MeshAxisName]) -> Mesh:  # pytype: disable=module-attr
   size = np.prod(mesh_shape)
   if len(jax.devices()) < size:
     raise ValueError(f'Test requires {size} global devices.')
