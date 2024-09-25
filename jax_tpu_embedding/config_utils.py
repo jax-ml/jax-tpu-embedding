@@ -26,6 +26,11 @@ import tensorflow as tf
 
 LearningRate = Union[float, Callable[[], float]]
 Optimizer = pytype_utils.TPUEmbeddingOptimizer
+AdagradMomentumOptimizer = pytype_utils.TPUEmbeddingOptimizerAdagradMomentum
+AdagradOptimizer = pytype_utils.TPUEmbeddingOptimizerAdagrad
+AdamOptimizer = pytype_utils.TPUEmbeddingOptimizerAdam
+FTRLOptimizer = pytype_utils.TPUEmbeddingOptimizerFTRL
+SGDOptimizer = pytype_utils.TPUEmbeddingOptimizerSGD
 
 TableConfig = pytype_utils.TableConfig
 TensorProto = pytype_utils.TensorProto

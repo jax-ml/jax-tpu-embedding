@@ -48,6 +48,11 @@ TPUEmbeddingConfigurationProto = (
     tpu_embedding_configuration_pb2.TPUEmbeddingConfiguration
 )
 TPUEmbeddingOptimizer = tpu_embedding_v2_utils._Optimizer  # pylint: disable=protected-access
+TPUEmbeddingOptimizerAdagrad = tpu_embedding_v2_utils.Adagrad
+TPUEmbeddingOptimizerAdagradMomentum = tpu_embedding_v2_utils.AdagradMomentum
+TPUEmbeddingOptimizerAdam = tpu_embedding_v2_utils.Adam
+TPUEmbeddingOptimizerFTRL = tpu_embedding_v2_utils.FTRL
+TPUEmbeddingOptimizerSGD = tpu_embedding_v2_utils.SGD
 
 # TPUEmbedding checkpoints
 GlobalHostArray = checkpoint.GlobalHostArray
