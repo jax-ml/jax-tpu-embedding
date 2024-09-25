@@ -139,13 +139,14 @@ class TPUEmbedding(object):
       use_pathways: bool = False,
       num_shards: int | None = None,
       input_split_fn: Callable[..., dict[str, Any]] | None = None,
+      use_manual_partitioning: bool = False,
   ):
     """Creates JAX TPUEmbedding object.
 
     Args:
       feature_configs: A nested structure, or a list of nested structure, or a
         standalone instance of `tf.tpu.experimental.embedding.FeatureConfig`
-        configs. It must be a list of nested structure if using Pathways (see 
+        configs. It must be a list of nested structure if using Pathways (see
         below); and otherwise it must be the others.
       optimizer: An instance of one of embedding optimizers like
         `tf.tpu.experimental.embedding.SGD`,
@@ -164,6 +165,9 @@ class TPUEmbedding(object):
       input_split_fn: A callable function takes elements from iterator, yields
         splits pytree of host and device batches in a dictionary. This should be
         supplied if users want to call `experimental_get_next`.
+      use_manual_partitioning: If True, the tensors are manually partitioned.
+        Otherwise, use the automatic SPMD partitioning. This needs to be true if
+        users use `shard_map`.
 
     Raises:
       ValueError: when cores_per_replica is not legal.
@@ -184,6 +188,7 @@ class TPUEmbedding(object):
         pipeline_execution_with_tensor_core
     )
     self._cores_per_replica = cores_per_replica
+    self._use_manual_partitioning = use_manual_partitioning
 
     # Create config_utils.TpuEmbeddingConfig instance.
     if use_pathways:
@@ -194,6 +199,7 @@ class TPUEmbedding(object):
           num_hosts=self._num_hosts,
           num_tensor_cores=self._num_tensor_cores,
           cores_per_replica=self._cores_per_replica,
+          use_manual_partitioning=self._use_manual_partitioning,
       )
       # We assume the output shapes and dynamic learning rates are the same
       # across all the tasks. This may be relaxed in the future.
@@ -212,6 +218,7 @@ class TPUEmbedding(object):
           num_hosts=self._num_hosts,
           num_tensor_cores=self._num_tensor_cores,
           cores_per_replica=self._cores_per_replica,
+          use_manual_partitioning=self._use_manual_partitioning,
       )
       self._table_config_list = self._tpu_embedding_config.table_config_list
       self._output_shapes = self._tpu_embedding_config.output_shapes
@@ -716,7 +723,7 @@ class TPUEmbedding(object):
           local_shape = gradient.shape.as_list()
 
           # When self._core_per_replica is not None, it uses BC spmd.
-          if self._cores_per_replica:
+          if self._cores_per_replica and not self._use_manual_partitioning:
             local_shape[0] = local_shape[0] // self._cores_per_replica
           if local_shape != full_output_shape:
             raise ValueError("Found gradient of shape {} at path {}. Expected "

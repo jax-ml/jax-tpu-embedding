@@ -55,8 +55,10 @@ class TpuEmbeddingConfigSpecs:
       overlap with the TensorCore computations.
     num_hosts: number of hosts.
     num_tensor_cores: number of tensor cores.
-    cores_per_replica: number of cores per replica, use for spmd when it's
-      not None.
+    cores_per_replica: number of cores per replica, use for spmd when it's not
+      None.
+    use_manual_partitioning: If True, the tensors are manually partitioned.
+      Otherwise, use the automatic SPMD partitioning.
   """
   feature_config: NestedFeatureConfig
   output_shapes: List[OutputShape]
@@ -66,6 +68,7 @@ class TpuEmbeddingConfigSpecs:
   num_hosts: int
   num_tensor_cores: int
   cores_per_replica: Optional[int]
+  use_manual_partitioning: bool
 
 
 def create_tpu_embedding_config(
@@ -74,7 +77,9 @@ def create_tpu_embedding_config(
     pipeline_execution_with_tensor_core: bool,
     num_hosts: int,
     num_tensor_cores: int,
-    cores_per_replica: Optional[int] = None) -> TpuEmbeddingConfigSpecs:
+    cores_per_replica: Optional[int] = None,
+    use_manual_partitioning: bool = False,
+) -> TpuEmbeddingConfigSpecs:
   """Creates TpuEmbeddingConfigSpecs.
 
   Args:
@@ -87,6 +92,8 @@ def create_tpu_embedding_config(
     num_tensor_cores: number of tensor cores.
     cores_per_replica: number of cores for one replica. If None, config would be
       for data parallelism only, if not None config will be set for SPMD.
+    use_manual_partitioning: If True, the tensors are manually partitioned.
+      Otherwise, use the automatic SPMD partitioning.
 
   Raises:
       ValueError: If optimizer is not one of tf.tpu.experimental.embedding.(SGD,
@@ -141,7 +148,9 @@ def create_tpu_embedding_config(
       pipeline_execution_with_tensor_core=pipeline_execution_with_tensor_core,
       num_hosts=num_hosts,
       num_tensor_cores=num_tensor_cores,
-      cores_per_replica=cores_per_replica)
+      cores_per_replica=cores_per_replica,
+      use_manual_partitioning=use_manual_partitioning,
+  )
 
 
 def create_tpu_embedding_configs(
@@ -151,6 +160,7 @@ def create_tpu_embedding_configs(
     num_hosts: int,
     num_tensor_cores: int,
     cores_per_replica: Optional[int] = None,
+    use_manual_partitioning: bool = False,
 ) -> List[TpuEmbeddingConfigSpecs]:
   """Creates a list of TpuEmbeddingConfigSpecs.
 
@@ -164,6 +174,8 @@ def create_tpu_embedding_configs(
     num_tensor_cores: number of tensor cores.
     cores_per_replica: number of cores for one replica. If None, config would be
       for data parallelism only, if not None config will be set for SPMD.
+    use_manual_partitioning: If True, the tensors are manually partitioned.
+      Otherwise, use the automatic SPMD partitioning.
 
   Raises:
       ValueError: If optimizer is not one of tf.tpu.experimental.embedding.(SGD,
@@ -182,6 +194,7 @@ def create_tpu_embedding_configs(
         num_hosts,
         num_tensor_cores,
         cores_per_replica,
+        use_manual_partitioning,
     )
     tpu_embedding_configs.append(tpu_embedding_config)
   return tpu_embedding_configs
@@ -347,6 +360,9 @@ def create_config_proto(
     config_proto.spmd_sharding.enabled = True
     config_proto.spmd_sharding.num_cores_per_replica = (
         tpu_embedding_config.cores_per_replica)
+    config_proto.spmd_sharding.use_manual_partitioning = (
+        tpu_embedding_config.use_manual_partitioning
+    )
 
   return config_proto
 
