@@ -20,23 +20,24 @@ from typing import List, Mapping, Optional, Union
 from absl import flags
 from absl import logging
 import jax
-from jax.experimental import multihost_utils
 from jax.experimental import jax2tf
+from jax.experimental import multihost_utils
 import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding import config_utils
 from jax_tpu_embedding import pytype_utils
 import numpy as np
-import tensorflow as tf
 import orbax.checkpoint as ocp
+import tensorflow as tf
 
 # pylint: disable=g-direct-tensorflow-import
 from tensorflow.dtensor.python import accelerator_util
 from tensorflow.dtensor.python import gen_dtensor_ops
 from tensorflow.python.eager import context
-# pylint: enable=g-direct-tensorflow-import
-
 from tensorflow.python.tpu.ops import gen_tpu_embedding_ops as tpu_ops  # pylint: disable=g-direct-tensorflow-import
+
+
+# pylint: enable=g-direct-tensorflow-import
 
 JaxArrayRestoreArgs = ocp.ArrayRestoreArgs
 GlobalHostArray = pytype_utils.GlobalHostArray
@@ -199,8 +200,8 @@ def create_tables_variables_from_config(
     table_config_list: A list of all table config.
 
   Returns:
-    A nested dictionary of tf tensors. Outer dictionary is indexed by table's 
-    name while the inner is indexed by variable names (`parameters` and slot 
+    A nested dictionary of tf tensors. Outer dictionary is indexed by table's
+    name while the inner is indexed by variable names (`parameters` and slot
     names).
   """
 
@@ -381,13 +382,13 @@ def create_tables_global_host_array_restore_args(
 
 
 def create_tables_jax_array_restore_args(
-    sharding: jax.sharding.NamedSharding,
+    sharding: jax.sharding.Sharding,
     table_config_list: List[TableConfig],
 ) -> NestedStruct[ocp.ArrayRestoreArgs]:
   """Creates RestoreArgs for tables and slot variables.
 
   Args:
-    sharding: NamedSharding corresponding to the embedding table shards
+    sharding: The sharding strategy of the embedding tables.
     table_config_list: A list of all table config.
 
   Returns:
