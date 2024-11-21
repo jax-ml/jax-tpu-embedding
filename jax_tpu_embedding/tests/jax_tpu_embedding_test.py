@@ -15,6 +15,7 @@
 """Tests for jax tpu embedding support."""
 
 import functools
+import logging
 from typing import Callable, Dict, Tuple
 
 from absl.testing import parameterized
@@ -293,6 +294,29 @@ class JaxJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase):
       self.assertAlmostEqual(
           loss.addressable_data(0), expect_loss)
       self.assertAlmostEqual(loss.addressable_data(1), expect_loss)
+
+  def test_get_tpu_embedding_for_serving(self):
+    """Test model parallelism with pjit."""
+    # Create and initialize tpu embedding layer.
+    use_shape_inference = False
+    embedding_layer = jte.TPUEmbedding(
+        feature_configs=self.feature_config_fn(
+            use_shape_inference=use_shape_inference
+        ),
+        optimizer=self.embedding_optimizer,
+        cores_per_replica=jax.local_device_count(),
+    )
+
+    embedding_layer.initialize_tpu_embedding()
+    embedding_layer.load_embedding_tables()
+
+    # Create serving function.
+    serving_fn, serving_params = embedding_layer.get_tpu_embedding_for_serving()
+    logging.info('serving_params: %s', serving_params)
+    logging.info('serving_fn: %s', serving_fn)
+    checkpoint = tf.train.Checkpoint(embedding=serving_fn)
+    tmp_dir = self.create_tempdir().full_path
+    checkpoint.save(tmp_dir)
 
 
 class TFJaxTpuEmbeddingTest(JaxTpuEmbeddingTestBase, tf.test.TestCase):
