@@ -170,7 +170,7 @@ def create_global_mesh(mesh_shape: Tuple[int, ...],
   size = np.prod(mesh_shape)
   if len(jax.devices()) < size:
     raise ValueError(f'Test requires {size} global devices.')
-  devices = sorted(jax.devices(), key=lambda d: d.id)
+  devices = sorted(jax.devices(), key=lambda d: (d.process_index, d.id))
   mesh_devices = np.array(devices[:size]).reshape(mesh_shape)
   global_mesh = Mesh(mesh_devices, axis_names)
   return global_mesh
