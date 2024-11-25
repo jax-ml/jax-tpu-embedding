@@ -59,7 +59,7 @@ def init_tpu_system(enable_megacore=False):
 
 def is_tpu_use_tfrt() -> bool:
   """Checks if tpu backend is using TFRT-TPU Runtime."""
-  return 'tpu_use_tfrt' in flags.FLAGS and flags.FLAGS['tpu_use_tfrt'].value
+  return 'tpu_use_tfrt' in flags.FLAGS and flags.FLAGS['tpu_use_tfrt'].value  # pytype: disable=bad-return-type
 
 
 def shutdown_tpu_system():
