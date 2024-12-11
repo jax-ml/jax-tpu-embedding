@@ -35,7 +35,7 @@ struct CooFormat {
 
 // Get adjusted col_id based on shift and offset.
 int GetColId(int col_id, int col_shift, int col_offset, int num_scs_mod,
-             int num_scs_mod_inv);
+                    int num_scs_mod_inv);
 
 inline unsigned int CeilOfRatio(unsigned int numerator,
                                 unsigned int denominator) {
@@ -50,14 +50,16 @@ struct StackedTableMetadata {
   StackedTableMetadata() = delete;
   StackedTableMetadata(int feature_index, int max_ids_per_partition,
                        int max_unique_ids_per_partition, int row_offset,
-                       int col_offset, int col_shift, int batch_size)
+                       int col_offset, int col_shift, int batch_size,
+                       int stacked_table_vocab_size = 0)
       : feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
         max_unique_ids_per_partition(max_unique_ids_per_partition),
         row_offset(row_offset),
         col_offset(col_offset),
         col_shift(col_shift),
-        batch_size(batch_size) {}
+        batch_size(batch_size),
+        stacked_table_vocab_size(stacked_table_vocab_size) {}
   // The batch is given as a list of features (numpy arrays). `feature_index`
   // represents the index of the feature in the list.
   int feature_index;
@@ -70,6 +72,8 @@ struct StackedTableMetadata {
 
   // Process local batch size of the feature.
   int batch_size;
+
+  int stacked_table_vocab_size;
 };
 
 void SortAndGroupCooTensors(
