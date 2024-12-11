@@ -1,0 +1,103 @@
+// Copyright 2024 JAX SC Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package third_party.py.jax_tpu_embedding.sparsecore_lib_proto;
+
+option java_multiple_files = true;
+
+message FeatureSpecProto {
+  // The name of the user defined feature.
+  string feature_name = 1;
+  // The shape of the input training batch.
+  repeated int64 input_shape = 2;
+  // The expected shape of the output embedding lookup.
+  repeated int64 output_shape = 3;
+  // When multiple features are stacked, the `row offset` specifies the first
+  // row of this feature lookup output.
+  int64 row_offset = 4;
+  // When multiple features are stacked, the `col_offset` specifies the first
+  // row of vocabulary of this feature's tables inthe stacked table.
+  int64 col_offset = 5;
+  // The `col_shift` specifies how the embedding table shards are rotated on the
+  // device.
+  int64 col_shift = 6;
+}
+
+message TableSpecProto {
+  // The name of the table.
+  string table_name = 1;
+  // The user defined vocab size of the table.
+  int64 vocab_size = 2;
+  // The user defined embedding dim of the table.
+  int64 embedding_dim = 3;
+  // The max number of ids per partition for the table. This is an input data
+  // dependent value and is required by the compiler to appropriately allocate
+  // memory. When table stacking is used, this value is overridden by the
+  // max_ids_per_partition of the stacked table.
+  int64 max_ids_per_partition = 5;
+  // The max number of unique ids per partition for the table. This is an input
+  // data dependent value and is required by the compiler to appropriately
+  // allocate memory. When table stacking is used, this value is overridden by
+  // the max_unique_ids_per_partition of the stacked table.
+  int64 max_unique_ids_per_partition = 6;
+  // The padded vocab size of the table. This is the vocab size rounded up to
+  // the next multiple of 8 times number of sparsecores.
+  int64 padded_vocab_size = 7;
+  // The padded embedding dim of the table. This is the embedding dim rounded up
+  // to the next multiple of 8.
+  int64 padded_embedding_dim = 8;
+  // When table stacking is used, this is the row offset of the table in the
+  // stacked table shard. 0 otherwise.
+  int64 row_offset_in_shard = 9;
+  // When table stacking is used, this is the rotation of the table shard in the
+  // stacked table shard. 0 otherwise.
+  int64 shard_rotation = 10;
+  // The list of features that point to this table.
+  repeated FeatureSpecProto feature_specs = 11;
+}
+
+message StackedTableSpecProto {
+  // The name of the stack. This is usually a concatenation of the table names
+  // that are stacked.
+  string stack_name = 1;
+  // The vocab size of the stack. This is the sum of the vocab sizes (padded)
+  // of all the tables in the stack.
+  int64 stack_vocab_size = 2;
+  // The embedding dim of the stack. This is the sum of the embedding dims
+  // (padded) of all the tables in the stack.
+  int64 stack_embedding_dim = 3;
+  // The total number of samples (batch size) for the stack. This is the sum of
+  // sample sizes (batch dimension) of all the features in the stack.
+  int64 total_sample_count = 6;
+  // The max number of ids per partition for the stack. This is an input data
+  // dependent value and is required by the compiler to appropriately allocate
+  // memory.
+  int64 max_ids_per_partition = 7;
+  // The max number of unique ids per partition for the stack. This is an input
+  // data dependent value and is required by the compiler to appropriately
+  // allocate memory.
+  int64 max_unique_ids_per_partition = 8;
+  // Total number of sparsecores used in the training setup.
+  int64 num_sparsecores = 9;
+  // Specs for the table that are stacked.
+  repeated TableSpecProto table_specs = 10;
+}
+
+message EmbeddingSpecProto {
+  // The list of stacked tables that represent layout of embedding tables
+  // during training.
+  repeated StackedTableSpecProto stacked_table_specs = 1;
+}

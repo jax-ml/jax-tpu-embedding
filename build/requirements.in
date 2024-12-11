@@ -1,0 +1,14 @@
+absl-py
+flax
+jax
+numpy
+dm-tree
+
+# Testing
+clu
+einops
+google-benchmark
+optax
+orbax
+protobuf
+

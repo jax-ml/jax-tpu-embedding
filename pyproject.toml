@@ -1,29 +1,43 @@
 [project]
-name = "jax-tpu-embedding"
-version = "0.1.0"
-description = "JAX TPU Embedding API"
+name = "jax_tpu_embedding"
+description = "JAX SparseCore API"
 readme = "README.md"
-requires-python = ">=3.7<3.10"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+authors = [{name = "JAX SC Authors", email="jax-sc-dev@google.com"}]
+classifiers = [  # List of https://pypi.org/classifiers/
+    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Science/Research",
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
+]
 dependencies = [
-  "absl-py",
-  "jax>=0.3.15",
-  "tensorflow>=2.11.0",
-  "numpy",
-  "flax",
-  "tensorstore",
-  "orbax"
+    'jax',
+    'absl-py',
+    'flax',
+    'numpy',
 ]
 
-[build-system]
-requires = [
-    "setuptools>=42",
-    "wheel",
-]
-build-backend = "setuptools.build_meta"
-
-[tools.setuptools]
-packages = ["jax_tpu_embedding"]
+# `version` is set by setuptools to use `jax_tpu_embedding.sparsecore.__version__`.
+dynamic = ["version"]
 
 [project.urls]
-homepage = 'http://github.com/jax-ml/jax-tpu-embedding'
-repository = 'http://github.com/jax-ml/jax-tpu-embedding'
+homepage = "https://github.com/jax-ml/jax_tpu_embedding"
+repository = "https://github.com/jax-ml/jax_tpu_embedding"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Pseudo extension module to indicate to setuptools that the package
+# does contain prebuilt extensions.
+ext-modules = [{name = "jax_tpu_embedding.sparsecore.prebuilt", sources = []}]
+
+[tool.setuptools.dynamic]
+version = {attr = "jax_tpu_embedding.sparsecore.__version__"}
+
+[tool.setuptools.package-data]
+"*" = ["*.dylib", "*.so", "*.pyd"]
