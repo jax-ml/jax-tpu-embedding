@@ -1,4 +1,4 @@
-# Copyright 2024 JAX SC Authors.
+# Copyright 2024 The JAX SC Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
 
@@ -26,11 +25,11 @@ pytype_strict_contrib_test(
         "embed_test.py",
     ],
     args = [
-        "--tpu_chip_config_name=sparsecore_tccontrol",
+        # TPU chip configuration,
         "--logtostderr",
     ],
     tags = [
-        "requires-sparsecore:4",
+        "exclusive-if-local",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax:embed",
@@ -53,7 +52,7 @@ pytype_strict_contrib_test(
         "autograd_test.py",
     ],
     args = [
-        "--tpu_chip_config_name=sparsecore_tccontrol",
+        # TPU chip configuration,
         "--logtostderr",
     ],
     env = {
@@ -61,7 +60,7 @@ pytype_strict_contrib_test(
         "JAX_TRACEBACK_FILTERING": "off",
     },
     tags = [
-        "requires-sparsecore:4",
+        "exclusive-if-local",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",

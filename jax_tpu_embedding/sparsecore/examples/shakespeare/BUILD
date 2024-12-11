@@ -1,4 +1,4 @@
-# Copyright 2024 JAX SC Authors.
+# Copyright 2024 The JAX SC Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary", "pytype_strict_contrib_test")
 
@@ -25,16 +24,16 @@ pytype_strict_contrib_test(
     srcs = ["jax_sc_shakespeare_jit.py"],
     args = [
         "--alsologtostderr",
-        "--tpu_chip_config_name=sparsecore_tccontrol",
+        # TPU chip configuration,
         "--dump_dir=sponge",
-        "--vmodule=jax_sc_shakespeare_jit=1",
+        # "--vmodule=jax_sc_shakespeare_jit=1",
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     main = "jax_sc_shakespeare_jit.py",
     tags = [
-        "requires-sparsecore:4",
+        "exclusive-if-local",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
@@ -64,7 +63,7 @@ pytype_strict_binary(
     srcs = ["jax_sc_shakespeare_jit.py"],
     args = [
         "--alsologtostderr",
-        "--tpu_chip_config_name=sparsecore_tccontrol",
+        # TPU chip configuration,
     ],
     main = "jax_sc_shakespeare_jit.py",
     deps = [
@@ -96,16 +95,16 @@ pytype_strict_contrib_test(
     srcs = ["jax_sc_shakespeare_pmap.py"],
     args = [
         "--alsologtostderr",
-        "--tpu_chip_config_name=sparsecore_tccontrol",
+        # TPU chip configuration,
         "--dump_dir=sponge",
-        "--vmodule=jax_sc_shakespeare_pmap=1",
+        # "--vmodule=jax_sc_shakespeare_pmap=1",
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     main = "jax_sc_shakespeare_pmap.py",
     tags = [
-        "requires-sparsecore:4",
+        "exclusive-if-local",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
@@ -131,7 +130,7 @@ pytype_strict_binary(
     srcs = ["jax_sc_shakespeare_pmap.py"],
     args = [
         "--alsologtostderr",
-        "--tpu_chip_config_name=sparsecore_tccontrol",
+        # TPU chip configuration,
     ],
     main = "jax_sc_shakespeare_pmap.py",
     deps = [

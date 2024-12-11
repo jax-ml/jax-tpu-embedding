@@ -1,4 +1,4 @@
-# Copyright 2024 JAX SC Authors.
+# Copyright 2024 The JAX SC Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Primitive for sparse dense matmul grad with optimizer.
 
 This module mainly exposes a single Jax primitive that can be used to apply
