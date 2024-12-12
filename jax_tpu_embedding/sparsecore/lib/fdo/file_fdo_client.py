@@ -17,13 +17,12 @@ import collections
 from collections.abc import Mapping
 import glob
 import os
-
+import time
 from absl import logging
 import jax
 from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.fdo import fdo_client
 import numpy as np
-
 
 _FILE_NAME = 'fdo_stats'
 _FILE_EXTENSION = 'npz'
@@ -52,12 +51,6 @@ class NPZFileFDOClient(fdo_client.FDOClient):
 
   def __init__(self, base_dir: str):
     self._base_dir = base_dir
-    self._file = os.path.join(
-        base_dir,
-        '{}_{}.{}'.format(
-            _FILE_NAME, str(jax.process_index()), _FILE_EXTENSION
-        ),
-    )
     self._max_ids_per_partition = collections.defaultdict(jnp.ndarray)
     self._max_unique_ids_per_partition = collections.defaultdict(jnp.ndarray)
 
@@ -72,11 +65,11 @@ class NPZFileFDOClient(fdo_client.FDOClient):
       data: A mapping representing data to be recorded.
     """
     if _MAX_ID_STATS_KEY[1:] not in data:
-      raise ValueError('Expected stat (max_ids) not found.')
+      raise ValueError(f'Expected stat ({_MAX_ID_STATS_KEY[1:]}) not found.')
     max_ids_per_process = data[_MAX_ID_STATS_KEY[1:]]
     for table_name, stats in max_ids_per_process.items():
-      logging.info(
-          'Recording observed max ids for table: %s -> %s', table_name, stats
+      logging.vlog(
+          2, 'Recording observed max ids for table: %s -> %s', table_name, stats
       )
       if table_name not in self._max_ids_per_partition:
         self._max_ids_per_partition[table_name] = stats
@@ -85,7 +78,9 @@ class NPZFileFDOClient(fdo_client.FDOClient):
             (self._max_ids_per_partition[table_name], stats)
         )
     if _MAX_UNIQUE_ID_STATS_KEY[1:] not in data:
-      raise ValueError('Expected stats (max_unique_ids) not found.')
+      raise ValueError(
+          f'Expected stats ({_MAX_UNIQUE_ID_STATS_KEY[1:]}) not found.'
+      )
     max_uniques_per_process = data[_MAX_UNIQUE_ID_STATS_KEY[1:]]
     for table_name, stats in max_uniques_per_process.items():
       logging.vlog(
@@ -101,10 +96,15 @@ class NPZFileFDOClient(fdo_client.FDOClient):
             (self._max_unique_ids_per_partition[table_name], stats)
         )
 
-  def _write_to_file(
-      self, stats: Mapping[str, jnp.ndarray], file_name: str
-  ) -> None:
+  def _generate_file_name(self) -> str:
+    filename = '{}_{}_{}.{}'.format(
+        _FILE_NAME, jax.process_index(), time.time_ns(), _FILE_EXTENSION
+    )
+    return os.path.join(self._base_dir, filename)
+
+  def _write_to_file(self, stats: Mapping[str, jnp.ndarray]) -> None:
     """Writes stats to a npz file."""
+    file_name = self._generate_file_name()
     logging.info('Write stats to %s', file_name)
     jax.numpy.savez(file_name, **stats)
 
@@ -122,16 +122,15 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         f'{table_name}{_MAX_UNIQUE_ID_STATS_KEY}': stats
         for table_name, stats in self._max_unique_ids_per_partition.items()
     })
-    self._write_to_file(merged_stats, self._file)
+    self._write_to_file(merged_stats)
 
-  def _read_from_file(
-      self, glob_of_file_name: list[str]
-  ) -> Mapping[str, jnp.ndarray]:
+  def _read_from_file(self, files_glob: str) -> Mapping[str, jnp.ndarray]:
     """Reads stats from a npz file."""
+    files = glob.glob(files_glob)
+    if not files:
+      raise FileNotFoundError('No stats files found in %s' % files_glob)
     stats = collections.defaultdict(jnp.ndarray)
-    if not glob_of_file_name:
-      return stats
-    for file_name in glob_of_file_name:
+    for file_name in files:
       logging.info('Reading stats from %s', file_name)
       loaded = np.load(file_name)
       loaded_d = {key: loaded[key] for key in loaded.files}
@@ -139,7 +138,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         if stats.get(key) is None:
           stats[key] = value
         else:
-          stats[key] = np.maximum(stats[key], value)
+          stats[key] = jnp.max(jnp.vstack((stats[key], value)), axis=0)
     return stats
 
   def load(
@@ -159,10 +158,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     files_glob = os.path.join(
         self._base_dir, '{}*.{}'.format(_FILE_NAME, _FILE_EXTENSION)
     )
-    files = glob.glob(files_glob)
-    if not files:
-      raise FileNotFoundError('No stats files found in %s' % files_glob)
-    stats = self._read_from_file(files)
+    stats = self._read_from_file(files_glob)
     max_id_stats, max_unique_id_stats = {}, {}
     for table_name, stats in stats.items():
       if table_name.endswith(f'{_MAX_ID_STATS_KEY}'):

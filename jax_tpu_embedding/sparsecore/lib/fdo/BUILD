@@ -18,6 +18,7 @@ package(
     default_applicable_licenses = ["//:license"],
     default_visibility = [
         "//jax_tpu_embedding/sparsecore:__subpackages__",
+        "//video/youtube/discovery/tensorflow/clients/ml_infra/jax:__subpackages__",
     ],
 )
 
