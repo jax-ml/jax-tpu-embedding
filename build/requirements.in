@@ -1,10 +1,12 @@
+# Library.
 absl-py
 flax
-jax
 numpy
 dm-tree
+# Pre-release of JAX required for SparseCore TPUs.
+jax[tpu] --pre
 
-# Testing
+# Testing.
 clu
 einops
 google-benchmark
@@ -12,3 +14,6 @@ optax
 orbax
 protobuf
 
+# Paths for pre-releases of JAX and libtpu.
+-f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html
+-f https://storage.googleapis.com/jax-releases/libtpu_releases.html
