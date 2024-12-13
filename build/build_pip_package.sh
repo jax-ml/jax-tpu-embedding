@@ -97,6 +97,8 @@ main() {
   # The plat_name variable is intentionally unquoted since it _does_
   # intentionally contain spaces.
   # shellcheck disable=SC2086
+  $installed_python -m pip install --upgrade pip
+  $installed_python -m pip install build
   $installed_python -m build
 
   cp dist/*.whl "${output_dir}"
