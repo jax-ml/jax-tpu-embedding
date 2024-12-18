@@ -126,7 +126,6 @@ void SortAndGroupCooTensors(
         LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
                      << " observed max ids per partition: "
                      << observed_max_ids_per_partition
-                     << " for table: " << stacked_table_name
                      << " is greater than the set max ids per partition: "
                      << max_ids_per_partition;
       } else {
@@ -143,7 +142,6 @@ void SortAndGroupCooTensors(
             << "Allowing ID dropping for table: " << stacked_table_name
             << " observed max unique ids per partition: "
             << observed_max_unique_ids_per_partition
-            << " for table: " << stacked_table_name
             << " is greater than the set max unique ids per partition: "
             << max_unique_ids_per_partition;
       } else {
