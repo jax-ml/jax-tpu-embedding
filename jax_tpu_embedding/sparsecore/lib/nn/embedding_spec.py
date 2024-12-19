@@ -22,6 +22,7 @@ from typing import Callable, Sequence, TypeAlias
 
 import jax
 from jax import core
+import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
@@ -84,7 +85,7 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
     return len(self.slot_variables_initializers())
 
   @abc.abstractmethod
-  def get_optimizer_primitive(self) -> core.Primitive:
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
     """Derived classes should implement this method to return the xla primitive for the optimizer."""
     raise NotImplementedError
 
@@ -137,7 +138,7 @@ class SGDOptimizerSpec(OptimizerSpec):
     """SGD does not have any slot variables, hence this returns an empty tuple."""
     return SGDSlotVariables()
 
-  def get_optimizer_primitive(self) -> core.Primitive:
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
     """Returns the optimizer primitive for the SGD optimizer."""
     return (
         sparse_dense_matmul_grad_with_sgd.tpu_sparse_dense_matmul_grad_with_sgd_primitive
@@ -182,7 +183,7 @@ class AdagradOptimizerSpec(OptimizerSpec):
   def short_name(self) -> str:
     return "adagrad"
 
-  def get_optimizer_primitive(self) -> core.Primitive:
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
     )
