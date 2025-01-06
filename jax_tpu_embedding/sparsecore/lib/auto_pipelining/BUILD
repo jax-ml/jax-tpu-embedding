@@ -12,48 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
+    default_visibility = [
+        "//jax_tpu_embedding/sparsecore:__subpackages__",
+    ],
 )
 
 pytype_strict_library(
-    name = "fdo_client",
-    srcs = ["fdo_client.py"],
+    name = "utils",
+    srcs = ["utils.py"],
     deps = [pypi_requirement("jax")],
 )
 
 pytype_strict_library(
-    name = "file_fdo_client",
-    srcs = ["file_fdo_client.py"],
+    name = "decompose",
+    srcs = ["decompose.py"],
     deps = [
-        ":fdo_client",
-        pypi_requirement("absl/logging"),
+        ":preprocess",
+        ":utils",
         pypi_requirement("jax"),
-        pypi_requirement("numpy"),
     ],
 )
 
-pytype_strict_contrib_test(
-    name = "file_fdo_client_test",
-    srcs = ["file_fdo_client_test.py"],
-    deps = [
-        ":file_fdo_client",
-        pypi_requirement("absl/testing:absltest"),
-        pypi_requirement("jax"),
-        pypi_requirement("numpy"),
-    ],
-)
-
-# Library target.
 pytype_strict_library(
-    name = "fdo",
-    srcs = ["__init__.py"],
-    visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
+    name = "preprocess",
+    srcs = ["preprocess.py"],
     deps = [
-        ":fdo_client",  # buildcleaner: keep
-        ":file_fdo_client",  # buildcleaner: keep
+        ":utils",
+        pypi_requirement("jax"),
+    ],
+)
+
+pytype_strict_library(
+    name = "auto_pipelining",
+    srcs = ["auto_pipelining.py"],
+    deps = [
+        ":decompose",
+        pypi_requirement("jax"),
     ],
 )
