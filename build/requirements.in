@@ -1,6 +1,6 @@
 # Library.
 absl-py
-flax
+flax @ https://github.com/google/flax/archive/e2134af.zip
 numpy
 dm-tree
 # Pre-release of JAX required for SparseCore TPUs.

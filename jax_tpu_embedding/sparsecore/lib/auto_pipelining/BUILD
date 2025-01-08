@@ -11,31 +11,46 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-load("//third_party/bazel/protobuf:proto_library.bzl", "proto_library")
-load("//third_party/bazel/python:proto.bzl", "py_proto_library")
+load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = [
         "//jax_tpu_embedding/sparsecore:__subpackages__",
-        "//video/youtube/discovery/tensorflow/clients/ml_infra/jax:__subpackages__",
     ],
 )
 
-proto_library(
-    name = "embedding_spec_proto",
-    srcs = ["embedding_spec.proto"],
-)
-
-py_proto_library(
-    name = "embedding_spec_py_pb2",
-    deps = [":embedding_spec_proto"],
+pytype_strict_library(
+    name = "utils",
+    srcs = ["utils.py"],
+    deps = [pypi_requirement("jax")],
 )
 
 pytype_strict_library(
-    name = "proto",
-    srcs = ["__init__.py"],
-    visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
-    deps = [":embedding_spec_py_pb2"],  # buildcleaner: keep
+    name = "decompose",
+    srcs = ["decompose.py"],
+    deps = [
+        ":preprocess",
+        ":utils",
+        pypi_requirement("jax"),
+    ],
+)
+
+pytype_strict_library(
+    name = "preprocess",
+    srcs = ["preprocess.py"],
+    deps = [
+        ":utils",
+        pypi_requirement("jax"),
+    ],
+)
+
+pytype_strict_library(
+    name = "auto_pipelining",
+    srcs = ["auto_pipelining.py"],
+    deps = [
+        ":decompose",
+        pypi_requirement("jax"),
+    ],
 )
