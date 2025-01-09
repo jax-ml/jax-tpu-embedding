@@ -16,7 +16,10 @@ load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pyt
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
+    default_visibility = [
+        "//jax_tpu_embedding/sparsecore:__subpackages__",
+        "//video/youtube/discovery/tensorflow/clients/ml_infra/jax:__subpackages__",
+    ],
 )
 
 pytype_strict_library(
@@ -39,7 +42,6 @@ pytype_strict_library(
 pytype_strict_contrib_test(
     name = "file_fdo_client_test",
     srcs = ["file_fdo_client_test.py"],
-    tags = ["cpu"],
     deps = [
         ":file_fdo_client",
         pypi_requirement("absl/testing:absltest"),

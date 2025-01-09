@@ -22,9 +22,3 @@ poetry.lock
 
 # PyCharm
 .idea
-
-# Bazel
-/bazel-*
-
-# Built wheels.
-/*.whl

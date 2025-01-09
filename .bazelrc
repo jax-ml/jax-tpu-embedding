@@ -98,11 +98,6 @@ build:clang --copt=-Wno-gnu-offsetof-extensions
 # Disable clang extention that rejects unknown arguments.
 build:clang --copt=-Qunused-arguments
 
-##############################################################################
-# Test configurations.
-##############################################################################
-test:cpu --test_env=JAX_PLATFORMS=cpu --test_tag_filters=cpu
-
 #############################################################################
 # Some configs to make getting some forms of debug builds. In general, the
 # codebase is only regularly built with optimizations. Use 'debug_symbols' to
