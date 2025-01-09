@@ -25,7 +25,6 @@ pytype_strict_contrib_test(
     srcs = [
         "preprocess_sparse_dense_matmul_input_test.py",
     ],
-    tags = ["cpu"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -64,7 +63,6 @@ pytype_strict_library(
 pytype_strict_contrib_test(
     name = "test_utils_test",
     srcs = ["test_utils_test.py"],
-    tags = ["cpu"],
     deps = [
         ":test_utils",
         pypi_requirement("absl/logging"),
@@ -181,7 +179,6 @@ pytype_strict_contrib_test(
 pytype_strict_contrib_test(
     name = "embedding_spec_test",
     srcs = ["embedding_spec_test.py"],
-    tags = ["cpu"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),

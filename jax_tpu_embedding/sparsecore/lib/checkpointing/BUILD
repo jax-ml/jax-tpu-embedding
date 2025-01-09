@@ -31,7 +31,6 @@ pytype_strict_library(
 pytype_strict_contrib_test(
     name = "checkpoint_utils_test",
     srcs = ["checkpoint_utils_test.py"],
-    tags = ["cpu"],
     deps = [
         ":checkpoint_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
