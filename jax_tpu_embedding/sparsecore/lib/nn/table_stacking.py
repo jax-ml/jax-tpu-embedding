@@ -14,10 +14,14 @@
 """Methods for table stacking."""
 
 import collections
-from typing import Callable, Mapping, Sequence, TypeAlias, TypeVar
+import functools
+from typing import Callable, Dict, Mapping, Sequence, TypeAlias, TypeVar
 
 from absl import logging
+import jax
+import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 import numpy as np
 import tree
 
@@ -406,3 +410,144 @@ def auto_stack_tables(
         stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
         stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
     )
+
+
+def _unstack_and_unshard_stacked_table(
+    stacked_table: jax.Array,
+    stacked_table_specs: embedding_spec_pb2.StackedTableSpecProto,
+    donate: bool = False,
+) -> Dict[str, jax.Array]:
+  """Unstack and unshard the stacked table."""
+
+  stacked_table_sharding = stacked_table.sharding
+  num_sparse_cores = stacked_table_specs.num_sparsecores
+  stack_embedding_dim = stacked_table_specs.stack_embedding_dim
+
+  # increase a rank and the first dimension is the number of sparse cores.
+  stacked_table_3d = jax.jit(
+      fun=lambda x: x.reshape(num_sparse_cores, -1, stack_embedding_dim),
+      donate_argnums=(0 if donate else None),
+      in_shardings=stacked_table_sharding,
+      out_shardings=stacked_table_sharding,
+  )(stacked_table)
+
+  @functools.partial(
+      jax.jit,
+      static_argnames=(
+          "row_offset",
+          "chunk_size",
+          "rotation",
+          "stack_embedding_dim",
+          "vocab_size",
+          "embedding_dim",
+      ),
+      in_shardings=stacked_table_sharding,
+      out_shardings=stacked_table_sharding,
+  )
+  def _unstack_and_unshard(
+      stacked_table_3d,
+      row_offset,
+      chunk_size,
+      rotation,
+      stack_embedding_dim,
+      vocab_size,
+      embedding_dim,
+  ):
+    # From each shard get the chunk for 'this' table
+    shards = stacked_table_3d[:, row_offset : row_offset + chunk_size, :]
+
+    # Undo the shard rotation (note '-' for reverse direction)
+    shards = jnp.roll(shards, -rotation, axis=0)
+
+    # Undo the mod sharding
+    un_mod_shard = shards.transpose((1, 0, 2))
+
+    # Remove the first dimension
+    ret = un_mod_shard.reshape(-1, stack_embedding_dim)
+
+    # Remove paddings
+    ret = ret[:vocab_size, :embedding_dim]
+
+    return ret
+
+  logging.info(
+      "unstack_and_unshard_stacked_table: num_sparse_cores: %s,"
+      " stack_embedding_dim: %s, stacked_table_shape: %s,"
+      " stacked_table_sharding: %s",
+      num_sparse_cores,
+      stack_embedding_dim,
+      stacked_table.shape,
+      stacked_table.sharding,
+  )
+
+  ret = {}
+  for table_setting_in_stack in stacked_table_specs.table_specs:
+    row_offset = table_setting_in_stack.row_offset_in_shard
+    chunk_size = table_setting_in_stack.padded_vocab_size // num_sparse_cores
+    rotation = table_setting_in_stack.shard_rotation
+    vocab_size = table_setting_in_stack.vocab_size
+    embedding_dim = table_setting_in_stack.embedding_dim
+
+    logging.info(
+        "unstack_and_unshard_stacked_table: table_name: %s, row_offset: %s,"
+        " chunk_size: %s, rotation: %s, vocab_size: %s, embedding_dim: %s",
+        table_setting_in_stack.table_name,
+        row_offset,
+        chunk_size,
+        rotation,
+        vocab_size,
+        embedding_dim,
+    )
+
+    ret[table_setting_in_stack.table_name] = _unstack_and_unshard(
+        stacked_table_3d,
+        row_offset,
+        chunk_size,
+        rotation,
+        stack_embedding_dim,
+        vocab_size,
+        embedding_dim,
+    )
+
+    logging.info(
+        "unstack_and_unshard_stacked_table: unstacked table_name: %s, shape:"
+        " %s, sharding: %s",
+        table_setting_in_stack.table_name,
+        ret[table_setting_in_stack.table_name].shape,
+        ret[table_setting_in_stack.table_name].sharding,
+    )
+
+  return ret
+
+
+def unstack_and_unshard_stacked_tables(
+    stacked_tables: Dict[str, jax.Array],
+    embedding_specs: embedding_spec_pb2.EmbeddingSpecProto,
+    donate: bool = False,
+) -> Dict[str, jax.Array]:
+  """Unstack and unshard the stacked tables.
+
+  Args:
+    stacked_tables: A dictionary of stacked tables. The keys are the stacked
+      table names.
+    embedding_specs: The embedding spec proto.
+    donate: Whether the stacked tables are donated to reduce memory usage.
+
+  Returns:
+    A dictionary of unstacked tables with keys as the table names.
+  """
+  ret = {}
+  for stacked_table_spec in embedding_specs.stacked_table_specs:
+    if (
+        stacked_table := stacked_tables.get(stacked_table_spec.stack_name)
+    ) is None:
+      raise ValueError(
+          f"Stacked table '{stacked_table_spec.stack_name}' not found in"
+          " `stacked_tables`."
+      )
+    ret.update(
+        _unstack_and_unshard_stacked_table(
+            stacked_table, stacked_table_spec, donate
+        )
+    )
+  return ret

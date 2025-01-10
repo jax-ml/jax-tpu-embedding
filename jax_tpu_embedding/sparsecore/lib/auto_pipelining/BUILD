@@ -12,41 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
+    default_visibility = [
+        "//jax_tpu_embedding/sparsecore:__subpackages__",
+    ],
 )
 
 pytype_strict_library(
-    name = "checkpoint_utils",
-    srcs = ["checkpoint_utils.py"],
+    name = "utils",
+    srcs = ["utils.py"],
+    deps = [pypi_requirement("jax")],
+)
+
+pytype_strict_library(
+    name = "decompose",
+    srcs = ["decompose.py"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        ":preprocess",
+        ":utils",
         pypi_requirement("jax"),
     ],
 )
 
-pytype_strict_contrib_test(
-    name = "checkpoint_utils_test",
-    srcs = ["checkpoint_utils_test.py"],
-    tags = ["cpu"],
+pytype_strict_library(
+    name = "preprocess",
+    srcs = ["preprocess.py"],
     deps = [
-        ":checkpoint_utils",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("absl/testing:absltest"),
+        ":utils",
         pypi_requirement("jax"),
     ],
 )
 
-# Library target.
 pytype_strict_library(
-    name = "checkpointing",
-    srcs = ["__init__.py"],
-    visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
+    name = "auto_pipelining",
+    srcs = ["auto_pipelining.py"],
     deps = [
-        "checkpoint_utils",  # buildcleaner: keep
+        ":decompose",
+        pypi_requirement("jax"),
     ],
 )

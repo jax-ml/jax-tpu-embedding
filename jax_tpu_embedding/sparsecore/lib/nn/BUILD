@@ -54,6 +54,7 @@ pytype_strict_library(
     srcs = ["table_stacking.py"],
     deps = [
         ":embedding_spec",
+        "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
         pypi_requirement("absl/logging"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
