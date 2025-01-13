@@ -36,7 +36,7 @@ cc_library(
 cc_test(
     name = "input_preprocessing_threads_test",
     srcs = ["input_preprocessing_threads_test.cc"],
-    tags = ["cpu"],
+    env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":input_preprocessing_threads",
         "@com_google_googletest//:gtest_main",
@@ -65,7 +65,7 @@ cc_library(
 cc_test(
     name = "input_preprocessing_util_test",
     srcs = ["input_preprocessing_util_test.cc"],
-    tags = ["cpu"],
+    env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":input_preprocessing_util",
         "@com_google_googletest//:gtest_main",
@@ -118,9 +118,9 @@ pytype_strict_contrib_test(
         "input_preprocessing_test.py",
     ],
     env = {
+        "JAX_PLATFORMS": "cpu",
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
-    tags = ["cpu"],
     deps = [
         ":constants",
         ":input_preprocessing",
@@ -136,9 +136,9 @@ pytype_strict_contrib_test(
         "input_preprocessing_cc_test.py",
     ],
     env = {
+        "JAX_PLATFORMS": "cpu",
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
-    tags = ["cpu"],
     deps = [
         ":constants",
         ":input_preprocessing_cc",

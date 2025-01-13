@@ -25,7 +25,7 @@ pytype_strict_contrib_test(
     srcs = [
         "preprocess_sparse_dense_matmul_input_test.py",
     ],
-    tags = ["cpu"],
+    env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -64,7 +64,7 @@ pytype_strict_library(
 pytype_strict_contrib_test(
     name = "test_utils_test",
     srcs = ["test_utils_test.py"],
-    tags = ["cpu"],
+    env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":test_utils",
         pypi_requirement("absl/logging"),
@@ -89,6 +89,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         ":test_utils",
@@ -118,6 +119,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         ":test_utils",
@@ -143,6 +145,7 @@ pytype_strict_contrib_test(
     ],
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -168,6 +171,7 @@ pytype_strict_contrib_test(
     ],
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         ":test_utils",
@@ -185,7 +189,7 @@ pytype_strict_contrib_test(
 pytype_strict_contrib_test(
     name = "embedding_spec_test",
     srcs = ["embedding_spec_test.py"],
-    tags = ["cpu"],
+    env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),

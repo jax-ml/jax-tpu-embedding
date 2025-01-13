@@ -33,6 +33,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -59,6 +60,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -85,6 +87,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd_with_mini_batching",
@@ -111,6 +114,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_with_mini_batching",
@@ -138,6 +142,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -164,6 +169,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -188,6 +194,7 @@ pytype_strict_contrib_test(
     ],
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",

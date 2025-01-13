@@ -31,6 +31,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
@@ -60,6 +61,7 @@ pytype_strict_contrib_test(
     },
     tags = [
         "exclusive-if-local",
+        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",

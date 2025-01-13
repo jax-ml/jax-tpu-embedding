@@ -101,7 +101,10 @@ build:clang --copt=-Qunused-arguments
 ##############################################################################
 # Test configurations.
 ##############################################################################
-test:cpu --test_env=JAX_PLATFORMS=cpu --test_tag_filters=cpu
+# Configure TPU for SparseCore usage.
+test --test_env="LIBTPU_INIT_ARGS=--2a886c8_chip_config_name=megachip_tccontrol"
+# Show output for failing tests.
+test --test_output=errors
 
 #############################################################################
 # Some configs to make getting some forms of debug builds. In general, the
