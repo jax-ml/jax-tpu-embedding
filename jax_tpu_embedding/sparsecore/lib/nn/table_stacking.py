@@ -76,11 +76,6 @@ def round_up_dim_and_vocab_size(
   return table_to_padded_dim, tables_to_padded_vocab_size
 
 
-# TODO(b/355289256): Consider better name for the stack.
-def _get_stack_name(table_names: Sequence[str]) -> str:
-  return "_".join(table_names)
-
-
 def _get_stack_table_names(
     tables: Mapping[str, embedding_spec.TableSpec], num_sc: int
 ) -> Sequence[Sequence[str]]:
@@ -96,12 +91,13 @@ def _get_stack_table_names(
 
 
 def _verify_stack_tables(
+    stack_name: str,
     table_names: Sequence[str],
+    features: Sequence[embedding_spec.FeatureSpec],
     tables: Mapping[str, embedding_spec.TableSpec],
     table_to_padded_dim: Mapping[str, int],
 ):
   """Verifies that the provided stacking groups are valid."""
-  stack_name = _get_stack_name(table_names)
   logging.vlog(
       2,
       "Verifying stack group: %s with tables: %s",
@@ -120,6 +116,15 @@ def _verify_stack_tables(
       raise ValueError(
           f"Table {tname} is already stacked in group"
           f" {tables[tname].setting_in_stack.stack_name}."
+      )
+
+  for feature in features:
+    if (
+        _is_stacked_already(feature.table_spec)
+        and feature.table_spec.setting_in_stack.stack_name == stack_name
+    ):
+      raise ValueError(
+          f"Cannot use stack name {stack_name} since it's already used."
       )
 
   # A table should not be repeated in a group.
@@ -214,6 +219,7 @@ def _get_limits_for_stack(
 
 
 def _stack_feature_specs(
+    stack_name: str,
     features: Nested[embedding_spec.FeatureSpec],
     table_names: Sequence[str],
     table_to_padded_dim: Mapping[str, int],
@@ -225,7 +231,6 @@ def _stack_feature_specs(
 ) -> None:
   """Updated the feature spec based on provided groups and stacking logic."""
 
-  stack_name = _get_stack_name(table_names)
   table_name_to_feature_spec = {
       f.table_spec.name: f for f in tree.flatten(features)
   }
@@ -324,6 +329,7 @@ def stack_tables(
     num_sc_per_device: int = 4,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
+    stack_name: str | None = None,
 ) -> None:
   """Creates new feature specs based on specified stacking groups.
 
@@ -341,7 +347,12 @@ def stack_tables(
       stack.
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
+    stack_name: A unique name for the table stack. If None, a default name will
+      be chosen.
   """
+  if stack_name is None:
+    # TODO(b/355289256): Consider better name for the stack.
+    stack_name = "_".join(table_names)
   flatten_features = tree.flatten(features)
   tables_in_group = {
       feature.table_spec.name: feature.table_spec
@@ -353,8 +364,15 @@ def stack_tables(
           tables_in_group, num_sc_per_device * global_device_count
       )
   )
-  _verify_stack_tables(table_names, tables_in_group, table_to_padded_dim)
+  _verify_stack_tables(
+      stack_name,
+      table_names,
+      flatten_features,
+      tables_in_group,
+      table_to_padded_dim,
+  )
   _stack_feature_specs(
+      stack_name=stack_name,
       features=features,
       table_names=table_names,
       table_to_padded_dim=table_to_padded_dim,

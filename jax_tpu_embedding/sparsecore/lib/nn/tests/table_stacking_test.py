@@ -371,6 +371,82 @@ class TableStackingTest(parameterized.TestCase):
         0.5
     )
 
+  def test_manual_stacking_reuse_table_name(self):
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=64,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
+        combiner='sum',
+        name='A',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
+        combiner='sum',
+        name='B',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    table_spec_c = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
+        combiner='sum',
+        name='C',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_a,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_a.embedding_dim,
+            ),
+            name='feature_a',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_b.embedding_dim,
+            ),
+            name='feature_b',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_c,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_c.embedding_dim,
+            ),
+            name='feature_c',
+        ),
+    ]
+
+    table_stacking.stack_tables(
+        feature_specs,
+        ('A', 'B'),
+        global_device_count=jax.device_count(),
+        stack_name='custom_stack',
+    )
+
+    with self.assertRaisesRegex(ValueError, 'custom_stack.*already used.*'):
+      table_stacking.stack_tables(
+          feature_specs,
+          ('C',),
+          global_device_count=jax.device_count(),
+          stack_name='custom_stack',
+      )
+
   def test_manual_stacking_not_same_optimizer(self):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
