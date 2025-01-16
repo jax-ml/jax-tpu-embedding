@@ -42,6 +42,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
+        pypi_requirement("jax/extend"),
         pypi_requirement("numpy"),
     ],
 )

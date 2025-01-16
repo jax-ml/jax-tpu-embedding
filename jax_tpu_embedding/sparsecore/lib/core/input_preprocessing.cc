@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include <algorithm>
-#include <cmath>
 #include <optional>
 #include <string>
 #include <utility>
@@ -24,6 +23,7 @@
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_py_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/cast.h"  // from @pybind11
@@ -146,48 +146,6 @@ int ExtractCooTensors(const py::array& features,
                                             row_offset, col_offset, col_shift,
                                             num_scs_mod, num_scs_mod_inv,
                                             global_device_count, coo_tensors);
-}
-
-absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-GetStackedTableMetadata(py::list feature_specs, py::list features) {
-  tsl::profiler::TraceMe t([] { return "GetStackedTableMetadata"; });
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-      stacked_table_metadata;
-  for (int i = 0; i < feature_specs.size(); ++i) {
-    const py::object& feature_spec = feature_specs[i];
-    const py::array& feature = features[i].cast<py::array>();
-    const py::object& feature_transformation =
-        feature_spec.attr("_id_transformation");
-    const py::object& table_spec = feature_spec.attr("table_spec");
-    const py::object& stacked_table_spec =
-        table_spec.attr("stacked_table_spec");
-    const std::string stacked_table_name = py::cast<std::string>(
-        table_spec.attr("_setting_in_stack").attr("stack_name"));
-    int col_shift = 0;
-    int col_offset = 0;
-    int row_offset = 0;
-    const int max_ids_per_partition =
-        py::cast<int>(stacked_table_spec.attr("max_ids_per_partition"));
-    const int max_unique_ids_per_partition =
-        py::cast<int>(stacked_table_spec.attr("max_unique_ids_per_partition"));
-    if (!feature_transformation.is_none()) {
-      row_offset = py::cast<int>(feature_transformation.attr("row_offset"));
-      col_shift = py::cast<int>(feature_transformation.attr("col_shift"));
-      col_offset = py::cast<int>(feature_transformation.attr("col_offset"));
-    }
-    stacked_table_metadata[stacked_table_name].emplace_back(
-        i, max_ids_per_partition, max_unique_ids_per_partition, row_offset,
-        col_offset, col_shift,
-        /*batch_size=*/feature.shape(0));
-  }
-  // Sort the stacked tables by row_offset.
-  for (auto& [_, t] : stacked_table_metadata) {
-    std::sort(t.begin(), t.end(),
-              [](const StackedTableMetadata& a, const StackedTableMetadata& b) {
-                return a.row_offset < b.row_offset;
-              });
-  }
-  return stacked_table_metadata;
 }
 
 // Preprocess inputs for a single table. Stacked table here refers to a
