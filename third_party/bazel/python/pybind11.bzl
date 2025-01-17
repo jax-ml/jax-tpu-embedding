@@ -20,3 +20,8 @@ def pybind_extension(name, deps, **kwargs):
     # Add pybind11 to deps.
     deps = collections.uniq(deps + ["@pybind11"])
     tsl_pybind_extension_opensource(name = name, deps = deps, **kwargs)
+
+def pybind_library(name, deps, **kwargs):
+    # Add pybind11 and python headers to deps.
+    deps = collections.uniq(deps + ["@pybind11", "@local_config_python//:python_headers"])
+    native.cc_library(name = name, deps = deps, **kwargs)
