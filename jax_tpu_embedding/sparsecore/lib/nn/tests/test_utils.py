@@ -90,6 +90,36 @@ def row_col_id_initializer(
   return init
 
 
+def row_id_with_offset_initializer_value(
+    offset_value: int, row: int
+) -> jax.numpy.float32:
+  """Returns the value for row_col_id_initializer."""
+  return offset_value + row
+
+
+def row_id_with_offset_initializer(
+    offset_value: int = 0,
+) -> jax.nn.initializers.Initializer:
+  """Initializes a table with offset value + row id."""
+
+  def create_array(offset_value, shape):
+    rows, cols = shape
+    result = jax.numpy.zeros(shape, dtype=jax.numpy.float32)
+    for i in range(rows):
+      for j in range(cols):
+        result = result.at[i, j].set(
+            row_id_with_offset_initializer_value(offset_value, i)
+        )
+
+    return result
+
+  def init(key, shape) -> jax.Array:
+    del key
+    return create_array(offset_value, shape)
+
+  return init
+
+
 def rotate_sharded_table(
     embedding_table: jax.Array, rotation: int
 ) -> jax.Array:
