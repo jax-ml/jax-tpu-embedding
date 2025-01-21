@@ -13,11 +13,12 @@
 # limitations under the License.
 """Preprocessor for autopipelining."""
 
-import jax
+import jax.extend as jex
+
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import utils
 
 
-def _has_permitive(eqn: jax.core.JaxprEqn, primitive_name_prefix: str) -> bool:
+def _has_permitive(eqn: jex.core.JaxprEqn, primitive_name_prefix: str) -> bool:
   """Checks if a JaxprEqn contains a primitive with the given prefix.
 
   This function recursively checks the equation and any nested Jaxprs (e.g., in
@@ -33,25 +34,25 @@ def _has_permitive(eqn: jax.core.JaxprEqn, primitive_name_prefix: str) -> bool:
   if eqn.primitive.name.startswith(primitive_name_prefix):
     return True
   for param in eqn.params.values():
-    if isinstance(param, jax.core.ClosedJaxpr) or isinstance(
-        param, jax.core.Jaxpr
+    if isinstance(param, jex.core.ClosedJaxpr) or isinstance(
+        param, jex.core.Jaxpr
     ):
       if any(_has_permitive(eqn, primitive_name_prefix) for eqn in param.eqns):
         return True
   return False
 
 
-def _has_embedding_lookup(eqn: jax.core.JaxprEqn) -> bool:
+def _has_embedding_lookup(eqn: jex.core.JaxprEqn) -> bool:
   """Checks if a JaxprEqn contains an embedding lookup operation."""
   return _has_permitive(eqn, utils.EMBEDDING_LOOKUP_PRIMITIVE_PREFIX)
 
 
-def _has_embedding_update(eqn: jax.core.JaxprEqn) -> bool:
+def _has_embedding_update(eqn: jex.core.JaxprEqn) -> bool:
   """Checks if a JaxprEqn contains an embedding update operation."""
   return _has_permitive(eqn, utils.EMBEDDING_UPDATE_PRIMITIVE_PREFIX)
 
 
-def _inline_custom_vjp(jaxpr: jax.core.Jaxpr) -> jax.core.Jaxpr:
+def _inline_custom_vjp(jaxpr: jex.core.Jaxpr) -> jex.core.Jaxpr:
   """Inlines embedding lookup inside custom_vjp_call_jaxpr."""
   eqns = []
   for eqn in jaxpr.eqns:
@@ -68,7 +69,7 @@ def _inline_custom_vjp(jaxpr: jax.core.Jaxpr) -> jax.core.Jaxpr:
   return jaxpr.replace(eqns=eqns)
 
 
-def _validate_embedding_lookup(eqn: jax.core.JaxprEqn) -> None:
+def _validate_embedding_lookup(eqn: jex.core.JaxprEqn) -> None:
   """Validates whether the embedding lookups can be transformed."""
   # shard_map should be on the top level so that we can combine them.
   assert (
@@ -92,7 +93,7 @@ def _validate_embedding_lookup(eqn: jax.core.JaxprEqn) -> None:
   ), 'Embedding table should be the last input of the lookup shard_map'
 
 
-def _validate_embedding_update(eqn: jax.core.JaxprEqn) -> None:
+def _validate_embedding_update(eqn: jex.core.JaxprEqn) -> None:
   """Validates whether the embedding updates can be transformed."""
   # shard_map should be on the top level so that we can combine them.
   assert (
@@ -123,7 +124,7 @@ def _validate_embedding_update(eqn: jax.core.JaxprEqn) -> None:
   ), 'Embedding table should be the first output of the update shard_map'
 
 
-def validate_jaxpr(jaxpr: jax.core.Jaxpr) -> None:
+def validate_jaxpr(jaxpr: jex.core.Jaxpr) -> None:
   """Validates the structure of the Jaxpr for auto-pipelining."""
   for eqn in jaxpr.eqns:
     has_lookup = _has_embedding_lookup(eqn)
@@ -137,7 +138,7 @@ def validate_jaxpr(jaxpr: jax.core.Jaxpr) -> None:
       _validate_embedding_update(eqn)
 
 
-def preprocess(jaxpr: jax.core.Jaxpr) -> jax.core.Jaxpr:
+def preprocess(jaxpr: jex.core.Jaxpr) -> jex.core.Jaxpr:
   """Preprocesses the Jaxpr for auto-pipelining."""
   jaxpr = _inline_custom_vjp(jaxpr)
   validate_jaxpr(jaxpr)

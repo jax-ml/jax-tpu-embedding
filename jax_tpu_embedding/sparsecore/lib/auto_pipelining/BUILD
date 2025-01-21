@@ -24,7 +24,10 @@ package(
 pytype_strict_library(
     name = "utils",
     srcs = ["utils.py"],
-    deps = [pypi_requirement("jax")],
+    deps = [
+        pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
+    ],
 )
 
 pytype_strict_library(
@@ -34,6 +37,7 @@ pytype_strict_library(
         ":preprocess",
         ":utils",
         pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
     ],
 )
 
@@ -43,6 +47,7 @@ pytype_strict_library(
     deps = [
         ":utils",
         pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
     ],
 )
 
@@ -52,5 +57,6 @@ pytype_strict_library(
     deps = [
         ":decompose",
         pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
     ],
 )

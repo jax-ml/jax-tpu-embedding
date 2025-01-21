@@ -109,13 +109,14 @@ import os
 from typing import Any, Callable, Concatenate, NamedTuple, Optional, ParamSpec, TypeVar
 
 import jax
+import jax.extend as jex
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import decompose
 
 
 Carry = decompose.Carry
 
 
-def dump_jaxpr(jaxpr: jax.core.ClosedJaxpr | jax.core.Jaxpr, name: str) -> None:
+def dump_jaxpr(jaxpr: jex.core.ClosedJaxpr | jex.core.Jaxpr, name: str) -> None:
   """Dumps a Jaxpr to a file, if the TEST_UNDECLARED_OUTPUTS_DIR is set."""
   dirname = os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
   if not dirname:

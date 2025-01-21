@@ -17,6 +17,7 @@ import dataclasses
 from typing import Any
 
 import jax
+import jax.extend as jex
 from jax.interpreters import partial_eval as pe
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import preprocess
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import utils
@@ -33,12 +34,12 @@ class FunctionRunner:
 
   result_structure: jax.tree_util.PyTreeDef
   carry_structure: jax.tree_util.PyTreeDef
-  literals: list[jax.core.Literal]
+  literals: list[jex.core.Literal]
 
-  lookup_jaxpr: jax.core.Jaxpr
-  update_jaxpr: jax.core.Jaxpr
-  update_lookup_jaxpr: jax.core.Jaxpr
-  dense_jaxpr: jax.core.Jaxpr
+  lookup_jaxpr: jex.core.Jaxpr
+  update_jaxpr: jex.core.Jaxpr
+  update_lookup_jaxpr: jex.core.Jaxpr
+  dense_jaxpr: jex.core.Jaxpr
 
   update_params_len: int
   activations_len: int
@@ -78,9 +79,9 @@ class FunctionRunner:
 
 
 def _combine_shard_maps(
-    lookup_eqn: jax.core.JaxprEqn,
-    update_eqn: jax.core.JaxprEqn,
-) -> jax.core.JaxprEqn:
+    lookup_eqn: jex.core.JaxprEqn,
+    update_eqn: jex.core.JaxprEqn,
+) -> jex.core.JaxprEqn:
   """Combines the lookup and update shard_maps into a single shard_map."""
   # The update primitive is the last equation in the Jaxpr.
   update_jaxpr = update_eqn.params['jaxpr']
@@ -95,7 +96,7 @@ def _combine_shard_maps(
   )
 
   # Combine the sub Jaxpr.
-  jaxpr = jax.core.Jaxpr(
+  jaxpr = jex.core.Jaxpr(
       constvars=update_jaxpr.constvars + lookup_jaxpr.constvars,
       invars=update_jaxpr.invars + lookup_jaxpr.invars[:-1],
       outvars=update_jaxpr.outvars + lookup_jaxpr.outvars,
@@ -122,7 +123,7 @@ def _combine_shard_maps(
 
 
 def decompose(
-    closed_jaxpr: jax.core.ClosedJaxpr,
+    closed_jaxpr: jex.core.ClosedJaxpr,
     result_structure: jax.tree_util.PyTreeDef,
     carry_structure: jax.tree_util.PyTreeDef,
 ) -> FunctionRunner:
@@ -146,8 +147,8 @@ def decompose(
   update_param_inputs: list[jax.core.Atom] = []
   update_param_outputs: list[jax.core.Atom] = []
 
-  lookups: dict[jax.core.Atom, jax.core.JaxprEqn] = {}
-  updates: dict[jax.core.Atom, jax.core.JaxprEqn] = {}
+  lookups: dict[jax.core.Atom, jex.core.JaxprEqn] = {}
+  updates: dict[jax.core.Atom, jex.core.JaxprEqn] = {}
 
   ##############################################################################
   # Construct a full jaxpr that takes / returns a different set of activations
