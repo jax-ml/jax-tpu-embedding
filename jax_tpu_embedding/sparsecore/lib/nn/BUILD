@@ -36,17 +36,55 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "embedding_utils",
+    srcs = ["embedding_utils.py"],
+    visibility = ["//jax_tpu_embedding/sparsecore/lib/nn:__subpackages__"],
+    deps = [
+        ":embedding_spec",
+        ":table_stacking",
+        pypi_requirement("absl/logging"),
+        pypi_requirement("jax"),
+        pypi_requirement("jax:experimental"),
+        pypi_requirement("numpy"),
+        pypi_requirement("tree"),
+    ],
+)
+
+pytype_strict_library(
     name = "embedding",
     srcs = ["embedding.py"],
     deps = [
         ":embedding_spec",
+        ":embedding_utils",
         ":table_stacking",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr_with_mini_batching",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
         pypi_requirement("absl/logging"),
         pypi_requirement("jax"),
         pypi_requirement("jax:experimental"),
+        pypi_requirement("numpy"),
+        pypi_requirement("tree"),
+    ],
+)
+
+pytype_strict_library(
+    name = "embedding_with_mini_batching",
+    srcs = ["embedding_with_mini_batching.py"],
+    deps = [
+        ":embedding",
+        ":embedding_spec",
+        ":embedding_utils",
+        ":table_stacking",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_with_mini_batching_cc",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr_with_mini_batching",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_with_mini_batching",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd_with_mini_batching",
+        pypi_requirement("absl/logging"),
+        pypi_requirement("jax"),
+        pypi_requirement("jax:experimental"),
+        pypi_requirement("jax/extend"),
         pypi_requirement("numpy"),
         pypi_requirement("tree"),
     ],

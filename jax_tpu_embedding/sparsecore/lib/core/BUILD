@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-load("//third_party/bazel/python:pybind11.bzl", "pybind_extension")
+load("//third_party/bazel/python:pybind11.bzl", "pybind_extension", "pybind_library")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
@@ -72,17 +72,65 @@ cc_test(
     ],
 )
 
+pybind_library(
+    name = "input_preprocessing_py_util",
+    srcs = [
+        "input_preprocessing_py_util.cc",
+    ],
+    hdrs = [
+        "input_preprocessing_py_util.h",
+    ],
+    deps = [
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:check",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
 pybind_extension(
     name = "input_preprocessing_cc",
-    srcs = ["input_preprocessing.cc"],
+    srcs = [
+        "input_preprocessing.cc",
+    ],
     deps = [
+        ":input_preprocessing_py_util",
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
+        "@highway//:hwy",
+        "@highway//hwy/contrib/sort:vqsort",
+        "@tsl//tsl/profiler/lib:connected_traceme",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+pybind_extension(
+    name = "input_preprocessing_with_mini_batching_cc",
+    srcs = [
+        "input_preprocessing_with_mini_batching.cc",
+        "input_preprocessing_with_mini_batching.h",
+    ],
+    deps = [
+        ":input_preprocessing_py_util",
+        ":input_preprocessing_threads",
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
+        "@highway//:hwy",
+        "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],
