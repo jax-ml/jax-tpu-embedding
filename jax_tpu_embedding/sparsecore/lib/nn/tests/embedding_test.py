@@ -759,7 +759,16 @@ class EmbeddingTest(parameterized.TestCase):
           jax.random.PRNGKey(0),
           updated_table_specs,
           global_sharding=global_sharding,
+          bypass_mesh_check=False,
       )
+
+    # Call the method again with bypass_mesh_check and it should succeed.
+    _ = embedding.init_embedding_variables(
+        jax.random.PRNGKey(0),
+        updated_table_specs,
+        global_sharding=global_sharding,
+        bypass_mesh_check=True,
+    )
 
   def test_muti_dimensional_mesh_for_init_embedding_variables(self):
     # create non-standard device list

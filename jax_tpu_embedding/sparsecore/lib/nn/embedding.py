@@ -820,6 +820,7 @@ def init_embedding_variables(
     table_specs: Nested[embedding_spec.TableSpec],
     global_sharding: jax.sharding.NamedSharding,
     num_sparsecore_per_device: int = 4,
+    bypass_mesh_check: bool = False,
 ) -> Mapping[str, EmbeddingVariables]:
   """Generates the initial embedding variables.
 
@@ -838,6 +839,9 @@ def init_embedding_variables(
       happen along the device dimension, the partition spec should be
       sharding.PartitionSpec("x", None, None).
     num_sparsecore_per_device: Number of sparsecore per device. default = 4
+    bypass_mesh_check: If True, don't require the mesh device order to match
+      jax.devices(). This can be used when exporting a model from a host where
+      the training devices are not present.
 
   Returns:
     A dictionary of embedding variable initializers. Each key is the table name
@@ -869,8 +873,11 @@ def init_embedding_variables(
         f" None). Got {global_sharding.spec}"
     )
 
-  if global_sharding.mesh.devices is None or not np.array_equal(
-      global_sharding.mesh.devices.flatten(), jax.devices()
+  if not bypass_mesh_check and (
+      global_sharding.mesh.devices is None
+      or not np.array_equal(
+          global_sharding.mesh.devices.flatten(), jax.devices()
+      )
   ):
     raise ValueError(
         "global_sharding needs to be created with default device order from"
