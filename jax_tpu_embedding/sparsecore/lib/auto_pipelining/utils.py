@@ -15,9 +15,11 @@
 
 from collections.abc import Iterable
 import itertools
+from typing import Union
 
 import jax
 
+Atom = Union[jax.extend.core.Var, jax.extend.core.Literal]
 
 EMBEDDING_LOOKUP_PRIMITIVE_PREFIX = 'sparse_dense_matmul_csr'
 EMBEDDING_UPDATE_PRIMITIVE_PREFIX = 'sparse_dense_matmul_grad'
@@ -32,7 +34,7 @@ EMBEDDING_LOOKUP_DATA_LEN = 4
 EMBEDDING_UPDATE_DATA_LEN = EMBEDDING_LOOKUP_DATA_LEN + 1
 
 
-def is_embedding_lookup(eqn: jax.core.JaxprEqn) -> bool:
+def is_embedding_lookup(eqn: jax.extend.core.JaxprEqn) -> bool:
   if eqn.primitive.name != SHARD_MAP_PRIMITIVE_NAME:
     return False
   jaxpr = eqn.params['jaxpr']
@@ -41,7 +43,7 @@ def is_embedding_lookup(eqn: jax.core.JaxprEqn) -> bool:
   )
 
 
-def is_embedding_update(eqn: jax.core.JaxprEqn) -> bool:
+def is_embedding_update(eqn: jax.extend.core.JaxprEqn) -> bool:
   if eqn.primitive.name != SHARD_MAP_PRIMITIVE_NAME:
     return False
   jaxpr = eqn.params['jaxpr']
@@ -51,8 +53,8 @@ def is_embedding_update(eqn: jax.core.JaxprEqn) -> bool:
 
 
 def lookup_params(
-    eqn: jax.core.JaxprEqn,
-) -> tuple[list[jax.core.Atom], list[jax.core.Atom]]:
+    eqn: jax.extend.core.JaxprEqn,
+) -> tuple[list[Atom], list[Atom]]:
   return (
       eqn.invars[:EMBEDDING_LOOKUP_DATA_LEN],
       eqn.invars[EMBEDDING_LOOKUP_DATA_LEN:],
@@ -60,23 +62,25 @@ def lookup_params(
 
 
 def update_params(
-    eqn: jax.core.JaxprEqn,
-) -> tuple[list[jax.core.Atom], list[jax.core.Atom]]:
+    eqn: jax.extend.core.JaxprEqn,
+) -> tuple[list[Atom], list[Atom]]:
   return (
       eqn.invars[:EMBEDDING_UPDATE_DATA_LEN],
       eqn.invars[EMBEDDING_UPDATE_DATA_LEN:],
   )
 
 
-def clone_vars(var_list: Iterable[jax.core.Var]) -> list[jax.core.Var]:
-  return [jax.core.Var(var.suffix, var.aval) for var in var_list]
+def clone_vars(
+    var_list: Iterable[jax.extend.core.Var],
+) -> list[jax.extend.core.Var]:
+  return [jax.extend.core.Var(var.suffix, var.aval) for var in var_list]
 
 
 def inline_jaxpr(
-    jaxpr: jax.core.Jaxpr,
-    invars: list[jax.core.Var],
-    outvars: list[jax.core.Var],
-) -> list[jax.core.JaxprEqn]:
+    jaxpr: jax.extend.core.Jaxpr,
+    invars: list[jax.extend.core.Var],
+    outvars: list[jax.extend.core.Var],
+) -> list[jax.extend.core.JaxprEqn]:
   """Inlines a jaxpr with given invars and outvars."""
   assert not set(jaxpr.invars).intersection(
       jaxpr.outvars
@@ -92,11 +96,11 @@ def inline_jaxpr(
       )
   }
 
-  def _translate_outvar(var: jax.core.Var) -> jax.core.Var:
+  def _translate_outvar(var: jax.extend.core.Var) -> jax.extend.core.Var:
     return var_mapping.setdefault(var, clone_vars([var])[0])
 
-  def _translate_invar(var: jax.core.Var) -> jax.core.Var:
-    return var if isinstance(var, jax.core.Literal) else var_mapping[var]
+  def _translate_invar(var: jax.extend.core.Var) -> jax.extend.core.Var:
+    return var if isinstance(var, jax.extend.core.Literal) else var_mapping[var]
 
   return [
       eqn.replace(

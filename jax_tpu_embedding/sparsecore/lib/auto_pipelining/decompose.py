@@ -33,12 +33,12 @@ class FunctionRunner:
 
   result_structure: jax.tree_util.PyTreeDef
   carry_structure: jax.tree_util.PyTreeDef
-  literals: list[jax.core.Literal]
+  literals: list[jax.extend.core.Literal]
 
-  lookup_jaxpr: jax.core.Jaxpr
-  update_jaxpr: jax.core.Jaxpr
-  update_lookup_jaxpr: jax.core.Jaxpr
-  dense_jaxpr: jax.core.Jaxpr
+  lookup_jaxpr: jax.extend.core.Jaxpr
+  update_jaxpr: jax.extend.core.Jaxpr
+  update_lookup_jaxpr: jax.extend.core.Jaxpr
+  dense_jaxpr: jax.extend.core.Jaxpr
 
   update_params_len: int
   activations_len: int
@@ -78,9 +78,9 @@ class FunctionRunner:
 
 
 def _combine_shard_maps(
-    lookup_eqn: jax.core.JaxprEqn,
-    update_eqn: jax.core.JaxprEqn,
-) -> jax.core.JaxprEqn:
+    lookup_eqn: jax.extend.core.JaxprEqn,
+    update_eqn: jax.extend.core.JaxprEqn,
+) -> jax.extend.core.JaxprEqn:
   """Combines the lookup and update shard_maps into a single shard_map."""
   # The update primitive is the last equation in the Jaxpr.
   update_jaxpr = update_eqn.params['jaxpr']
@@ -95,7 +95,7 @@ def _combine_shard_maps(
   )
 
   # Combine the sub Jaxpr.
-  jaxpr = jax.core.Jaxpr(
+  jaxpr = jax.extend.core.Jaxpr(
       constvars=update_jaxpr.constvars + lookup_jaxpr.constvars,
       invars=update_jaxpr.invars + lookup_jaxpr.invars[:-1],
       outvars=update_jaxpr.outvars + lookup_jaxpr.outvars,
@@ -122,7 +122,7 @@ def _combine_shard_maps(
 
 
 def decompose(
-    closed_jaxpr: jax.core.ClosedJaxpr,
+    closed_jaxpr: jax.extend.core.ClosedJaxpr,
     result_structure: jax.tree_util.PyTreeDef,
     carry_structure: jax.tree_util.PyTreeDef,
 ) -> FunctionRunner:
@@ -140,14 +140,14 @@ def decompose(
   carry_len = carry_structure.num_leaves
   jaxpr = preprocess.preprocess(closed_jaxpr.jaxpr)
 
-  activation_inputs: list[jax.core.Atom] = []
-  activation_outputs: list[jax.core.Atom] = []
+  activation_inputs: list[utils.Atom] = []
+  activation_outputs: list[utils.Atom] = []
 
-  update_param_inputs: list[jax.core.Atom] = []
-  update_param_outputs: list[jax.core.Atom] = []
+  update_param_inputs: list[utils.Atom] = []
+  update_param_outputs: list[utils.Atom] = []
 
-  lookups: dict[jax.core.Atom, jax.core.JaxprEqn] = {}
-  updates: dict[jax.core.Atom, jax.core.JaxprEqn] = {}
+  lookups: dict[utils.Atom, jax.extend.core.JaxprEqn] = {}
+  updates: dict[utils.Atom, jax.extend.core.JaxprEqn] = {}
 
   ##############################################################################
   # Construct a full jaxpr that takes / returns a different set of activations

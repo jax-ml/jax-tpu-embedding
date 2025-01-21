@@ -115,7 +115,9 @@ from jax_tpu_embedding.sparsecore.lib.auto_pipelining import decompose
 Carry = decompose.Carry
 
 
-def dump_jaxpr(jaxpr: jax.core.ClosedJaxpr | jax.core.Jaxpr, name: str) -> None:
+def dump_jaxpr(
+    jaxpr: jax.extend.core.ClosedJaxpr | jax.extend.core.Jaxpr, name: str
+) -> None:
   """Dumps a Jaxpr to a file, if the TEST_UNDECLARED_OUTPUTS_DIR is set."""
   dirname = os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
   if not dirname:
