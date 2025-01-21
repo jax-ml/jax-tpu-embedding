@@ -33,10 +33,26 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "embedding_utils",
+    srcs = ["embedding_utils.py"],
+    visibility = ["//jax_tpu_embedding/sparsecore/lib/nn:__subpackages__"],
+    deps = [
+        ":embedding_spec",
+        ":table_stacking",
+        pypi_requirement("absl/logging"),
+        pypi_requirement("jax"),
+        pypi_requirement("jax:experimental"),
+        pypi_requirement("numpy"),
+        pypi_requirement("tree"),
+    ],
+)
+
+pytype_strict_library(
     name = "embedding",
     srcs = ["embedding.py"],
     deps = [
         ":embedding_spec",
+        ":embedding_utils",
         ":table_stacking",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
