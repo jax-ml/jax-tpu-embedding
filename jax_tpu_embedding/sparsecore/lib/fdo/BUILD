@@ -22,7 +22,7 @@ package(
 pytype_strict_library(
     name = "fdo_client",
     srcs = ["fdo_client.py"],
-    deps = [pypi_requirement("jax")],
+    deps = [pypi_requirement("numpy")],
 )
 
 pytype_strict_library(

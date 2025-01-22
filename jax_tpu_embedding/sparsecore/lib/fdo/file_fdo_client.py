@@ -20,7 +20,6 @@ import os
 import time
 from absl import logging
 import jax
-from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.fdo import fdo_client
 import numpy as np
 
@@ -51,10 +50,10 @@ class NPZFileFDOClient(fdo_client.FDOClient):
 
   def __init__(self, base_dir: str):
     self._base_dir = base_dir
-    self._max_ids_per_partition = collections.defaultdict(jnp.ndarray)
-    self._max_unique_ids_per_partition = collections.defaultdict(jnp.ndarray)
+    self._max_ids_per_partition = collections.defaultdict(np.ndarray)
+    self._max_unique_ids_per_partition = collections.defaultdict(np.ndarray)
 
-  def record(self, data: Mapping[str, Mapping[str, jnp.ndarray]]) -> None:
+  def record(self, data: Mapping[str, Mapping[str, np.ndarray]]) -> None:
     """Records stats per process.
 
     Accumulates the max ids observed per process per sparsecore per device for
@@ -102,7 +101,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     )
     return os.path.join(self._base_dir, filename)
 
-  def _write_to_file(self, stats: Mapping[str, jnp.ndarray]) -> None:
+  def _write_to_file(self, stats: Mapping[str, np.ndarray]) -> None:
     """Writes stats to a npz file."""
     file_name = self._generate_file_name()
     logging.info('Write stats to %s', file_name)
@@ -124,12 +123,12 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     })
     self._write_to_file(merged_stats)
 
-  def _read_from_file(self, files_glob: str) -> Mapping[str, jnp.ndarray]:
+  def _read_from_file(self, files_glob: str) -> Mapping[str, np.ndarray]:
     """Reads stats from a npz file."""
     files = glob.glob(files_glob)
     if not files:
       raise FileNotFoundError('No stats files found in %s' % files_glob)
-    stats = collections.defaultdict(jnp.ndarray)
+    stats = collections.defaultdict(np.ndarray)
     for file_name in files:
       logging.info('Reading stats from %s', file_name)
       loaded = np.load(file_name)
@@ -138,12 +137,12 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         if stats.get(key) is None:
           stats[key] = value
         else:
-          stats[key] = jnp.max(jnp.vstack((stats[key], value)), axis=0)
+          stats[key] = np.max(np.vstack((stats[key], value)), axis=0)
     return stats
 
   def load(
       self,
-  ) -> tuple[Mapping[str, jnp.ndarray], Mapping[str, jnp.ndarray]]:
+  ) -> tuple[Mapping[str, np.ndarray], Mapping[str, np.ndarray]]:
     """Loads state of local FDO client from disk.
 
     Reads all files in the base_dir and aggregates stats.

@@ -16,7 +16,7 @@
 import abc
 from collections.abc import Mapping
 
-from jax import numpy as jnp
+import numpy as np
 
 
 class FDOClient(abc.ABC):
@@ -41,7 +41,7 @@ class FDOClient(abc.ABC):
   @abc.abstractmethod
   def record(
       self,
-      data: Mapping[str, Mapping[str, jnp.ndarray]],
+      data: Mapping[str, Mapping[str, np.ndarray]],
   ) -> None:
     """Records the raw stats to local memory.
 
@@ -66,7 +66,7 @@ class FDOClient(abc.ABC):
   @abc.abstractmethod
   def load(
       self,
-  ) -> tuple[Mapping[str, jnp.ndarray], Mapping[str, jnp.ndarray]]:
+  ) -> tuple[Mapping[str, np.ndarray], Mapping[str, np.ndarray]]:
     """Loads state of local FDO client and returns the aggregated stats.
 
     An implementation of this method defines how the stats are aggregated across
