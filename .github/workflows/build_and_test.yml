@@ -9,19 +9,15 @@ on:
   pull_request:
 
 jobs:
-  build_and_test:
+  build-and-test-cpu:
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        python-version: ["3.10"]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.10'
           cache: 'pip'
 
       - name: Display Python version
@@ -42,10 +38,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: "/home/runner/.cache/bazel"
-          key: bazel-${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.sha }}
+          key: bazel-py3.10-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            bazel-${{ matrix.python-version }}-${{ github.ref_name }}
-            bazel-${{ matrix.python-version }}-
+            bazel-py3.10-${{ github.ref_name }}
+            bazel-py3.10-
             bazel-
 
       - if: github.event_name == 'pull_request'
@@ -53,15 +49,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: "/home/runner/.cache/bazel"
-          key: bazel-${{ matrix.python-version }}-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
+          key: bazel-py3.10-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
           restore-keys: |
-            bazel-${{ matrix.python-version }}-${{ github.base_ref }}
-            bazel-${{ matrix.python-version }}-
+            bazel-py3.10-${{ github.base_ref }}
+            bazel-py3.10-
             bazel-
 
       - name: Build all targets
         run: |
-          export HERMETIC_PYTHON_VERSION=${{ matrix.python-version }}
+          export HERMETIC_PYTHON_VERSION=3.10
           bazel build //...
 
       - name: Build pip wheel

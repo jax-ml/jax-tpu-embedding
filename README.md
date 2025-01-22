@@ -1,6 +1,7 @@
 # jax_tpu_embedding
 
-[![Unittests](https://github.com/jax-ml/jax_tpu_embedding/actions/workflows/pytest_and_autopublish.yml/badge.svg)](https://github.com/jax-ml/jax_tpu_embedding/actions/workflows/pytest_and_autopublish.yml)
-[![PyPI version](https://badge.fury.io/py/jax_tpu_embedding.svg)](https://badge.fury.io/py/jax_tpu_embedding)
+[![Unittests](https://github.com/jax-ml/jax-tpu-embedding/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/jax-ml/jax-tpu-embedding/actions/workflows/build_and_test.yml)
+
+Usage instructions coming soon!
 
 *This is not an officially supported Google product.*
