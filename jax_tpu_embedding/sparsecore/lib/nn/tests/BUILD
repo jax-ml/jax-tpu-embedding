@@ -148,6 +148,7 @@ pytype_strict_contrib_test(
         "requires-tpu",
     ],
     deps = [
+        ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",

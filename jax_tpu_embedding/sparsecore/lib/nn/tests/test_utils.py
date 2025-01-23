@@ -141,3 +141,8 @@ def create_per_device_sharded_stacked_tables(
   sharded_stacked = jax.numpy.concatenate(rotated_tables, axis=1)
 
   return sharded_stacked.reshape(num_devices, -1, dim)
+
+
+def round_up_to_multiple(number: int, factor: int) -> int:
+  """Rounds up a number to the next multiple of a factor."""
+  return ((number + factor - 1) // factor) * factor
