@@ -45,11 +45,13 @@ from jax import numpy as jnp
 from jax._src import dispatch
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import hlo
+import jax.extend as jex
 from jax.interpreters import mlir
 from jax_tpu_embedding.sparsecore.lib.core import constants
 import numpy as np
 
-tpu_sparse_dense_matmul_optimizer_grad_primitive = core.Primitive(
+
+tpu_sparse_dense_matmul_optimizer_grad_primitive = jex.core.Primitive(
     "sparse_dense_matmul_optimizer_grad_primitive",
 )
 
