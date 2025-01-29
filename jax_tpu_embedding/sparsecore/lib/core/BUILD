@@ -93,7 +93,6 @@ pytype_strict_library(
     srcs = [
         "input_preprocessing.py",
     ],
-    srcs_version = "PY3",
     deps = [
         ":constants",
         pypi_requirement("absl:app"),
@@ -109,7 +108,6 @@ pytype_strict_library(
     srcs = [
         "constants.py",
     ],
-    srcs_version = "PY3",
 )
 
 pytype_strict_contrib_test(

@@ -24,7 +24,6 @@ pytype_strict_library(
     srcs = [
         "dataset.py",
     ],
-    srcs_version = "PY3",
     deps = [
         pypi_requirement("absl/logging"),
         pypi_requirement("numpy"),
@@ -36,7 +35,6 @@ pytype_strict_library(
     srcs = [
         "model.py",
     ],
-    srcs_version = "PY3",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("flax:core"),
@@ -50,7 +48,6 @@ pytype_strict_library(
     srcs = [
         "flax_model.py",
     ],
-    srcs_version = "PY3",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
