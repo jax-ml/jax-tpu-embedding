@@ -21,7 +21,7 @@
 # Usage:
 #   . build/install_bazelisk.sh
 
-if [ -z "${BAZELISK_VERSION}" ]; then
+if [[ -z "${BAZELISK_VERSION}" ]]; then
   BAZELISK_VERSION=v1.15.0
 fi
 
