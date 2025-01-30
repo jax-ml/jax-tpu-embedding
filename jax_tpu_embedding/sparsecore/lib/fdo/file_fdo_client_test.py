@@ -71,7 +71,7 @@ class NpzFdoClientTest(absltest.TestCase):
   def test_load_multiple_files(self):
     base_dir = self.create_tempdir().full_path
     np.savez(
-        os.path.join(base_dir, "fdo_stats_10.npz"),
+        os.path.join(base_dir, "fdo_stats_0_10.npz"),
         **{
             "t_one_max_ids": np.array([10, 20, 30, 40]),
             "t_two_max_ids": np.array([50, 60, 70, 80]),
@@ -80,7 +80,7 @@ class NpzFdoClientTest(absltest.TestCase):
         },
     )
     np.savez(
-        os.path.join(base_dir, "fdo_stats_11.npz"),
+        os.path.join(base_dir, "fdo_stats_1_11.npz"),
         **{
             "t_one_max_ids": np.array([20, 10, 40, 30]),
             "t_two_max_ids": np.array([60, 60, 80, 70]),
@@ -110,6 +110,26 @@ class NpzFdoClientTest(absltest.TestCase):
     fdo_client = file_fdo_client.NPZFileFDOClient(self.base_dir)
     with self.assertRaises(FileNotFoundError):
       _, _ = fdo_client.load()
+
+  def test_latest_files_by_process(self):
+    files = [
+        "temp/fdo_dumps/fdo_stats_0_10.npz",
+        "temp/fdo_dumps/fdo_stats_0_20.npz",
+        "temp/fdo_dumps/fdo_stats_0_30.npz",
+        "temp/fdo_dumps/fdo_stats_1_09.npz",
+        "temp/fdo_dumps/fdo_stats_0_40.npz",
+        "temp/fdo_dumps/fdo_stats_2_10.npz",
+    ]
+    fdo_client = file_fdo_client.NPZFileFDOClient(self.base_dir)
+    latest_files = fdo_client._get_latest_files_by_process(files)
+    self.assertEqual(
+        latest_files,
+        [
+            "temp/fdo_dumps/fdo_stats_2_10.npz",
+            "temp/fdo_dumps/fdo_stats_1_09.npz",
+            "temp/fdo_dumps/fdo_stats_0_40.npz",
+        ],
+    )
 
 
 if __name__ == "__main__":
