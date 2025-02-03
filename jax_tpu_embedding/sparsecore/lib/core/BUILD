@@ -19,7 +19,7 @@ package(
     default_applicable_licenses = ["//:license"],
     default_visibility = [
         "//jax_tpu_embedding/sparsecore:__subpackages__",
-        "//smartass/brain/configure/jax:__subpackages__",
+        "//smartass/brain/jax:__subpackages__",
     ],
 )
 
