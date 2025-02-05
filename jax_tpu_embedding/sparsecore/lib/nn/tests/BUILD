@@ -53,6 +53,7 @@ pytype_strict_library(
     srcs = ["test_utils.py"],
     visibility = [
         "//jax_tpu_embedding/sparsecore/lib:__subpackages__",
+        "//video/youtube/discovery/ml_infra/jax:__subpackages__",
     ],
     deps = [
         pypi_requirement("einops"),
