@@ -1,0 +1,70 @@
+# Cloud TPU CI (presubmit)
+#
+# This job currently runs as a non-blocking presubmit. It is experimental and is currently being
+# tested to get to a stable state before we enable it as a blocking presubmit.
+name: CI - Cloud TPU (presubmit)
+on:
+  workflow_dispatch:
+    inputs:
+      halt-for-connection:
+        description: 'Should this workflow run wait for a remote connection?'
+        type: choice
+        required: true
+        default: 'no'
+        options:
+        - 'yes'
+        - 'no'
+  pull_request:
+    branches:
+      - main
+
+# This should also be set to read-only in the project settings, but it's nice to
+# document and enforce the permissions here.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cloud-tpu-test:
+    if: github.event.repository.fork == false
+    strategy:
+      fail-fast: false # don't cancel all jobs on failure
+      matrix:
+        tpu: [
+          {type: "v6e-4", cores: "8", runner: "linux-x86-ct6e-180-4tpu"}
+        ]
+        python-version: ["3.10"]
+
+    name: "TPU test (jax-tpu-embedding/sparsecore=head, ${{ matrix.tpu.type }})"
+
+    env:
+      JAXCI_PYTHON: python${{ matrix.python-version }}
+      JAXCI_TPU_CORES: ${{ matrix.tpu.cores }}
+      HERMETIC_PYTHON_VERSION: ${{ matrix.python-version }}
+
+    runs-on: ${{ matrix.tpu.runner }}
+    container: "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest"
+
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout jax-tpu-embedding at head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      # We need to mark the GitHub workspace as safe as otherwise git commands will fail.
+      - name: Mark GitHub workspace as safe
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # Halt for testing
+      - name: Wait For Connection
+        uses: google-ml-infra/actions/ci_connection@main
+        with:
+          halt-dispatch-input: ${{ inputs.halt-for-connection }}
+      - name: Build and Run tests
+        run: |
+          bazel test //...
