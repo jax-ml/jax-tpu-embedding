@@ -14,7 +14,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 
 #include <gtest/gtest.h>
-#include "tsl/platform/threadpool.h"  // from @tsl
+#include "third_party/tensorflow/compiler/xla/tsl/platform/threadpool.h"
 
 namespace jax_sc_embedding {
 namespace {

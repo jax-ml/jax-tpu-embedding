@@ -14,7 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_THREADS_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_THREADS_H_
 
-#include "tsl/platform/threadpool.h"  // from @tsl
+#include "third_party/tensorflow/compiler/xla/tsl/platform/threadpool.h"
 
 namespace jax_sc_embedding {
 

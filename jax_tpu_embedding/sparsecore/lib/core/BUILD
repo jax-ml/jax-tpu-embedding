@@ -28,10 +28,10 @@ cc_library(
     srcs = ["input_preprocessing_threads.cc"],
     hdrs = ["input_preprocessing_threads.h"],
     deps = [
+        "//third_party/tensorflow/compiler/xla/tsl/platform:env",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
-        "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:platform_port",
     ],
 )
@@ -42,8 +42,8 @@ cc_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":input_preprocessing_threads",
+        "//third_party/tensorflow/compiler/xla/tsl/platform:env",
         "@com_google_googletest//:gtest_main",
-        "@tsl//tsl/platform:env",
     ],
 )
 

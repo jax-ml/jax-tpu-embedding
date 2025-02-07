@@ -20,9 +20,9 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/numbers.h"  // from @com_google_absl
+#include "third_party/tensorflow/compiler/xla/tsl/platform/env.h"
+#include "third_party/tensorflow/compiler/xla/tsl/platform/threadpool.h"
 #include "tsl/platform/cpu_info.h"  // from @tsl
-#include "tsl/platform/env.h"  // from @tsl
-#include "tsl/platform/threadpool.h"  // from @tsl
 
 namespace jax_sc_embedding {
 
