@@ -31,8 +31,8 @@
 #include "pybind11/numpy.h"  // from @pybind11
 #include "pybind11/pybind11.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
-#include "tsl/profiler/lib/connected_traceme.h"  // from @tsl
-#include "tsl/profiler/lib/traceme.h"  // from @tsl
+#include "tsl/profiler/lib/connected_traceme.h"
+#include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
 
