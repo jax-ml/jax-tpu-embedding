@@ -31,8 +31,8 @@ tpu_py_strict_test(
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
-        pypi_requirement("absl/flags"),
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("einops"),
         pypi_requirement("jax"),

@@ -24,6 +24,16 @@ _DUMP_DIR = flags.DEFINE_string(
     'dump_dir', None, 'Directory to write debug dumps to.'
 )
 
+NUM_SC_PER_DEVICE_MAP = {
+    'TPU v5': 4,
+    'TPU v6 lite': 2,
+}
+
+
+def num_sparsecores_per_device(device: jax.Device):
+  """Determine the number of sparsecores available on a device."""
+  return NUM_SC_PER_DEVICE_MAP[device.device_kind]
+
 
 def jit_with_dump(fn, name=None, source_info=None, *jit_args, **jit_kwargs):
   """A wrapper for a jitted function that dumps the jaxpr to a file."""

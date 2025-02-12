@@ -46,8 +46,8 @@ def tpu_py_strict_test(
 
     pytype_strict_contrib_test(
         name = name,
-        tags = tags + ["requires-tpu"],
+        tags = tags,
         deps = deps,
-        args = args + ["--num_sparsecore_per_device=4"],
+        args = args,
         **kwargs
     )

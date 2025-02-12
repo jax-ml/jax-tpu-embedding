@@ -13,19 +13,14 @@
 # limitations under the License.
 from unittest import mock
 
-from absl import flags
 from absl.testing import absltest
 import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
-
-FLAGS = flags.FLAGS
-flags.DEFINE_integer(
-    "num_sparsecore_per_device", None, "Number of sparsecores per tpu device."
-)
 
 
 class SparseDenseMatmulCsrTest(absltest.TestCase):
@@ -36,7 +31,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     self.batch_size = 16
     self.vocab_size = 32
     self.emb_size = 8
-    self.num_sc_per_device = FLAGS.num_sparsecore_per_device
+    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
     self.input_tensor = np.array(
         [
             [5],
