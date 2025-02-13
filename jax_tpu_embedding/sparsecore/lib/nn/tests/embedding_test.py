@@ -22,7 +22,9 @@ import jax
 from jax import sharding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -39,6 +41,10 @@ _DEVICE_ERR_STR = (
 
 # TODO(b/369729914): Refactor according to internal link:unit-testing-practices#
 class EmbeddingTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
 
   def assert_all_shards_shape(self, shards, expected_shape):
     for shard in shards:
@@ -71,10 +77,15 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    total_sc_in_test = jax.device_count() * self.num_sc_per_device
+    padded_vocab_size = test_utils.round_up_to_multiple(
+        table_spec.vocabulary_size, 8 * total_sc_in_test
     )
     expected_stacked_table_spec = embedding_spec.StackedTableSpec(
         stack_name=table_spec.name,
-        stack_vocab_size=128,
+        stack_vocab_size=padded_vocab_size,
         stack_embedding_dim=16,
         combiner=table_spec.combiner,
         optimizer=table_spec.optimizer,
@@ -97,7 +108,7 @@ class EmbeddingTest(parameterized.TestCase):
                 _setting_in_stack=embedding_spec.TableSettingInStack(
                     stack_name=table_spec.name,
                     padded_embedding_dim=table_spec.embedding_dim,
-                    padded_vocab_size=128,
+                    padded_vocab_size=padded_vocab_size,
                     row_offset_in_shard=0,
                     shard_rotation=0,
                 ),
@@ -143,6 +154,7 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
+        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
     )
     with self.assertRaises(ValueError):
       embedding.get_stacked_table_specs(feature_specs)
@@ -237,10 +249,15 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         (feature_spec_a, feature_spec_b),
         global_device_count=jax.device_count(),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    total_sc_in_test = jax.device_count() * self.num_sc_per_device
+    padded_vocab_size = test_utils.round_up_to_multiple(
+        table_spec.vocabulary_size, 8 * total_sc_in_test
     )
     expected_stacked_table_spec = embedding_spec.StackedTableSpec(
         stack_name="table",
-        stack_vocab_size=128,  # Vocab round up
+        stack_vocab_size=padded_vocab_size,
         stack_embedding_dim=16,  # Dim round up
         combiner="sum",
         optimizer=embedding_spec.SGDOptimizerSpec(),
@@ -336,6 +353,7 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
+        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
     )
     self.assertEqual(
         embedding.get_stacked_table_specs(feature_specs),
@@ -393,6 +411,7 @@ class EmbeddingTest(parameterized.TestCase):
         jax.random.PRNGKey(0),
         [table_a_spec, table_b_spec],
         global_sharding=global_sharding,
+        num_sparsecore_per_device=utils.num_sparsecores_per_device(devices[0]),
     )
 
     self.assertLen(
@@ -481,19 +500,25 @@ class EmbeddingTest(parameterized.TestCase):
     feature_specs = [feature_a_spec, feature_b_spec]
     embedding.auto_stack_tables(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
     # Assert on the preconditions.
     self.assertLen(feature_specs, 2)
-    padded_vocab_size_a = vocab_size_a + 96  # extra padding rows = 96.
+    total_sc_in_test = self.num_sc_per_device * jax.device_count()
+    padded_vocab_size_a = test_utils.round_up_to_multiple(
+        vocab_size_a, 8 * total_sc_in_test
+    )
     self.assertEqual(
         feature_a_spec.table_spec.setting_in_stack.padded_vocab_size,
         padded_vocab_size_a,
     )
+    padded_vocab_size_b = test_utils.round_up_to_multiple(
+        vocab_size_b, 8 * total_sc_in_test
+    )
     self.assertEqual(
         feature_b_spec.table_spec.setting_in_stack.padded_vocab_size,
-        vocab_size_b,
+        padded_vocab_size_b,
     )
     updated_table_specs = [f.table_spec for f in feature_specs]
 
@@ -502,6 +527,7 @@ class EmbeddingTest(parameterized.TestCase):
         jax.random.PRNGKey(0),
         updated_table_specs,
         global_sharding=global_sharding,
+        num_sparsecore_per_device=self.num_sc_per_device,
     )
 
     expected_sc_shard_a = jax.numpy.zeros([8, 16]).reshape([1, -1, 16])
@@ -510,7 +536,7 @@ class EmbeddingTest(parameterized.TestCase):
         [expected_sc_shard_a, expected_sc_shard_b], axis=1
     )
     expected_device_shard = jax.numpy.concatenate(
-        [expected_stack_sc_shard] * 4, axis=1
+        [expected_stack_sc_shard] * self.num_sc_per_device, axis=1
     )
 
     self.assertLen(
@@ -520,8 +546,8 @@ class EmbeddingTest(parameterized.TestCase):
       self.assertEqual(
           variable.shape,
           (
-              4,
-              (padded_vocab_size_a + vocab_size_b) // len(devices),
+              jax.device_count(),
+              (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
               16,
           ),
       )
@@ -534,7 +560,7 @@ class EmbeddingTest(parameterized.TestCase):
         embedding_variables["table_a_table_b"].table.addressable_shards,
         (
             1,
-            (padded_vocab_size_a + vocab_size_b) // len(devices),
+            (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
             16,
         ),
     )
@@ -595,19 +621,25 @@ class EmbeddingTest(parameterized.TestCase):
     feature_specs = [feature_a_spec, feature_b_spec]
     embedding.auto_stack_tables(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
     # Assert on the preconditions.
     self.assertLen(feature_specs, 2)
-    padded_vocab_size_a = vocab_size_a + 96  # extra padding rows = 96.
+    total_sc_in_test = self.num_sc_per_device * jax.device_count()
+    padded_vocab_size_a = test_utils.round_up_to_multiple(
+        vocab_size_a, 8 * total_sc_in_test
+    )
     self.assertEqual(
         feature_a_spec.table_spec.setting_in_stack.padded_vocab_size,
         padded_vocab_size_a,
     )
+    padded_vocab_size_b = test_utils.round_up_to_multiple(
+        vocab_size_b, 8 * total_sc_in_test
+    )
     self.assertEqual(
         feature_b_spec.table_spec.setting_in_stack.padded_vocab_size,
-        vocab_size_b,
+        padded_vocab_size_b,
     )
     updated_table_specs = [f.table_spec for f in feature_specs]
 
@@ -616,6 +648,7 @@ class EmbeddingTest(parameterized.TestCase):
         jax.random.PRNGKey(0),
         updated_table_specs,
         global_sharding=global_sharding,
+        num_sparsecore_per_device=self.num_sc_per_device,
     )
     expected_sc_shard_a = jax.numpy.zeros([8, 16])
     expected_sc_shard_b = jax.numpy.ones([8, 16])
@@ -623,7 +656,7 @@ class EmbeddingTest(parameterized.TestCase):
         [expected_sc_shard_a, expected_sc_shard_b], axis=0
     )
     expected_device_shard = jax.numpy.concatenate(
-        [expected_stack_sc_shard] * 4, axis=0
+        [expected_stack_sc_shard] * self.num_sc_per_device, axis=0
     )
 
     self.assertLen(
@@ -632,7 +665,7 @@ class EmbeddingTest(parameterized.TestCase):
     for variable in jax.tree.leaves(embedding_variables):
       self.assertEqual(
           variable.shape,
-          (padded_vocab_size_a + vocab_size_b, embedding_dim),
+          (padded_vocab_size_a + padded_vocab_size_b, embedding_dim),
       )
 
       self.assertEqual(
@@ -643,7 +676,7 @@ class EmbeddingTest(parameterized.TestCase):
       self.assert_all_shards_shape(
           variable.addressable_shards,
           (
-              (padded_vocab_size_a + vocab_size_b) // len(devices),
+              (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
               16,
           ),
       )
@@ -692,7 +725,7 @@ class EmbeddingTest(parameterized.TestCase):
     feature_specs = [feature_a_spec, feature_a_spec]
     embedding.auto_stack_tables(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
 
@@ -707,6 +740,7 @@ class EmbeddingTest(parameterized.TestCase):
           jax.random.PRNGKey(0),
           updated_table_specs,
           global_sharding=global_sharding,
+          num_sparsecore_per_device=self.num_sc_per_device,
       )
 
   def test_non_default_device_mesh_for_init_embedding_variables(self):
@@ -744,7 +778,7 @@ class EmbeddingTest(parameterized.TestCase):
     feature_specs = [feature_a_spec, feature_a_spec]
     embedding.auto_stack_tables(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
 
@@ -760,6 +794,7 @@ class EmbeddingTest(parameterized.TestCase):
           updated_table_specs,
           global_sharding=global_sharding,
           bypass_mesh_check=False,
+          num_sparsecore_per_device=self.num_sc_per_device,
       )
 
     # Call the method again with bypass_mesh_check and it should succeed.
@@ -768,6 +803,7 @@ class EmbeddingTest(parameterized.TestCase):
         updated_table_specs,
         global_sharding=global_sharding,
         bypass_mesh_check=True,
+        num_sparsecore_per_device=self.num_sc_per_device,
     )
 
   def test_muti_dimensional_mesh_for_init_embedding_variables(self):
@@ -820,10 +856,9 @@ class EmbeddingTest(parameterized.TestCase):
     feature_specs = [feature_a_spec, feature_b_spec]
     embedding.auto_stack_tables(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
-
     updated_table_specs = [f.table_spec for f in feature_specs]
 
     # Create embedding variables with stacked features.
@@ -831,6 +866,7 @@ class EmbeddingTest(parameterized.TestCase):
         jax.random.PRNGKey(0),
         updated_table_specs,
         global_sharding=global_sharding,
+        num_sparsecore_per_device=self.num_sc_per_device,
     )
 
     table_spec = updated_table_specs[0]
@@ -892,28 +928,36 @@ class EmbeddingTest(parameterized.TestCase):
     feature_specs = [feature_a_spec, feature_b_spec]
     embedding.auto_stack_tables(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
     expected_proto = embedding_spec_pb2.EmbeddingSpecProto()
+    num_sparsecores = self.num_sc_per_device * jax.device_count()
+    padded_vocab_size_a = test_utils.round_up_to_multiple(
+        feature_a_spec.table_spec.vocabulary_size, 8 * num_sparsecores
+    )
+    padded_vocab_size_b = test_utils.round_up_to_multiple(
+        feature_b_spec.table_spec.vocabulary_size, 8 * num_sparsecores
+    )
+    stack_vocab_size = padded_vocab_size_a + padded_vocab_size_b
     text_format.Parse(
-        """stacked_table_specs {
+        f"""stacked_table_specs {{
         stack_name: "table_a_table_b"
-        stack_vocab_size: 256
+        stack_vocab_size: {stack_vocab_size}
         stack_embedding_dim: 16
         total_sample_count: 32
         max_ids_per_partition: 256
         max_unique_ids_per_partition: 256
-        num_sparsecores: 16
-        table_specs {
+        num_sparsecores: {num_sparsecores}
+        table_specs {{
           table_name: "table_a"
           vocab_size: 32
           embedding_dim: 14
-          padded_vocab_size: 128
+          padded_vocab_size: {padded_vocab_size_a}
           padded_embedding_dim: 16
           row_offset_in_shard: 0
           shard_rotation: 0
-          feature_specs {
+          feature_specs {{
             feature_name: "feature_a"
             input_shape: 16
             input_shape: 1
@@ -922,32 +966,34 @@ class EmbeddingTest(parameterized.TestCase):
             row_offset: 0
             col_offset: 0
             col_shift: 0
-          }
-        }
-        table_specs {
+          }}
+        }}
+        table_specs {{
           table_name: "table_b"
           vocab_size: 128
           embedding_dim: 14
-          padded_vocab_size: 128
+          padded_vocab_size: {padded_vocab_size_b}
           padded_embedding_dim: 16
           row_offset_in_shard: 8
-          shard_rotation: 4
-          feature_specs {
+          shard_rotation: {self.num_sc_per_device}
+          feature_specs {{
             feature_name: "feature_b"
             input_shape: 16
             input_shape: 1
             output_shape: 16
             output_shape: 14
             row_offset: 16
-            col_offset: 128
-            col_shift: 4
-          }
-        }
-      }""",
+            col_offset: {padded_vocab_size_a}
+            col_shift: {self.num_sc_per_device}
+          }}
+        }}
+      }}""",
         expected_proto,
     )
     actual = embedding.create_proto_from_feature_specs(
-        feature_specs, global_device_count=jax.device_count()
+        feature_specs,
+        global_device_count=jax.device_count(),
+        num_sparsecore_per_device=self.num_sc_per_device,
     )
     logging.info("actual =%s\n", actual)
     self.assertEqual(

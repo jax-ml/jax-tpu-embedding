@@ -17,10 +17,7 @@ load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pyt
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = [
-        "//jax_tpu_embedding/sparsecore:__subpackages__",
-        "//smartass/brain/jax:__subpackages__",
-    ],
+    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
 )
 
 cc_library(
@@ -28,10 +25,10 @@ cc_library(
     srcs = ["input_preprocessing_threads.cc"],
     hdrs = ["input_preprocessing_threads.h"],
     deps = [
-        "//third_party/tensorflow/compiler/xla/tsl/platform:env",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+        "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:platform_port",
     ],
 )
@@ -42,8 +39,8 @@ cc_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":input_preprocessing_threads",
-        "//third_party/tensorflow/compiler/xla/tsl/platform:env",
         "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:env",
     ],
 )
 

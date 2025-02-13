@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("//jax_tpu_embedding/sparsecore:tpu.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
 
@@ -19,25 +20,18 @@ package(
     default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_csr_test",
     srcs = [
         "sparse_dense_matmul_csr_test.py",
     ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("einops"),

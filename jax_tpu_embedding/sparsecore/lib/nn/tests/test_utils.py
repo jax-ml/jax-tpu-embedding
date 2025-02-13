@@ -19,7 +19,10 @@ import einops
 import jax
 import numpy
 
-NUM_SC_PER_DEVICE = 4
+
+def round_up_to_multiple(number: int, factor: int) -> int:
+  """Returns the next largest multiple of factor greater than number."""
+  return number if number % factor == 0 else (number // factor + 1) * factor
 
 
 def row_id_initializer(

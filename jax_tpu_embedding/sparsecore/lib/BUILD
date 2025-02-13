@@ -23,7 +23,6 @@ pytype_strict_library(
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore:__pkg__"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/checkpointing",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/fdo",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/flax",  # buildcleaner: keep

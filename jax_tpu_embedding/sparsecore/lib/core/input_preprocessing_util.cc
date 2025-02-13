@@ -31,7 +31,7 @@
 #include "hwy/base.h"  // from @highway
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
-#include "tsl/profiler/lib/traceme.h"  // from @tsl
+#include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
 

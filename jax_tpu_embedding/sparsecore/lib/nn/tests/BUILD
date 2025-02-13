@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//jax_tpu_embedding/sparsecore:tpu.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
@@ -135,23 +136,17 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "embedding_test",
     srcs = [
         "embedding_test.py",
     ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
+        ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
@@ -161,24 +156,17 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "table_stacking_test",
     srcs = [
         "table_stacking_test.py",
-    ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
     ],
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/lib/nn:table_stacking",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),

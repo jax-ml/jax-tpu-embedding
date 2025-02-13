@@ -19,6 +19,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -30,6 +31,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     self.batch_size = 16
     self.vocab_size = 32
     self.emb_size = 8
+    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
     self.input_tensor = np.array(
         [
             [5],
@@ -96,13 +98,17 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
         self.emb_table,
         "(v c s) f -> c (s v) f",
         c=len(self.global_devices),
-        s=4,
+        s=self.num_sc_per_device,
     )
 
     with self.subTest("invalid_row_pointer_type"):
@@ -195,13 +201,17 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
         self.emb_table,
         "(v c s) f -> c (s v) f",
         c=len(self.global_devices),
-        s=4,
+        s=self.num_sc_per_device,
     )
     with self.subTest("invalid_sample_id_shape"):
       bad_sample_id = jnp.full(
@@ -229,13 +239,17 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
         self.emb_table,
         "(v c s) f -> c (s v) f",
         c=len(self.global_devices),
-        s=4,
+        s=self.num_sc_per_device,
     )
     self.assertRaises(
         ValueError,
@@ -278,7 +292,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         self.emb_table,
         "(v c s) f -> c (s v) f",
         c=len(self.global_devices),
-        s=4,
+        s=self.num_sc_per_device,
     )
     self.assertRaises(
         ValueError,
@@ -303,14 +317,18 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
     )
     # Shared the embedding table.
     self.emb_table_sharded = einops.rearrange(
         self.emb_table,
         "(v c s) f -> c (s v) f",
         c=len(self.global_devices),
-        s=4,
+        s=self.num_sc_per_device,
     )
     # Do the embedding lookup.
     emb_activations = self.tpu_sparse_dense_matmul_csr(
