@@ -50,14 +50,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       # Halt for testing
-      - name: Verify wait for connection isn't eatting the env
-        run: |
-          env | grep TPU
       - name: Wait For Connection
         uses: google-ml-infra/actions/ci_connection@main
         with:
           halt-dispatch-input: ${{ inputs.halt-for-connection }}
       - name: Build and Run tests
         run: |
+          # Check local envs
           env | grep TPU
-          bazel test //...
+          # Try to test
+          bazel test --subcommands //...
