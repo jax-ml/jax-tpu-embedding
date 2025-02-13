@@ -58,5 +58,4 @@ jobs:
         run: |
           # Check local envs
           env | grep TPU
-          # Try to test
-          bazel test --subcommands //...
+          bazel test //...
