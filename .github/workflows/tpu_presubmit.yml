@@ -42,7 +42,7 @@ jobs:
       HERMETIC_PYTHON_VERSION: ${{ matrix.python-version }}
     runs-on: ${{ matrix.tpu.runner }}
     container: "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest"
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -57,5 +57,13 @@ jobs:
       - name: Build and Run tests
         run: |
           # Check local envs
+          env
+          bazel test \
+          --test_env=TPU_WORKER_ID=${TPU_WORKER_ID} \
+          --test_env=HOST_BOUNDS=${HOST_BOUNDS} \
+          --test_env=CHIPS_PER_HOST_BOUNDS=${CHIPS_PER_HOST_BOUNDS} \
+          --test_env=ALT=${ALT} \
+          --test_env=WRAP=${WRAP} \
+          --test_env=TPU_ACCELERATOR_TYPE=${TPU_ACCELERATOR_TYPE} \
+          --test_env=TPU_WORKER_HOSTNAMES=${TPU_WORKER_HOSTNAMES} //...
           env | grep TPU
-          bazel test //...
