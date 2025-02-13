@@ -17,12 +17,9 @@ on:
   pull_request:
     branches:
       - main
-
-# This should also be set to read-only in the project settings, but it's nice to
-# document and enforce the permissions here.
+  
 permissions:
   contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
@@ -39,32 +36,28 @@ jobs:
         python-version: ["3.10"]
 
     name: "TPU test (jax-tpu-embedding/sparsecore=head, ${{ matrix.tpu.type }})"
-
     env:
       JAXCI_PYTHON: python${{ matrix.python-version }}
       JAXCI_TPU_CORES: ${{ matrix.tpu.cores }}
       HERMETIC_PYTHON_VERSION: ${{ matrix.python-version }}
-
     runs-on: ${{ matrix.tpu.runner }}
     container: "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest"
-
     timeout-minutes: 60
-
     defaults:
       run:
         shell: bash
     steps:
-      - name: Checkout jax-tpu-embedding at head
+      - name: Checkout Code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      # We need to mark the GitHub workspace as safe as otherwise git commands will fail.
-      - name: Mark GitHub workspace as safe
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # Halt for testing
+      - name: Verify wait for connection isn't eatting the env
+        run: |
+          env | grep TPU
       - name: Wait For Connection
         uses: google-ml-infra/actions/ci_connection@main
         with:
           halt-dispatch-input: ${{ inputs.halt-for-connection }}
       - name: Build and Run tests
         run: |
+          env | grep TPU
           bazel test //...
