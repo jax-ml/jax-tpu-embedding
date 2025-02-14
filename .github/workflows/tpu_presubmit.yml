@@ -1,0 +1,74 @@
+# Cloud TPU CI (presubmit)
+#
+# This job currently runs as a non-blocking presubmit. It is experimental and is currently being
+# tested to get to a stable state before we enable it as a blocking presubmit.
+name: CI - Cloud TPU (presubmit)
+on:
+  workflow_dispatch:
+    inputs:
+      halt-for-connection:
+        description: 'Should this workflow run wait for a remote connection?'
+        type: choice
+        required: true
+        default: 'no'
+        options:
+        - 'yes'
+        - 'no'
+  pull_request:
+    branches:
+      - main
+  
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cloud-tpu-test:
+    if: github.event.repository.fork == false
+    strategy:
+      fail-fast: false # don't cancel all jobs on failure
+      matrix:
+        tpu: [
+          {type: "v6e-4", cores: "8", runner: "linux-x86-ct6e-180-4tpu"}
+        ]
+        python-version: ["3.10"]
+
+    name: "TPU test (jax-tpu-embedding/sparsecore=head, ${{ matrix.tpu.type }})"
+    env:
+      JAXCI_PYTHON: python${{ matrix.python-version }}
+      JAXCI_TPU_CORES: ${{ matrix.tpu.cores }}
+      HERMETIC_PYTHON_VERSION: ${{ matrix.python-version }}
+    runs-on: ${{ matrix.tpu.runner }}
+    container: "us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      # Halt for testing
+      - name: Wait For Connection
+        uses: google-ml-infra/actions/ci_connection@main
+        with:
+          halt-dispatch-input: ${{ inputs.halt-for-connection }}
+      - name: Build and Run tests
+        timeout-minutes: 90
+        run: |
+          # Check local envs
+          env
+          bazel test \
+          --local_test_jobs=1 \
+          --test_env=TPU_WORKER_ID=${TPU_WORKER_ID} \
+          --test_env=HOST_BOUNDS=${HOST_BOUNDS} \
+          --test_env=CHIPS_PER_HOST_BOUNDS=${CHIPS_PER_HOST_BOUNDS} \
+          --test_env=ALT=${ALT} \
+          --test_env=WRAP=${WRAP} \
+          --test_env=TPU_ACCELERATOR_TYPE=${TPU_ACCELERATOR_TYPE} \
+          --test_env=TPU_WORKER_HOSTNAMES=${TPU_WORKER_HOSTNAMES} \
+          --test_env=TF_CPP_MIN_LOG_LEVEL=0 \
+          --test_output=all \
+          --test_timeout=300 \
+          //...
+          env | grep TPU
