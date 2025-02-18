@@ -48,7 +48,16 @@ class TableStackingTest(parameterized.TestCase):
     self.assertEqual(table_spec.setting_in_stack.row_offset_in_shard, 0)
     self.assertEqual(table_spec.setting_in_stack.shard_rotation, 0)
 
-  def test_auto_stack_two_tables(self):
+  @parameterized.parameters(
+      dict(device_count=1),
+      dict(device_count=2),
+      dict(device_count=4),
+      dict(device_count=-1),  # All.
+  )
+  def test_auto_stack_two_tables(self, device_count: int):
+    if device_count < 0:
+      device_count = jax.device_count()
+
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
@@ -100,12 +109,15 @@ class TableStackingTest(parameterized.TestCase):
     ]
     table_stacking.auto_stack_tables(
         feature_specs,
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
         num_sc_per_device=self.num_sc_per_device,
     )
     self.assertLen(feature_specs, 3)
     feature_a, feature_b, feature_c = feature_specs
-    total_sc_in_test = jax.device_count() * self.num_sc_per_device
+    total_sc_in_test = device_count * self.num_sc_per_device
+    expected_padded_vocab_a = test_utils.round_up_to_multiple(
+        feature_a.table_spec.vocabulary_size, 8 * total_sc_in_test
+    )
     expected_padded_vocab_b = test_utils.round_up_to_multiple(
         feature_b.table_spec.vocabulary_size, 8 * total_sc_in_test
     )
@@ -116,9 +128,7 @@ class TableStackingTest(parameterized.TestCase):
     # Round up padded vocab size to next multiple of 8 * total_sc_in_test
     self.assertEqual(
         feature_a.table_spec.setting_in_stack.padded_vocab_size,
-        test_utils.round_up_to_multiple(
-            feature_a.table_spec.vocabulary_size, 8 * total_sc_in_test
-        ),
+        expected_padded_vocab_a,
     )
     self.assertEqual(
         feature_a.table_spec.setting_in_stack.padded_embedding_dim, 16
@@ -139,7 +149,7 @@ class TableStackingTest(parameterized.TestCase):
     )
     self.assertEqual(
         feature_b.table_spec.setting_in_stack.row_offset_in_shard,
-        expected_padded_vocab_b // total_sc_in_test,
+        expected_padded_vocab_a // total_sc_in_test,
     )
     self.assertEqual(
         feature_b.table_spec.setting_in_stack.padded_vocab_size,
@@ -150,14 +160,29 @@ class TableStackingTest(parameterized.TestCase):
     )
     self.assertEqual(feature_b.id_transformation.row_offset, 16)
     self.assertEqual(
-        feature_b.id_transformation.col_offset, expected_padded_vocab_b
+        feature_b.id_transformation.col_offset,
+        feature_b.table_spec.setting_in_stack.row_offset_in_shard
+        * self.num_sc_per_device
+        * device_count,
     )
     self.assertEqual(feature_c.id_transformation.row_offset, 16 + 16)
     self.assertEqual(
-        feature_c.id_transformation.col_offset, expected_padded_vocab_b
+        feature_c.id_transformation.col_offset,
+        feature_c.table_spec.setting_in_stack.row_offset_in_shard
+        * self.num_sc_per_device
+        * device_count,
     )
 
-  def test_auto_stack_two_tables_adagrad(self):
+  @parameterized.parameters(
+      dict(device_count=1),
+      dict(device_count=2),
+      dict(device_count=4),
+      dict(device_count=-1),  # All.
+  )
+  def test_auto_stack_two_tables_adagrad(self, device_count: int):
+    if device_count < 0:
+      device_count = jax.device_count()
+
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
@@ -213,12 +238,19 @@ class TableStackingTest(parameterized.TestCase):
     ]
     table_stacking.auto_stack_tables(
         feature_specs,
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
         num_sc_per_device=self.num_sc_per_device,
     )
     self.assertLen(feature_specs, 3)
     feature_a, feature_b, feature_c = feature_specs
-    total_sc_in_test = jax.device_count() * self.num_sc_per_device
+    total_sc_in_test = device_count * self.num_sc_per_device
+    expected_padded_vocab_a = test_utils.round_up_to_multiple(
+        feature_a.table_spec.vocabulary_size, 8 * total_sc_in_test
+    )
+    expected_padded_vocab_b = test_utils.round_up_to_multiple(
+        feature_b.table_spec.vocabulary_size, 8 * total_sc_in_test
+    )
+
     self.assertEqual(
         feature_a.table_spec.setting_in_stack.stack_name,
         'table_a_table_b',
@@ -245,12 +277,9 @@ class TableStackingTest(parameterized.TestCase):
         feature_b.table_spec.setting_in_stack.stack_name,
         'table_a_table_b',
     )
-    expected_padded_vocab_b = test_utils.round_up_to_multiple(
-        feature_b.table_spec.vocabulary_size, 8 * total_sc_in_test
-    )
     self.assertEqual(
         feature_b.table_spec.setting_in_stack.row_offset_in_shard,
-        expected_padded_vocab_b // total_sc_in_test,
+        expected_padded_vocab_a // total_sc_in_test,
     )
     self.assertEqual(
         feature_b.table_spec.setting_in_stack.padded_vocab_size,
@@ -262,14 +291,29 @@ class TableStackingTest(parameterized.TestCase):
     )
     self.assertEqual(feature_b.id_transformation.row_offset, 16)
     self.assertEqual(
-        feature_b.id_transformation.col_offset, expected_padded_vocab_b
+        feature_b.id_transformation.col_offset,
+        feature_b.table_spec.setting_in_stack.row_offset_in_shard
+        * self.num_sc_per_device
+        * device_count,
     )
     self.assertEqual(feature_c.id_transformation.row_offset, 16 + 16)
     self.assertEqual(
-        feature_c.id_transformation.col_offset, expected_padded_vocab_b
+        feature_c.id_transformation.col_offset,
+        feature_c.table_spec.setting_in_stack.row_offset_in_shard
+        * self.num_sc_per_device
+        * device_count,
     )
 
-  def test_manual_stacking(self):
+  @parameterized.parameters(
+      dict(device_count=1),
+      dict(device_count=2),
+      dict(device_count=4),
+      dict(device_count=-1),  # All.
+  )
+  def test_manual_stacking(self, device_count: int):
+    if device_count < 0:
+      device_count = jax.device_count()
+
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
@@ -333,7 +377,7 @@ class TableStackingTest(parameterized.TestCase):
     table_stacking.stack_tables(
         feature_specs,
         ['table_a'],
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
         num_sc_per_device=self.num_sc_per_device,
     )
 
@@ -344,7 +388,7 @@ class TableStackingTest(parameterized.TestCase):
     table_stacking.stack_tables(
         feature_specs,
         ['table_c', 'table_b'],
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
         stack_to_max_ids_per_partition=limits,
         stack_to_max_unique_ids_per_partition=limits,
         num_sc_per_device=self.num_sc_per_device,
@@ -367,7 +411,7 @@ class TableStackingTest(parameterized.TestCase):
         updated_feature_c.table_spec.setting_in_stack.stack_name,
         'table_c_table_b',
     )
-    total_sc_in_test = jax.device_count() * self.num_sc_per_device
+    total_sc_in_test = device_count * self.num_sc_per_device
     self.assertEqual(
         updated_feature_b.table_spec.setting_in_stack.padded_vocab_size,
         test_utils.round_up_to_multiple(
@@ -381,7 +425,7 @@ class TableStackingTest(parameterized.TestCase):
     )
     self.assertEqual(
         updated_feature_b.table_spec.setting_in_stack.shard_rotation,
-        self.num_sc_per_device,
+        self.num_sc_per_device % total_sc_in_test,
     )
     assert updated_feature_b.table_spec.stacked_table_spec is not None
     self.assertEqual(
@@ -396,7 +440,16 @@ class TableStackingTest(parameterized.TestCase):
         0.5
     )
 
-  def test_manual_stacking_reuse_table_name(self):
+  @parameterized.parameters(
+      dict(device_count=1),
+      dict(device_count=2),
+      dict(device_count=4),
+      dict(device_count=-1),  # All.
+  )
+  def test_manual_stacking_reuse_table_name(self, device_count: int):
+    if device_count < 0:
+      device_count = jax.device_count()
+
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
@@ -460,7 +513,7 @@ class TableStackingTest(parameterized.TestCase):
     table_stacking.stack_tables(
         feature_specs,
         ('A', 'B'),
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
         num_sc_per_device=self.num_sc_per_device,
         stack_name='custom_stack',
     )
@@ -469,7 +522,7 @@ class TableStackingTest(parameterized.TestCase):
       table_stacking.stack_tables(
           feature_specs,
           ('C',),
-          global_device_count=jax.device_count(),
+          global_device_count=device_count,
           num_sc_per_device=self.num_sc_per_device,
           stack_name='custom_stack',
       )
@@ -610,8 +663,16 @@ class TableStackingTest(parameterized.TestCase):
           num_sc_per_device=self.num_sc_per_device,
       )
 
-  @parameterized.parameters([True, False])
-  def test_unshard_and_unstack_stacked_table(self, donate):
+  @parameterized.product(
+      donate=[True, False],
+      device_count=[1, 2, 4, -1],
+  )
+  def test_unshard_and_unstack_stacked_table(
+      self, donate: bool, device_count: int
+  ):
+    if device_count < 0:
+      device_count = jax.device_count()
+
     vocab_size_a = 32
     vocab_size_b = 128
     embedding_dim = 14
@@ -619,6 +680,7 @@ class TableStackingTest(parameterized.TestCase):
 
     vocab_size_c = 256
     embedding_dim_c = 32
+    devices = jax.devices()[:device_count]
 
     table_a_spec = embedding_spec.TableSpec(
         vocabulary_size=vocab_size_a,
@@ -673,14 +735,14 @@ class TableStackingTest(parameterized.TestCase):
     table_stacking.auto_stack_tables(
         feature_specs,
         num_sc_per_device=self.num_sc_per_device,
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
     )
 
     feature_specs_c = [feature_c_spec]
     table_stacking.auto_stack_tables(
         feature_specs_c,
         num_sc_per_device=self.num_sc_per_device,
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
     )
 
     updated_table_a = feature_specs[0].table_spec
@@ -712,7 +774,7 @@ class TableStackingTest(parameterized.TestCase):
     emb_tables = [table_a, table_b]
     embedding_var = test_utils.create_per_device_sharded_stacked_tables(
         emb_tables,
-        num_devices=jax.device_count(),
+        num_devices=device_count,
         num_sparsecore_per_device=self.num_sc_per_device,
         rotation=self.num_sc_per_device,
     )
@@ -724,7 +786,7 @@ class TableStackingTest(parameterized.TestCase):
     emb_tables_c = [table_c]
     embedding_var_c = test_utils.create_per_device_sharded_stacked_tables(
         emb_tables_c,
-        num_devices=jax.device_count(),
+        num_devices=device_count,
         num_sparsecore_per_device=self.num_sc_per_device,
         rotation=self.num_sc_per_device,
     )
@@ -734,7 +796,7 @@ class TableStackingTest(parameterized.TestCase):
     logging.vlog(1, 'embedding_var_c: %s', embedding_var_c)
 
     # distribute to all devices
-    mesh = jax.sharding.Mesh(jax.devices(), 'data')
+    mesh = jax.sharding.Mesh(devices, 'data')
     sharding = jax.sharding.NamedSharding(
         mesh, jax.sharding.PartitionSpec('data')
     )
@@ -743,7 +805,7 @@ class TableStackingTest(parameterized.TestCase):
 
     table_spec_proto = embedding.create_proto_from_feature_specs(
         feature_specs,
-        global_device_count=jax.device_count(),
+        global_device_count=device_count,
         num_sparsecore_per_device=self.num_sc_per_device,
     )
 
@@ -783,7 +845,7 @@ class TableStackingTest(parameterized.TestCase):
     with self.subTest('test_multiple_stack_tables'):
       table_spec_proto = embedding.create_proto_from_feature_specs(
           feature_specs + feature_specs_c,
-          global_device_count=jax.device_count(),
+          global_device_count=device_count,
           num_sparsecore_per_device=self.num_sc_per_device,
       )
       ret = table_stacking.unstack_and_unshard_stacked_tables(
