@@ -2,7 +2,7 @@
 # All default build options below. These apply to all build commands.
 ##############################################################################
 # Make Bazel print out all options from rc files.
-build --announce_rc
+common --announce_rc
 
 # Required by XLA/TSL python configure for experimental 'remotable' feature.
 common --experimental_repo_remote_exec
@@ -14,7 +14,7 @@ build --spawn_strategy=local
 # automatically when building on Linux.
 build --enable_platform_specific_config
 
-build --experimental_cc_shared_library
+common --experimental_cc_shared_library
 
 build --define=tsl_link_protobuf=true
 
