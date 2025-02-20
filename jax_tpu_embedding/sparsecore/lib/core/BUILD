@@ -133,6 +133,9 @@ pytype_strict_contrib_test(
     srcs = [
         "input_preprocessing_cc_test.py",
     ],
+    args = [
+        # "--vmodule=input_preprocessing_util=2",
+    ],
     env = {
         "JAX_PLATFORMS": "cpu",
         "XLA_FLAGS": "--xla_dump_to=sponge",

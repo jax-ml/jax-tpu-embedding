@@ -366,7 +366,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
           {
               "one_table_to_rule_them_all": np.array(
                   [
-                      6,
+                      5,
                       9,
                       21,
                       29,
@@ -374,13 +374,13 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
                       42,
                       51,
                       60,
-                      8,
+                      7,
                       12,
                       22,
                       29,
                       41,
                       53,
-                      62,
+                      61,
                       69,
                       2,
                       10,
@@ -410,8 +410,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[1] = 0
       expected_embedding_ids[2] = 0
       expected_embedding_ids[3] = 0
-      expected_embedding_ids[4] = 0
-      expected_embedding_ids[5] = 1
+      expected_embedding_ids[4] = 1
       expected_embedding_ids[8] = 0
       expected_embedding_ids[16] = 0
       expected_embedding_ids[17] = 0
@@ -442,10 +441,9 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[129] = 0
       expected_embedding_ids[130] = 0
       expected_embedding_ids[131] = 0
-      expected_embedding_ids[132] = 0
+      expected_embedding_ids[132] = 1
       expected_embedding_ids[133] = 1
-      expected_embedding_ids[134] = 1
-      expected_embedding_ids[135] = 5
+      expected_embedding_ids[134] = 5
       expected_embedding_ids[136] = 0
       expected_embedding_ids[137] = 0
       expected_embedding_ids[138] = 4
@@ -480,7 +478,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[186] = 0
       expected_embedding_ids[187] = 4
       expected_embedding_ids[188] = 5
-      expected_embedding_ids[189] = 5
       expected_embedding_ids[192] = 0
       expected_embedding_ids[193] = 1
       expected_embedding_ids[194] = 3
@@ -515,11 +512,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     with self.subTest("sample_ids"):
       expected_sample_ids = np.full((512,), 2**31 - 1, dtype=np.int32)
       expected_sample_ids[0] = 0
-      expected_sample_ids[1] = 0
-      expected_sample_ids[2] = 1
-      expected_sample_ids[3] = 2
-      expected_sample_ids[4] = 3
-      expected_sample_ids[5] = 1
+      expected_sample_ids[1] = 1
+      expected_sample_ids[2] = 2
+      expected_sample_ids[3] = 3
+      expected_sample_ids[4] = 1
       expected_sample_ids[8] = 1
       expected_sample_ids[16] = 0
       expected_sample_ids[17] = 3
@@ -549,11 +545,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_sample_ids[128] = 0
       expected_sample_ids[129] = 1
       expected_sample_ids[130] = 2
-      expected_sample_ids[131] = 2
-      expected_sample_ids[132] = 3
-      expected_sample_ids[133] = 0
-      expected_sample_ids[134] = 3
-      expected_sample_ids[135] = 0
+      expected_sample_ids[131] = 3
+      expected_sample_ids[132] = 0
+      expected_sample_ids[133] = 3
+      expected_sample_ids[134] = 0
       expected_sample_ids[136] = 0
       expected_sample_ids[137] = 3
       expected_sample_ids[138] = 2
@@ -588,7 +583,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_sample_ids[186] = 3
       expected_sample_ids[187] = 0
       expected_sample_ids[188] = 1
-      expected_sample_ids[189] = 1
       expected_sample_ids[192] = 1
       expected_sample_ids[193] = 1
       expected_sample_ids[194] = 2
@@ -621,12 +615,11 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
 
     with self.subTest("gains"):
       expected_gains = np.full((512,), np.nan, dtype=np.float32)
-      expected_gains[0] = 1.0
+      expected_gains[0] = 2.0
       expected_gains[1] = 1.0
       expected_gains[2] = 1.0
       expected_gains[3] = 1.0
       expected_gains[4] = 1.0
-      expected_gains[5] = 1.0
       expected_gains[8] = 1.0
       expected_gains[16] = 1.0
       expected_gains[17] = 1.0
@@ -655,12 +648,11 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_gains[59] = 1.0
       expected_gains[128] = 1.0
       expected_gains[129] = 1.0
-      expected_gains[130] = 1.0
+      expected_gains[130] = 2.0
       expected_gains[131] = 1.0
       expected_gains[132] = 1.0
       expected_gains[133] = 1.0
       expected_gains[134] = 1.0
-      expected_gains[135] = 1.0
       expected_gains[136] = 1.0
       expected_gains[137] = 1.0
       expected_gains[138] = 1.0
@@ -694,8 +686,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_gains[185] = 1.0
       expected_gains[186] = 1.0
       expected_gains[187] = 1.0
-      expected_gains[188] = 1.0
-      expected_gains[189] = 1.0
+      expected_gains[188] = 2.0
       expected_gains[192] = 1.0
       expected_gains[193] = 1.0
       expected_gains[194] = 1.0
@@ -774,9 +765,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     )
     fdo_client.record(stats)
     fdo_client.publish()
+    # Duplicated ids on row 0 and 6 are combined.
     np.testing.assert_equal(
         stats["max_ids"]["one_table_to_rule_them_all"],
-        np.array([8, 4, 6, 5, 9, 5, 6, 5], dtype=np.int32),
+        np.array([7, 4, 6, 5, 9, 5, 5, 5], dtype=np.int32),
     )
     np.testing.assert_equal(
         stats["max_unique_ids"]["one_table_to_rule_them_all"],
@@ -1105,7 +1097,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
           {
               "one_table_to_rule_them_all": np.array(
                   [
-                      4,
+                      3,
                       9,
                       19,
                       25,
@@ -1127,7 +1119,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
                       16,
                       18,
                       24,
-                      27,
+                      26,
                       32,
                       0,
                       2,
@@ -1145,7 +1137,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
                       41,
                       50,
                       58,
-                      4,
+                      3,
                       9,
                       19,
                       25,
@@ -1179,8 +1171,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids = np.full((1024,), 2**31 - 1, dtype=np.int32)
       expected_embedding_ids[0] = 0
       expected_embedding_ids[1] = 0
-      expected_embedding_ids[2] = 0
-      expected_embedding_ids[3] = 1
+      expected_embedding_ids[2] = 1
       expected_embedding_ids[8] = 0
       expected_embedding_ids[16] = 0
       expected_embedding_ids[17] = 2
@@ -1216,7 +1207,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[273] = 5
       expected_embedding_ids[280] = 4
       expected_embedding_ids[281] = 5
-      expected_embedding_ids[282] = 5
       expected_embedding_ids[384] = 4
       expected_embedding_ids[385] = 5
       expected_embedding_ids[392] = 4
@@ -1243,8 +1233,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[569] = 1
       expected_embedding_ids[640] = 0
       expected_embedding_ids[641] = 0
-      expected_embedding_ids[642] = 0
-      expected_embedding_ids[643] = 1
+      expected_embedding_ids[642] = 1
       expected_embedding_ids[648] = 0
       expected_embedding_ids[656] = 0
       expected_embedding_ids[657] = 2
@@ -1285,9 +1274,8 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     with self.subTest("sample_ids"):
       expected_sample_ids = np.full((1024,), 2**31 - 1, dtype=np.int32)
       expected_sample_ids[0] = 0
-      expected_sample_ids[1] = 0
+      expected_sample_ids[1] = 1
       expected_sample_ids[2] = 1
-      expected_sample_ids[3] = 1
       expected_sample_ids[8] = 1
       expected_sample_ids[16] = 0
       expected_sample_ids[17] = 0
@@ -1324,7 +1312,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_sample_ids[273] = 1
       expected_sample_ids[280] = 0
       expected_sample_ids[281] = 1
-      expected_sample_ids[282] = 1
       expected_sample_ids[384] = 0
       expected_sample_ids[385] = 1
       expected_sample_ids[392] = 0
@@ -1351,9 +1338,8 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_sample_ids[568] = 1
       expected_sample_ids[569] = 1
       expected_sample_ids[640] = 0
-      expected_sample_ids[641] = 0
+      expected_sample_ids[641] = 1
       expected_sample_ids[642] = 1
-      expected_sample_ids[643] = 1
       expected_sample_ids[648] = 1
       expected_sample_ids[656] = 0
       expected_sample_ids[657] = 0
@@ -1392,10 +1378,9 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       )
     with self.subTest("gains"):
       expected_gains = np.full((1024,), np.nan, dtype=np.float32)
-      expected_gains[0] = 1.0
+      expected_gains[0] = 2.0
       expected_gains[1] = 1.0
       expected_gains[2] = 1.0
-      expected_gains[3] = 1.0
       expected_gains[8] = 1.0
       expected_gains[16] = 1.0
       expected_gains[17] = 1.0
@@ -1430,8 +1415,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_gains[272] = 1.0
       expected_gains[273] = 1.0
       expected_gains[280] = 1.0
-      expected_gains[281] = 1.0
-      expected_gains[282] = 1.0
+      expected_gains[281] = 2.0
       expected_gains[384] = 1.0
       expected_gains[385] = 1.0
       expected_gains[392] = 1.0
@@ -1456,10 +1440,9 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_gains[561] = 1.0
       expected_gains[568] = 1.0
       expected_gains[569] = 1.0
-      expected_gains[640] = 1.0
+      expected_gains[640] = 2.0
       expected_gains[641] = 1.0
       expected_gains[642] = 1.0
-      expected_gains[643] = 1.0
       expected_gains[648] = 1.0
       expected_gains[656] = 1.0
       expected_gains[657] = 1.0
@@ -1847,7 +1830,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     with self.subTest(name="RowPointerEquality"):
       expected_lhs_row_pointers = np.array(
           [
-              3,
+              2,
               9,
               18,
               26,
@@ -1899,8 +1882,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           dtype=np.int32,
       )
       expected_lhs_local_embedding_ids[0] = 0
-      expected_lhs_local_embedding_ids[1] = 0
-      expected_lhs_local_embedding_ids[2] = 5
+      expected_lhs_local_embedding_ids[1] = 5
       expected_lhs_local_embedding_ids[8] = 1
       expected_lhs_local_embedding_ids[16] = 0
       expected_lhs_local_embedding_ids[17] = 4
@@ -1953,7 +1935,6 @@ class InputPreprocessingTest(parameterized.TestCase):
       )
       expected_lhs_local_sample_ids[0] = 0
       expected_lhs_local_sample_ids[1] = 0
-      expected_lhs_local_sample_ids[2] = 0
       expected_lhs_local_sample_ids[8] = 0
       expected_lhs_local_sample_ids[16] = 0
       expected_lhs_local_sample_ids[17] = 0
@@ -2006,9 +1987,8 @@ class InputPreprocessingTest(parameterized.TestCase):
           np.nan,
           dtype=np.float32,
       )
-      expected_lhs_gains[0] = 1.0
+      expected_lhs_gains[0] = 2.0
       expected_lhs_gains[1] = 1.0
-      expected_lhs_gains[2] = 1.0
       expected_lhs_gains[8] = 1.0
       expected_lhs_gains[16] = 1.0
       expected_lhs_gains[17] = 1.0
