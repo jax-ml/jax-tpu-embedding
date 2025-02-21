@@ -823,7 +823,7 @@ class TableStackingTest(parameterized.TestCase):
     with self.subTest('test_single_stack_table'):
       stacked_table_spec = table_spec_proto.stacked_table_specs[0]
       ret = table_stacking._unstack_and_unshard_stacked_table(
-          embedding_var, stacked_table_spec, donate=donate
+          embedding_var, stacked_table_spec, donate=False
       )
 
       logging.vlog(1, "ret['table_a']: %s", ret['table_a'])
@@ -882,6 +882,14 @@ class TableStackingTest(parameterized.TestCase):
               table_c_expected,
           )
       )
+
+      if donate:
+        # make sure the input tables are donated
+        self.assertTrue(embedding_var.is_deleted())
+        self.assertTrue(embedding_var_c.is_deleted())
+      else:
+        self.assertFalse(embedding_var.is_deleted())
+        self.assertFalse(embedding_var_c.is_deleted())
 
 
 if __name__ == '__main__':
