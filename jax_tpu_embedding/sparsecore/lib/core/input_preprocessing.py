@@ -142,6 +142,8 @@ def preprocess_sparse_dense_matmul_input(
 
   # Calculate row pointers for each partition.
   coo_tensor_index = 0
+  prev_row_id = -1
+  prev_col_id = -1
   for local_sc_id in range(num_sc_per_device):
     lhs_row_index = 0
     padded_coo_tensor_index = 0
@@ -158,6 +160,14 @@ def preprocess_sparse_dense_matmul_input(
         row_id, col_id, gain = coo_tensor[coo_tensor_index]
         coo_tensor_index += 1
 
+        if row_id == prev_row_id and col_id == prev_col_id:
+          # If the row ids and col ids are both same as the previous one,
+          # dedup the id by adding the gains.
+          padded_coo_tensor_index -= 1
+          gain += padded_coo_tensor_by_sc_id[local_sc_id][
+              padded_coo_tensor_index
+          ][2]
+
         # Append the sample to the COO tensor.
         padded_coo_tensor_by_sc_id[local_sc_id][padded_coo_tensor_index] = (
             row_id % batch_size_per_sc,
@@ -165,6 +175,9 @@ def preprocess_sparse_dense_matmul_input(
             gain,
         )
         padded_coo_tensor_index += 1
+
+        prev_row_id = row_id
+        prev_col_id = col_id
 
       # Commit the current row pointer.
       lhs_row_pointers_by_sc_id[local_sc_id][

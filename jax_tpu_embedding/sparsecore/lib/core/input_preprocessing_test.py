@@ -354,7 +354,7 @@ class InputPreprocessingTest(absltest.TestCase):
     with self.subTest(name="RowPointerEquality"):
       expected_lhs_row_pointers = np.array(
           [
-              3,
+              2,
               9,
               18,
               26,
@@ -403,8 +403,7 @@ class InputPreprocessingTest(absltest.TestCase):
           dtype=np.int32,
       )
       expected_lhs_local_embedding_ids[0] = 0
-      expected_lhs_local_embedding_ids[1] = 0
-      expected_lhs_local_embedding_ids[2] = 5
+      expected_lhs_local_embedding_ids[1] = 5
       expected_lhs_local_embedding_ids[8] = 1
       expected_lhs_local_embedding_ids[16] = 0
       expected_lhs_local_embedding_ids[17] = 4
@@ -453,7 +452,6 @@ class InputPreprocessingTest(absltest.TestCase):
       )
       expected_lhs_local_sample_ids[0] = 0
       expected_lhs_local_sample_ids[1] = 0
-      expected_lhs_local_sample_ids[2] = 0
       expected_lhs_local_sample_ids[8] = 0
       expected_lhs_local_sample_ids[16] = 0
       expected_lhs_local_sample_ids[17] = 0
@@ -502,9 +500,8 @@ class InputPreprocessingTest(absltest.TestCase):
           np.nan,
           dtype=np.float32,
       )
-      expected_lhs_gains[0] = 1.0
+      expected_lhs_gains[0] = 2.0
       expected_lhs_gains[1] = 1.0
-      expected_lhs_gains[2] = 1.0
       expected_lhs_gains[8] = 1.0
       expected_lhs_gains[16] = 1.0
       expected_lhs_gains[17] = 1.0

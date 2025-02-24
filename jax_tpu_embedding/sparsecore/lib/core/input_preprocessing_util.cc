@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <utility>
 #include <vector>
 
@@ -84,21 +85,33 @@ void SortAndGroupCooTensors(
     hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
 
     uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
+    uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
     for (const auto key : keys) {
-      uint32_t sc_id = static_cast<uint32_t>(key >> (64 - num_scs_bit));
-      if (static_cast<uint32_t>(key >> 32) != prev_col_id) {
+      const uint32_t index = static_cast<uint32_t>(key);
+      const CooFormat& coo_tensor = coo_tensors[index];
+      const uint32_t sc_id = static_cast<uint32_t>(key >> (64 - num_scs_bit));
+      const uint32_t col_id = static_cast<uint32_t>(key >> 32);
+      const uint32_t row_id = coo_tensor.row_id;
+
+      if (col_id != prev_col_id) {
         max_unique_ids_per_sc[sc_id] += 1;
       }
-      max_ids_per_sc[sc_id] += 1;
-      // If either max_unique_ids_per_partition or max_ids_per_partition is
-      // exceeded, we drop the id.
-      if (max_unique_ids_per_sc[sc_id] > max_unique_ids_per_partition ||
-          max_ids_per_sc[sc_id] > max_ids_per_partition) {
-        prev_col_id = static_cast<uint32_t>(key >> 32);
-        continue;
+
+      // If the row ids and col ids are both same as the previous one,
+      // dedup the id by adding the gains.
+      if (col_id == prev_col_id && row_id == prev_row_id) {
+        coo_tensors_by_id[i].back().gain += coo_tensor.gain;
+      } else {
+        max_ids_per_sc[sc_id] += 1;
+        // If either max_unique_ids_per_partition or max_ids_per_partition is
+        // exceeded, we drop the id.
+        if (max_unique_ids_per_sc[sc_id] <= max_unique_ids_per_partition &&
+            max_ids_per_sc[sc_id] <= max_ids_per_partition) {
+          coo_tensors_by_id[i].push_back(coo_tensor);
+        }
       }
-      coo_tensors_by_id[i].push_back(coo_tensors[static_cast<uint32_t>(key)]);
-      prev_col_id = static_cast<uint32_t>(key >> 32);
+      prev_col_id = col_id;
+      prev_row_id = row_id;
     }
 
     for (int j = 0; j < num_scs; ++j) {
@@ -107,13 +120,21 @@ void SortAndGroupCooTensors(
       aggregated_max_unique_ids_per_sc[j] = std::max(
           aggregated_max_unique_ids_per_sc[j], max_unique_ids_per_sc[j]);
     }
-    VLOG(2) << "Observed ids per partition/sparsecore"
-            << " for table " << stacked_table_name << ": ["
-            << absl::StrJoin(max_ids_per_sc, ", ") << "]";
+    if (VLOG_IS_ON(2)) {
+      LOG(INFO) << "Observed ids per partition/sparsecore"
+                << " for table " << stacked_table_name << ": ["
+                << absl::StrJoin(max_ids_per_sc, ", ") << "]";
 
-    VLOG(2) << "Observed unique ids per partition/sparsecore"
-            << " for table " << stacked_table_name << ": ["
-            << absl::StrJoin(max_unique_ids_per_sc, ", ") << "]";
+      LOG(INFO) << "Observed unique ids per partition/sparsecore"
+                << " for table " << stacked_table_name << ": ["
+                << absl::StrJoin(max_unique_ids_per_sc, ", ") << "]";
+
+      LOG(INFO) << "Total number of ids for table " << stacked_table_name
+                << " on Sparsecore" << i << ": " << keys.size()
+                << ", after deduplication: "
+                << std::reduce(max_ids_per_sc.begin(), max_ids_per_sc.end())
+                << ", after drop id: " << coo_tensors_by_id[i].size();
+    }
 
     const int32_t observed_max_ids_per_partition =
         *absl::c_max_element(max_ids_per_sc);
