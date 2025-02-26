@@ -67,7 +67,7 @@ python_init_repositories(
 load("@xla//third_party/py:python_init_toolchains.bzl", "python_init_toolchains")
 python_init_toolchains()
 
-load("@xla//third_party/py:python_init_pip.bzl", "python_init_pip")
+load("//third_party/bazel/python:python_init_pip.bzl", "python_init_pip")
 python_init_pip()
 
 load("@pypi//:requirements.bzl", "install_deps")
