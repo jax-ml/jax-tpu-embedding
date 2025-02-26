@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@pypi//:requirements.bzl", "requirement")
 load("@python//:defs.bzl", "compile_pip_requirements")
 load("@python_version_repo//:py_version.bzl", "REQUIREMENTS")
 
@@ -37,13 +38,17 @@ compile_pip_requirements(
 # PIP Package
 ###############################################################################
 
-sh_binary(
+py_binary(
     name = "build_pip_package",
-    srcs = ["build_pip_package.sh"],
+    srcs = ["build_pip_package.py"],
     data = [
         "//:LICENSE",
         "//:README.md",
         "//:pyproject.toml",
+    ],
+    deps = [
         "//jax_tpu_embedding/sparsecore",
+        requirement("build"),
+        requirement("setuptools"),
     ],
 )
