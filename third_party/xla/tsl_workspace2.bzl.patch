@@ -1,0 +1,13 @@
+diff --git tsl_workspace2.bzl tsl_workspace2.bzl
+index b6dba42415..01a158b157 100644
+--- tsl_workspace2.bzl
++++ tsl_workspace2.bzl
+@@ -351,7 +351,7 @@ def _tf_repositories():
+         urls = tf_mirror_urls("https://github.com/grpc/grpc/archive/b54a5b338637f92bfcf4b0bc05e0f57a5fd8fadd.tar.gz"),
+     )
+
+-    llvm_setup(name = "llvm-project")
++    # llvm_setup(name = "llvm-project")
+
+     # Intel openMP that is part of LLVM sources.
+     tf_http_archive(
