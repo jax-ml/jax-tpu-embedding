@@ -64,8 +64,8 @@ build:windows --host_copt=-DNOGDI
 # https://devblogs.microsoft.com/cppblog/announcing-full-support-for-a-c-c-conformant-preprocessor-in-msvc/
 # otherwise, there will be some compiling error due to preprocessing.
 build:windows --copt=/Zc:preprocessor
-build:windows --cxxopt=/std:c++20
-build:windows --host_cxxopt=/std:c++20
+build:windows --cxxopt=/std:c++17
+build:windows --host_cxxopt=/std:c++17
 # Generate PDB files, to generate useful PDBs, in opt compilation_mode
 # --copt /Z7 is needed.
 build:windows --linkopt=/DEBUG
@@ -81,8 +81,8 @@ build:windows --incompatible_strict_action_env=true
 ##############################################################################
 
 build:posix --copt=-Wno-sign-compare
-build:posix --cxxopt=-std=c++20
-build:posix --host_cxxopt=-std=c++20
+build:posix --cxxopt=-std=c++17
+build:posix --host_cxxopt=-std=c++17
 
 build:avx_posix --copt=-mavx
 build:avx_posix --host_copt=-mavx
@@ -104,11 +104,31 @@ build:clang --copt=-Wno-gnu-offsetof-extensions
 # Disable clang extention that rejects unknown arguments.
 build:clang --copt=-Qunused-arguments
 
+# #############################################################################
+# Cache options below.
+# #############################################################################
+# Public read-only cache
+build:public_cache --remote_cache="https://storage.googleapis.com/jax-tpu-embedding-bazel-cache/" --remote_upload_local_results=false
+# Cache pushes are limited to JAX's CI system.
+build:public_cache_push --config=public_cache --remote_upload_local_results=true --google_default_credentials
+
+##############################################################################
+# Release configurations.
+##############################################################################
+
+# TODO(b/356695103): We do not have a CPU only toolchain so we use the CUDA
+# toolchain for both CPU and GPU builds.  This is for use with the ml-build
+# docker image: us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest
+build:release_linux_x86_64 --host_crosstool_top="@local_config_cuda//crosstool:toolchain"
+build:release_linux_x86_64 --crosstool_top="@local_config_cuda//crosstool:toolchain"
+build:release_linux_x86_64 --extra_toolchains="@local_config_cuda//crosstool:toolchain-linux-x86_64"
+build:release_linux_x86_64 --repo_env=TF_SYSROOT="/dt9"
+# Clang path needs to be set for remote toolchain to be configured correctly.
+build:release_linux_x86_64 --action_env=CLANG_CUDA_COMPILER_PATH="/usr/lib/llvm-18/bin/clang"
+
 ##############################################################################
 # Test configurations.
 ##############################################################################
-# Configure TPU for SparseCore usage.
-test --test_env="LIBTPU_INIT_ARGS=--2a886c8_chip_config_name=megachip_tccontrol"
 # Show output for failing tests.
 test --test_output=errors
 

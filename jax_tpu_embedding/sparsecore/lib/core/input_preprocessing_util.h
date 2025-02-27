@@ -30,7 +30,10 @@ struct CooFormat {
   int col_id;
   float gain;
 
-  bool operator==(const CooFormat& other) const = default;
+  bool operator==(const CooFormat& other) const {
+    return row_id == other.row_id && col_id == other.col_id &&
+           gain == other.gain;
+  }
 };
 
 // Get adjusted col_id based on shift and offset.
