@@ -31,6 +31,11 @@ repository = "https://github.com/jax-ml/jax_tpu_embedding"
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# Pseudo extension module to indicate to setuptools that the package
+# does contain prebuilt extensions.  Needed to set has_ext_modules.
+ext-modules = [{name="jax_tpu_embedding.prebuilt", sources=[]}]
+
 [tool.setuptools.dynamic]
 version = {attr = "jax_tpu_embedding.sparsecore.__version__"}
 
@@ -39,6 +44,3 @@ include = ["jax_tpu_embedding*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.dylib", "*.so", "*.pyd"]
-
-[tool.distutils.bdist_wheel]
-plat-name = "linux_x86_64"
