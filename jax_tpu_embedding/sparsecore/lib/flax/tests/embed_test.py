@@ -24,6 +24,7 @@ from jax_tpu_embedding.sparsecore.lib.flax import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import tree
 
@@ -194,13 +195,16 @@ class EmbeddingLayerTest(absltest.TestCase):
 
   def test_forward_and_backward_with_one_table(self):
     devices = jax.devices()
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+
     feature_specs = (self.feature_spec_a, self.feature_spec_b)
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
+        num_sc_per_device=num_sc_per_device,
     )
     sc_module = embed.SparseCoreEmbed(
-        feature_specs=feature_specs,
+        feature_specs=feature_specs, num_sc_per_device=num_sc_per_device
     )
 
     embedding_lookups = sc_module.preprocess_inputs(
@@ -208,18 +212,24 @@ class EmbeddingLayerTest(absltest.TestCase):
         (self.input_weights, self.input_weights_table_b),
     )
 
-    padded_vocab_a = 128
-    padded_vocab_b = 128
+    padded_vocab_a = (
+        self.feature_spec_a.table_spec.setting_in_stack.padded_vocab_size
+    )
+    padded_vocab_b = (
+        self.feature_spec_b.table_spec.setting_in_stack.padded_vocab_size
+    )
+    print('Padded vocab:', padded_vocab_a, padded_vocab_b, flush=True)
     emb_table_a = (
         np.array([[i for _ in range(_DIM_A)] for i in range(padded_vocab_a)])
         .reshape(padded_vocab_a, _DIM_A)
         .astype(np.float32)
     )
+
     emb_table_a_sharded = einops.rearrange(
         emb_table_a,
         '(v c s) f -> c (s v) f',
-        c=4,
-        s=4,
+        c=_DIM_B // num_sc_per_device,
+        s=num_sc_per_device,
     )
     emb_table_b = (
         np.array([[i for _ in range(_DIM_B)] for i in range(padded_vocab_b)])
@@ -229,8 +239,8 @@ class EmbeddingLayerTest(absltest.TestCase):
     emb_table_b_sharded = einops.rearrange(
         emb_table_b,
         '(v c s) f -> c (s v) f',
-        c=4,
-        s=4,
+        c=_DIM_B // num_sc_per_device,
+        s=num_sc_per_device,
     )
 
     embedding_variables = {}
@@ -410,15 +420,18 @@ class EmbeddingLayerTest(absltest.TestCase):
 
   def test_forward_and_backward_with_table_stacking(self):
     devices = jax.devices()
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     sharding_axis = 'x'
     mesh = jax.sharding.Mesh(devices, sharding_axis)
     feature_specs = (self.feature_spec_a, self.feature_spec_c)
     embedding.auto_stack_tables(
         feature_specs,
         global_device_count=jax.device_count(),
+        num_sc_per_device=utils.num_sparsecores_per_device(devices[0]),
     )
     sc_module = embed.SparseCoreEmbed(
         feature_specs=feature_specs,
+        num_sc_per_device=num_sc_per_device,
         mesh=mesh,
         sharding_axis=sharding_axis,
     )
@@ -427,8 +440,12 @@ class EmbeddingLayerTest(absltest.TestCase):
         (self.input_tensor, self.input_tensor),
         (self.input_weights, self.input_weights),
     )
-    padded_vocab_a = 128
-    padded_vocab_c = 128
+    padded_vocab_a = (
+        self.feature_spec_a.table_spec.setting_in_stack.padded_vocab_size
+    )
+    padded_vocab_c = (
+        self.feature_spec_c.table_spec.setting_in_stack.padded_vocab_size
+    )
     stacked_vocab_size = padded_vocab_a + padded_vocab_c
     emb_table_a = test_utils.row_id_initializer(shape=(padded_vocab_a, _DIM_A))
     emb_table_c = test_utils.row_id_initializer(
@@ -439,8 +456,8 @@ class EmbeddingLayerTest(absltest.TestCase):
         test_utils.create_per_device_sharded_stacked_tables(
             [emb_table_a, emb_table_c],
             num_devices=mesh.size,
-            num_sparsecore_per_device=4,
-            rotation=4,
+            num_sparsecore_per_device=num_sc_per_device,
+            rotation=num_sc_per_device,
         )
     )
     embedding_variables['table_a_table_c'] = [
