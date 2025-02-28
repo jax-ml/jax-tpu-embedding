@@ -15,7 +15,7 @@
 
 import collections
 import functools
-from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union
+from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union, Tuple
 
 from absl import logging
 import jax
@@ -759,7 +759,7 @@ def _init_stacked_embedding_table(
     stack_name: str,
     table_specs: List[embedding_spec.TableSpec],
     global_sharding: jax.sharding.NamedSharding,
-    sharding_axis: str,
+    sharding_axis: str | Tuple[str, ...],
     num_sparsecore_per_device: int,
 ) -> EmbeddingVariables:
   """Initializes a stacked embedding table."""
@@ -776,7 +776,7 @@ def _init_stacked_embedding_table(
   assert all(s.padded_embedding_dim == stack_dim for s in settings)
 
   P: TypeAlias = jax.sharding.PartitionSpec
-  num_global_shards = global_sharding.mesh.shape[sharding_axis]
+  num_global_shards = global_sharding.mesh.size
   init_func = lambda rng: _init_stacked_embedding_table_shard(
       rng=rng,
       table_specs=table_specs,
@@ -902,7 +902,7 @@ def init_embedding_variables(
     rngs = jax.random.split(rng, per_table_width * len(stacks))
   else:
     per_table_width = (
-        global_sharding.mesh.shape[sharding_axis] * num_sparsecore_per_device
+        global_sharding.mesh.size * num_sparsecore_per_device
     )
     rngs = jax.random.split(
         rng,

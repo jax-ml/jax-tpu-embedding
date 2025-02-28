@@ -806,6 +806,85 @@ class EmbeddingTest(parameterized.TestCase):
         num_sparsecore_per_device=self.num_sc_per_device,
     )
 
+  def test_nd_mesh_for_init_embedding_variables(self):
+    devices = np.array(jax.devices()).reshape(2, -1)
+    mesh = jax.sharding.Mesh(devices, ("x", "y"))
+    global_sharding = sharding.NamedSharding(
+        mesh, sharding.PartitionSpec(("x", "y"), None)
+    )
+
+    vocab_size_a = 32
+    vocab_size_b = 77
+    embedding_dim = 14
+    batch_size = 16
+
+    table_a_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_a,
+        embedding_dim=embedding_dim,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_a",
+    )
+
+    feature_a_spec = embedding_spec.FeatureSpec(
+        table_spec=table_a_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim],
+        name="feature_a",
+    )
+
+    table_b_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_b,
+        embedding_dim=embedding_dim,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_b",
+    )
+
+    feature_b_spec = embedding_spec.FeatureSpec(
+        table_spec=table_b_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim],
+        name="feature_b",
+    )
+
+    # Prepare feature specs with stacking
+    feature_specs = [feature_a_spec, feature_b_spec]
+    embedding.auto_stack_tables(
+        feature_specs,
+        num_sc_per_device=self.num_sc_per_device,
+        global_device_count=jax.device_count(),
+    )
+    updated_table_specs = [f.table_spec for f in feature_specs]
+
+    # Create embedding variables with stacked features.
+    embedding_variables = embedding.init_embedding_variables(
+        jax.random.PRNGKey(0),
+        updated_table_specs,
+        global_sharding=global_sharding,
+        num_sparsecore_per_device=self.num_sc_per_device,
+    )
+
+    table_spec = updated_table_specs[0]
+    assert table_spec.stacked_table_spec is not None
+    self.assertEqual(
+        embedding_variables["table_a_table_b"][0].shape,
+        (
+            table_spec.stacked_table_spec.stack_vocab_size,
+            table_spec.stacked_table_spec.stack_embedding_dim,
+        ),
+    )
+    self.assertGreaterEqual(
+        table_spec.stacked_table_spec.stack_vocab_size,
+        vocab_size_a + vocab_size_b,
+    )
+    self.assertGreaterEqual(
+        table_spec.stacked_table_spec.stack_embedding_dim, embedding_dim
+    )
+    self.assertEqual(table_spec.stacked_table_spec.stack_embedding_dim % 8, 0)
+
   def test_muti_dimensional_mesh_for_init_embedding_variables(self):
     # create non-standard device list
     devices = np.array(jax.devices()).reshape(1, 1, -1, 1)
