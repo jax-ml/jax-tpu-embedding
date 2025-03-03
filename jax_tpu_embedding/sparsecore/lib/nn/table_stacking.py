@@ -572,3 +572,152 @@ def unstack_and_unshard_stacked_tables(
         )
     )
   return ret
+
+
+def _stack_and_shard_feature_table(
+    feature_tables: Dict[str, jax.Array],
+    stacked_table_specs: embedding_spec_pb2.StackedTableSpecProto,
+    delete_input: bool = False,
+) -> jax.Array:
+  """Stack and shard feature tables and return one stacked table."""
+
+  def mod_shard(
+      tbl,
+      padded_vocab_size,
+      padded_embedding_dim,
+      num_sparsecores,
+      shard_rotation,
+  ):
+    tbl_padded = jnp.pad(
+        tbl,
+        (
+            (0, padded_vocab_size - tbl.shape[0]),
+            (0, padded_embedding_dim - tbl.shape[1]),
+        ),
+    )
+    chunk_size = padded_vocab_size // num_sparsecores
+
+    tbl_3d = tbl_padded.reshape(
+        chunk_size,
+        -1,
+        stacked_table_specs.stack_embedding_dim,
+    )
+
+    # mod sharding
+    tbl_sharded = tbl_3d.transpose((1, 0, 2))
+
+    tbl_rotated = jnp.roll(tbl_sharded, shard_rotation, axis=0)
+
+    return tbl_rotated
+
+  sharded_tables = []
+  for table_setting_in_stack in stacked_table_specs.table_specs:
+    # prepare each feature table
+    tbl = feature_tables[table_setting_in_stack.table_name]
+
+    if (
+        stacked_table_specs.stack_embedding_dim
+        != table_setting_in_stack.padded_embedding_dim
+    ):
+      raise ValueError(
+          f"Embedding dim of table_spec {table_setting_in_stack.table_name} is"
+          f" {table_setting_in_stack.padded_embedding_dim} but the stacked"
+          f" table embedding dim is {stacked_table_specs.stack_embedding_dim}."
+      )
+
+    # mod shard and rotate the table
+    tbl_rotated = jax.jit(
+        mod_shard,
+        static_argnames=(
+            "padded_vocab_size",
+            "padded_embedding_dim",
+            "num_sparsecores",
+            "shard_rotation",
+        ),
+        in_shardings=tbl.sharding,
+        out_shardings=tbl.sharding,
+    )(
+        tbl,
+        table_setting_in_stack.padded_vocab_size,
+        table_setting_in_stack.padded_embedding_dim,
+        stacked_table_specs.num_sparsecores,
+        table_setting_in_stack.shard_rotation,
+    )
+
+    if delete_input:
+      # to save memory
+      tbl.delete()
+
+    sharded_tables.append(tbl_rotated)
+
+  # stack tables to create the final stacked table
+  tbl_stacked_3d = jax.numpy.concatenate(sharded_tables, axis=1)
+  tbl_stacked = jax.jit(
+      lambda x: x.reshape(-1, stacked_table_specs.stack_embedding_dim),
+      in_shardings=tbl_stacked_3d.sharding,
+      out_shardings=tbl_stacked_3d.sharding,
+  )(tbl_stacked_3d)
+
+  return tbl_stacked
+
+
+def stack_and_shard_feature_tables(
+    feature_tables: Dict[str, jax.Array],
+    embedding_specs: embedding_spec_pb2.EmbeddingSpecProto,
+    delete_input: bool = False,
+) -> Dict[str, jax.Array]:
+  """Stack and shard the feature tables and return the stacked tables.
+
+  This function can be run on both TPU or CPU backends. The stacked tables will
+  be mod-sharded specifically for training TPU topologies, which is described in
+  `embedding_specs`.
+
+  The output sharding will be the same as the sharding of the input
+  `feature_tables`, and all feature tables' shardings are required to be the
+  same. For best restoration performance at the target TPU topologies, the
+  number of shards of the input sharding should be the same as the number of TPU
+  devices at the target topology.
+
+  Args:
+    feature_tables: A dictionary of feature tables. The keys are the table
+      names.  Arrays are required to all have the same
+      jax.sharding.NamedSharding.
+    embedding_specs: The embedding spec proto.
+    delete_input: Whether to delete the input feature tables to reduce peak
+      memory usage.
+
+  Returns:
+    A dictionary of stacked tables with keys as the stacked table names.
+  """
+
+  in_sharding = list(feature_tables.values())[0].sharding
+  for arr in feature_tables.values():
+    if arr.sharding != in_sharding:
+      raise ValueError(
+          "All feature tables must have the same sharding. Found"
+          f" {arr.sharding} and {in_sharding}."
+      )
+
+  ret = {}
+  for stacked_table_spec in embedding_specs.stacked_table_specs:
+    in_tables = {}
+    for table_setting_in_stack in stacked_table_spec.table_specs:
+      tbl_name = table_setting_in_stack.table_name
+      if (tbl := feature_tables.get(tbl_name)) is None:
+        raise ValueError(f"{tbl_name}' not found in `feature_tables`.")
+
+      in_tables[tbl_name] = tbl
+
+    ret[stacked_table_spec.stack_name] = _stack_and_shard_feature_table(
+        in_tables, stacked_table_spec, delete_input
+    )
+
+    logging.info(
+        "stack_and_shard_feature_tables: stacked table_name: %s, shape: %s,"
+        " sharding: %s",
+        stacked_table_spec.stack_name,
+        ret[stacked_table_spec.stack_name].shape,
+        ret[stacked_table_spec.stack_name].sharding,
+    )
+
+  return ret

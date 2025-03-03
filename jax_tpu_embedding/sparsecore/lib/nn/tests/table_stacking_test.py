@@ -891,6 +891,244 @@ class TableStackingTest(parameterized.TestCase):
         self.assertFalse(embedding_var.is_deleted())
         self.assertFalse(embedding_var_c.is_deleted())
 
+  @parameterized.parameters([True, False])
+  def test_stacking_and_sharding_table(self, delete_input):
+    vocab_size_a = 64
+    vocab_size_b = 192
+    embedding_dim = 14
+    batch_size = 16
+
+    vocab_size_c = 120
+    embedding_dim_c = 30
+
+    table_a_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_a,
+        embedding_dim=embedding_dim,
+        initializer=jax.nn.initializers.constant(0.0),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+    )
+
+    table_b_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_b,
+        embedding_dim=embedding_dim,
+        initializer=jax.nn.initializers.constant(1.0),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_b',
+    )
+
+    table_c_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_c,
+        embedding_dim=embedding_dim_c,
+        initializer=jax.nn.initializers.constant(1.0),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_c',
+    )
+
+    feature_a_spec = embedding_spec.FeatureSpec(
+        table_spec=table_a_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim],
+        name='feature_a',
+    )
+
+    feature_b_spec = embedding_spec.FeatureSpec(
+        table_spec=table_b_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim],
+        name='feature_b',
+    )
+
+    feature_c_spec = embedding_spec.FeatureSpec(
+        table_spec=table_c_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim],
+        name='feature_c',
+    )
+
+    # Prepare feature specs with stacking
+    feature_specs = [feature_a_spec, feature_b_spec]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        num_sc_per_device=self.num_sc_per_device,
+        global_device_count=jax.device_count(),
+    )
+    logging.vlog(1, 'feature_specs_a_b: %s', feature_specs)
+
+    feature_specs_c = [feature_c_spec]
+    table_stacking.auto_stack_tables(
+        feature_specs_c,
+        num_sc_per_device=self.num_sc_per_device,
+        global_device_count=jax.device_count(),
+    )
+    logging.vlog(1, 'feature_specs_c: %s', feature_specs_c)
+
+    updated_table_spec_a = feature_specs[0].table_spec
+    updated_table_spec_b = feature_specs[1].table_spec
+    updated_table_spec_c = feature_specs_c[0].table_spec
+
+    # prepare arrays in unpadded and sharded forms
+    mesh = jax.sharding.Mesh(jax.devices(), 'data')
+    sharding = jax.sharding.NamedSharding(
+        mesh, jax.sharding.PartitionSpec('data')
+    )
+    table_a_sharded = jax.device_put(
+        test_utils.row_id_initializer(
+            (
+                vocab_size_a,
+                embedding_dim,
+            ),
+            offset=10,
+        ),
+        device=sharding,
+    )
+    table_b_sharded = jax.device_put(
+        test_utils.row_id_initializer(
+            (
+                vocab_size_b,
+                embedding_dim,
+            ),
+            offset=100,
+        ),
+        device=sharding,
+    )
+    table_c_sharded = jax.device_put(
+        test_utils.row_id_initializer(
+            (
+                vocab_size_c,
+                embedding_dim_c,
+            ),
+            offset=1000,
+        ),
+        device=sharding,
+    )
+
+    # pad tables
+    table_a_padded = jnp.pad(
+        table_a_sharded,
+        (
+            (
+                0,
+                updated_table_spec_a.setting_in_stack.padded_vocab_size
+                - vocab_size_a,
+            ),
+            (
+                0,
+                updated_table_spec_a.setting_in_stack.padded_embedding_dim
+                - embedding_dim,
+            ),
+        ),
+    )
+    table_b_padded = jnp.pad(
+        table_b_sharded,
+        (
+            (
+                0,
+                updated_table_spec_b.setting_in_stack.padded_vocab_size
+                - vocab_size_b,
+            ),
+            (
+                0,
+                updated_table_spec_b.setting_in_stack.padded_embedding_dim
+                - embedding_dim,
+            ),
+        ),
+    )
+    table_c_padded = jnp.pad(
+        table_c_sharded,
+        (
+            (
+                0,
+                updated_table_spec_c.setting_in_stack.padded_vocab_size
+                - vocab_size_c,
+            ),
+            (
+                0,
+                updated_table_spec_c.setting_in_stack.padded_embedding_dim
+                - embedding_dim_c,
+            ),
+        ),
+    )
+
+    logging.vlog(1, 'table_a_padded: \n%s', table_a_padded)
+    logging.vlog(1, 'table_b_padded: \n%s', table_b_padded)
+    logging.vlog(1, 'table_c_padded: \n%s', table_c_padded)
+
+    emb_tables = [table_a_padded, table_b_padded]
+    embedding_var = test_utils.create_per_device_sharded_stacked_tables(
+        emb_tables,
+        num_devices=jax.device_count(),
+        num_sparsecore_per_device=self.num_sc_per_device,
+        rotation=updated_table_spec_b.setting_in_stack.shard_rotation,
+    )
+    embedding_var = embedding_var.reshape(
+        -1, feature_specs[0].table_spec.setting_in_stack.padded_embedding_dim
+    )
+    logging.vlog(1, 'embedding_var: \n%s', embedding_var)
+
+    emb_tables_c = [table_c_padded]
+    embedding_var_c = test_utils.create_per_device_sharded_stacked_tables(
+        emb_tables_c,
+        num_devices=jax.device_count(),
+        num_sparsecore_per_device=self.num_sc_per_device,
+        rotation=0,
+    )
+    embedding_var_c = embedding_var_c.reshape(
+        -1, feature_specs_c[0].table_spec.setting_in_stack.padded_embedding_dim
+    )
+    logging.vlog(1, 'embedding_var_c: \n%s', embedding_var_c)
+
+    # distribute to all devices
+
+    embedding_var = jax.device_put(embedding_var, sharding, donate=True)
+    embedding_var_c = jax.device_put(embedding_var_c, sharding, donate=True)
+
+    table_spec_proto = embedding.create_proto_from_feature_specs(
+        feature_specs + feature_specs_c,
+        global_device_count=jax.device_count(),
+        num_sparsecore_per_device=self.num_sc_per_device,
+    )
+
+    logging.vlog(1, 'table_spec_proto: %s', table_spec_proto)
+
+    feature_tables = {
+        table_a_spec.name: table_a_sharded,
+        table_b_spec.name: table_b_sharded,
+        table_c_spec.name: table_c_sharded,
+    }
+
+    stacked_tables = table_stacking.stack_and_shard_feature_tables(
+        feature_tables, table_spec_proto, delete_input=delete_input
+    )
+
+    for i in range(len(table_spec_proto.stacked_table_specs)):
+      logging.vlog(
+          1,
+          'stacked_table[%s]: \t%s',
+          table_spec_proto.stacked_table_specs[i].stack_name,
+          stacked_tables[table_spec_proto.stacked_table_specs[i].stack_name],
+      )
+
+    self.assertTrue(
+        jnp.array_equal(
+            stacked_tables[table_spec_proto.stacked_table_specs[0].stack_name],
+            embedding_var,
+        )
+    )
+    self.assertTrue(
+        jnp.array_equal(
+            stacked_tables[table_spec_proto.stacked_table_specs[1].stack_name],
+            embedding_var_c,
+        )
+    )
+
+    # validate if inputs are deleted accordingly
+    for tbl in feature_tables.values():
+      self.assertEqual(tbl.is_deleted(), delete_input)
+
 
 if __name__ == '__main__':
   absltest.main()
