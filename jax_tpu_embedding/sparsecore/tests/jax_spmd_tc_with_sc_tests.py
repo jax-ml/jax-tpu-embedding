@@ -37,6 +37,7 @@ import optax
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as shakespeare_data
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.utils import utils
 
 _VOCAB_SIZE = flags.DEFINE_integer('vocab_size', 128, 'Vocabulary size.')
 _BATCH_SIZE = flags.DEFINE_integer('batch_size', 8, 'Batch size.')
@@ -111,6 +112,7 @@ class ShakespeareTest(absltest.TestCase):
     self.devices = jax.devices()
     self.mesh = Mesh(np.array(self.devices), axis_names=['device'])
     self.pd = P('device')
+    self.num_sc_per_device = utils.num_sparsecores_per_device(self.devices[0])
 
     self.shakespeare_table_spec = embedding_spec.TableSpec(
         vocabulary_size=_VOCAB_SIZE.value,
@@ -150,7 +152,7 @@ class ShakespeareTest(absltest.TestCase):
         emb_table,
         '(v c s) f -> c (s v) f',
         c=len(self.devices),
-        s=4,
+        s=self.num_sc_per_device,
     )
 
     self.embedding_variables = {}
@@ -201,7 +203,9 @@ class ShakespeareTest(absltest.TestCase):
     self.loss_grad_fn = jax.value_and_grad(loss_fn, argnums=(0, 1))
 
     embedding.prepare_feature_specs_for_training(
-        self.shakespeare_feature, global_device_count=self.mesh.size
+        self.shakespeare_feature,
+        global_device_count=self.mesh.size,
+        num_sc_per_device=self.num_sc_per_device,
     )
     sharded_matmul = functools.partial(
         embedding.tpu_sparse_dense_matmul,
@@ -296,7 +300,7 @@ class ShakespeareTest(absltest.TestCase):
               {self.shakespeare_feature.name: self.shakespeare_feature},
               local_device_count=self.mesh.local_mesh.size,
               global_device_count=self.mesh.size,
-              num_sc_per_device=4,
+              num_sc_per_device=self.num_sc_per_device,
               sharding_strategy='MOD',
           )
       )

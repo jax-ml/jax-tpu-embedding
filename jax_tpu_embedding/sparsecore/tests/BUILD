@@ -11,32 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("//jax_tpu_embedding/sparsecore:tpu.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "jax_sc_shakespeare_tests",
     srcs = ["jax_sc_shakespeare_tests.py"],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
@@ -49,24 +42,17 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "jax_spmd_tc_with_sc_tests",
     srcs = ["jax_spmd_tc_with_sc_tests.py"],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
