@@ -23,6 +23,7 @@ import jax
 from jax.experimental import layout
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -81,11 +82,15 @@ class SparseCoreEmbed(nn.Module):
   # Sharding strategy for embedding tables.
   table_sharding_strategy: str = 'MOD'
 
-  num_sc_per_device: int = 4
+  num_sc_per_device: int = -1  # Initialized in __post_init__.
 
   def __post_init__(self):
     if not self.mesh:
       self.mesh = jax.sharding.Mesh(jax.devices(), [self.sharding_axis])
+
+    self.num_sc_per_device = utils.num_sparsecores_per_device(
+        self.mesh.devices[0]
+    )
 
     super().__post_init__()
 
@@ -101,6 +106,9 @@ class SparseCoreEmbed(nn.Module):
             self.mesh, self.embedding_table_partition
         ),
         num_sparsecore_per_device=self.num_sc_per_device,
+        # We need to by-pass the mesh check if not using all
+        # JAX devices (build-in assumption to the check).
+        bypass_mesh_check=len(self.mesh.devices) != jax.device_count(),
     )
     self.embedding_table = self.param(
         EMBEDDING_PARAM_NAME,

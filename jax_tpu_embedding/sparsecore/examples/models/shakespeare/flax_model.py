@@ -38,11 +38,15 @@ class Model(nn.Module):
   embedding_size: int
   table_name: str = 'shakespeare_table'
   feature_name: str = 'shakespeare_feature'
+  mesh: jax.sharding.Mesh | None = None
+  sharding_axis: str = 'sparsecore_sharding'
 
   @nn.compact
   def __call__(self, embedding_lookups: embed.EmbeddingLookups):
     x = embed.SparseCoreEmbed(
         feature_specs=self.feature_specs,
+        mesh=self.mesh,
+        sharding_axis=self.sharding_axis,
     )(embedding_lookups)
 
     # Unpack the activations.
