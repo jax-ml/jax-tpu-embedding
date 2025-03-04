@@ -69,8 +69,6 @@ class TrainMetrics(metrics.Collection):
   train_loss_std: metrics.Std.from_output('loss')
 
 
-_NUM_SCS_PER_DEVICE = 4
-
 _VOCAB_SIZE = flags.DEFINE_integer('vocab_size', 1024, 'Vocabulary size.')
 
 _GLOBAL_BATCH_SIZE = flags.DEFINE_integer(
@@ -247,8 +245,12 @@ def _try_restore_latest_checkpoint(
 
 def run_model():
   """Runs the model including input processing and training."""
-  num_global_devices = jax.device_count()
-  num_local_devices = jax.local_device_count()
+  local_devices = jax.local_devices()
+  global_devices = jax.devices()
+  num_global_devices = len(global_devices)
+  num_local_devices = len(local_devices)
+  num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])
+
   num_processes = jax.process_count()
   process_id = jax.process_index()
   info(
@@ -259,8 +261,7 @@ def run_model():
   info('process_id = %s, num_processes = %s', process_id, num_processes)
   pd = P('device')  # Device sharding.
   pe = P('device', None)  # PartitionSpec for embedding tables.
-  local_devices = jax.local_devices()
-  global_devices = jax.devices()
+
   info('local_devices [len=%s] = %s', len(local_devices), local_devices)
   info('global_devices [len=%s] = %s', len(global_devices), global_devices)
   global_mesh = Mesh(np.array(global_devices), axis_names=['device'])
@@ -294,11 +295,11 @@ def run_model():
       device_batch_size,
   )
 
-  per_sc_vocab_size = _VOCAB_SIZE.value // _NUM_SCS_PER_DEVICE
+  per_sc_vocab_size = _VOCAB_SIZE.value // num_sc_per_device
   if per_sc_vocab_size < 8 or per_sc_vocab_size % 8 != 0:
     raise ValueError(
         'Vocabulary size must be a multiple of 8 per SC: VOCAB_SIZE ='
-        f' {_VOCAB_SIZE.value}, num_scs = {_NUM_SCS_PER_DEVICE}'
+        f' {_VOCAB_SIZE.value}, num_scs = {num_sc_per_device}'
     )
 
   word_ids = shakespeare_data.load_shakespeare(_VOCAB_SIZE.value)
@@ -520,7 +521,7 @@ def run_model():
             feature_specs,
             local_device_count=global_mesh.local_mesh.size,
             global_device_count=global_mesh.size,
-            num_sc_per_device=_NUM_SCS_PER_DEVICE,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy='MOD',
         ),
     )

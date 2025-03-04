@@ -36,6 +36,7 @@ from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as 
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import model as shakespeare_model
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
 import tree
@@ -95,16 +96,14 @@ _EMBEDDING_INIT = flags.DEFINE_enum(
     'embedding_init', 'normal', ['normal', 'row_id'], 'Embedding initializer.'
 )
 
-_DUMP_DIR = flags.DEFINE_string(
-    'dump_dir', None, 'Directory to write debug dumps to.'
-)
-
 _LOG_FREQUENCY = flags.DEFINE_integer(
     'log_frequency', 10, 'Frequency to log metrics.'
 )
 _LOSS_RESET_FREQUENCY = flags.DEFINE_integer(
     'loss_window', 10, 'Number of steps to average loss over.'
 )
+
+_FLAGS = flags.FLAGS
 
 info = logging.info
 vlog1 = partial(logging.vlog, 1)
@@ -175,8 +174,12 @@ def create_train_state(
 
 def run_model():
   """Runs the model including input processing and training."""
-  num_global_devices = jax.device_count()
-  num_local_devices = jax.local_device_count()
+  local_devices = jax.local_devices()
+  global_devices = jax.devices()
+  num_global_devices = len(global_devices)
+  num_local_devices = len(local_devices)
+  num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])
+
   num_processes = jax.process_count()
   process_id = jax.process_index()
   info(
@@ -185,17 +188,13 @@ def run_model():
       num_global_devices,
   )
   info('process_id = %s, num_processes = %s', process_id, num_processes)
-  local_devices = jax.local_devices()
-  global_devices = jax.devices()
   info('local_devices [len=%s] = %s', len(local_devices), local_devices)
   info('global_devices [len=%s] = %s', len(global_devices), global_devices)
 
   # Shard the local embedding table onto the local devices.
-  local_devices = jax.local_devices()
   info('Local Devices: %s', local_devices)
   local_mesh = Mesh(np.array(local_devices), axis_names=['device'])
   info('Local Mesh: %s', local_mesh)
-  global_devices = jax.devices()
   global_mesh = Mesh(np.array(global_devices), axis_names=['device'])
   global_emb_sharding = NamedSharding(global_mesh, P('device', None, None))
 
@@ -214,15 +213,11 @@ def run_model():
       device_batch_size,
   )
 
-  per_chip_vocab_size = _VOCAB_SIZE.value // 4
-  if per_chip_vocab_size < 8 or per_chip_vocab_size % 8 != 0:
-    raise ValueError('Vocabulary size must be at least 8 per SC.')
-
-  per_sc_vocab_size = _VOCAB_SIZE.value // 4
+  per_sc_vocab_size = _VOCAB_SIZE.value // num_sc_per_device
   if per_sc_vocab_size < 8 or per_sc_vocab_size % 8 != 0:
     raise ValueError(
         'Vocabulary size must be a multiple of 8 per SC: VOCAB_SIZE ='
-        f' {_VOCAB_SIZE.value}, num_scs = {4}'
+        f' {_VOCAB_SIZE.value}, num_scs = {num_sc_per_device}'
     )
 
   word_ids = shakespeare_data.load_shakespeare(_VOCAB_SIZE.value)
@@ -392,7 +387,7 @@ def run_model():
             feature_specs,
             local_device_count=global_mesh.local_mesh.size,
             global_device_count=global_mesh.size,
-            num_sc_per_device=4,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy='MOD',
             has_leading_dimension=True,
         )
@@ -419,11 +414,11 @@ def run_model():
 
     # ----------------------------------------------------------------------
     # Optionally dump the Jaxpr for the train step.
-    if _DUMP_DIR.value and step == 0:
+    if _FLAGS.dump_dir and step == 0:
       dirname = (
           os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
-          if _DUMP_DIR.value == 'sponge'
-          else _DUMP_DIR.value
+          if _FLAGS.dump_dir == 'sponge'
+          else _FLAGS.dump_dir
       )
       if not dirname:
         logging.warning(
