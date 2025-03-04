@@ -203,7 +203,9 @@ class EmbeddingLayerTest(absltest.TestCase):
         global_device_count=jax.device_count(),
         num_sc_per_device=num_sc_per_device,
     )
-    sc_module = embed.SparseCoreEmbed(feature_specs=feature_specs)
+    sc_module = embed.SparseCoreEmbed(
+        feature_specs=feature_specs, num_sc_per_device=num_sc_per_device
+    )
 
     embedding_lookups = sc_module.preprocess_inputs(
         (self.input_tensor, self.input_tensor_table_b),
@@ -429,6 +431,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
     sc_module = embed.SparseCoreEmbed(
         feature_specs=feature_specs,
+        num_sc_per_device=num_sc_per_device,
         mesh=mesh,
         sharding_axis=sharding_axis,
     )

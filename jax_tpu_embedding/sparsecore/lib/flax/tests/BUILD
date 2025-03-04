@@ -13,6 +13,7 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:tpu.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
+load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -38,15 +39,23 @@ tpu_py_strict_test(
     ],
 )
 
-tpu_py_strict_test(
+pytype_strict_contrib_test(
     name = "autograd_test",
     srcs = [
         "autograd_test.py",
+    ],
+    args = [
+        # TPU chip configuration,
+        "--logtostderr",
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
         "JAX_TRACEBACK_FILTERING": "off",
     },
+    tags = [
+        "exclusive-if-local",
+        "requires-tpu",
+    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_model",
@@ -54,7 +63,6 @@ tpu_py_strict_test(
         "//jax_tpu_embedding/sparsecore/lib/flax:embed_optimizer",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),

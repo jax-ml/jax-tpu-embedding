@@ -26,7 +26,6 @@ from jax_tpu_embedding.sparsecore.lib.flax import embed
 from jax_tpu_embedding.sparsecore.lib.flax import embed_optimizer
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
-from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
 
@@ -74,8 +73,7 @@ class ShakespeareTest(absltest.TestCase):
   """Input processing and convergence of basic model using JAX SC libraries."""
 
   def test_shakespeare_model_loss_convergence(self):
-    devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    devices = jax.devices()[:4]
     mesh = jax.sharding.Mesh(devices, 'x')
 
     word_ids = shakespeare_data.load_shakespeare(_VOCAB_SIZE.value)
@@ -113,8 +111,7 @@ class ShakespeareTest(absltest.TestCase):
     feature_specs = nn.FrozenDict({'shakespeare_feature': feature_spec})
     embedding.prepare_feature_specs_for_training(
         feature_specs,
-        global_device_count=len(devices),
-        num_sc_per_device=num_sc_per_device,
+        global_device_count=len(jax.devices()),
     )
 
     # Construct the model.
@@ -124,8 +121,6 @@ class ShakespeareTest(absltest.TestCase):
         vocab_size=_VOCAB_SIZE.value,
         seq_len=_SEQ_LEN.value,
         embedding_size=_EMBEDDING_SIZE.value,
-        mesh=mesh,
-        sharding_axis='x',
     )
 
     # Initialize the model.
@@ -147,7 +142,7 @@ class ShakespeareTest(absltest.TestCase):
               feature_specs,
               mesh.local_mesh.size,
               mesh.size,
-              num_sc_per_device=num_sc_per_device,
+              num_sc_per_device=4,
               sharding_strategy='MOD',
           )[:-1]
       )
