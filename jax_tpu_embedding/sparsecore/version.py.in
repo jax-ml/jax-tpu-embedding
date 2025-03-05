@@ -1,0 +1,18 @@
+"""JAX TPU Embedding versioning utilities
+
+For releases, the version is of the form:
+  xx.yy.zz
+
+For nightly builds, the date of the build is added:
+  xx.yy.zz-devYYYMMDD
+"""
+
+_base_version = "0.1.0"
+_version_suffix = "${VERSION_SUFFIX}"
+
+# Git commit corresponding to the build, if available.
+__git_commit__ = "${GIT_COMMIT}"
+
+# Library version.
+__version__ = _base_version + _version_suffix
+

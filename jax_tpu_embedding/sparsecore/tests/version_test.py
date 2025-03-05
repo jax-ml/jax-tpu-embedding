@@ -11,8 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""JAX SparseCore library."""
+"""Test version string generation."""
 
+from absl.testing import absltest
+from jax_tpu_embedding import sparsecore
 from jax_tpu_embedding.sparsecore import version
 
-__version__ = version.__version__
+
+class VersionTest(absltest.TestCase):
+
+  def test_version_string(self):
+    self.assertEqual(sparsecore.__version__, version.__version__)
+    self.assertTrue(version.__version__.startswith(version._base_version))
+    self.assertTrue(version.__version__.endswith(version._version_suffix))
+
+
+if __name__ == "__main__":
+  absltest.main()
