@@ -202,7 +202,6 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
-      "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
   optimizer_update_computation_name = computation_name
