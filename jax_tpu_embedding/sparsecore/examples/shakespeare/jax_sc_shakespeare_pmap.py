@@ -113,6 +113,7 @@ vlog3 = partial(logging.vlog, 3)
 def create_train_state(
     rng: jax.Array,
     global_device_count: int,
+    num_sc_per_device: int,
     global_batch_size: int,
     vocab_size: int,
     seq_len: int,
@@ -128,6 +129,7 @@ def create_train_state(
   Args:
     rng: JAX PRNG Key.
     global_device_count: The Jax global device count.
+    num_sc_per_device: The number of sparsecores per device.
     global_batch_size: global batch size.
     vocab_size: embedding vocabulary size.
     seq_len: sequence length.
@@ -159,7 +161,9 @@ def create_train_state(
   optimizer = optax.adam(learning_rate=_LEARNING_RATE.value)
   feature_specs = model.create_feature_specs()
   embedding.prepare_feature_specs_for_training(
-      feature_specs, global_device_count=global_device_count,
+      feature_specs,
+      global_device_count=global_device_count,
+      num_sc_per_device=num_sc_per_device,
   )
   return (
       model,
@@ -239,6 +243,7 @@ def run_model():
   model, optimizer, train_state, feature_specs = create_train_state(
       jax.random.key(42),
       num_global_devices,
+      num_sc_per_device,
       _GLOBAL_BATCH_SIZE.value,
       _VOCAB_SIZE.value,
       _SEQ_LEN.value,
@@ -251,7 +256,7 @@ def run_model():
       for f in tree.flatten(feature_specs)
   }
   emb_variables = embedding.init_embedding_variables(
-      jax.random.key(13), table_specs, global_emb_sharding
+      jax.random.key(13), table_specs, global_emb_sharding, num_sc_per_device
   )
 
   def train_step_fn(

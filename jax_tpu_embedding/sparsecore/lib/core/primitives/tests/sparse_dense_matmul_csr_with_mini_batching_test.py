@@ -22,6 +22,8 @@ from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr_with_mini_batching
 import numpy as np
 
+_NUM_SC_PER_DEVICE = 4
+
 
 def _generate_input_tensors_and_expected_output_for_2_batches(
     max_mini_batch_size=0, output_padded_width=0):
@@ -455,7 +457,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         self.emb_table,
         "(v c s) f -> c (s v) f",
         c=len(self.global_devices),
-        s=4,
+        s=_NUM_SC_PER_DEVICE,
     )
 
     self.tpu_sparse_dense_matmul_csr_with_mini_batching = jax.named_call(
@@ -472,7 +474,11 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -573,7 +579,11 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -605,7 +615,11 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -647,7 +661,11 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
     num_minibatches_per_physical_sparse_core = 1
