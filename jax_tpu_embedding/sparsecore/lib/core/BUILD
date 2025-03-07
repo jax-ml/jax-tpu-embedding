@@ -95,6 +95,7 @@ pytype_strict_library(
     ],
     deps = [
         ":constants",
+        "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("absl:app"),
         pypi_requirement("absl/logging"),
         pypi_requirement("einops"),
