@@ -165,7 +165,7 @@ def _compute_table_to_setting_in_stack(
     table_to_padded_dim: Mapping[str, int],
     table_to_padded_vocab_size: Mapping[str, int],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
 ) -> Mapping[str, embedding_spec.TableSettingInStack]:
   """Returns the table to setting in stack mapping."""
   table_name_to_setting_in_stack = {}
@@ -225,7 +225,7 @@ def _stack_feature_specs(
     table_to_padded_dim: Mapping[str, int],
     table_to_padded_vocab_size: Mapping[str, int],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:
@@ -326,7 +326,7 @@ def stack_tables(
     features: Nested[embedding_spec.FeatureSpec],
     table_names: Sequence[str],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     stack_name: str | None = None,
@@ -388,7 +388,7 @@ def stack_tables(
 def auto_stack_tables(
     features: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:

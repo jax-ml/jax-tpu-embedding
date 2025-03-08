@@ -30,6 +30,7 @@ class SparseDenseMatmulGradWithSgdTest(absltest.TestCase):
     self.batch_size = 16
     self.vocab_size = 32
     self.emb_size = 8
+    self.num_sc_per_device = 4
     self.input_tensor = np.array(
         [
             [5],
@@ -86,7 +87,11 @@ class SparseDenseMatmulGradWithSgdTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
 
     emb_table_sharded = einops.rearrange(
