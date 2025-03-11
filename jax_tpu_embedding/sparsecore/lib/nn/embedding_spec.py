@@ -58,14 +58,17 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
 
   def __init__(
       self,
-      learning_rate: HyperParameterType,
+      learning_rate,
   ):
     self.learning_rate = learning_rate
 
-  def get_learning_rate(self) -> jax.Array:
+  def get_learning_rate(self, step: int | None = None) -> jax.Array:
     """Returns the learning rate for the optimizer."""
     if callable(self.learning_rate):
-      return jnp.array(self.learning_rate(), dtype=jnp.float32)
+      if step is None:
+        return jnp.array(self.learning_rate(), dtype=jnp.float32)
+      else:
+        return jnp.array(self.learning_rate(step), dtype=jnp.float32)
     else:
       return jnp.array(self.learning_rate, dtype=jnp.float32)
 
@@ -120,18 +123,16 @@ class SGDOptimizerSpec(OptimizerSpec):
 
   def __init__(
       self,
-      learning_rate: HyperParameterType = 0.001,
+      learning_rate=0.001,
   ):
     super().__init__(
         learning_rate=learning_rate,
     )
 
   def __hash__(self) -> int:
-    return hash((
-        self.learning_rate,
-    ))
+    return hash((self.learning_rate,))
 
-  def short_name(self)-> str:
+  def short_name(self) -> str:
     return "sgd"
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
@@ -161,7 +162,7 @@ class AdagradOptimizerSpec(OptimizerSpec):
 
   def __init__(
       self,
-      learning_rate: HyperParameterType = 0.001,
+      learning_rate=0.001,
       initial_accumulator_value: HyperParameterType = 0.1,
   ):
     super().__init__(

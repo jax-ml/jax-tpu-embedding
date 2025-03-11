@@ -15,6 +15,7 @@
 
 from absl.testing import absltest
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from optax import schedules
 
 
 class OptimizerSpecTest(absltest.TestCase):
@@ -77,6 +78,17 @@ class OptimizerSpecTest(absltest.TestCase):
 
     op = embedding_spec.AdagradOptimizerSpec(learning_rate=lr)
     self.assertEqual(op.get_learning_rate(), 0.1)
+
+  def test_learning_rate_schedule(self):
+    op = embedding_spec.AdagradOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        )
+    )
+
+    self.assertEqual(op.get_learning_rate(0), 1.0)
+    self.assertEqual(op.get_learning_rate(50), 0.55)
+    self.assertEqual(op.get_learning_rate(100), 0.1)
 
 
 if __name__ == "__main__":

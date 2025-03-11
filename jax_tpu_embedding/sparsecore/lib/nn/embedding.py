@@ -573,6 +573,7 @@ def tpu_sparse_dense_matmul_grad(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     sharding_strategy: str = "MOD",
     label: str = "",
+    step: int | None = None,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -627,6 +628,7 @@ def tpu_sparse_dense_matmul_grad(
     feature_specs: The input features for the current process.
     sharding_strategy: The sharding strategy (e.g., MOD)
     label: The label for the optimizer computation.
+    step: The current step number.
 
   Returns:
     The updated activation embedding variables.
@@ -657,7 +659,7 @@ def tpu_sparse_dense_matmul_grad(
     embedding_variable = embedding_variables[stacked_table_name]
     activation_gradient = gradients[stacked_table_name]
     stack_table_spec = stacked_table_specs[stacked_table_name]
-    learning_rate = stack_table_spec.optimizer.get_learning_rate()
+    learning_rate = stack_table_spec.optimizer.get_learning_rate(step)
     hyper_params = [learning_rate]
     # The MLIR computation symbol names need to be different. We attach the
     # table name to the symbol name to ensure that.

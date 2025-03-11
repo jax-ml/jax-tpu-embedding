@@ -182,5 +182,6 @@ pytype_strict_contrib_test(
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("optax/schedules"),
     ],
 )
