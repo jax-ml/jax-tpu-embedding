@@ -136,7 +136,7 @@ def get_stacked_table_specs(
 def prepare_feature_specs_for_training(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
 ) -> None:
   """Prepares the feature specs for training by populating missing fields.
 
@@ -244,7 +244,7 @@ def prepare_feature_specs_for_training(
 def auto_stack_tables(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:
@@ -288,8 +288,8 @@ def preprocess_sparse_dense_matmul_input(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     local_device_count: int,
     global_device_count: int,
+    num_sc_per_device: int,
     static_buffer_size_multiplier: int = 0,
-    num_sc_per_device: int = 4,
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
@@ -821,7 +821,7 @@ def init_embedding_variables(
     rng: jax.Array,
     table_specs: Nested[embedding_spec.TableSpec],
     global_sharding: jax.sharding.NamedSharding,
-    num_sparsecore_per_device: int = 4,
+    num_sparsecore_per_device: int,
     bypass_mesh_check: bool = False,
 ) -> Mapping[str, EmbeddingVariables]:
   """Generates the initial embedding variables.
@@ -928,7 +928,7 @@ def init_embedding_variables(
 def create_proto_from_feature_specs(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sparsecore_per_device: int = 4,
+    num_sparsecore_per_device: int,
 ) -> embedding_spec_pb2.EmbeddingSpecProto:
   """Creates a StackedTableSpecProto from a list of FeatureSpec.
 

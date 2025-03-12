@@ -24,6 +24,7 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 np.set_printoptions(threshold=np.inf, suppress=True)
@@ -495,6 +496,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(self):
     devices = jax.devices()[:2]
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -505,6 +507,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
     )
     # Add another table.
     row_pointers, embedding_ids, sample_ids, gains, _ = (
@@ -773,6 +776,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables_stacked(self):
     devices = jax.devices()[:2]
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -783,6 +787,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     embedding.auto_stack_tables(
         feature_specs,
         global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
     )
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
