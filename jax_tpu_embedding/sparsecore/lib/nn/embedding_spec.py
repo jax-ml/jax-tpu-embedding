@@ -18,6 +18,7 @@ from __future__ import annotations
 import abc
 import collections
 import dataclasses
+import inspect
 from typing import Callable, Sequence, TypeAlias
 
 import jax
@@ -65,10 +66,18 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
   def get_learning_rate(self, step: int | None = None) -> jax.Array:
     """Returns the learning rate for the optimizer."""
     if callable(self.learning_rate):
-      if step is None:
-        return jnp.array(self.learning_rate(), dtype=jnp.float32)
-      else:
+      # Callable learning rate functions are expected to take a singular step
+      # count argument, or none at all.
+      if step is not None:
+        arg_spec = inspect.getfullargspec(self.learning_rate)
+        assert len(arg_spec.args) == 1, (
+            "Learning rate callbacks should only take a singular step count"
+            " argument."
+        )
+
         return jnp.array(self.learning_rate(step), dtype=jnp.float32)
+      else:
+        return jnp.array(self.learning_rate(), dtype=jnp.float32)
     else:
       return jnp.array(self.learning_rate, dtype=jnp.float32)
 
