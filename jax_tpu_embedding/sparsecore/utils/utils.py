@@ -30,9 +30,29 @@ NUM_SC_PER_DEVICE_MAP = {
 }
 
 
-def num_sparsecores_per_device(device: jax.Device):
-  """Determine the number of sparsecores available on a device."""
-  return NUM_SC_PER_DEVICE_MAP[device.device_kind]
+def num_sparsecores_per_device(device: jax.Device | None = None):
+  """Determine the number of sparsecores available on a device.
+
+  Args:
+    device: JAX device to check.  If None, queries the first device in
+            jax.devices().
+
+  Returns:
+    Number of sparsecores.
+
+  Raises:
+    ValueError: if the number of sparsecores cannot be determined.
+  """
+  device = device or jax.devices()[0]
+
+  if not hasattr(device, 'device_kind'):
+    raise ValueError(f'Cannot determine device kind for device: {device}')
+
+  device_kind = device.device_kind
+  if device_kind not in NUM_SC_PER_DEVICE_MAP:
+    raise ValueError(f'Unknown sparsecore count for device kind: {device_kind}')
+
+  return NUM_SC_PER_DEVICE_MAP[device_kind]
 
 
 def jit_with_dump(fn, name=None, source_info=None, *jit_args, **jit_kwargs):

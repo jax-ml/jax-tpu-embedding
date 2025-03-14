@@ -245,6 +245,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_b,
         temp_mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
     np.testing.assert_equal(
         row_pointers["table_b"], np.concatenate((first_half_b_row_pointers, []))
@@ -296,6 +297,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_a[:4],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
     (
         second_half_a_row_pointers,
@@ -307,6 +309,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_a[4:],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
 
     (
@@ -319,6 +322,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_b[:4],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
     (
         second_half_b_row_pointers,
@@ -330,6 +334,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_b[4:],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
 
     np.testing.assert_equal(
@@ -412,6 +417,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_a[:4],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
     (
         second_half_a_row_pointers,
@@ -423,6 +429,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_a[4:],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
 
     (
@@ -435,6 +442,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_b[:4],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
     (
         second_half_b_row_pointers,
@@ -446,6 +454,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         self.input_weights_b[4:],
         self.mesh,
         max_ids_per_partition=16,
+        num_sc_per_device=4,
     )
 
     np.testing.assert_equal(
