@@ -18,6 +18,7 @@ from typing import Tuple
 import jax
 from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import constants
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 ArrayLike = jnp.ndarray | np.ndarray
@@ -28,7 +29,7 @@ def preprocess_sparse_dense_matmul_input(
     features_weights: ArrayLike,
     mesh: jax.sharding.Mesh,
     max_ids_per_partition: int = 64,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int = -1,
     sharding_strategy: str = "MOD",
 ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Preprocesses the input for the sparse-dense matmul.
@@ -70,15 +71,15 @@ def preprocess_sparse_dense_matmul_input(
   if np.ndim(features) != 2 and np.ndim(features) != 1:
     raise ValueError("features must be a 2D array or a 1D numpy array.")
 
-  if num_sc_per_device <= 0:
-    raise ValueError("num_sc_per_device must be positive.")
-
   if max_ids_per_partition <= 0:
     raise ValueError("max_ids_per_partition must be positive.")
 
   global_device_count = len(mesh.devices)
   if global_device_count <= 0:
     raise ValueError("global_device_count must be positive.")
+
+  if num_sc_per_device <= 0:
+    num_sc_per_device = utils.num_sparsecores_per_device(mesh.devices.item(0))
 
   # Global number of sparse cores.
   num_scs = num_sc_per_device * global_device_count

@@ -286,7 +286,11 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_tensor, self.input_weights, mesh, max_ids_per_partition=16
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
         self.emb_table,

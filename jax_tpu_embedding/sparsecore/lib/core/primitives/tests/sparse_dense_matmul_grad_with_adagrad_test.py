@@ -26,6 +26,7 @@ import numpy as np
 _BATCH_SIZE = 16
 _VOCAB_SIZE = 32
 _EMB_SIZE = 8
+_NUM_SC_PER_DEVICE = 4
 
 
 class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
@@ -309,7 +310,11 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        input_tensor, input_weights, mesh, max_ids_per_partition=16
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     emb_table = (
         np.array([[i for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)])

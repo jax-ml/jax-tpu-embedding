@@ -81,6 +81,7 @@ class InputPreprocessingTest(absltest.TestCase):
         bad_input_tensor,
         bad_weights_tensor,
         mesh,
+        2,  # num_sc_per_device
     )
 
   def test_error_on_bad_input_dimensions(self):
@@ -109,6 +110,7 @@ class InputPreprocessingTest(absltest.TestCase):
         bad_input_features,
         bad_weights,
         mesh,
+        2,  # num_sc_per_device
     )
 
   def test_error_on_bad_weights(self):
@@ -224,7 +226,11 @@ class InputPreprocessingTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        input_tensor, input_weights, mesh, max_ids_per_partition=12
+        input_tensor,
+        input_weights,
+        mesh,
+        num_sc_per_device=4,
+        max_ids_per_partition=12,
     )
     logging.info(lhs_local_embedding_ids.shape)
 
@@ -349,7 +355,11 @@ class InputPreprocessingTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
     ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        self.input_features, self.input_weights, mesh, max_ids_per_partition=32
+        self.input_features,
+        self.input_weights,
+        mesh,
+        num_sc_per_device=4,
+        max_ids_per_partition=32,
     )
     with self.subTest(name="RowPointerEquality"):
       expected_lhs_row_pointers = np.array(
