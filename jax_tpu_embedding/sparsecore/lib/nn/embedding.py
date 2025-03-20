@@ -15,7 +15,7 @@
 
 import collections
 import functools
-from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union, Tuple
+from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
 
 from absl import logging
 import jax
@@ -28,6 +28,7 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import tree
 
@@ -136,7 +137,7 @@ def get_stacked_table_specs(
 def prepare_feature_specs_for_training(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
 ) -> None:
   """Prepares the feature specs for training by populating missing fields.
 
@@ -244,7 +245,7 @@ def prepare_feature_specs_for_training(
 def auto_stack_tables(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sc_per_device: int = 4,
+    num_sc_per_device: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:
@@ -288,8 +289,8 @@ def preprocess_sparse_dense_matmul_input(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     local_device_count: int,
     global_device_count: int,
+    num_sc_per_device: int,
     static_buffer_size_multiplier: int = 0,
-    num_sc_per_device: int = 4,
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
@@ -316,13 +317,13 @@ def preprocess_sparse_dense_matmul_input(
       `mesh.local_mesh.size`.
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
+    num_sc_per_device: The number of sparse cores per device.
     static_buffer_size_multiplier: If larger than 0, this is the multiplier that
       is used to determine the size of the static buffers (lhs_embedding_ids,
       lhs_sample_ids and lhs_gains). The size of the buffer returned is
       static_buffer_size_multiplier x batch_size. If less than or equal to 0,
       the size of the buffer is determined based off of the
       max_ids_per_partition limits.
-    num_sc_per_device: The number of sparse cores per device.
     sharding_strategy: The sharding strategy (e.g., MOD)
     has_leading_dimension: If set to True, then the first dimension of the
       output will be the number of local devices. This is useful when using the
@@ -821,7 +822,7 @@ def init_embedding_variables(
     rng: jax.Array,
     table_specs: Nested[embedding_spec.TableSpec],
     global_sharding: jax.sharding.NamedSharding,
-    num_sparsecore_per_device: int = 4,
+    num_sparsecore_per_device: int = -1,
     bypass_mesh_check: bool = False,
 ) -> Mapping[str, EmbeddingVariables]:
   """Generates the initial embedding variables.
@@ -840,7 +841,8 @@ def init_embedding_variables(
       dimension represents the embedding dimension. Since the sharding should
       happen along the device dimension, the partition spec should be
       sharding.PartitionSpec("x", None, None).
-    num_sparsecore_per_device: Number of sparsecore per device. default = 4
+    num_sparsecore_per_device: Number of sparsecore per device. default = -1 to
+      query from the TPU type of global_sharding.mesh.devices.item(0).
     bypass_mesh_check: If True, don't require the mesh device order to match
       jax.devices(). This can be used when exporting a model from a host where
       the training devices are not present.
@@ -850,7 +852,8 @@ def init_embedding_variables(
     and each value is the embedding variable initializer.
 
   Raises:
-    ValueError: if there is duplicate table name.
+    ValueError: if there is duplicate table name, or if the number of
+                sparsecores could not be determined.
   """
   # When using pmap, the partition spec should be 3 dimensional where
   # * the 0th dimension represents the device dimension
@@ -865,6 +868,17 @@ def init_embedding_variables(
   # Since the sharding should happen along the vocab dimension,
   # the partition spec should be sharding.PartitionSpec("x", None).
   sharding_axis = next((s for s in global_sharding.spec if s is not None), None)
+  if num_sparsecore_per_device < 0:
+    if not isinstance(global_sharding.mesh.devices, np.ndarray):
+      raise ValueError(
+          "Cannot determine the number of sparsecores from the provided mesh. "
+          "The parameter `num_sparsecore_per_device` must be specified."
+      )
+
+    num_sparsecore_per_device = utils.num_sparsecores_per_device(
+        global_sharding.mesh.devices.item(0)
+    )
+
   if sharding_axis is None or (
       global_sharding.spec != (sharding_axis, None, None)
       and global_sharding.spec != (sharding_axis, None)
@@ -928,7 +942,7 @@ def init_embedding_variables(
 def create_proto_from_feature_specs(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
-    num_sparsecore_per_device: int = 4,
+    num_sparsecore_per_device: int,
 ) -> embedding_spec_pb2.EmbeddingSpecProto:
   """Creates a StackedTableSpecProto from a list of FeatureSpec.
 

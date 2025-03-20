@@ -141,8 +141,8 @@ def rotate_sharded_table(
 def create_per_device_sharded_stacked_tables(
     emb_tables: Sequence[jax.Array],
     num_devices: int,
-    num_sparsecore_per_device: int = 4,
-    rotation: int = 4,
+    num_sparsecore_per_device: int,
+    rotation: int,
 ) -> jax.Array:
   """Creates a array of stacked shards, one per device.
 

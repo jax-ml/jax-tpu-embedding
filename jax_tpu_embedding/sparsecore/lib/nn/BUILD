@@ -45,6 +45,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
+        "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("absl/logging"),
         pypi_requirement("jax"),
         pypi_requirement("jax:experimental"),
