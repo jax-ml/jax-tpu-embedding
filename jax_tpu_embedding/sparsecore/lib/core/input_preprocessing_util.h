@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -63,7 +64,8 @@ struct StackedTableMetadata {
   StackedTableMetadata(int feature_index, int max_ids_per_partition,
                        int max_unique_ids_per_partition, int row_offset,
                        int col_offset, int col_shift, int batch_size,
-                       RowCombiner row_combiner = RowCombiner::kSum)
+                       RowCombiner row_combiner = RowCombiner::kSum,
+                       int max_col_id = std::numeric_limits<int>::max())
       : feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
         max_unique_ids_per_partition(max_unique_ids_per_partition),
@@ -71,7 +73,8 @@ struct StackedTableMetadata {
         col_offset(col_offset),
         col_shift(col_shift),
         batch_size(batch_size),
-        row_combiner(row_combiner) {}
+        row_combiner(row_combiner),
+        max_col_id(max_col_id) {}
   // The batch is given as a list of features (numpy arrays). `feature_index`
   // represents the index of the feature in the list.
   int feature_index;
@@ -86,6 +89,10 @@ struct StackedTableMetadata {
   int batch_size;
 
   RowCombiner row_combiner;
+
+  // The vocabulary size of the table. Any embedding IDs that are larger than
+  // this value are considered invalid.
+  int max_col_id;
 };
 
 void SortAndGroupCooTensors(
