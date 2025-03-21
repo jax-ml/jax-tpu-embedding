@@ -2029,6 +2029,126 @@ class InputPreprocessingTest(parameterized.TestCase):
         gains[self.table_spec.name] = gains[self.table_spec.name].reshape(-1)
       np.testing.assert_equal(gains[self.table_spec.name], expected_lhs_gains)
 
+  @parameterized.parameters(False, True)
+  def test_mean_combiner(
+      self, has_leading_dimension
+  ):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=16,
+        embedding_dim=8,
+        initializer=lambda: np.zeros((16, 8), dtype=np.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(
+            learning_rate=0.001,
+        ),
+        combiner="mean",
+        name="table_b",
+        max_ids_per_partition=8,
+        max_unique_ids_per_partition=8,
+        _setting_in_stack=embedding_spec.TableSettingInStack(
+            stack_name="one_table_to_rule_them_all",
+            padded_vocab_size=48,
+            padded_embedding_dim=8,
+            row_offset_in_shard=0,
+            shard_rotation=0,
+        ),
+        stacked_table_spec=embedding_spec.StackedTableSpec(
+            stack_name="one_table_to_rule_them_all",
+            stack_vocab_size=48,
+            stack_embedding_dim=8,
+            optimizer=embedding_spec.SGDOptimizerSpec(
+                learning_rate=0.001,
+            ),
+            combiner="mean",
+            total_sample_count=16,
+            max_ids_per_partition=32,
+            max_unique_ids_per_partition=32,
+        ),
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=[8, 4],
+        output_shape=[
+            8,
+            table_spec.embedding_dim,
+        ],
+        name="feature_spec_b",
+        _id_transformation=embedding_spec.FeatureIdTransformation(
+            row_offset=0,
+            col_offset=32,
+            col_shift=4,
+        ),
+    )
+    _, _, _, gains, _ = (
+        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+            [self.input_features],
+            [self.input_weights],
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sharding_strategy=1,
+            has_leading_dimension=has_leading_dimension,
+            static_buffer_size_multiplier=0,
+            allow_id_dropping=False,
+        )
+    )
+
+    coo_buffer_size = 32 * 4 * 4
+
+    with self.subTest(name="GainsEqualityTest"):
+      coo_buffer_size_per_sc = coo_buffer_size // 4
+
+      expected_lhs_gains = np.full(
+          (coo_buffer_size,),
+          np.nan,
+          dtype=np.float32,
+      )
+      expected_lhs_gains[0] = 2.0 / 8
+      expected_lhs_gains[1] = 1.0 / 8
+      expected_lhs_gains[8] = 1.0 / 8
+      expected_lhs_gains[16] = 1.0 / 8
+      expected_lhs_gains[17] = 1.0 / 8
+      expected_lhs_gains[24] = 1.0 / 8
+      expected_lhs_gains[25] = 1.0 / 8
+
+      sc_1_start = coo_buffer_size_per_sc
+      expected_lhs_gains[sc_1_start + 0] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 1] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 2] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 3] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 8] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 9] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 16] = 1.0 / 8
+      expected_lhs_gains[sc_1_start + 17] = 1.0 / 8
+
+      sc_2_start = coo_buffer_size_per_sc * 2
+      expected_lhs_gains[sc_2_start + 0] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 1] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 2] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 8] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 16] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 17] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 18] = 1.0 / 8
+      expected_lhs_gains[sc_2_start + 19] = 1.0 / 8
+
+      sc_3_start = coo_buffer_size_per_sc * 3
+      expected_lhs_gains[sc_3_start + 0] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 1] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 8] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 9] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 10] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 16] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 17] = 1.0 / 8
+      expected_lhs_gains[sc_3_start + 18] = 1.0 / 8
+
+      if has_leading_dimension:
+        gains["one_table_to_rule_them_all"] = gains[
+            "one_table_to_rule_them_all"
+        ].reshape(-1)
+      np.testing.assert_equal(
+          gains["one_table_to_rule_them_all"], expected_lhs_gains
+      )
+
   def test_correct_input_preprocessing_multiple_features_two_local_four_global_devices(
       self,
   ):
@@ -2596,6 +2716,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           gains_flattened[self.ragged_input_table_spec.name],
           np.ravel(expected_ragged_table_gains),
       )
+
 
 if __name__ == "__main__":
   absltest.main()

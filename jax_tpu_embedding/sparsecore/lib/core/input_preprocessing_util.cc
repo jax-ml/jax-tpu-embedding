@@ -45,6 +45,15 @@ int GetColId(const int col_id, const int col_shift, const int col_offset,
          col_offset;
 }
 
+RowCombiner GetRowCombiner(absl::string_view combiner) {
+  if (combiner == "sum") {
+    return RowCombiner::kSum;
+  } else if (combiner == "mean") {
+    return RowCombiner::kMean;
+  }
+  return RowCombiner::kSum;
+}
+
 void SortAndGroupCooTensors(
     absl::Span<const CooFormat> coo_tensors, const int batch_size_per_sc,
     const int num_scs, const int32_t batch_size_for_device,

@@ -23,6 +23,15 @@
 
 namespace jax_sc_embedding {
 
+// Different combiners that are supported for samples with multiple ids.
+// By default, we use kSum (add the embeddings for all ids in the sample).
+enum class RowCombiner {
+  kSum = 0,
+  kMean = 1,
+};
+
+RowCombiner GetRowCombiner(absl::string_view combiner);
+
 struct CooFormat {
   CooFormat(int row_id, int col_id, float gain)
       : row_id(row_id), col_id(col_id), gain(gain) {}
@@ -53,14 +62,16 @@ struct StackedTableMetadata {
   StackedTableMetadata() = delete;
   StackedTableMetadata(int feature_index, int max_ids_per_partition,
                        int max_unique_ids_per_partition, int row_offset,
-                       int col_offset, int col_shift, int batch_size)
+                       int col_offset, int col_shift, int batch_size,
+                       RowCombiner row_combiner = RowCombiner::kSum)
       : feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
         max_unique_ids_per_partition(max_unique_ids_per_partition),
         row_offset(row_offset),
         col_offset(col_offset),
         col_shift(col_shift),
-        batch_size(batch_size) {}
+        batch_size(batch_size),
+        row_combiner(row_combiner) {}
   // The batch is given as a list of features (numpy arrays). `feature_index`
   // represents the index of the feature in the list.
   int feature_index;
@@ -73,6 +84,8 @@ struct StackedTableMetadata {
 
   // Process local batch size of the feature.
   int batch_size;
+
+  RowCombiner row_combiner;
 };
 
 void SortAndGroupCooTensors(
@@ -82,7 +95,7 @@ void SortAndGroupCooTensors(
     int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
     absl::string_view stacked_table_name, bool allow_id_dropping,
     std::vector<std::vector<CooFormat>>& coo_tensors_by_id,
-    int* total_max_ids_per_sc, int* total_max_unique_ids_per_sc);
+    int* aggregated_max_ids_per_sc, int* aggregated_max_unique_ids_per_sc);
 
 int ComputeCooBufferSize(
     int num_scs, int num_scs_per_device,

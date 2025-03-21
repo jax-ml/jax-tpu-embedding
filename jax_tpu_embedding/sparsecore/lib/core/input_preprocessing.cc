@@ -40,6 +40,19 @@ namespace {
 
 namespace py = ::pybind11;
 
+namespace {
+
+float ComputeGain(RowCombiner combiner, int elements_in_row, float gain) {
+  switch (combiner) {
+    case RowCombiner::kSum:
+      return gain;
+    case RowCombiner::kMean:
+      return gain / elements_in_row;
+  }
+}
+
+}  // namespace
+
 // `features` and `feature_weights` are 2D arrays, which means they are
 // rectangular shaped arrays of dtype int (features) and float
 // (feature_weights).
@@ -49,6 +62,7 @@ int ExtractCooTensorsFrom2dArray(const py::array& features,
                                  const int col_shift, const int num_scs_mod,
                                  const int num_scs_mod_inv,
                                  const int global_device_count,
+                                 const RowCombiner combiner,
                                  std::vector<CooFormat>& coo_tensors) {
   auto features_array = py::cast<py::array_t<int>>(features);
   auto features_weight_array = py::cast<py::array_t<float>>(feature_weights);
@@ -66,7 +80,8 @@ int ExtractCooTensorsFrom2dArray(const py::array& features,
     const int row_id = i + row_offset_per_device;
     for (py::ssize_t j = 0; j < features_array_t.shape(1); ++j) {
       const int col = features_array_t(i, j);
-      const float gain = features_weight_array_t(i, j);
+      const float gain = ComputeGain(combiner, features_array_t.shape(1),
+                                     features_weight_array_t(i, j));
       coo_tensors.emplace_back(
           row_id,
           GetColId(col, col_shift, col_offset, num_scs_mod, num_scs_mod_inv),
@@ -87,6 +102,7 @@ int ExtractCooTensorsFrom1dArray(const py::array& features,
                                  const int col_shift, const int num_scs_mod,
                                  const int num_scs_mod_inv,
                                  const int global_device_count,
+                                 const RowCombiner combiner,
                                  std::vector<CooFormat>& coo_tensors) {
   // The assumption here is that the gains are always represented as 32bit
   // float arrays (np array with dtype=np.float32) and the features are always
@@ -109,11 +125,13 @@ int ExtractCooTensorsFrom1dArray(const py::array& features,
     coo_tensors_extracted += curr_features_t.shape(0);
     const int row_id = i + row_offset_per_device;
     for (int j = 0; j < curr_features_t.shape(0); ++j) {
+      const float gain = ComputeGain(combiner, curr_features_t.shape(0),
+                                     curr_feature_weights_t(j));
       coo_tensors.emplace_back(
           row_id,
           GetColId(curr_features_t(j), col_shift, col_offset, num_scs_mod,
                    num_scs_mod_inv),
-          curr_feature_weights_t(j));
+          gain);
     }
   }
   return coo_tensors_extracted;
@@ -123,6 +141,7 @@ int ExtractCooTensors(const py::array& features,
                       const py::array& feature_weights, const int row_offset,
                       const int col_offset, const int col_shift,
                       const int num_scs, const int global_device_count,
+                      const RowCombiner combiner,
                       std::vector<CooFormat>& coo_tensors) {
   // We have to differentiate between 2D and 1D np.ndarray.
   // In the case of a 1D array of arrays, we have to iterate over the inner
@@ -138,14 +157,14 @@ int ExtractCooTensors(const py::array& features,
   const int num_scs_mod = (1 << num_scs_bit) - 1;
   const int num_scs_mod_inv = ~num_scs_mod;
   return features_buffer_info.ndim == 2
-             ? ExtractCooTensorsFrom2dArray(features, feature_weights,
-                                            row_offset, col_offset, col_shift,
-                                            num_scs_mod, num_scs_mod_inv,
-                                            global_device_count, coo_tensors)
-             : ExtractCooTensorsFrom1dArray(features, feature_weights,
-                                            row_offset, col_offset, col_shift,
-                                            num_scs_mod, num_scs_mod_inv,
-                                            global_device_count, coo_tensors);
+             ? ExtractCooTensorsFrom2dArray(
+                   features, feature_weights, row_offset, col_offset, col_shift,
+                   num_scs_mod, num_scs_mod_inv, global_device_count, combiner,
+                   coo_tensors)
+             : ExtractCooTensorsFrom1dArray(
+                   features, feature_weights, row_offset, col_offset, col_shift,
+                   num_scs_mod, num_scs_mod_inv, global_device_count, combiner,
+                   coo_tensors);
 }
 
 absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
@@ -170,6 +189,8 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
         py::cast<int>(stacked_table_spec.attr("max_ids_per_partition"));
     const int max_unique_ids_per_partition =
         py::cast<int>(stacked_table_spec.attr("max_unique_ids_per_partition"));
+    const std::string row_combiner =
+        py::cast<std::string>(stacked_table_spec.attr("combiner"));
     if (!feature_transformation.is_none()) {
       row_offset = py::cast<int>(feature_transformation.attr("row_offset"));
       col_shift = py::cast<int>(feature_transformation.attr("col_shift"));
@@ -178,7 +199,7 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
     stacked_table_metadata[stacked_table_name].emplace_back(
         i, max_ids_per_partition, max_unique_ids_per_partition, row_offset,
         col_offset, col_shift,
-        /*batch_size=*/feature.shape(0));
+        /*batch_size=*/feature.shape(0), GetRowCombiner(row_combiner));
   }
   // Sort the stacked tables by row_offset.
   for (auto& [_, t] : stacked_table_metadata) {
@@ -245,7 +266,7 @@ void PreprocessInputForStackedTable(
     // at this stage (i.e., before the sorting later on).
     total_num_coo_tensors += ExtractCooTensors(
         feature_split, feature_weights_split, row_offset, col_offset, col_shift,
-        num_scs, num_global_devices, coo_tensors);
+        num_scs, num_global_devices, metadata.row_combiner, coo_tensors);
   }
   row_pointer_buffer[py::make_tuple(py::ellipsis())] = coo_buffer_size;
 
