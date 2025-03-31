@@ -170,7 +170,6 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_csr_config,
-      "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
   op = mlir.custom_call(
