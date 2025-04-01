@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+from typing import Tuple
 
 from absl.testing import absltest
 import einops
@@ -29,13 +30,14 @@ import numpy as np
 import tree
 
 
-_VOC_A = 32
-_VOC_B = 64
-_VOC_C = 32
-_DIM_A = 8
-_DIM_B = 16
-_DIM_C = 8
+_VOC_A = 31
+_VOC_B = 75
+_VOC_C = 33
+_DIM_A = 7
+_DIM_B = 15
+_DIM_C = 6
 _BATCH_SIZE = 16
+_PAD_VALUE = -1
 
 _EMBED_PARAM = embed.EMBEDDING_PARAM_NAME
 
@@ -193,6 +195,17 @@ class EmbeddingLayerTest(absltest.TestCase):
       dtype=object,
   )
 
+  def _row_initialize_with_padding(
+      self,
+      shape: Tuple[int, ...],
+      padded_shape: Tuple[int, ...],
+      offset: int = 0,
+      pad_value: float = _PAD_VALUE,
+  ):
+    array = test_utils.row_id_initializer(shape=shape, offset=offset)
+    paddings = tuple((0, y - x) for x, y in zip(shape, padded_shape))
+    return np.pad(array, paddings, mode='constant', constant_values=pad_value)
+
   def test_forward_and_backward_with_one_table(self):
     devices = jax.devices()
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
@@ -216,28 +229,30 @@ class EmbeddingLayerTest(absltest.TestCase):
     padded_vocab_b = (
         self.feature_spec_b.table_spec.setting_in_stack.padded_vocab_size
     )
-    print('Padded vocab:', padded_vocab_a, padded_vocab_b, flush=True)
-    emb_table_a = (
-        np.array([[i for _ in range(_DIM_A)] for i in range(padded_vocab_a)])
-        .reshape(padded_vocab_a, _DIM_A)
-        .astype(np.float32)
+    padded_dim_a = (
+        self.feature_spec_a.table_spec.setting_in_stack.padded_embedding_dim
+    )
+    padded_dim_b = (
+        self.feature_spec_b.table_spec.setting_in_stack.padded_embedding_dim
     )
 
+    device_count = len(devices)
+    emb_table_a = self._row_initialize_with_padding(
+        shape=(_VOC_A, _DIM_A), padded_shape=(padded_vocab_a, padded_dim_a)
+    )
     emb_table_a_sharded = einops.rearrange(
         emb_table_a,
         '(v c s) f -> c (s v) f',
-        c=_DIM_B // num_sc_per_device,
+        c=device_count,
         s=num_sc_per_device,
     )
-    emb_table_b = (
-        np.array([[i for _ in range(_DIM_B)] for i in range(padded_vocab_b)])
-        .reshape(padded_vocab_b, _DIM_B)
-        .astype(np.float32)
+    emb_table_b = self._row_initialize_with_padding(
+        shape=(_VOC_B, _DIM_B), padded_shape=(padded_vocab_b, padded_dim_b)
     )
     emb_table_b_sharded = einops.rearrange(
         emb_table_b,
         '(v c s) f -> c (s v) f',
-        c=_DIM_B // num_sc_per_device,
+        c=device_count,
         s=num_sc_per_device,
     )
 
@@ -260,7 +275,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     sharding = NamedSharding(sc_module.mesh, P(sc_module.sharding_axis, None))
     embedding_variables['table_a'] = embedding.EmbeddingVariables(
         table=jax.make_array_from_single_device_arrays(
-            shape=(padded_vocab_a, _DIM_A),
+            shape=(padded_vocab_a, padded_dim_a),
             sharding=sharding,
             arrays=embedding_variables['table_a'],
         ),
@@ -268,7 +283,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
     embedding_variables['table_b'] = embedding.EmbeddingVariables(
         table=jax.make_array_from_single_device_arrays(
-            shape=(padded_vocab_b, _DIM_B),
+            shape=(padded_vocab_b, padded_dim_b),
             sharding=sharding,
             arrays=embedding_variables['table_b'],
         ),
@@ -319,50 +334,57 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
 
     # Check the activation correctness.
-    expected_emb_activations = np.array(
-        [
-            [11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0],
-            [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0],
-            [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0],
-            [26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0],
-            [29.0, 29.0, 29.0, 29.0, 29.0, 29.0, 29.0, 29.0],
-            [31.0, 31.0, 31.0, 31.0, 31.0, 31.0, 31.0, 31.0],
-            [67.0, 67.0, 67.0, 67.0, 67.0, 67.0, 67.0, 67.0],
-            [57.0, 57.0, 57.0, 57.0, 57.0, 57.0, 57.0, 57.0],
-            [15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0],
-            [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0],
-            [11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0],
-            [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0],
-            [17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0],
-            [42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0],
-            [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0],
-            [26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0],
-        ],
-        dtype=np.float32,
+    expected_emb_activations = np.broadcast_to(
+        np.array(
+            [
+                [11.0],
+                [3.0],
+                [9.0],
+                [26.0],
+                [29.0],
+                [31.0],
+                [67.0],
+                [57.0],
+                [15.0],
+                [13.0],
+                [11.0],
+                [8.0],
+                [17.0],
+                [42.0],
+                [30.0],
+                [26.0],
+            ],
+            dtype=np.float32,
+        ),
+        (_BATCH_SIZE, _DIM_A),
     )
     np.testing.assert_equal(activations[0], expected_emb_activations)
 
-    expected_emb_activations_table_b = np.array(
-        [
-            [110.0] * 16,
-            [33.0] * 16,
-            [59.0] * 16,
-            [26.0] * 16,
-            [29.0] * 16,
-            [31.0] * 16,
-            [67.0] * 16,
-            [57.0] * 16,
-            [101.0] * 16,
-            [120.0] * 16,
-            [36.0] * 16,
-            [121.0] * 16,
-            [60.0] * 16,
-            [132.0] * 16,
-            [60.0] * 16,
-            [26.0] * 16,
-        ],
-        dtype=np.float32,
+    expected_emb_activations_table_b = np.broadcast_to(
+        np.array(
+            [
+                [110.0],
+                [33.0],
+                [59.0],
+                [26.0],
+                [29.0],
+                [31.0],
+                [67.0],
+                [57.0],
+                [101.0],
+                [120.0],
+                [36.0],
+                [121.0],
+                [60.0],
+                [132.0],
+                [60.0],
+                [26.0],
+            ],
+            dtype=np.float32,
+        ),
+        (_BATCH_SIZE, _DIM_B),
     )
+
     np.testing.assert_equal(activations[1], expected_emb_activations_table_b)
 
     activations_grad = (
@@ -391,13 +413,17 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
     params['params'] = params['params'] | params_updates
 
-    expected_grad_table_a = np.zeros((padded_vocab_a, _DIM_A), dtype=np.float32)
-    expected_grad_table_b = np.zeros((padded_vocab_b, _DIM_B), dtype=np.float32)
+    expected_grad_table_a = np.full(
+        (padded_vocab_a, padded_dim_a), _PAD_VALUE, dtype=np.float32
+    )
+    expected_grad_table_b = np.full(
+        (padded_vocab_b, padded_dim_b), _PAD_VALUE, dtype=np.float32
+    )
 
     for i, array in enumerate(embedding_variables['table_a'][0]):
       col_id = array[0]
       new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
-      expected_grad_table_a[i] = np.full(
+      expected_grad_table_a[i, :_DIM_A] = np.full(
           (1, _DIM_A), new_col_id, dtype=np.float32
       )
 
@@ -406,14 +432,14 @@ class EmbeddingLayerTest(absltest.TestCase):
       new_col_id = col_id - (
           count_num(self.input_tensor_table_b, col_id) * 0.01
       )
-      expected_grad_table_b[i] = np.full(
+      expected_grad_table_b[i, :_DIM_B] = np.full(
           (1, _DIM_B), new_col_id, dtype=np.float32
       )
     np.testing.assert_equal(
-        expected_grad_table_a, params['params'][_EMBED_PARAM]['table_a'][0]
+        params['params'][_EMBED_PARAM]['table_a'][0], expected_grad_table_a
     )
     np.testing.assert_equal(
-        expected_grad_table_b, params['params'][_EMBED_PARAM]['table_b'][0]
+        params['params'][_EMBED_PARAM]['table_b'][0], expected_grad_table_b
     )
 
   def test_forward_and_backward_with_table_stacking(self):
@@ -443,10 +469,22 @@ class EmbeddingLayerTest(absltest.TestCase):
     padded_vocab_c = (
         self.feature_spec_c.table_spec.setting_in_stack.padded_vocab_size
     )
+    padded_dim_a = (
+        self.feature_spec_a.table_spec.setting_in_stack.padded_embedding_dim
+    )
+    padded_dim_c = (
+        self.feature_spec_c.table_spec.setting_in_stack.padded_embedding_dim
+    )
     stacked_vocab_size = padded_vocab_a + padded_vocab_c
-    emb_table_a = test_utils.row_id_initializer(shape=(padded_vocab_a, _DIM_A))
-    emb_table_c = test_utils.row_id_initializer(
-        shape=(padded_vocab_c, _DIM_C), offset=200
+    stacked_embedding_dim = padded_dim_a
+
+    emb_table_a = self._row_initialize_with_padding(
+        shape=(_VOC_A, _DIM_A), padded_shape=(padded_vocab_a, padded_dim_a)
+    )
+    emb_table_c = self._row_initialize_with_padding(
+        shape=(_VOC_C, _DIM_C),
+        padded_shape=(padded_vocab_c, padded_dim_c),
+        offset=200,
     )
     embedding_variables = {}
     sharded_stacked_tables = (
@@ -467,7 +505,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     sharding = NamedSharding(mesh, P('x', None))
     embedding_variables['table_a_table_c'] = embedding.EmbeddingVariables(
         table=jax.make_array_from_single_device_arrays(
-            shape=(stacked_vocab_size, _DIM_A),
+            shape=(stacked_vocab_size, padded_dim_a),
             sharding=sharding,
             arrays=embedding_variables['table_a_table_c'],
         ),
@@ -518,26 +556,29 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
 
     # Check the activation correctness.
-    expected_emb_activations = np.array(
-        [
-            [11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0],
-            [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0],
-            [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0],
-            [26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0],
-            [29.0, 29.0, 29.0, 29.0, 29.0, 29.0, 29.0, 29.0],
-            [31.0, 31.0, 31.0, 31.0, 31.0, 31.0, 31.0, 31.0],
-            [67.0, 67.0, 67.0, 67.0, 67.0, 67.0, 67.0, 67.0],
-            [57.0, 57.0, 57.0, 57.0, 57.0, 57.0, 57.0, 57.0],
-            [15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0],
-            [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0],
-            [11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0],
-            [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0],
-            [17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0],
-            [42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0, 42.0],
-            [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0],
-            [26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0],
-        ],
-        dtype=np.float32,
+    expected_emb_activations = np.broadcast_to(
+        np.array(
+            [
+                [11.0],
+                [3.0],
+                [9.0],
+                [26.0],
+                [29.0],
+                [31.0],
+                [67.0],
+                [57.0],
+                [15.0],
+                [13.0],
+                [11.0],
+                [8.0],
+                [17.0],
+                [42.0],
+                [30.0],
+                [26.0],
+            ],
+            dtype=np.float32,
+        ),
+        (_BATCH_SIZE, _DIM_A),
     )
     np.testing.assert_equal(activations[0], expected_emb_activations)
 
@@ -567,25 +608,29 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
     params['params'] = params['params'] | params_updates
 
-    expected_grad_table_ac = np.zeros(
-        (stacked_vocab_size, _DIM_A), dtype=np.float32
+    expected_grad_table_ac = np.full(
+        (stacked_vocab_size, stacked_embedding_dim),
+        _PAD_VALUE,
+        dtype=np.float32,
     )
 
     for i, array in enumerate(embedding_variables['table_a_table_c'][0]):
       col_id = array[0]
+      embedding_dim = _DIM_A
       if col_id < 200:
         new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
       else:
+        embedding_dim = _DIM_C
         new_col_id = col_id - (
             count_num(self.input_tensor, col_id - 200) * 0.01
         )
-      expected_grad_table_ac[i] = np.full(
-          (1, _DIM_A), new_col_id, dtype=np.float32
+      expected_grad_table_ac[i, :embedding_dim] = np.full(
+          (1, embedding_dim), new_col_id, dtype=np.float32
       )
 
     np.testing.assert_equal(
-        expected_grad_table_ac,
         params['params'][_EMBED_PARAM]['table_a_table_c'][0],
+        expected_grad_table_ac,
     )
 
 
