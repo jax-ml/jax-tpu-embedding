@@ -53,6 +53,7 @@ pytype_strict_library(
         "sparse_dense_matmul_grad_with_sgd_with_mini_batching.py",
     ],
     deps = [
+        ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
@@ -67,6 +68,7 @@ pytype_strict_library(
         "sparse_dense_matmul_grad_with_adagrad_with_mini_batching.py",
     ],
     deps = [
+        ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
@@ -81,6 +83,7 @@ pytype_strict_library(
         "sparse_dense_matmul_grad_with_sgd.py",
     ],
     deps = [
+        ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
@@ -95,6 +98,7 @@ pytype_strict_library(
         "sparse_dense_matmul_grad_with_adagrad.py",
     ],
     deps = [
+        ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
@@ -141,4 +145,10 @@ pytype_strict_library(
         ":sparse_dense_matmul_grad_with_sgd",  # buildcleaner: keep
         ":sparse_dense_matmul_optimizer_grad",  # buildcleaner: keep
     ],
+)
+
+pytype_strict_library(
+    name = "utils",
+    srcs = ["utils.py"],
+    deps = [pypi_requirement("numpy")],
 )

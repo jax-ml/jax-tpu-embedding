@@ -23,7 +23,7 @@ inputs and returns the updated embedding table and accumulator.
 
 import functools
 import json
-from typing import Any, Tuple
+from typing import Tuple
 
 from jax._src import dispatch
 from jax._src.lib.mlir import ir
@@ -32,6 +32,7 @@ from jax._src.lib.mlir.dialects import hlo
 import jax.extend as jex
 from jax.interpreters import mlir
 from jax_tpu_embedding.sparsecore.lib.core import constants
+from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
 
 tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_primitive = (
@@ -58,20 +59,6 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _ensure_dtype(check: Any, expected_type: Any, object_name: str):
-  if check.dtype != expected_type:
-    raise ValueError(
-        f"{object_name} must have type {expected_type!r}, got {check.dtype!r}"
-    )
-
-
-def _ensure_dim(check: Any, expected_dim: int, object_name: str):
-  if len(check.shape) != expected_dim:
-    raise ValueError(
-        f"{object_name} must have dim {expected_dim!r}, got {check.shape!r}"
-    )
-
-
 def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_abstract_eval(
     lhs_row_pointers: np.ndarray,
     lhs_local_embedding_ids: np.ndarray,
@@ -90,56 +77,27 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_abstract_eval(
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
   del num_minibatches_per_physical_sparse_core
-  _ensure_dtype(lhs_row_pointers, np.int32, "lhs_row_pointers")
-  _ensure_dtype(lhs_local_sample_ids, np.int32, "lhs_local_sample_ids")
-  _ensure_dtype(lhs_local_embedding_ids, np.int32, "lhs_local_embedding_ids")
-  _ensure_dtype(learning_rate, np.float32, "learning_rate")
-  _ensure_dtype(lhs_gains, np.float32, "lhs_gains")
-  _ensure_dtype(embedding_table, np.float32, "embedding_table")
-  _ensure_dtype(accumulator, np.float32, "accumulator")
-  _ensure_dtype(activations_grad, np.float32, "activations_grad")
+  utils.validate_abstract_eval_params(
+      lhs_row_pointers,
+      lhs_local_embedding_ids,
+      lhs_local_sample_ids,
+      lhs_gains,
+      embedding_table,
+      activations_grad,
+      max_ids_per_partition,
+      max_unique_ids_per_partition,
+      computation_name,
+      sharding_strategy,
+  )
+
+  utils.ensure_dtype(accumulator, np.float32, "accumulator")
+  utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
 
   if embedding_table.shape != accumulator.shape:
     raise ValueError(
         "embedding_table and accumulator must have equal shapes, got"
         f" {embedding_table.shape} and {accumulator.shape}"
     )
-  _ensure_dim(lhs_row_pointers, 1, "lhs_row_pointers")
-  _ensure_dim(embedding_table, 2, "embedding_table")
-  _ensure_dim(activations_grad, 2, "activations_grad")
-  if (
-      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape
-      or lhs_gains.shape != lhs_local_embedding_ids.shape
-      or len(lhs_local_sample_ids.shape) != 1
-  ):
-    raise ValueError(
-        "LHS sample IDs, embedding IDs, and gains must all have "
-        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "
-        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"
-    )
-  if embedding_table.shape[-1] != activations_grad.shape[-1]:
-    raise ValueError(
-        "embedding_table and activations_grad must have equal feature (minor)"
-        f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"
-    )
-
-  if sharding_strategy != 1:
-    raise ValueError(
-        f"sharding_strategy must be MOD (1), got {sharding_strategy}"
-    )
-
-  if max_ids_per_partition <= 0:
-    raise ValueError(
-        f"max_ids_per_partition must be positive, got {max_ids_per_partition}"
-    )
-
-  if max_unique_ids_per_partition <= 0:
-    raise ValueError(
-        "max_unique_ids_per_partition must be positive, got"
-        f" {max_unique_ids_per_partition}"
-    )
-  if not computation_name:
-    raise ValueError("computation_name must be non-empty")
 
   return embedding_table, accumulator
 

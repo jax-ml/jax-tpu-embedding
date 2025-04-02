@@ -31,6 +31,7 @@ from jax._src.lib.mlir.dialects import hlo
 import jax.extend as jex
 from jax.interpreters import mlir
 from jax_tpu_embedding.sparsecore.lib.core import constants
+from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
 
 tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching_primitive = (
@@ -71,79 +72,19 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching_abstract_eval(
 ) -> np.ndarray:
   """Abstract eval for sparse_dense_matmul_sgd."""
   del num_minibatches_per_physical_sparse_core
-  if lhs_row_pointers.dtype != np.int32:
-    raise ValueError(
-        f"lhs_row_pointers must have type int32, got {lhs_row_pointers.dtype}"
-    )
-  if lhs_local_sample_ids.dtype != np.int32:
-    raise ValueError(
-        "lhs_local_sample_ids must have type int32, got"
-        f" {lhs_local_sample_ids.dtype}"
-    )
-  if lhs_local_embedding_ids.dtype != np.int32:
-    raise ValueError(
-        "lhs_local_embedding_ids must have type uint32, got"
-        f" {lhs_local_embedding_ids.dtype}"
-    )
-  if lhs_gains.dtype != np.float32:
-    raise ValueError(f"lhs_gains must have type float32, got {lhs_gains.dtype}")
-  if embedding_table.dtype != np.float32:
-    raise ValueError(
-        f"embedding_table must have type float32, got {embedding_table.dtype}"
-    )
-  if activations_grad.dtype != np.float32:
-    raise ValueError(
-        f"activations_grad must have type float32, got {activations_grad.dtype}"
-    )
-  if learning_rate.dtype != np.float32:  # pylint: disable=attribute-error
-    raise ValueError(
-        f"learning_rate must have type float32, got {learning_rate.dtype}"
-    )
-  if len(lhs_row_pointers.shape) != 1:
-    raise ValueError(
-        f"lhs_row_pointers must have rank 1, got {lhs_row_pointers.shape}"
-    )
-  if (
-      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape
-      or lhs_gains.shape != lhs_local_embedding_ids.shape
-      or len(lhs_local_sample_ids.shape) != 1
-  ):
-    raise ValueError(
-        "LHS sample IDs, embedding IDs, and gains must all have "
-        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "
-        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"
-    )
-  if len(embedding_table.shape) != 2:
-    raise ValueError(
-        f"embedding_table must have rank 2, got {embedding_table.shape}"
-    )
-  if len(activations_grad.shape) != 2:
-    raise ValueError(
-        f"activations_grad must have rank 2, got {activations_grad.shape}"
-    )
-  if embedding_table.shape[-1] != activations_grad.shape[-1]:
-    raise ValueError(
-        "embedding_table and activations_grad must have equal feature (minor)"
-        f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"
-    )
-
-  if sharding_strategy != 1:
-    raise ValueError(
-        f"sharding_strategy must be MOD (1), got {sharding_strategy}"
-    )
-
-  if max_ids_per_partition <= 0:
-    raise ValueError(
-        f"max_ids_per_partition must be positive, got {max_ids_per_partition}"
-    )
-
-  if max_unique_ids_per_partition <= 0:
-    raise ValueError(
-        "max_unique_ids_per_partition must be positive, got"
-        f" {max_unique_ids_per_partition}"
-    )
-  if not computation_name:
-    raise ValueError("computation_name must be non-empty")
+  utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
+  utils.validate_abstract_eval_params(
+      lhs_row_pointers,
+      lhs_local_embedding_ids,
+      lhs_local_sample_ids,
+      lhs_gains,
+      embedding_table,
+      activations_grad,
+      max_ids_per_partition,
+      max_unique_ids_per_partition,
+      computation_name,
+      sharding_strategy,
+  )
 
   return embedding_table
 
