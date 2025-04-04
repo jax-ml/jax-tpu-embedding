@@ -733,3 +733,36 @@ def stack_and_shard_feature_tables(
     )
 
   return ret
+
+
+def get_row_ids_in_stacked_table(
+    stack_table_spec: embedding_spec_pb2.StackedTableSpecProto,
+    table_spec: embedding_spec_pb2.TableSpecProto,
+    row_ids: Sequence[int],
+) -> Sequence[int]:
+  """Returns the stacked table's row ids for the given unsharded table's row ids.
+
+  Args:
+    stack_table_spec: StackedTableSpecProto describing the stacked table
+    table_spec: TableSpecProto of the unsharded table
+    row_ids: Squence of row ids of the unsharded table
+
+  Returns:
+    Row ids of the stacked table
+  """
+  ret = []
+
+  num_sparse_cores = stack_table_spec.num_sparsecores
+  stack_shard_size = stack_table_spec.stack_vocab_size // num_sparse_cores
+
+  for row_id in row_ids:
+    assert (
+        row_id < table_spec.vocab_size
+    ), f"{row_id} execeeds available vocabulary size [{table_spec.vocab_size}]."
+    shard_id = (
+        row_id % num_sparse_cores + table_spec.shard_rotation
+    ) % num_sparse_cores
+    sharded_row_id = row_id // num_sparse_cores + table_spec.row_offset_in_shard
+    ret.append(shard_id * stack_shard_size + sharded_row_id)
+
+  return ret
