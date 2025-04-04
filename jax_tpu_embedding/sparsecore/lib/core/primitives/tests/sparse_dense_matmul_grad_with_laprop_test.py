@@ -11,8 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from unittest import mock
+
 from absl.testing import absltest
 from absl.testing import parameterized
+import einops
+import jax
+import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 import numpy as np
 
@@ -368,6 +374,117 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
       )
+
+  def test_laprop_optimizer_update(self):
+    # Process the input.
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(16)],
+        dtype=np.float32,
+    )
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
+    )
+    emb_table = (
+        np.array([[i for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)])
+        .reshape(_VOCAB_SIZE, _EMB_SIZE)
+        .astype(np.float32)
+    )
+    emb_table_sharded = einops.rearrange(
+        emb_table,
+        "(v c s) f -> c (s v) f",
+        c=1,
+        s=4,
+    )
+    mu_init = jnp.full(
+        emb_table_sharded[0].shape,
+        0.00,
+        np.float32,
+    )
+
+    nu_init = jnp.full(
+        emb_table_sharded[0].shape,
+        0.00,
+        np.float32,
+    )
+
+    b1 = 0.9
+    b2 = 0.95
+    eps = 1e-8
+
+    z_grad = jnp.full(
+        (
+            _BATCH_SIZE,
+            _EMB_SIZE,
+        ),
+        0.01,
+        np.float32,
+    )
+
+    update_indices = jnp.reshape(input_tensor, (-1, 1))
+    expected_emb_table = emb_table.copy()
+    # TODO(b/407826659) Implement LaProp update.
+    grad_update = (z_grad[:, np.newaxis, :] * b1) + b2 - eps
+    expected_emb_table[update_indices] -= grad_update
+    expected_emb_table = einops.rearrange(
+        expected_emb_table,
+        "(v c s) f -> c (s v) f",
+        c=1,
+        s=4,
+    )[0]
+
+    (updated_table, updated_mu, updated_nu) = (  # pylint: disable=unused-variable
+        sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive.bind(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            emb_table_sharded[0],
+            mu_init,
+            nu_init,
+            z_grad,
+            b1,
+            b2,
+            eps,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="optimizer_test_computation",
+            sharding_strategy=1,
+        )
+    )
+
+    np.testing.assert_equal(expected_emb_table, updated_table)
 
 
 if __name__ == "__main__":
