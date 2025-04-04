@@ -108,6 +108,18 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "sparse_dense_matmul_grad_with_laprop",
+    srcs = ["sparse_dense_matmul_grad_with_laprop.py"],
+    deps = [
+        ":utils",
+        pypi_requirement("jax"),
+        pypi_requirement("jax/_src/lib"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
     name = "optimizers_computation",
     srcs = [
         "optimizers_computation.py",
@@ -142,6 +154,7 @@ pytype_strict_library(
         ":optimizers_computation",  # buildcleaner: keep
         ":sparse_dense_matmul_csr",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_adagrad",  # buildcleaner: keep
+        ":sparse_dense_matmul_grad_with_laprop",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_sgd",  # buildcleaner: keep
         ":sparse_dense_matmul_optimizer_grad",  # buildcleaner: keep
     ],
