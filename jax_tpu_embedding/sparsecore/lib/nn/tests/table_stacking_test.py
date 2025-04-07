@@ -666,9 +666,10 @@ class TableStackingTest(parameterized.TestCase):
   @parameterized.product(
       donate=[True, False],
       device_count=[1, 2, 4, -1],
+      rotation=[None, 0, 2, 4, -1],
   )
   def test_unshard_and_unstack_stacked_table(
-      self, donate: bool, device_count: int
+      self, donate: bool, device_count: int, rotation: int
   ):
     if device_count < 0:
       device_count = jax.device_count()
@@ -736,6 +737,7 @@ class TableStackingTest(parameterized.TestCase):
         feature_specs,
         num_sc_per_device=self.num_sc_per_device,
         global_device_count=device_count,
+        rotation=rotation,
     )
 
     feature_specs_c = [feature_c_spec]
@@ -743,6 +745,7 @@ class TableStackingTest(parameterized.TestCase):
         feature_specs_c,
         num_sc_per_device=self.num_sc_per_device,
         global_device_count=device_count,
+        rotation=rotation,
     )
 
     updated_table_a = feature_specs[0].table_spec
@@ -776,7 +779,7 @@ class TableStackingTest(parameterized.TestCase):
         emb_tables,
         num_devices=device_count,
         num_sparsecore_per_device=self.num_sc_per_device,
-        rotation=self.num_sc_per_device,
+        rotation=rotation,
     )
     embedding_var = embedding_var.reshape(
         -1, feature_specs[0].table_spec.setting_in_stack.padded_embedding_dim
@@ -788,7 +791,7 @@ class TableStackingTest(parameterized.TestCase):
         emb_tables_c,
         num_devices=device_count,
         num_sparsecore_per_device=self.num_sc_per_device,
-        rotation=self.num_sc_per_device,
+        rotation=rotation,
     )
     embedding_var_c = embedding_var_c.reshape(
         -1, feature_specs_c[0].table_spec.setting_in_stack.padded_embedding_dim

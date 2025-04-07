@@ -166,6 +166,7 @@ def _compute_table_to_setting_in_stack(
     table_to_padded_vocab_size: Mapping[str, int],
     global_device_count: int,
     num_sc_per_device: int,
+    rotation: int,
 ) -> Mapping[str, embedding_spec.TableSettingInStack]:
   """Returns the table to setting in stack mapping."""
   table_name_to_setting_in_stack = {}
@@ -188,7 +189,7 @@ def _compute_table_to_setting_in_stack(
     row_offset_in_shard += num_rows_in_shard
     # Rotate the shard by num_sc_per_device and then bound by the
     # total number of sparsecores.
-    shard_rotation = (shard_rotation + num_sc_per_device) % (num_sc)
+    shard_rotation = (shard_rotation + rotation) % (num_sc)
     table_name_to_setting_in_stack[tname] = setting_in_stack
     logging.info("Table %s has setting in stack: %s", tname, setting_in_stack)
   return table_name_to_setting_in_stack
@@ -226,6 +227,7 @@ def _stack_feature_specs(
     table_to_padded_vocab_size: Mapping[str, int],
     global_device_count: int,
     num_sc_per_device: int,
+    rotation: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:
@@ -242,6 +244,7 @@ def _stack_feature_specs(
       table_to_padded_vocab_size=table_to_padded_vocab_size,
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
+      rotation=rotation,
   )
   # Get the features for which the table is stacked in this group.
   stacked_features = [
@@ -327,6 +330,7 @@ def stack_tables(
     table_names: Sequence[str],
     global_device_count: int,
     num_sc_per_device: int,
+    rotation: int | None = None,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     stack_name: str | None = None,
@@ -343,6 +347,8 @@ def stack_tables(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: The number of sparsecores per device.
+    rotation: The shard rotation factor for each stacked table.  If None,
+      sets to num_sc_per_device.  Default: None.
     stack_to_max_ids_per_partition: Override the max_ids_per_partition for each
       stack.
     stack_to_max_unique_ids_per_partition: Override the
@@ -371,6 +377,7 @@ def stack_tables(
       tables_in_group,
       table_to_padded_dim,
   )
+  rotation = rotation if rotation is not None else num_sc_per_device
   _stack_feature_specs(
       stack_name=stack_name,
       features=features,
@@ -379,6 +386,7 @@ def stack_tables(
       table_to_padded_vocab_size=tables_to_padded_vocab_size,
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
+      rotation=rotation,
       stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
       stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
   )
@@ -389,6 +397,7 @@ def auto_stack_tables(
     features: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
+    rotation: int | None = None,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:
@@ -404,6 +413,8 @@ def auto_stack_tables(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: The number of sparsecores per device.
+    rotation: The shard rotation factor for each stacked table.  If None,
+      sets to num_sc_per_device.  Default: None.
     stack_to_max_ids_per_partition: Override the max_ids_per_partition for each
       stack.
     stack_to_max_unique_ids_per_partition: Override the
@@ -425,6 +436,7 @@ def auto_stack_tables(
         table_names=group,
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
+        rotation=rotation,
         stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
         stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
     )

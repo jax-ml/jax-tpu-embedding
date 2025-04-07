@@ -142,7 +142,7 @@ def create_per_device_sharded_stacked_tables(
     emb_tables: Sequence[jax.Array],
     num_devices: int,
     num_sparsecore_per_device: int,
-    rotation: int,
+    rotation: int | None,
 ) -> jax.Array:
   """Creates a array of stacked shards, one per device.
 
@@ -151,11 +151,12 @@ def create_per_device_sharded_stacked_tables(
     num_devices: Number of devices for which the stacked shards are created.
     num_sparsecore_per_device: Number of sparse core there are on each device.
     rotation: An int rotation that should be applied between tables when
-      stacking.
+      stacking.  If None, defaults to num_sparsecore_per_device.  Default: None.
 
   Returns:
     A jax.Array for shards on devices.
   """
+  rotation = rotation if rotation is not None else num_sparsecore_per_device
   dim = emb_tables[0].shape[1]
   assert all(table.shape[1] == dim for table in emb_tables)
   mod_sharded_tables = [
