@@ -549,16 +549,14 @@ def run_model():
         labels,
     )
 
-    with jax.spmd_mode('allow_all'):
-      train_metrics = (
-          metrics_update
-          if train_metrics is None
-          else train_metrics.merge(metrics_update)
-      )
+    train_metrics = (
+        metrics_update
+        if train_metrics is None
+        else train_metrics.merge(metrics_update)
+    )
 
     if (step + 1) % _LOG_FREQUENCY.value == 0:
-      with jax.spmd_mode('allow_all'):
-        m = train_metrics.compute()
+      m = train_metrics.compute()
       info('Step %s: Loss = %s', step, m['train_loss'])
       parameter_overview.log_parameter_overview(train_state.params)
       fdo_client.publish()
