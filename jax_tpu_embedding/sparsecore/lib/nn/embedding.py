@@ -660,8 +660,7 @@ def tpu_sparse_dense_matmul_grad(
     embedding_variable = embedding_variables[stacked_table_name]
     activation_gradient = gradients[stacked_table_name]
     stack_table_spec = stacked_table_specs[stacked_table_name]
-    learning_rate = stack_table_spec.optimizer.get_learning_rate(step)
-    hyper_params = [learning_rate]
+    hyper_params = stack_table_spec.optimizer.get_hyperparameters(step)
     # The MLIR computation symbol names need to be different. We attach the
     # table name to the symbol name to ensure that.
     symbol_name = "{}-{}{}".format(

@@ -26,6 +26,7 @@ from jax import core
 import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 
 HyperParameterType: TypeAlias = Callable[[], jax.Array] | float
@@ -43,6 +44,10 @@ _OptimizerDefinition: TypeAlias = collections.namedtuple(
 SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
 AdagradSlotVariables = collections.namedtuple(
     "AdagradSlotVariables", ["accumulator"]
+)
+
+LaPropSlotVariables = collections.namedtuple(
+    "LaPropSlotVariables", ["mu", "nu"]
 )
 
 
@@ -80,6 +85,12 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
         return jnp.array(self.learning_rate(), dtype=jnp.float32)
     else:
       return jnp.array(self.learning_rate, dtype=jnp.float32)
+
+  def get_hyperparameters(
+      self, step: int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the hyperparameters for the optimizer."""
+    return (self.get_learning_rate(step),)
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     """Slot variables initializers for the optimizer.
@@ -196,6 +207,90 @@ class AdagradOptimizerSpec(OptimizerSpec):
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
+    )
+
+
+class LaPropOptimizerSpec(OptimizerSpec):
+  """Spec for the LaProp optimizer.
+
+  Laprop decouples momentum and adaptivity in the Adam-style methods, leading to
+  improved speed and stability compare to Adam.
+  https://arxiv.org/abs/2002.04839
+
+  Attributes:
+    learning_rate: The learning rate for the training variables or embeddings.
+    b1: decay rate for the exponentially weighted average of grads.
+    b2: decay rate for the exponentially weighted average of squared grads.
+    eps: term added to the squared gradient to improve numerical stability.
+    rms_clip_threshold: Clipping threshold for RMS.
+    initial_slot_value: Initial value for the slot variables.
+  """
+
+  def __init__(
+      self,
+      learning_rate=0.001,
+      b1: float = 0.9,
+      b2: float = 0.95,
+      eps: float = 1e-30,
+      rms_clip_threshold: float = 1.0,
+      initial_slot_value: float = 0.0,
+  ):
+    super().__init__(
+        learning_rate=learning_rate,
+    )
+    self.b1 = b1
+    self.b2 = b2
+    self.eps = eps
+    self.rms_clip_threshold = rms_clip_threshold
+    self.initial_slot_value = initial_slot_value
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return LaPropSlotVariables(
+        mu=jax.nn.initializers.constant(self.initial_slot_value),
+        nu=jax.nn.initializers.constant(self.initial_slot_value),
+    )
+
+  def get_decay_rate(self, step: int | None = None) -> jax.Array:
+    """Returns the decay rate for the optimizer."""
+
+    if step is None:
+      return jnp.array(self.b2, dtype=jnp.float32)
+
+    decay_rate = (
+        self.b2
+        * (1.0 - jnp.power(self.b2, step))
+        / ((1.0 - jnp.power(self.b2, step+1.0)))
+    )
+
+    return jnp.array(decay_rate, dtype=jnp.float32)
+
+  def get_hyperparameters(
+      self, step: int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the LaProp hyperparameters: (learning_rate, b1, decay_rate, eps)."""
+    return (
+        self.get_learning_rate(step),
+        jnp.array(self.b1, dtype=jnp.float32),
+        self.get_decay_rate(step),
+        jnp.array(self.eps, dtype=jnp.float32),
+    )
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.b1,
+        self.b2,
+        self.eps,
+        self.rms_clip_threshold,
+        self.initial_slot_value,
+    ))
+
+  def short_name(self) -> str:
+    return "laprop"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive
     )
 
 

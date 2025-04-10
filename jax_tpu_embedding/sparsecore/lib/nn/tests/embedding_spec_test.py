@@ -14,6 +14,7 @@
 """Tests for embedding spec."""
 
 from absl.testing import absltest
+import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from optax import schedules
 
@@ -72,6 +73,44 @@ class OptimizerSpecTest(absltest.TestCase):
     self.assertEqual(op.learning_rate, 0.1)
     self.assertEqual(op.initial_accumulator_value, 0.1)
 
+  def test_compare_laprop(self):
+    self.assertEqual(
+        embedding_spec.LaPropOptimizerSpec(
+            learning_rate=0.1,
+            b1=0.9,
+            b2=0.95,
+            eps=1e-30,
+            rms_clip_threshold=1.0,
+            initial_slot_value=0.0,
+        ),
+        embedding_spec.LaPropOptimizerSpec(
+            learning_rate=0.1,
+            b1=0.9,
+            b2=0.95,
+            eps=1e-30,
+            rms_clip_threshold=1.0,
+            initial_slot_value=0.0,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.LaPropOptimizerSpec(
+            learning_rate=0.1,
+            b1=0.8,
+            b2=0.95,
+            eps=1e-30,
+            rms_clip_threshold=1.0,
+            initial_slot_value=0.0,
+        ),
+        embedding_spec.LaPropOptimizerSpec(
+            learning_rate=0.1,
+            b1=0.9,
+            b2=0.95,
+            eps=1e-30,
+            rms_clip_threshold=1.0,
+            initial_slot_value=0.0,
+        ),
+    )
+
   def test_learning_rate_callable(self):
     def lr():
       return 0.1
@@ -89,6 +128,32 @@ class OptimizerSpecTest(absltest.TestCase):
     self.assertEqual(op.get_learning_rate(0), 1.0)
     self.assertEqual(op.get_learning_rate(50), 0.55)
     self.assertEqual(op.get_learning_rate(100), 0.1)
+
+  def test_hyperparameters(self):
+    op = embedding_spec.AdagradOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        )
+    )
+    self.assertEqual(op.get_hyperparameters(0), (1.0,))
+
+    op = embedding_spec.LaPropOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        ),
+        b1=0.9,
+        b2=0.95,
+        eps=1e-30,
+        rms_clip_threshold=1.0,
+        initial_slot_value=0.0,
+    )
+    expected_hyperparameters = (
+        jnp.array(1.0, dtype=jnp.float32),
+        jnp.array(0.9, dtype=jnp.float32),
+        jnp.array(0.0, dtype=jnp.float32),
+        jnp.array(1e-30, dtype=jnp.float32),
+    )
+    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
 
 
 if __name__ == "__main__":
