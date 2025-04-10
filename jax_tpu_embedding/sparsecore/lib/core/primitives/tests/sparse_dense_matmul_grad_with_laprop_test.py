@@ -29,7 +29,7 @@ _EMB_SIZE = 8
 _NUM_SC_PER_DEVICE = 4
 
 
-class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
+class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
   row_pointers = np.array([0, 1, 2, 4], dtype=np.int32)
   sample_ids = np.array([0, 1, 2, 3], dtype=np.int32)
   embedding_ids = np.array([0, 1, 2, 3], dtype=np.int32)
@@ -42,8 +42,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
   activations_grad = np.array(
       [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32
   )
+  learning_rate = 0.001
   b1 = 0.9
-  b2 = 0.95
+  decay_rate = 0.95
   eps = 1e-8
   max_ids_per_partition = 16
   max_unique_ids_per_partition = 16
@@ -59,8 +60,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -75,8 +77,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -91,8 +94,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -107,8 +111,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -123,8 +128,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -139,8 +145,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu.astype(np.int32),
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -155,8 +162,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu.astype(np.int32),
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -171,8 +179,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad.astype(np.int32),
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -187,14 +196,15 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
       ),
       dict(
-          testcase_name="b2 is not np.float32",
+          testcase_name="decay_rate is not np.float32",
           row_pointers=row_pointers,
           sample_ids=sample_ids,
           embedding_ids=embedding_ids,
@@ -203,8 +213,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=1,
+          decay_rate=1,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -219,8 +230,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=1,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -235,8 +247,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -251,8 +264,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -264,11 +278,12 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           embedding_ids=embedding_ids,
           gains=gains,
           embedding_table=np.array([1.0, 2.0, 3.0, 4.0]),
-          mu=mu,
+          mu=mu.astype(np.int32),
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -283,8 +298,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=np.array([1.0, 2.0, 3.0]),
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -301,8 +317,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=np.array([[1.0, 2.0, 3.0]]),
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -315,10 +332,11 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           gains=gains,
           embedding_table=embedding_table,
           mu=mu,
-          nu=nu,
+          nu=nu.astype(np.int32),
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=0,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -335,8 +353,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu=mu,
           nu=nu,
           activations_grad=activations_grad,
+          learning_rate=learning_rate,
           b1=b1,
-          b2=b2,
+          decay_rate=decay_rate,
           eps=eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=0,
@@ -352,8 +371,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
       mu,
       nu,
       activations_grad,
+      learning_rate,
       b1,
-      b2,
+      decay_rate,
       eps,
       max_ids_per_partition,
       max_unique_ids_per_partition,
@@ -368,8 +388,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           mu,
           nu,
           activations_grad,
+          learning_rate,
           b1,
-          b2,
+          decay_rate,
           eps,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -439,8 +460,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         np.float32,
     )
 
+    learning_rate = 0.1
     b1 = 0.9
-    b2 = 0.95
+    decay_rate = 0.95
     eps = 1e-8
 
     z_grad = jnp.full(
@@ -455,7 +477,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
     update_indices = jnp.reshape(input_tensor, (-1, 1))
     expected_emb_table = emb_table.copy()
     # TODO(b/407826659) Implement LaProp update.
-    grad_update = (z_grad[:, np.newaxis, :] * b1) + b2 - eps
+    grad_update = learning_rate * (
+        (z_grad[:, np.newaxis, :] * b1) + decay_rate - eps
+    )
     expected_emb_table[update_indices] -= grad_update
     expected_emb_table = einops.rearrange(
         expected_emb_table,
@@ -474,8 +498,9 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
             mu_init,
             nu_init,
             z_grad,
+            learning_rate,
             b1,
-            b2,
+            decay_rate,
             eps,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,

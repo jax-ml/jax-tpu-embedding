@@ -66,9 +66,10 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
     mu: np.ndarray,
     nu: np.ndarray,
     activations_grad: np.ndarray,
-    b1: float,
-    b2: float,
-    eps: float,
+    learning_rate: np.float32,
+    b1: np.float32,
+    decay_rate: np.float32,
+    eps: np.float32,
     *_,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -90,8 +91,9 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
       sharding_strategy,
   )
 
+  utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
   utils.ensure_dtype(b1, np.float32, "b1")
-  utils.ensure_dtype(b2, np.float32, "b2")
+  utils.ensure_dtype(decay_rate, np.float32, "decay_rate")
   utils.ensure_dtype(eps, np.float32, "eps")
   utils.ensure_dtype(mu, np.float32, "mu")
   utils.ensure_dtype(nu, np.float32, "nu")
@@ -125,9 +127,10 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     mu: np.ndarray,
     nu: np.ndarray,
     activations_grad: np.ndarray,
-    b1: float,
-    b2: float,
-    eps: float,
+    learning_rate: np.ndarray,
+    b1: np.ndarray,
+    decay_rate: np.ndarray,
+    eps: np.ndarray,
     *_,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -159,6 +162,7 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   #                             %arg4: tuple<tensor<1xNxf32>>,
   #                             %arg5: tuple<tensor<1xNxf32>>,
   #                             %arg6: tuple<tensor<1xNxf32>>,
+  #                             %arg7: tuple<tensor<1xNxf32>>,
   # )
   #   -> tuple<tensor<1xNxf32>, tensor<1xNxf32>, tensor<1xNxf32>>
   # where N is the embedding dimension size.
@@ -167,9 +171,10 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   #   %arg1: the embedding tables before the update.
   #   %arg2: the optimizer states (mu).
   #   %arg3: the optimizer states (nu).
-  #   %arg4: the hyperparameters (b1).
-  #   %arg5: the hyperparameters (b2).
-  #   %arg6: the hyperparameters (eps).
+  #   %arg4: the hyperparameters (learning_rate).
+  #   %arg5: the hyperparameters (b1).
+  #   %arg6: the hyperparameters (b2).
+  #   %arg7: the hyperparameters (eps).
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
@@ -195,11 +200,15 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
                   [1, embedding_table.type.get_dim_size(1)],
                   ir.F32Type.get(),
               ),
+              ir.RankedTensorType.get(  # learning_rate
+                  [1, embedding_table.type.get_dim_size(1)],
+                  ir.F32Type.get(),
+              ),
               ir.RankedTensorType.get(  # b1
                   [1, embedding_table.type.get_dim_size(1)],
                   ir.F32Type.get(),
               ),
-              ir.RankedTensorType.get(  # b2
+              ir.RankedTensorType.get(  # decay_rate
                   [1, embedding_table.type.get_dim_size(1)],
                   ir.F32Type.get(),
               ),
@@ -237,11 +246,12 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     embedding_table_ = entry_block.arguments[1]
     mu_ = entry_block.arguments[2]
     nu_ = entry_block.arguments[3]
-    b1_ = entry_block.arguments[4]
-    b2_ = entry_block.arguments[5]
-    eps_ = entry_block.arguments[6]
+    lr_ = entry_block.arguments[4]
+    b1_ = entry_block.arguments[5]
+    decay_rate_ = entry_block.arguments[6]
+    eps_ = entry_block.arguments[7]
 
-    # update = (b1 * grad) + b2 - eps (using dummy update rule for now).
+    # update = (b1 * grad) + decay_rate - eps (using dummy update rule for now).
     # TODO(b/407826659) - Implement the laprop update rule.
     gradient_update = hlo.multiply(
         grad_,
@@ -249,11 +259,15 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     )
     gradient_update = hlo.add(
         gradient_update,
-        b2_,
+        decay_rate_,
     )
     gradient_update = hlo.subtract(
         gradient_update,
         eps_,
+    )
+    gradient_update = hlo.multiply(
+        gradient_update,
+        lr_,
     )
     # updated_embedding_table = embedding_table - update
     updated_embedding_table = hlo.subtract(embedding_table_, gradient_update)
@@ -264,7 +278,7 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
 
   table_tuple_op = hlo.TupleOp([embedding_table, mu, nu])
   table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  hyperparams_tuple_op = hlo.TupleOp([b1, b2, eps])
+  hyperparams_tuple_op = hlo.TupleOp([learning_rate, b1, decay_rate, eps])
   hyperparams_tuple_op = _annotate_sparse_compute_type(hyperparams_tuple_op)
 
   op = mlir.custom_call(
