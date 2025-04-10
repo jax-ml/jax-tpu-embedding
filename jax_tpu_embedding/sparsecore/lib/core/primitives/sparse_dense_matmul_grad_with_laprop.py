@@ -57,6 +57,18 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
+def _hlo_const(x: np.ndarray) -> ir.Value:
+  return hlo.constant(
+      ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
+  )
+
+
+def _hlo_f32(x: float, emb_dim: int):
+  return _hlo_const(
+      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
+  )
+
+
 def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
     lhs_row_pointers: np.ndarray,
     lhs_local_embedding_ids: np.ndarray,
@@ -179,6 +191,7 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   # states.
 
   embedding_table_dim_size = embedding_table.type.get_dim_size(1)
+  hlo_f32 = functools.partial(_hlo_f32, emb_dim=embedding_table_dim_size)
 
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
@@ -251,27 +264,49 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     decay_rate_ = entry_block.arguments[6]
     eps_ = entry_block.arguments[7]
 
-    # update = (b1 * grad) + decay_rate - eps (using dummy update rule for now).
-    # TODO(b/407826659) - Implement the laprop update rule.
-    gradient_update = hlo.multiply(
+    # grad_square = grad*grad + eps
+    grad_square = hlo.multiply(
         grad_,
-        b1_,
+        grad_,
     )
-    gradient_update = hlo.add(
-        gradient_update,
-        decay_rate_,
-    )
-    gradient_update = hlo.subtract(
-        gradient_update,
+    grad_square = hlo.add(
+        grad_square,
         eps_,
     )
-    gradient_update = hlo.multiply(
-        gradient_update,
-        lr_,
+
+    # nu_new = decay*nu + (1-decay)*grad_square
+    nu_new = hlo.multiply(
+        nu_,
+        decay_rate_,
     )
-    # updated_embedding_table = embedding_table - update
-    updated_embedding_table = hlo.subtract(embedding_table_, gradient_update)
-    updated_tables = hlo.tuple([updated_embedding_table, mu_, nu_])
+    nu_new = hlo.add(
+        nu_new,
+        hlo.multiply(hlo.subtract(hlo_f32(1.0), decay_rate_), grad_square),
+    )
+
+    # update = grad / sqrt(nu_new)
+    update = hlo.divide(grad_, hlo.sqrt(nu_new))
+
+    # TODO(b/407826659): Add RMS clipping.
+
+    # momentum: update = b_1*mu + ( (1 - b_1^2)^0.5 ) * update
+
+    momentum_term_1 = hlo.multiply(b1_, mu_)
+    momentum_term_2 = hlo.power(
+        hlo.subtract(hlo_f32(1.0), hlo.power(b1_, hlo_f32(2))),
+        hlo_f32(0.5),
+    )
+
+    update = hlo.add(momentum_term_1, hlo.multiply(momentum_term_2, update))
+
+    mu_new = update
+
+    # updated_table = embedding_table - learning_rate * update
+    updated_embedding_table = hlo.subtract(
+        embedding_table_, hlo.multiply(lr_, update)
+    )
+
+    updated_tables = hlo.tuple([updated_embedding_table, mu_new, nu_new])
 
     # return the updated embedding table, mu, nu
     func_dialect.ReturnOp([updated_tables])

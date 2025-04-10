@@ -474,21 +474,76 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         np.float32,
     )
 
-    update_indices = jnp.reshape(input_tensor, (-1, 1))
-    expected_emb_table = emb_table.copy()
-    # TODO(b/407826659) Implement LaProp update.
-    grad_update = learning_rate * (
-        (z_grad[:, np.newaxis, :] * b1) + decay_rate - eps
-    )
-    expected_emb_table[update_indices] -= grad_update
-    expected_emb_table = einops.rearrange(
-        expected_emb_table,
+    # Expected values are computed manually on colab.
+    expected_embedding_table = np.array([
+        _EMB_SIZE * [-0.19492617],
+        _EMB_SIZE * [0.80507386],
+        _EMB_SIZE * [1.8050739],
+        _EMB_SIZE * [2.8050737],
+        _EMB_SIZE * [3.8050737],
+        _EMB_SIZE * [4.8050737],
+        _EMB_SIZE * [5.8050737],
+        _EMB_SIZE * [6.8050737],
+        _EMB_SIZE * [7.8050737],
+        _EMB_SIZE * [8.805074],
+        _EMB_SIZE * [9.805074],
+        _EMB_SIZE * [10.805074],
+        _EMB_SIZE * [11.805074],
+        _EMB_SIZE * [12.805074],
+        _EMB_SIZE * [13.805074],
+        _EMB_SIZE * [14.805074],
+        _EMB_SIZE * [16],
+        _EMB_SIZE * [17],
+        _EMB_SIZE * [18],
+        _EMB_SIZE * [19],
+        _EMB_SIZE * [20],
+        _EMB_SIZE * [21],
+        _EMB_SIZE * [22],
+        _EMB_SIZE * [23],
+        _EMB_SIZE * [24],
+        _EMB_SIZE * [25],
+        _EMB_SIZE * [26],
+        _EMB_SIZE * [27],
+        _EMB_SIZE * [28],
+        _EMB_SIZE * [29],
+        _EMB_SIZE * [30],
+        _EMB_SIZE * [31],
+    ])
+
+    expected_embedding_table = einops.rearrange(
+        expected_embedding_table,
         "(v c s) f -> c (s v) f",
         c=1,
         s=4,
     )[0]
 
-    (updated_table, updated_mu, updated_nu) = (  # pylint: disable=unused-variable
+    # Expected values are computed manually on colab.
+    expected_mu = np.array([
+        (_VOCAB_SIZE // 2) * _EMB_SIZE * [1.9492617],
+        (_VOCAB_SIZE // 2) * _EMB_SIZE * [0.0],
+    ]).reshape(_VOCAB_SIZE, _EMB_SIZE)
+
+    expected_mu = einops.rearrange(
+        expected_mu,
+        "(v c s) f -> c (s v) f",
+        c=1,
+        s=4,
+    )[0]
+
+    # Expected values are computed manually on colab.
+    expected_nu = np.array([
+        (_VOCAB_SIZE // 2) * _EMB_SIZE * [5.0004996e-06],
+        (_VOCAB_SIZE // 2) * _EMB_SIZE * [0.0],
+    ]).reshape(_VOCAB_SIZE, _EMB_SIZE)
+
+    expected_nu = einops.rearrange(
+        expected_nu,
+        "(v c s) f -> c (s v) f",
+        c=1,
+        s=4,
+    )[0]
+
+    (updated_table, updated_mu, updated_nu) = (
         sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive.bind(
             lhs_row_pointers,
             lhs_local_embedding_ids,
@@ -509,7 +564,11 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         )
     )
 
-    np.testing.assert_equal(expected_emb_table, updated_table)
+    np.testing.assert_almost_equal(
+        expected_embedding_table, updated_table, decimal=6
+    )
+    np.testing.assert_almost_equal(expected_mu, updated_mu, decimal=6)
+    np.testing.assert_almost_equal(expected_nu, updated_nu, decimal=6)
 
 
 if __name__ == "__main__":
