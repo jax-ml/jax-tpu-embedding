@@ -455,7 +455,7 @@ def _unstack_and_unshard_stacked_table(
 
   # increase a rank and the first dimension is the number of sparse cores.
   stacked_table_3d = jax.jit(
-      fun=lambda x: x.reshape(num_sparse_cores, -1, stack_embedding_dim),
+      lambda x: x.reshape(num_sparse_cores, -1, stack_embedding_dim),
       in_shardings=stacked_table_sharding,
       out_shardings=stacked_table_sharding,
   )(stacked_table)
