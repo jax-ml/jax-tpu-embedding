@@ -16,6 +16,7 @@
 import abc
 from collections.abc import Mapping
 
+from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
 
 
@@ -41,7 +42,7 @@ class FDOClient(abc.ABC):
   @abc.abstractmethod
   def record(
       self,
-      data: Mapping[str, Mapping[str, np.ndarray]],
+      data: embedding.SparseDenseMatmulInputStats,
   ) -> None:
     """Records the raw stats to local memory.
 

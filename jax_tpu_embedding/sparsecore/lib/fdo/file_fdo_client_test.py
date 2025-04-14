@@ -17,6 +17,7 @@ import os
 
 from absl.testing import absltest
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
+from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
 
 
@@ -36,26 +37,26 @@ class NpzFdoClientTest(absltest.TestCase):
 
   def test_record_and_publish_load(self):
     fdo_client = file_fdo_client.NPZFileFDOClient(self.base_dir)
-    max_id_stats = {"tab_one": np.array([10, 20, 30, 40])}
-    max_unique_stats = {"tab_one": np.array([1, 2, 3, 4])}
-    fdo_client.record(
-        {"max_ids": max_id_stats, "max_unique_ids": max_unique_stats}
+    stats = embedding.SparseDenseMatmulInputStats(
+        max_ids_per_partition={"tab_one": np.array([10, 20, 30, 40])},
+        max_unique_ids_per_partition={"tab_one": np.array([1, 2, 3, 4])},
     )
+    fdo_client.record(stats)
     fdo_client.publish()
     loaded_max_ids, loaded_max_uniques = fdo_client.load()
-    self._assert_stats_equal(loaded_max_ids, max_id_stats)
-    self._assert_stats_equal(loaded_max_uniques, max_unique_stats)
+    self._assert_stats_equal(loaded_max_ids, stats.max_ids_per_partition)
+    self._assert_stats_equal(
+        loaded_max_uniques, stats.max_unique_ids_per_partition
+    )
 
   def test_multiple_record(self):
     fdo_client = file_fdo_client.NPZFileFDOClient(self.base_dir)
-    fdo_client.record({
-        "max_ids": {"tab_one": np.array([10, 20, 30, 40])},
-        "max_unique_ids": {"tab_one": np.array([1, 2, 3, 4])},
-    })
-    fdo_client.record({
-        "max_ids": {"tab_one": np.array([10, 20, 30, 40])},
-        "max_unique_ids": {"tab_one": np.array([1, 2, 3, 4])},
-    })
+    stats = embedding.SparseDenseMatmulInputStats(
+        max_ids_per_partition={"tab_one": np.array([10, 20, 30, 40])},
+        max_unique_ids_per_partition={"tab_one": np.array([1, 2, 3, 4])},
+    )
+    fdo_client.record(stats)
+    fdo_client.record(stats)
     fdo_client.publish()
     loaded_max_ids, loaded_max_uniques = fdo_client.load()
 

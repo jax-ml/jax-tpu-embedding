@@ -265,10 +265,7 @@ def run_model():
       optimizer,
       feature_specs,
       train_state: TrainState,
-      lhs_row_pointers,
-      lhs_local_embedding_ids,
-      lhs_local_sample_ids,
-      lhs_gains,
+      preprocessed_inputs,
       emb_variables: Mapping[str, embedding.EmbeddingVariables],
       labels,
   ) -> tuple[
@@ -284,10 +281,7 @@ def run_model():
           sharding_strategy='MOD',
       )
       emb_act = tpu_sparse_dense_matmul(
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
+          preprocessed_inputs,
           emb_variables,
       )
 
@@ -323,10 +317,7 @@ def run_model():
       )
       emb_variables = tpu_sparse_dense_matmul_grad(
           emb_grad,
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
+          preprocessed_inputs,
           emb_variables,
       )
 
@@ -385,17 +376,15 @@ def run_model():
     )
 
     # Preprocess the inputs.
-    (lhs_row_pointers, lhs_embedding_ids, lhs_sample_ids, lhs_gains, _) = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            features,
-            feature_weights,
-            feature_specs,
-            local_device_count=global_mesh.local_mesh.size,
-            global_device_count=global_mesh.size,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy='MOD',
-            has_leading_dimension=True,
-        )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features,
+        feature_weights,
+        feature_specs,
+        local_device_count=global_mesh.local_mesh.size,
+        global_device_count=global_mesh.size,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy='MOD',
+        has_leading_dimension=True,
     )
 
     # TODO(patn): This (local_slice)will go away once the input processor is
@@ -432,10 +421,7 @@ def run_model():
         continue
       jaxpr = jax.make_jaxpr(p_train_step_fn)(
           train_state,
-          lhs_row_pointers,
-          lhs_embedding_ids,
-          lhs_sample_ids,
-          lhs_gains,
+          preprocessed_inputs,
           emb_variables,
           labels_sharded,
       )
@@ -448,10 +434,7 @@ def run_model():
 
     train_state, metrics_update, emb_variables = p_train_step_fn(
         train_state,
-        lhs_row_pointers,
-        lhs_embedding_ids,
-        lhs_sample_ids,
-        lhs_gains,
+        preprocessed_inputs,
         emb_variables,
         labels_sharded,
     )

@@ -31,13 +31,13 @@ from jax.sharding import Mesh
 from jax.sharding import NamedSharding
 # pylint: disable-next=g-importing-member
 from jax.sharding import PartitionSpec as P
-import numpy as np
-import optax
-
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as shakespeare_data
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
+import numpy as np
+import optax
+
 
 _VOCAB_SIZE = flags.DEFINE_integer('vocab_size', 128, 'Vocabulary size.')
 _BATCH_SIZE = flags.DEFINE_integer('batch_size', 8, 'Batch size.')
@@ -216,7 +216,7 @@ class ShakespeareTest(absltest.TestCase):
     self.sparse_matmul = shard_map.shard_map(
         sharded_matmul,
         mesh=self.mesh,
-        in_specs=(self.pd,) * 4 + (P(self.pd, None),),
+        in_specs=(self.pd,) + (P(self.pd, None),),
         out_specs=self.pd,
         check_rep=False,
     )
@@ -229,7 +229,7 @@ class ShakespeareTest(absltest.TestCase):
     self.sparse_grad_update = shard_map.shard_map(
         sharded_grad_update,
         mesh=self.mesh,
-        in_specs=(self.pd,) * 5 + (P(self.pd, None),),
+        in_specs=(self.pd, self.pd, P(self.pd, None)),
         out_specs=P(self.pd, None),
         check_rep=False,
     )
@@ -242,21 +242,12 @@ class ShakespeareTest(absltest.TestCase):
     def train_step(
         params,
         opt_state,
-        row_pointers,
-        embedding_ids,
-        sample_ids,
-        gains,
+        preprocessed_inputs,
         embedding_variables,
         labels,
     ):
       # SC forward pass
-      activations = self.sparse_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
-          embedding_variables,
-      )
+      activations = self.sparse_matmul(preprocessed_inputs, embedding_variables)
       activations = jnp.reshape(
           activations[0],
           (
@@ -276,10 +267,7 @@ class ShakespeareTest(absltest.TestCase):
       gradient_updates = jnp.reshape(grads[1], (-1, _EMBEDDING_SIZE.value))
       new_embedding_variables = self.sparse_grad_update(
           (gradient_updates,),  # Should be same structure as features.
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
       )
 
@@ -289,7 +277,7 @@ class ShakespeareTest(absltest.TestCase):
       features = np.reshape(features, (-1, 1))
 
       # SC input processing
-      (row_pointers, embedding_ids, sample_ids, gains, _) = (
+      preprocessed_inputs, _ = (
           embedding.preprocess_sparse_dense_matmul_input(
               {self.shakespeare_feature.name: features},
               {
@@ -309,10 +297,7 @@ class ShakespeareTest(absltest.TestCase):
       )(
           self.params,
           self.opt_state,
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           self.embedding_variables,
           labels,
       )

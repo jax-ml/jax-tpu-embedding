@@ -13,7 +13,6 @@
 # limitations under the License.
 """SparseCore embedding layer."""
 
-import collections
 import functools
 from typing import Any, Callable, Mapping, TypeVar
 
@@ -33,10 +32,7 @@ LogicalNames = typing.LogicalNames
 P = jax.sharding.PartitionSpec
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
-EmbeddingLookups = collections.namedtuple(
-    'EmbeddingLookups',
-    ['row_pointers', 'embedding_ids', 'sample_ids', 'gains'],
-)
+EmbeddingLookups = embedding.SparseDenseMatmulInput
 
 EMBEDDING_PARAM_NAME = 'sc_embedding_variables'
 
@@ -144,17 +140,15 @@ class SparseCoreEmbed(nn.Module):
     Returns:
       The processed data for embedding lookup.
     """
-    return EmbeddingLookups(
-        *embedding.preprocess_sparse_dense_matmul_input(
-            features,
-            features_weights,
-            self.feature_specs,
-            self.mesh.local_mesh.size,
-            self.mesh.size,
-            num_sc_per_device=self.num_sc_per_device,
-            sharding_strategy=self.table_sharding_strategy,
-        )[:-1]
-    )
+    return embedding.preprocess_sparse_dense_matmul_input(
+        features,
+        features_weights,
+        self.feature_specs,
+        self.mesh.local_mesh.size,
+        self.mesh.size,
+        num_sc_per_device=self.num_sc_per_device,
+        sharding_strategy=self.table_sharding_strategy,
+    )[0]
 
   def __call__(self, embedding_lookups: EmbeddingLookups) -> Nested[jax.Array]:
     """Computes the embedding activations.
@@ -211,11 +205,11 @@ def _emb_lookup(
           sharding_strategy=embedding_layer.table_sharding_strategy,
       ),
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pd, pd, pd, pt),
+      in_specs=(pd, pt),
       out_specs=pd,
       check_rep=False,
   )(
-      *embedding_lookups,
+      embedding_lookups,
       emb_table,
   )
 
@@ -248,12 +242,12 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
           sharding_strategy=embedding_layer.table_sharding_strategy,
       ),
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pd, pd, pd, pd, pt),
+      in_specs=(pd, pd, pt),
       out_specs=pt,
       check_rep=False,
   )(
       gradients,
-      *embedding_lookups,
+      embedding_lookups,
       emb_table,
   )
 

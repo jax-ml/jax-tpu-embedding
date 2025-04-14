@@ -22,7 +22,10 @@ package(
 pytype_strict_library(
     name = "fdo_client",
     srcs = ["fdo_client.py"],
-    deps = [pypi_requirement("numpy")],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        pypi_requirement("numpy"),
+    ],
 )
 
 pytype_strict_library(
@@ -30,6 +33,7 @@ pytype_strict_library(
     srcs = ["file_fdo_client.py"],
     deps = [
         ":fdo_client",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         pypi_requirement("absl/logging"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
@@ -42,8 +46,8 @@ pytype_strict_contrib_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":file_fdo_client",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         pypi_requirement("absl/testing:absltest"),
-        pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],
 )

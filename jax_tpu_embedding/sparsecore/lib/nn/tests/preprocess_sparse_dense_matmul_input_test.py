@@ -172,63 +172,61 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
 
   def test_preprocess_static_buffer_size_multiplier(self):
     multiplier = 32
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            features={
-                "feature_b": self.feature_b_input,
-            },
-            features_weights={
-                "feature_b": self.input_weights_b,
-            },
-            feature_specs={
-                "feature_b": self.feature_spec_b,
-            },
-            local_device_count=1,
-            global_device_count=1,
-            static_buffer_size_multiplier=multiplier,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
-        )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+        },
+        features_weights={
+            "feature_b": self.input_weights_b,
+        },
+        feature_specs={
+            "feature_b": self.feature_spec_b,
+        },
+        local_device_count=1,
+        global_device_count=1,
+        static_buffer_size_multiplier=multiplier,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
     )
-    self.assertLen(row_pointers, 1)
-    self.assertLen(embedding_ids, 1)
-    self.assertLen(sample_ids, 1)
-    self.assertLen(gains, 1)
+    self.assertLen(preprocessed_input.lhs_row_pointers, 1)
+    self.assertLen(preprocessed_input.lhs_embedding_ids, 1)
+    self.assertLen(preprocessed_input.lhs_sample_ids, 1)
+    self.assertLen(preprocessed_input.lhs_gains, 1)
     self.assertLen(
-        embedding_ids[self.feature_spec_b.table_spec.name],
+        preprocessed_input.lhs_embedding_ids[
+            self.feature_spec_b.table_spec.name
+        ],
         len(self.feature_b_input) * multiplier,
     )
     self.assertLen(
-        sample_ids[self.feature_spec_b.table_spec.name],
+        preprocessed_input.lhs_sample_ids[self.feature_spec_b.table_spec.name],
         len(self.feature_b_input) * multiplier,
     )
     self.assertLen(
-        gains[self.feature_spec_b.table_spec.name],
+        preprocessed_input.lhs_gains[self.feature_spec_b.table_spec.name],
         len(self.feature_b_input) * multiplier,
     )
 
   def test_preprocess_for_single_feature_single_device(self):
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            features={
-                "feature_b": self.feature_b_input,
-            },
-            features_weights={
-                "feature_b": self.input_weights_b,
-            },
-            feature_specs={
-                "feature_b": self.feature_spec_b,
-            },
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
-        )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+        },
+        features_weights={
+            "feature_b": self.input_weights_b,
+        },
+        feature_specs={
+            "feature_b": self.feature_spec_b,
+        },
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
     )
-    self.assertLen(row_pointers, 1)
-    self.assertLen(embedding_ids, 1)
-    self.assertLen(sample_ids, 1)
-    self.assertLen(gains, 1)
+    self.assertLen(preprocessed_input.lhs_row_pointers, 1)
+    self.assertLen(preprocessed_input.lhs_embedding_ids, 1)
+    self.assertLen(preprocessed_input.lhs_sample_ids, 1)
+    self.assertLen(preprocessed_input.lhs_gains, 1)
     temp_mesh = mock.create_autospec(jax.sharding.Mesh, instance=True)
     temp_mesh.size = 1
     tmp_local_mesh = mock.create_autospec(jax.sharding.Mesh, instance=True)
@@ -248,44 +246,45 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         num_sc_per_device=4,
     )
     np.testing.assert_equal(
-        row_pointers["table_b"], np.concatenate((first_half_b_row_pointers, []))
+        preprocessed_input.lhs_row_pointers["table_b"],
+        np.concatenate((first_half_b_row_pointers, [])),
     )
     np.testing.assert_equal(
-        embedding_ids["table_b"],
+        preprocessed_input.lhs_embedding_ids["table_b"],
         np.concatenate((first_half_b_embedding_ids, [])),
     )
     np.testing.assert_equal(
-        sample_ids["table_b"], np.concatenate((first_half_b_sample_ids, []))
+        preprocessed_input.lhs_sample_ids["table_b"],
+        np.concatenate((first_half_b_sample_ids, [])),
     )
     np.testing.assert_equal(
-        gains["table_b"], np.concatenate((first_half_b_weights, []))
+        preprocessed_input.lhs_gains["table_b"],
+        np.concatenate((first_half_b_weights, [])),
     )
 
   def test_preprocess_sparse_dense_matmul_input_for_two_features(self):
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            features={
-                "feature_b": self.feature_b_input,
-                "feature_a": self.feature_a_input,
-            },
-            features_weights={
-                "feature_a": self.input_weights_a,
-                "feature_b": self.input_weights_b,
-            },
-            feature_specs={
-                "feature_b": self.feature_spec_b,
-                "feature_a": self.feature_spec_a,
-            },
-            local_device_count=2,
-            global_device_count=2,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
-        )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+            "feature_a": self.feature_a_input,
+        },
+        features_weights={
+            "feature_a": self.input_weights_a,
+            "feature_b": self.input_weights_b,
+        },
+        feature_specs={
+            "feature_b": self.feature_spec_b,
+            "feature_a": self.feature_spec_a,
+        },
+        local_device_count=2,
+        global_device_count=2,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
     )
-    self.assertLen(row_pointers, 2)
-    self.assertLen(embedding_ids, 2)
-    self.assertLen(sample_ids, 2)
-    self.assertLen(gains, 2)
+    self.assertLen(preprocessed_input.lhs_row_pointers, 2)
+    self.assertLen(preprocessed_input.lhs_embedding_ids, 2)
+    self.assertLen(preprocessed_input.lhs_sample_ids, 2)
+    self.assertLen(preprocessed_input.lhs_gains, 2)
 
     (
         first_half_a_row_pointers,
@@ -338,74 +337,72 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     )
 
     np.testing.assert_equal(
-        row_pointers["table_a"],
+        preprocessed_input.lhs_row_pointers["table_a"],
         np.concatenate((first_half_a_row_pointers, second_half_a_row_pointers)),
     )
     np.testing.assert_equal(
-        row_pointers["table_b"],
+        preprocessed_input.lhs_row_pointers["table_b"],
         np.concatenate((first_half_b_row_pointers, second_half_b_row_pointers)),
     )
 
     np.testing.assert_equal(
-        sample_ids["table_a"],
+        preprocessed_input.lhs_sample_ids["table_a"],
         np.concatenate((first_half_a_sample_ids, second_half_a_sample_ids)),
     )
     np.testing.assert_equal(
-        sample_ids["table_b"],
+        preprocessed_input.lhs_sample_ids["table_b"],
         np.concatenate((first_half_b_sample_ids, second_half_b_sample_ids)),
     )
 
     np.testing.assert_equal(
-        embedding_ids["table_a"],
+        preprocessed_input.lhs_embedding_ids["table_a"],
         np.concatenate(
             (first_half_a_embedding_ids, second_half_a_embedding_ids)
         ),
     )
     np.testing.assert_equal(
-        embedding_ids["table_b"],
+        preprocessed_input.lhs_embedding_ids["table_b"],
         np.concatenate(
             (first_half_b_embedding_ids, second_half_b_embedding_ids)
         ),
     )
 
     np.testing.assert_equal(
-        gains["table_a"],
+        preprocessed_input.lhs_gains["table_a"],
         np.concatenate((first_half_a_weights, second_half_a_weights)),
     )
     np.testing.assert_equal(
-        gains["table_b"],
+        preprocessed_input.lhs_gains["table_b"],
         np.concatenate((first_half_b_weights, second_half_b_weights)),
     )
 
   def test_preprocess_sparse_dense_matmul_input_for_two_features_with_leading_dim(
       self,
   ):
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            features={
-                "feature_b": self.feature_b_input,
-                "feature_a": self.feature_a_input,
-            },
-            features_weights={
-                "feature_a": self.input_weights_a,
-                "feature_b": self.input_weights_b,
-            },
-            feature_specs={
-                "feature_b": self.feature_spec_b,
-                "feature_a": self.feature_spec_a,
-            },
-            local_device_count=2,
-            global_device_count=2,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
-            has_leading_dimension=True,
-        )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+            "feature_a": self.feature_a_input,
+        },
+        features_weights={
+            "feature_a": self.input_weights_a,
+            "feature_b": self.input_weights_b,
+        },
+        feature_specs={
+            "feature_b": self.feature_spec_b,
+            "feature_a": self.feature_spec_a,
+        },
+        local_device_count=2,
+        global_device_count=2,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+        has_leading_dimension=True,
     )
 
-    self.assertLen(row_pointers, 2)
-    self.assertLen(embedding_ids, 2)
-    self.assertLen(sample_ids, 2)
-    self.assertLen(gains, 2)
+    self.assertLen(preprocessed_input.lhs_row_pointers, 2)
+    self.assertLen(preprocessed_input.lhs_embedding_ids, 2)
+    self.assertLen(preprocessed_input.lhs_sample_ids, 2)
+    self.assertLen(preprocessed_input.lhs_gains, 2)
 
     (
         first_half_a_row_pointers,
@@ -458,42 +455,42 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     )
 
     np.testing.assert_equal(
-        row_pointers["table_a"],
+        preprocessed_input.lhs_row_pointers["table_a"],
         np.array([first_half_a_row_pointers, second_half_a_row_pointers])
     )
     np.testing.assert_equal(
-        row_pointers["table_b"],
+        preprocessed_input.lhs_row_pointers["table_b"],
         np.array([first_half_b_row_pointers, second_half_b_row_pointers])
     )
 
     np.testing.assert_equal(
-        sample_ids["table_a"],
+        preprocessed_input.lhs_sample_ids["table_a"],
         np.array([first_half_a_sample_ids, second_half_a_sample_ids])
     )
     np.testing.assert_equal(
-        sample_ids["table_b"],
+        preprocessed_input.lhs_sample_ids["table_b"],
         np.array([first_half_b_sample_ids, second_half_b_sample_ids])
     )
 
     np.testing.assert_equal(
-        embedding_ids["table_a"],
+        preprocessed_input.lhs_embedding_ids["table_a"],
         np.array(
             [first_half_a_embedding_ids, second_half_a_embedding_ids]
         ),
     )
     np.testing.assert_equal(
-        embedding_ids["table_b"],
+        preprocessed_input.lhs_embedding_ids["table_b"],
         np.array(
             [first_half_b_embedding_ids, second_half_b_embedding_ids]
         ),
     )
 
     np.testing.assert_equal(
-        gains["table_a"],
+        preprocessed_input.lhs_gains["table_a"],
         np.array([first_half_a_weights, second_half_a_weights])
     )
     np.testing.assert_equal(
-        gains["table_b"],
+        preprocessed_input.lhs_gains["table_b"],
         np.array([first_half_b_weights, second_half_b_weights])
     )
 
