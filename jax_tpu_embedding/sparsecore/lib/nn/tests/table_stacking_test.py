@@ -1132,6 +1132,208 @@ class TableStackingTest(parameterized.TestCase):
     for tbl in feature_tables.values():
       self.assertEqual(tbl.is_deleted(), delete_input)
 
+  def test_get_stacked_row_ids(self):
+    vocab_size_a = 64
+    embedding_dim_a = 4
+
+    vocab_size_b = 192
+    embedding_dim_b = 5
+
+    vocab_size_c = 224
+    embedding_dim_c = 6
+
+    batch_size = 16
+
+    table_a_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_a,
+        embedding_dim=embedding_dim_a,
+        initializer=jax.nn.initializers.constant(0.0),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+    )
+
+    table_b_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_b,
+        embedding_dim=embedding_dim_b,
+        initializer=jax.nn.initializers.constant(1.0),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_b',
+    )
+
+    table_c_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size_c,
+        embedding_dim=embedding_dim_c,
+        initializer=jax.nn.initializers.constant(2.0),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_c',
+    )
+
+    feature_a_spec = embedding_spec.FeatureSpec(
+        table_spec=table_a_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim_a],
+        name='feature_a',
+    )
+
+    feature_b_spec = embedding_spec.FeatureSpec(
+        table_spec=table_b_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim_b],
+        name='feature_b',
+    )
+
+    feature_c_spec = embedding_spec.FeatureSpec(
+        table_spec=table_c_spec,
+        input_shape=[batch_size, 1],
+        output_shape=[batch_size, embedding_dim_c],
+        name='feature_c',
+    )
+
+    # Prepare feature specs with stacking
+    feature_specs = [feature_a_spec, feature_b_spec, feature_c_spec]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        num_sc_per_device=self.num_sc_per_device,
+        global_device_count=jax.device_count(),
+    )
+    logging.vlog(1, 'feature_specs_a_b: %s', feature_specs)
+
+    updated_table_spec_a = feature_specs[0].table_spec
+    updated_table_spec_b = feature_specs[1].table_spec
+    updated_table_spec_c = feature_specs[2].table_spec
+
+    # prepare arrays in unpadded and sharded forms
+    mesh = jax.sharding.Mesh(jax.devices(), 'data')
+    sharding = jax.sharding.NamedSharding(
+        mesh, jax.sharding.PartitionSpec('data')
+    )
+    table_a_sharded = jax.device_put(
+        test_utils.row_id_initializer(
+            (
+                vocab_size_a,
+                embedding_dim_a,
+            ),
+            offset=10,
+        ),
+        device=sharding,
+    )
+    table_b_sharded = jax.device_put(
+        test_utils.row_id_initializer(
+            (
+                vocab_size_b,
+                embedding_dim_b,
+            ),
+            offset=100,
+        ),
+        device=sharding,
+    )
+    table_c_sharded = jax.device_put(
+        test_utils.row_id_initializer(
+            (
+                vocab_size_c,
+                embedding_dim_c,
+            ),
+            offset=1000,
+        ),
+        device=sharding,
+    )
+
+    # pad tables
+    table_a_padded = jnp.pad(
+        table_a_sharded,
+        (
+            (
+                0,
+                updated_table_spec_a.setting_in_stack.padded_vocab_size
+                - vocab_size_a,
+            ),
+            (
+                0,
+                updated_table_spec_a.setting_in_stack.padded_embedding_dim
+                - embedding_dim_a,
+            ),
+        ),
+    )
+    table_b_padded = jnp.pad(
+        table_b_sharded,
+        (
+            (
+                0,
+                updated_table_spec_b.setting_in_stack.padded_vocab_size
+                - vocab_size_b,
+            ),
+            (
+                0,
+                updated_table_spec_b.setting_in_stack.padded_embedding_dim
+                - embedding_dim_b,
+            ),
+        ),
+    )
+    table_c_padded = jnp.pad(
+        table_c_sharded,
+        (
+            (
+                0,
+                updated_table_spec_c.setting_in_stack.padded_vocab_size
+                - vocab_size_c,
+            ),
+            (
+                0,
+                updated_table_spec_c.setting_in_stack.padded_embedding_dim
+                - embedding_dim_c,
+            ),
+        ),
+    )
+
+    logging.vlog(1, 'table_a_padded: \n%s', table_a_padded)
+    logging.vlog(1, 'table_b_padded: \n%s', table_b_padded)
+    logging.vlog(1, 'table_c_padded: \n%s', table_c_padded)
+
+    feature_tables = {
+        table_a_spec.name: table_a_sharded,
+        table_b_spec.name: table_b_sharded,
+        table_c_spec.name: table_c_sharded,
+    }
+    table_spec_proto = embedding.create_proto_from_feature_specs(
+        feature_specs,
+        global_device_count=jax.device_count(),
+        num_sparsecore_per_device=self.num_sc_per_device,
+    )
+    stacked_tables = table_stacking.stack_and_shard_feature_tables(
+        feature_tables,
+        table_spec_proto,
+        delete_input=False,
+    )
+
+    for stacked_table_spec in table_spec_proto.stacked_table_specs:
+      for table_spec in stacked_table_spec.table_specs:
+        # look up all the row ids
+        stack_row_ids = table_stacking.get_row_ids_in_stacked_table(
+            stacked_table_spec,
+            table_spec,
+            list(range(table_spec.vocab_size)),
+        )
+
+        # validate each row is equavalent
+        for i in range(table_spec.vocab_size):
+          stacked_row = stacked_tables[stacked_table_spec.stack_name][
+              stack_row_ids[i]
+          ][: table_spec.embedding_dim]
+
+          self.assertTrue(
+              jnp.array_equal(
+                  stacked_row,
+                  feature_tables[table_spec.table_name][i],
+              ),
+              'MISMATCH at'
+              f'row={i}:\n'
+              f'{stacked_row}\n'
+              f'{feature_tables[table_spec.table_name][i]}',
+          )
+
 
 if __name__ == '__main__':
   absltest.main()
