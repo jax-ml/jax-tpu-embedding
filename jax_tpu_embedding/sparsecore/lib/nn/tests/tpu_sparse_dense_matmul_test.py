@@ -13,6 +13,7 @@
 # limitations under the License.
 import collections
 import functools
+import unittest
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -105,6 +106,11 @@ class ErrorHandlingTest(absltest.TestCase):
 
   # Tests that even if static buffer size is too small, the matmul can proceed.
   def test_static_buffer_size_was_too_small(self):
+    global_devices = jax.devices()
+    if len(global_devices) != 1:
+      self.skipTest("Unsupported topology.")
+    first_device = global_devices[0]
+
     long_feature = np.arange(800, dtype=np.int32).reshape(8, -1)
     long_weights = np.ones(long_feature.shape, dtype=np.float32)
 
@@ -126,8 +132,6 @@ class ErrorHandlingTest(absltest.TestCase):
         output_shape=[8, 8],
         name="feature",
     )
-    global_devices = jax.devices()
-    first_device = global_devices[0]
     num_sc_per_device = utils.num_sparsecores_per_device(first_device)
     mesh = jax.sharding.Mesh([first_device], "x")
     feature_specs = {
@@ -359,7 +363,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.parameters(False, True)
   def test_sparse_dense_matmul_two_chips_sharded(self, using_pmap):
-    devices = jax.devices()[:2]
+    devices = jax.devices()
+    if len(devices) != 2:
+      raise unittest.SkipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -484,7 +490,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.parameters(False, True)
   def test_sparse_dense_matmul_two_chips_sharded_stacked(self, using_pmap):
-    devices = jax.devices()[:2]
+    devices = jax.devices()
+    if len(devices) != 2:
+      raise unittest.SkipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -633,8 +641,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.parameters(False, True)
   def test_sparse_dense_matmul_single_chip(self, using_pmap):
-    global_devices = jax.devices()
-    devices = [global_devices[0]]
+    devices = jax.devices()
+    if len(devices) != 1:
+      raise unittest.SkipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -741,7 +750,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.parameters(False, True)
   def test_sparse_dense_matmul_two_tables(self, using_pmap):
-    devices = jax.devices()[:2]
+    devices = jax.devices()
+    if len(devices) != 2:
+      raise unittest.SkipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -1168,6 +1179,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
   @parameterized.parameters(False, True)
   def test_sparse_dense_matmul_four_chips_complex_stacked(self, using_pmap):
     devices = jax.devices()
+    if len(devices) != 4:
+      self.skipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
     country_table = embedding_spec.TableSpec(
