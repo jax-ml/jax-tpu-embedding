@@ -302,12 +302,7 @@ class EmbeddingLayerTest(absltest.TestCase):
         sc_module.init,
         in_shardings=(
             NamedSharding(sc_module.mesh, P()),
-            embed.EmbeddingLookups(
-                NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
-                NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
-                NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
-                NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
-            ),
+            NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
         ),
         out_shardings=out_sharding,
     )(
@@ -524,12 +519,7 @@ class EmbeddingLayerTest(absltest.TestCase):
         sc_module.init,
         in_shardings=(
             NamedSharding(mesh, P()),
-            embed.EmbeddingLookups(
-                NamedSharding(mesh, P(sharding_axis)),
-                NamedSharding(mesh, P(sharding_axis)),
-                NamedSharding(mesh, P(sharding_axis)),
-                NamedSharding(mesh, P(sharding_axis)),
-            ),
+            NamedSharding(mesh, P(sharding_axis)),
         ),
         out_shardings=out_sharding,
     )(
