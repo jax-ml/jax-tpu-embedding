@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+import unittest
 
 from absl.testing import absltest
 import einops
@@ -214,7 +215,9 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
 
   def test_sparse_dense_matmul_one_chip_unsharded(self):
-    devices = jax.devices()[:1]
+    devices = jax.devices()
+    if len(devices) != 1:
+      raise unittest.SkipTest("Unsupported topology.")
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
         "feature_spec_a": self.feature_spec_a,
@@ -495,7 +498,9 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(self):
-    devices = jax.devices()[:2]
+    devices = jax.devices()
+    if len(devices) != 2:
+      raise unittest.SkipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
@@ -775,7 +780,9 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables_stacked(self):
-    devices = jax.devices()[:2]
+    devices = jax.devices()
+    if len(devices) != 2:
+      raise unittest.SkipTest("Unsupported topology.")
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
