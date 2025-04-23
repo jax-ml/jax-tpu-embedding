@@ -18,7 +18,6 @@ package(
     default_applicable_licenses = ["//:license"],
     default_visibility = [
         "//jax_tpu_embedding/sparsecore:__subpackages__",
-        pypi_requirement("recml:__subpackages__"),
         "//video/youtube/discovery/lrm/plum:__subpackages__",
     ],
 )
