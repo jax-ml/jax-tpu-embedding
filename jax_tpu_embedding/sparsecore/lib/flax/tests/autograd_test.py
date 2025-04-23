@@ -149,7 +149,7 @@ class ShakespeareTest(absltest.TestCase):
               mesh.size,
               num_sc_per_device=num_sc_per_device,
               sharding_strategy='MOD',
-          )[:-1]
+          )[0]
       )
 
     first_model_input = process_inputs(feature_batches[0])

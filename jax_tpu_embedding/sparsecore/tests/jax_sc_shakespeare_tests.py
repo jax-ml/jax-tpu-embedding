@@ -161,9 +161,6 @@ class ShakespeareTest(absltest.TestCase):
         mesh=mesh,
         in_specs=(
             P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0]),
@@ -180,9 +177,6 @@ class ShakespeareTest(absltest.TestCase):
         sharded_grad_update,
         mesh=mesh,
         in_specs=(
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
             P(mesh.axis_names[0]),
             P(mesh.axis_names[0]),
             P(mesh.axis_names[0], None),
@@ -206,7 +200,7 @@ class ShakespeareTest(absltest.TestCase):
           feature_structure, [feature_weights]
       )
 
-      (row_pointers, embedding_ids, sample_ids, gains, _) = (
+      preprocessed_inputs, _ = (
           embedding.preprocess_sparse_dense_matmul_input(
               features,
               feature_weights,
@@ -221,13 +215,7 @@ class ShakespeareTest(absltest.TestCase):
       # --------------------------------------------------------------------------
       # Step 2: SC forward pass.
       # --------------------------------------------------------------------------
-      activations = sparse_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
-          embedding_variables,
-      )
+      activations = sparse_matmul(preprocessed_inputs, embedding_variables)
       # Activations returned by matmul have the same structure as input feature
       # specs which is `frozendict` in this case. Make it a regular dict.
       activations = dict(activations)
@@ -255,10 +243,7 @@ class ShakespeareTest(absltest.TestCase):
       }
       embedding_variables = sparse_grad_update(
           gradient_updates,
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
       )
 

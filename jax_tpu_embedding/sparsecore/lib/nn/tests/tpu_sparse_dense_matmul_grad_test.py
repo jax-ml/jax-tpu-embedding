@@ -226,7 +226,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         num_sc_per_device=4,
         global_device_count=len(devices),
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -362,26 +362,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(
         activations_grad,
-        {
-            "table_a": row_pointers["table_a"],
-            "table_b": row_pointers["table_b"],
-            "table_c": row_pointers["table_c"],
-        },
-        {
-            "table_a": embedding_ids["table_a"],
-            "table_b": embedding_ids["table_b"],
-            "table_c": embedding_ids["table_c"],
-        },
-        {
-            "table_a": sample_ids["table_a"],
-            "table_b": sample_ids["table_b"],
-            "table_c": sample_ids["table_c"],
-        },
-        {
-            "table_a": gains["table_a"],
-            "table_b": gains["table_b"],
-            "table_c": gains["table_c"],
-        },
+        preprocessed_inputs,
         embedding_variables,
     )
     expected_grad_table_a = np.zeros((_VOC_A, _DIM_A), dtype=np.float32)
@@ -510,7 +491,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         num_sc_per_device=num_sc_per_device,
     )
     # Add another table.
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -648,9 +629,6 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         in_specs=(
             P(mesh.axis_names[0]),
             P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0], None),
@@ -659,10 +637,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(
         activations_grad,
-        row_pointers,
-        embedding_ids,
-        sample_ids,
-        gains,
+        preprocessed_inputs,
         embedding_variables,
     )
     expected_grad_table_a = np.zeros((_VOC_A, _DIM_A), dtype=np.float32)
@@ -789,7 +764,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -904,9 +879,6 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         in_specs=(
             P(mesh.axis_names[0]),
             P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
-            P(mesh.axis_names[0]),
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0], None),
@@ -914,12 +886,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(
-        activations_grad,
-        row_pointers,
-        embedding_ids,
-        sample_ids,
-        gains,
-        embedding_variables,
+        activations_grad, preprocessed_inputs, embedding_variables
     )
     expected_grad_table_ab = np.asarray(emb_sharded_per_device_ab).reshape(
         -1, table_dim_a

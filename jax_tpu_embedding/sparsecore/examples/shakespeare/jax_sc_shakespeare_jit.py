@@ -370,7 +370,7 @@ def run_model():
           None,
           emb_var_outsharding,
       ),
-      donate_argnums=(9),
+      donate_argnums=(6),
   )
   def train_step_fn(
       mesh: jax.sharding.Mesh,
@@ -378,10 +378,7 @@ def run_model():
       optimizer,
       feature_specs,
       train_state: TrainState,
-      lhs_row_pointers,
-      lhs_local_embedding_ids,
-      lhs_local_sample_ids,
-      lhs_gains,
+      preprocessed_inputs,
       emb_variables,
       labels,
   ) -> tuple[TrainState, TrainMetrics, Nested[jax.Array]]:
@@ -398,15 +395,12 @@ def run_model():
       tpu_sparse_dense_matmul = shard_map(
           f=tpu_sparse_dense_matmul,
           mesh=mesh,
-          in_specs=(pd, pd, pd, pd, pe),
+          in_specs=(pd, pe),
           out_specs=pd,
           check_rep=False,
       )
       emb_act = tpu_sparse_dense_matmul(
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
+          preprocessed_inputs,
           emb_variables,
       )
 
@@ -443,16 +437,13 @@ def run_model():
       tpu_sparse_dense_matmul_grad = shard_map(
           f=tpu_sparse_dense_matmul_grad,
           mesh=mesh,
-          in_specs=(pd, pd, pd, pd, pd, pe),
+          in_specs=(pd, pd, pe),
           out_specs=pe,
           check_rep=False,
       )
       emb_variables = tpu_sparse_dense_matmul_grad(
           emb_grad,
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
+          preprocessed_inputs,
           emb_variables,
       )
 
@@ -512,13 +503,7 @@ def run_model():
         lambda y: jax.make_array_from_process_local_data(global_sharding, y),
         x,
     )
-    (
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
-        lhs_gains,
-        stats,
-    ) = map(
+    preprocessed_inputs, stats = map(
         make_global_view,
         embedding.preprocess_sparse_dense_matmul_input(
             features,
@@ -541,10 +526,7 @@ def run_model():
         optimizer,
         feature_specs,
         train_state,
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
-        lhs_gains,
+        preprocessed_inputs,
         emb_variables,
         labels,
     )

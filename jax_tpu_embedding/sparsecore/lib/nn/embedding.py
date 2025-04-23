@@ -18,6 +18,7 @@ import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
 
 from absl import logging
+from flax import struct
 import jax
 from jax.experimental import shard_map
 from jax.experimental.layout import DeviceLocalLayout as DLL
@@ -31,6 +32,7 @@ from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import tree
+
 
 ArrayLike = jnp.ndarray | np.ndarray
 
@@ -48,6 +50,23 @@ class EmbeddingVariablesInitializer(NamedTuple):
 class EmbeddingVariables(NamedTuple):
   table: jax.Array
   slot: tuple[jax.Array, ...]
+
+
+class SparseDenseMatmulInput(NamedTuple):
+  """The result of preprocessing sparse dense matmul input."""
+
+  lhs_row_pointers: Mapping[str, np.ndarray]
+  lhs_embedding_ids: Mapping[str, np.ndarray]
+  lhs_sample_ids: Mapping[str, np.ndarray]
+  lhs_gains: Mapping[str, np.ndarray]
+
+
+@struct.dataclass
+class SparseDenseMatmulInputStats:
+  """The stats of preprocessing sparse dense matmul input."""
+
+  max_ids_per_partition: Mapping[str, np.ndarray]
+  max_unique_ids_per_partition: Mapping[str, np.ndarray]
 
 
 # TODO: b/346873239 - Add more checks for the feature specs to ensure all the
@@ -294,13 +313,7 @@ def preprocess_sparse_dense_matmul_input(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
-) -> tuple[
-    Mapping[str, np.ndarray],
-    Mapping[str, np.ndarray],
-    Mapping[str, np.ndarray],
-    Mapping[str, np.ndarray],
-    Mapping[str, np.ndarray],
-]:
+) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
   Args:
@@ -335,24 +348,32 @@ def preprocess_sparse_dense_matmul_input(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
 
   Returns:
-    A tuple of four dictionaries mapping the stacked table names to the
-    preprocessed inputs for the corresponding table. The four dictionaries are
-    lhs_row_pointers, lhs_embedding_ids, lhs_sample_ids, lhs_gains and stats.
+    A tuple of PreprocessSparseDenseMatmulInput and
+    PreprocessSparseDenseMatmulInputStats.
   """
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
 
-  return input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
-      tree.flatten(features),
-      tree.flatten(features_weights),
-      tree.flatten(feature_specs),
-      local_device_count,
-      global_device_count,
-      num_sc_per_device,
-      sharding_strategy_to_int(sharding_strategy),
-      has_leading_dimension,
-      static_buffer_size_multiplier,
-      allow_id_dropping=allow_id_dropping,
+  *preprocessed_inputs, stats = (
+      input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+          tree.flatten(features),
+          tree.flatten(features_weights),
+          tree.flatten(feature_specs),
+          local_device_count,
+          global_device_count,
+          num_sc_per_device,
+          sharding_strategy_to_int(sharding_strategy),
+          has_leading_dimension,
+          static_buffer_size_multiplier,
+          allow_id_dropping=allow_id_dropping,
+      )
+  )
+
+  return SparseDenseMatmulInput(
+      *preprocessed_inputs
+  ), SparseDenseMatmulInputStats(
+      max_ids_per_partition=stats["max_ids"],
+      max_unique_ids_per_partition=stats["max_unique_ids"],
   )
 
 
@@ -405,10 +426,7 @@ def _unstack_embedding_activations(
 
 @jax.named_call
 def tpu_sparse_dense_matmul(
-    lhs_row_pointers: Mapping[str, jax.Array],
-    lhs_embedding_ids: Mapping[str, jax.Array],
-    lhs_sample_ids: Mapping[str, jax.Array],
-    lhs_gains: Mapping[str, jax.Array],
+    preprocessed_inputs: SparseDenseMatmulInput,
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
@@ -435,31 +453,18 @@ def tpu_sparse_dense_matmul(
       in_specs=(
           P(mesh.axis_names[0]),
           P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
       ),
       out_specs=P(mesh.axis_names[0]),
       check_rep=False,
   )
   sparse_matmul = jax.jit(sparse_matmul)
   activations = sparse_matmul(
-      row_pointers,
-      embedding_ids,
-      sample_ids,
-      gains,
+      preprocessed_inputs=preprocessed_inputs,
       embedding_variables,
   )
 
   Args:
-    lhs_row_pointers: The row pointers to process. The keys are the stacked
-      table names.
-    lhs_embedding_ids: The embedding ids to process. The keys are the stacked
-      table names. Must have same structure as `lhs_row_pointers`.
-    lhs_sample_ids: The sample ids to process. The keys are the stacked table
-      names. Must have same structure as `lhs_row_pointers`.
-    lhs_gains: The gains to process. The keys are the stacked table names. Must
-      have same structure as `lhs_row_pointers`.
+    preprocessed_inputs: The preprocessed inputs for sparse dense matmul.
     embedding_variables: A tuple of embedding tables and slot variables. The
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
@@ -475,9 +480,11 @@ def tpu_sparse_dense_matmul(
     ValueError: The input arrays and tuples are not of the expected structure or
       the sharding strategy is not supported.
   """
-  assert lhs_row_pointers.keys() == lhs_embedding_ids.keys()
-  assert lhs_row_pointers.keys() == lhs_gains.keys()
-  assert lhs_row_pointers.keys() == lhs_sample_ids.keys()
+  lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
+  lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
+  lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
+  lhs_gains = preprocessed_inputs.lhs_gains
+
   assert lhs_row_pointers.keys() == embedding_variables.keys()
 
   stacked_table_specs = get_stacked_table_specs(feature_specs)
@@ -566,10 +573,7 @@ def _stack_embedding_gradients(
 @jax.named_call
 def tpu_sparse_dense_matmul_grad(
     activation_gradients: Nested[jax.Array],
-    lhs_row_pointers: Mapping[str, jax.Array],
-    lhs_embedding_ids: Mapping[str, jax.Array],
-    lhs_sample_ids: Mapping[str, jax.Array],
-    lhs_gains: Mapping[str, jax.Array],
+    preprocessed_inputs: SparseDenseMatmulInput,
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     sharding_strategy: str = "MOD",
@@ -595,9 +599,6 @@ def tpu_sparse_dense_matmul_grad(
           P(mesh.axis_names[0]),
           P(mesh.axis_names[0]),
           P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
       ),
       out_specs=P(mesh.axis_names[0]),
       check_rep=False,
@@ -606,23 +607,13 @@ def tpu_sparse_dense_matmul_grad(
   grad_update = jax.jit(grad_update)
   updated_embedding_variables = grad_update(
       activations_grad,
-      row_pointers,
-      embedding_ids,
-      sample_ids,
-      gains,
+      preprocessed_inputs=preprocessed_inputs,
       embedding_variables,
   )
 
   Args:
     activation_gradients: The activation gradients.
-    lhs_row_pointers: The row pointers to process. The keys are the stacked
-      table names.
-    lhs_embedding_ids: The embedding ids to process. The keys are the stacked
-      table names. Must have same structure as `lhs_row_pointers`.
-    lhs_sample_ids: The sample ids to process. The keys are the stacked table
-      names. Must have same structure as `lhs_row_pointers`.
-    lhs_gains: The gains to process. The keys are the stacked table names. Must
-      have same structure as `lhs_row_pointers`.
+    preprocessed_inputs: The preprocessed inputs for sparse dense matmul.
     embedding_variables: A tuple of embedding tables and slot variables. The
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
@@ -634,11 +625,12 @@ def tpu_sparse_dense_matmul_grad(
   Returns:
     The updated activation embedding variables.
   """
-
   # Verify the input structures and lengths.
-  assert lhs_row_pointers.keys() == lhs_embedding_ids.keys()
-  assert lhs_row_pointers.keys() == lhs_gains.keys()
-  assert lhs_row_pointers.keys() == lhs_sample_ids.keys()
+  lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
+  lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
+  lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
+  lhs_gains = preprocessed_inputs.lhs_gains
+
   assert lhs_row_pointers.keys() == embedding_variables.keys()
   # Activations match the feature specs structure
   tree.assert_same_structure(feature_specs, activation_gradients)

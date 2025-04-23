@@ -763,15 +763,19 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             allow_id_dropping=False,
         )
     )
+    stats = embedding.SparseDenseMatmulInputStats(
+        max_ids_per_partition=stats["max_ids"],
+        max_unique_ids_per_partition=stats["max_unique_ids"],
+    )
     fdo_client.record(stats)
     fdo_client.publish()
     # Duplicated ids on row 0 and 6 are combined.
     np.testing.assert_equal(
-        stats["max_ids"]["one_table_to_rule_them_all"],
+        stats.max_ids_per_partition["one_table_to_rule_them_all"],
         np.array([7, 4, 6, 5, 9, 5, 5, 5], dtype=np.int32),
     )
     np.testing.assert_equal(
-        stats["max_unique_ids"]["one_table_to_rule_them_all"],
+        stats.max_unique_ids_per_partition["one_table_to_rule_them_all"],
         np.array([3, 3, 4, 4, 5, 3, 3, 5], dtype=np.int32),
     )
 

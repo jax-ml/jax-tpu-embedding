@@ -24,13 +24,14 @@ import time
 from absl import logging
 import jax
 from jax_tpu_embedding.sparsecore.lib.fdo import fdo_client
+from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
 
 
 _FILE_NAME = 'fdo_stats'
 _FILE_EXTENSION = 'npz'
-_MAX_ID_STATS_KEY = '_max_ids'
-_MAX_UNIQUE_ID_STATS_KEY = '_max_unique_ids'
+_MAX_ID_STATS_SUFFIX = '_max_ids'
+_MAX_UNIQUE_ID_STATS_SUFFIX = '_max_unique_ids'
 
 
 class NPZFileFDOClient(fdo_client.FDOClient):
@@ -57,7 +58,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     self._max_ids_per_partition = collections.defaultdict(np.ndarray)
     self._max_unique_ids_per_partition = collections.defaultdict(np.ndarray)
 
-  def record(self, data: Mapping[str, Mapping[str, np.ndarray]]) -> None:
+  def record(self, data: embedding.SparseDenseMatmulInputStats) -> None:
     """Records stats per process.
 
     Accumulates the max ids observed per process per sparsecore per device for
@@ -67,9 +68,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     Args:
       data: A mapping representing data to be recorded.
     """
-    if _MAX_ID_STATS_KEY[1:] not in data:
-      raise ValueError(f'Expected stat ({_MAX_ID_STATS_KEY[1:]}) not found.')
-    max_ids_per_process = data[_MAX_ID_STATS_KEY[1:]]
+    max_ids_per_process = data.max_ids_per_partition
     for table_name, stats in max_ids_per_process.items():
       logging.vlog(
           2, 'Recording observed max ids for table: %s -> %s', table_name, stats
@@ -80,11 +79,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         self._max_ids_per_partition[table_name] = np.vstack(
             (self._max_ids_per_partition[table_name], stats)
         )
-    if _MAX_UNIQUE_ID_STATS_KEY[1:] not in data:
-      raise ValueError(
-          f'Expected stats ({_MAX_UNIQUE_ID_STATS_KEY[1:]}) not found.'
-      )
-    max_uniques_per_process = data[_MAX_UNIQUE_ID_STATS_KEY[1:]]
+    max_uniques_per_process = data.max_unique_ids_per_partition
     for table_name, stats in max_uniques_per_process.items():
       logging.vlog(
           2,
@@ -107,7 +102,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         _FILE_NAME, jax.process_index(), time.time_ns(), _FILE_EXTENSION
     )
     return os.path.join(self._base_dir, filename)
-# LINT.ThenChange(:_get_latest_files_by_process)
+  # LINT.ThenChange(:_get_latest_files_by_process)
 
   def _get_latest_files_by_process(self, files: list[str]) -> list[str]:
     """Returns the latest file for each process."""
@@ -150,11 +145,11 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     processes.
     """
     merged_stats = {
-        f'{table_name}{_MAX_ID_STATS_KEY}': stats
+        f'{table_name}{_MAX_ID_STATS_SUFFIX}': stats
         for table_name, stats in self._max_ids_per_partition.items()
     }
     merged_stats.update({
-        f'{table_name}{_MAX_UNIQUE_ID_STATS_KEY}': stats
+        f'{table_name}{_MAX_UNIQUE_ID_STATS_SUFFIX}': stats
         for table_name, stats in self._max_unique_ids_per_partition.items()
     })
     self._write_to_file(merged_stats)
@@ -197,16 +192,16 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     stats = self._read_from_file(files_glob)
     max_id_stats, max_unique_id_stats = {}, {}
     for table_name, stats in stats.items():
-      if table_name.endswith(f'{_MAX_ID_STATS_KEY}'):
-        max_id_stats[table_name[: -len(_MAX_ID_STATS_KEY)]] = stats
-      elif table_name.endswith(f'{_MAX_UNIQUE_ID_STATS_KEY}'):
-        max_unique_id_stats[table_name[: -len(_MAX_UNIQUE_ID_STATS_KEY)]] = (
+      if table_name.endswith(f'{_MAX_ID_STATS_SUFFIX}'):
+        max_id_stats[table_name[: -len(_MAX_ID_STATS_SUFFIX)]] = stats
+      elif table_name.endswith(f'{_MAX_UNIQUE_ID_STATS_SUFFIX}'):
+        max_unique_id_stats[table_name[: -len(_MAX_UNIQUE_ID_STATS_SUFFIX)]] = (
             stats
         )
       else:
         raise ValueError(
             f'Unexpected table name and stats key: {table_name}, expected to'
-            f' end with {_MAX_ID_STATS_KEY} or {_MAX_UNIQUE_ID_STATS_KEY}'
+            f' end with {_MAX_ID_STATS_SUFFIX} or {_MAX_UNIQUE_ID_STATS_SUFFIX}'
         )
     self._max_ids_per_partition = max_id_stats
     self._max_unique_ids_per_partition = max_unique_id_stats

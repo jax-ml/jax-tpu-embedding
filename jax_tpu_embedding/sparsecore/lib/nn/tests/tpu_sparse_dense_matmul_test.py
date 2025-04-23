@@ -138,7 +138,7 @@ class ErrorHandlingTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature": long_feature,
@@ -154,10 +154,10 @@ class ErrorHandlingTest(absltest.TestCase):
             sharding_strategy="MOD",
         )
     )
-    self.assertNotEmpty(row_pointers)
-    self.assertNotEmpty(embedding_ids)
-    self.assertNotEmpty(sample_ids)
-    self.assertNotEmpty(gains)
+    self.assertNotEmpty(preprocessed_inputs.lhs_row_pointers)
+    self.assertNotEmpty(preprocessed_inputs.lhs_embedding_ids)
+    self.assertNotEmpty(preprocessed_inputs.lhs_sample_ids)
+    self.assertNotEmpty(preprocessed_inputs.lhs_gains)
 
     # Initialize a table of all 1s.
     emb_table_a = (
@@ -194,10 +194,7 @@ class ErrorHandlingTest(absltest.TestCase):
     )
     sparse_matmul = jax.jit(tpu_sparse_dense_matmul)
     activations = sparse_matmul(
-        row_pointers,
-        embedding_ids,
-        sample_ids,
-        gains,
+        preprocessed_inputs,
         embedding_variables,
     )
     # The static buffer size is multiplier (8) x batch_size 8 = 64.
@@ -371,7 +368,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -404,12 +401,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
       activations = jax.pmap(
           embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[5, 6, 7],
+          static_broadcasted_argnums=[2, 3, 4],
       )(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
           mesh.size,
@@ -438,9 +432,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           mesh=mesh,
           in_specs=(
               P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -448,10 +439,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
       )
     expected_emb_activations = np.array(
@@ -496,7 +484,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -528,12 +516,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       ])
       activations = jax.pmap(
           embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[5, 6, 7],
+          static_broadcasted_argnums=[2, 3, 4],
       )(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
           mesh.size,
@@ -562,9 +547,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           mesh=mesh,
           in_specs=(
               P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -572,10 +554,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
       )
     expected_emb_activations_a = np.array(
@@ -646,7 +625,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -679,12 +658,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       ])
       activations = jax.pmap(
           embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[5, 6, 7],
+          static_broadcasted_argnums=[2, 3, 4],
       )(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
           mesh.size,
@@ -702,13 +678,10 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       sparse_matmul = jax.jit(
-          embedding.tpu_sparse_dense_matmul, static_argnums=(5, 6, 7)
+          embedding.tpu_sparse_dense_matmul, static_argnums=(2, 3, 4)
       )
       activations = sparse_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
           mesh.size,
@@ -754,7 +727,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         num_sc_per_device=num_sc_per_device,
     )
     # Add another table.
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "feature_spec_a": self.input_tensor,
@@ -786,12 +759,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       ])
       activations = jax.pmap(
           embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=(5, 6, 7),
+          static_broadcasted_argnums=(2, 3, 4),
       )(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
           mesh.size,
@@ -819,9 +789,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           mesh=mesh,
           in_specs=(
               P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -829,10 +796,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
       )
     expected_emb_activations = {}
@@ -1279,7 +1243,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         ],
         dtype=object,
     )
-    row_pointers, embedding_ids, sample_ids, gains, _ = (
+    preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
                 "country": input_tensor,
@@ -1318,12 +1282,9 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       activations = jax.pmap(
           embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[5, 6, 7],
+          static_broadcasted_argnums=[2, 3, 4],
       )(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
           mesh.size,
@@ -1357,9 +1318,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           mesh=mesh,
           in_specs=(
               P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
-              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -1367,10 +1325,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
-          row_pointers,
-          embedding_ids,
-          sample_ids,
-          gains,
+          preprocessed_inputs,
           embedding_variables,
       )
     expected_act_country = np.ones((4, 4, 16), np.float32)
@@ -1400,7 +1355,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         expected_act_related_item,
         "related_item activations do not match",
     )
-
 
 if __name__ == "__main__":
   absltest.main()
