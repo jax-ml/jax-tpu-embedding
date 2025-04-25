@@ -70,11 +70,7 @@ def row_col_id_initializer(
     result = jax.numpy.zeros(shape, dtype=jax.numpy.float32)
     for i in range(rows):
       for j in range(cols):
-        if j == 0:
-          # Column 0 is process ID.
-          col_value = jax.process_index()
-        else:
-          col_value = j
+        col_value = j
         result = result.at[i, j].set(
             row_col_id_initializer_value(leading_value, i, col_value)
         )
