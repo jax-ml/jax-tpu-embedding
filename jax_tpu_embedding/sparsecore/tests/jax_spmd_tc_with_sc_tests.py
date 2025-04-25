@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from collections.abc import Callable
+import dataclasses
 import functools
 from typing import Any
 
@@ -19,6 +20,7 @@ from absl import flags
 from absl import logging
 from absl.testing import absltest
 import einops
+import flax
 import flax.linen as nn
 import jax
 from jax.experimental import shard_map
@@ -207,24 +209,28 @@ class ShakespeareTest(absltest.TestCase):
         global_device_count=self.mesh.size,
         num_sc_per_device=self.num_sc_per_device,
     )
+    self.sdmm_config = embedding.SparseDenseMatmulConfig(
+        feature_specs=self.shakespeare_feature,
+        global_device_count=self.mesh.size,
+        local_device_count=self.mesh.local_mesh.size,
+        num_sc_per_device=self.num_sc_per_device,
+        sharding_strategy='MOD',
+    )
     sharded_matmul = functools.partial(
         embedding.tpu_sparse_dense_matmul,
-        global_device_count=self.mesh.size,
-        feature_specs=(self.shakespeare_feature,),
-        sharding_strategy='MOD',
+        config=self.sdmm_config,
     )
     self.sparse_matmul = shard_map.shard_map(
         sharded_matmul,
         mesh=self.mesh,
-        in_specs=(self.pd,) + (P(self.pd, None),),
+        in_specs=(self.pd, P(self.pd, None)),
         out_specs=self.pd,
         check_rep=False,
     )
 
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
-        feature_specs=(self.shakespeare_feature,),
-        sharding_strategy='MOD',
+        config=self.sdmm_config,
     )
     self.sparse_grad_update = shard_map.shard_map(
         sharded_grad_update,
@@ -249,7 +255,7 @@ class ShakespeareTest(absltest.TestCase):
       # SC forward pass
       activations = self.sparse_matmul(preprocessed_inputs, embedding_variables)
       activations = jnp.reshape(
-          activations[0],
+          activations,
           (
               _BATCH_SIZE.value,
               _SEQ_LEN.value,
@@ -266,7 +272,7 @@ class ShakespeareTest(absltest.TestCase):
       # SC backward pass
       gradient_updates = jnp.reshape(grads[1], (-1, _EMBEDDING_SIZE.value))
       new_embedding_variables = self.sparse_grad_update(
-          (gradient_updates,),  # Should be same structure as features.
+          gradient_updates,
           preprocessed_inputs,
           embedding_variables,
       )
@@ -277,23 +283,13 @@ class ShakespeareTest(absltest.TestCase):
       features = np.reshape(features, (-1, 1))
 
       # SC input processing
-      preprocessed_inputs, _ = (
-          embedding.preprocess_sparse_dense_matmul_input(
-              {self.shakespeare_feature.name: features},
-              {
-                  self.shakespeare_feature.name: np.ones_like(
-                      features, dtype=jnp.float32
-                  )
-              },
-              {self.shakespeare_feature.name: self.shakespeare_feature},
-              local_device_count=self.mesh.local_mesh.size,
-              global_device_count=self.mesh.size,
-              num_sc_per_device=self.num_sc_per_device,
-              sharding_strategy='MOD',
-          )
+      preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+          features,
+          np.ones_like(features, dtype=jnp.float32),
+          config=self.sdmm_config,
       )
       self.params, self.opt_state, loss_val, self.embedding_variables = jax.jit(
-          train_step
+          train_step, donate_argnums=(3,)
       )(
           self.params,
           self.opt_state,
@@ -307,7 +303,6 @@ class ShakespeareTest(absltest.TestCase):
         losses.append(loss_val)
 
       step += 1
-
     self.assertLess(losses[-1], 0.001)
 
 

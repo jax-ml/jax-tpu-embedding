@@ -46,6 +46,7 @@ import optax
 import orbax.checkpoint as ocp
 import tree
 
+
 np.set_printoptions(threshold=np.inf)
 Nested = embedding.Nested
 
@@ -376,7 +377,7 @@ def run_model():
       mesh: jax.sharding.Mesh,
       model: nn.Module,
       optimizer,
-      feature_specs,
+      config: embedding.SparseDenseMatmulConfig,
       train_state: TrainState,
       preprocessed_inputs,
       emb_variables,
@@ -386,22 +387,15 @@ def run_model():
 
     # Sparse forward pass - embedding lookup.
     with jax.named_scope('sc_forward_pass'):
-      tpu_sparse_dense_matmul = partial(
-          embedding.tpu_sparse_dense_matmul,
-          global_device_count=num_global_devices,
-          feature_specs=feature_specs,
-          sharding_strategy='MOD',
-      )
       tpu_sparse_dense_matmul = shard_map(
-          f=tpu_sparse_dense_matmul,
+          f=embedding.tpu_sparse_dense_matmul,
           mesh=mesh,
-          in_specs=(pd, pe),
+          in_specs=(pd, pe, None),
           out_specs=pd,
           check_rep=False,
       )
       emb_act = tpu_sparse_dense_matmul(
-          preprocessed_inputs,
-          emb_variables,
+          preprocessed_inputs, emb_variables, config
       )
 
     # Dense forward + backward pass.
@@ -429,22 +423,15 @@ def run_model():
 
     # Sparse backward pass - embedding update.
     with jax.named_scope('sc_backward_pass'):
-      tpu_sparse_dense_matmul_grad = partial(
-          embedding.tpu_sparse_dense_matmul_grad,
-          feature_specs=feature_specs,
-          sharding_strategy='MOD',
-      )
       tpu_sparse_dense_matmul_grad = shard_map(
-          f=tpu_sparse_dense_matmul_grad,
+          f=embedding.tpu_sparse_dense_matmul_grad,
           mesh=mesh,
-          in_specs=(pd, pd, pe),
+          in_specs=(pd, pd, pe, None),
           out_specs=pe,
           check_rep=False,
       )
       emb_variables = tpu_sparse_dense_matmul_grad(
-          emb_grad,
-          preprocessed_inputs,
-          emb_variables,
+          emb_grad, preprocessed_inputs, emb_variables, config
       )
 
     train_state = train_state.replace(
@@ -503,16 +490,17 @@ def run_model():
         lambda y: jax.make_array_from_process_local_data(global_sharding, y),
         x,
     )
+    config = embedding.SparseDenseMatmulConfig(
+        global_device_count=num_global_devices,
+        local_device_count=num_local_devices,
+        feature_specs=flax.core.freeze(feature_specs),
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy='MOD',
+    )
     preprocessed_inputs, stats = map(
         make_global_view,
         embedding.preprocess_sparse_dense_matmul_input(
-            features,
-            feature_weights,
-            feature_specs,
-            local_device_count=global_mesh.local_mesh.size,
-            global_device_count=global_mesh.size,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy='MOD',
+            features, feature_weights, config=config
         ),
     )
     fdo_client.record(stats)
@@ -524,7 +512,7 @@ def run_model():
         global_mesh,
         model,
         optimizer,
-        feature_specs,
+        config,
         train_state,
         preprocessed_inputs,
         emb_variables,

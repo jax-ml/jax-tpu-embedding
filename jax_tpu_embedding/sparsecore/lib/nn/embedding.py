@@ -14,10 +14,12 @@
 """List of functions for embedding lookup."""
 
 import collections
+import dataclasses
 import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
 
 from absl import logging
+from flax import linen as nn
 from flax import struct
 import jax
 from jax.experimental import shard_map
@@ -76,6 +78,54 @@ class SparseDenseMatmulInputStats:
         max_ids_per_partition=stats["max_ids"],
         max_unique_ids_per_partition=stats["max_unique_ids"],
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class SparseDenseMatmulConfig:
+  """The config of preprocessing sparse dense matmul input.
+
+  feature_specs:
+    The feature specs. This needs to have the same structure as features and
+    features_weights (e.g., if one of them is a mapping then all of them are).
+  local_device_count:
+    The number of local devices (chips). Typically `mesh.local_mesh.size`.
+  global_device_count:
+    The number of global devices (chips). Typically `mesh.size`.
+  num_sc_per_device:
+    The number of sparse cores per device.
+  optimizer_label:
+    The label for the optimizer computation.
+  static_buffer_size_multiplier:
+    If larger than 0, this is the multiplier that is used to determine the size
+    of the static buffers (lhs_embedding_ids, lhs_sample_ids and lhs_gains). The
+    size of the buffer returned is static_buffer_size_multiplier x batch_size.
+    If less than or equal to 0, the size of the buffer is determined based off
+    of the max_ids_per_partition limits.
+  sharding_strategy:
+    The sharding strategy (e.g., MOD)
+  has_leading_dimension:
+    If set to True, then the first dimension of the preprocessed input will be
+    the number of local devices. This is useful when using the preprocessed
+    input in jax.pmap. If set to False, then the first dimension of the
+    preprocessed input will be the number of local devices * the static buffer
+    size. This is useful when using the preprocessed input in jax.jit. In
+    conclusion, Set it to True if using jax.pmap and set it to False if using
+    jax.jit.
+  allow_id_dropping:
+    If set to True, then ids will be dropped if they exceed the
+    max_ids_per_partition or max_unique_ids_per_partition limits. the
+    max_ids_per_partition or max_unique_ids_per_partition limits.
+  """
+
+  feature_specs: nn.FrozenDict[str, embedding_spec.FeatureSpec]
+  local_device_count: int
+  global_device_count: int
+  num_sc_per_device: int
+  sharding_strategy: str = "MOD"
+  optimizer_label: str = ""
+  static_buffer_size_multiplier: int = 0
+  has_leading_dimension: bool = False
+  allow_id_dropping: bool = False
 
 
 # TODO: b/346873239 - Add more checks for the feature specs to ensure all the
@@ -314,14 +364,7 @@ def sharding_strategy_to_int(sharding_strategy: str) -> int:
 def preprocess_sparse_dense_matmul_input(
     features: Nested[ArrayLike],
     features_weights: Nested[ArrayLike],
-    feature_specs: Nested[embedding_spec.FeatureSpec],
-    local_device_count: int,
-    global_device_count: int,
-    num_sc_per_device: int,
-    static_buffer_size_multiplier: int = 0,
-    sharding_strategy: str = "MOD",
-    has_leading_dimension: bool = False,
-    allow_id_dropping: bool = False,
+    config: SparseDenseMatmulConfig,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -332,49 +375,27 @@ def preprocess_sparse_dense_matmul_input(
       arrays with dtype object (in the ragged tensor case).
     features_weights: The input feature weights. The structure must be identical
       to the features.
-    feature_specs: The feature specs. This needs to have the same structure as
-      features and features_weights (e.g., if one of them is a mapping then all
-      of them are).
-    local_device_count: The number of local devices (chips). Typically
-      `mesh.local_mesh.size`.
-    global_device_count: The number of global devices (chips). Typically
-      `mesh.size`.
-    num_sc_per_device: The number of sparse cores per device.
-    static_buffer_size_multiplier: If larger than 0, this is the multiplier that
-      is used to determine the size of the static buffers (lhs_embedding_ids,
-      lhs_sample_ids and lhs_gains). The size of the buffer returned is
-      static_buffer_size_multiplier x batch_size. If less than or equal to 0,
-      the size of the buffer is determined based off of the
-      max_ids_per_partition limits.
-    sharding_strategy: The sharding strategy (e.g., MOD)
-    has_leading_dimension: If set to True, then the first dimension of the
-      output will be the number of local devices. This is useful when using the
-      output in jax.pmap. If set to False, then the first dimension of the
-      output will be the number of local devices * the static buffer size. This
-      is useful when using the output in jax.jit. In conclusion, Set it to True
-      if using jax.pmap and set it to False if using jax.jit.
-    allow_id_dropping: If set to True, then ids will be dropped if they exceed
-      the max_ids_per_partition or max_unique_ids_per_partition limits.
+    config: The config of sparse dense matmul.
 
   Returns:
     A tuple of PreprocessSparseDenseMatmulInput and
     PreprocessSparseDenseMatmulInputStats.
   """
-  tree.assert_same_structure(features, feature_specs)
-  tree.assert_same_structure(features_weights, feature_specs)
+  tree.assert_same_structure(features, config.feature_specs)
+  tree.assert_same_structure(features_weights, config.feature_specs)
 
   *preprocessed_inputs, stats = (
       input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
           tree.flatten(features),
           tree.flatten(features_weights),
-          tree.flatten(feature_specs),
-          local_device_count,
-          global_device_count,
-          num_sc_per_device,
-          sharding_strategy_to_int(sharding_strategy),
-          has_leading_dimension,
-          static_buffer_size_multiplier,
-          allow_id_dropping=allow_id_dropping,
+          tree.flatten(config.feature_specs),
+          config.local_device_count,
+          config.global_device_count,
+          config.num_sc_per_device,
+          sharding_strategy_to_int(config.sharding_strategy),
+          config.has_leading_dimension,
+          config.static_buffer_size_multiplier,
+          allow_id_dropping=config.allow_id_dropping,
       )
   )
 
@@ -434,9 +455,7 @@ def _unstack_embedding_activations(
 def tpu_sparse_dense_matmul(
     preprocessed_inputs: SparseDenseMatmulInput,
     embedding_variables: Mapping[str, EmbeddingVariables],
-    feature_specs: Nested[embedding_spec.FeatureSpec],
-    global_device_count: int,
-    sharding_strategy: str = "MOD",
+    config: SparseDenseMatmulConfig,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -445,26 +464,21 @@ def tpu_sparse_dense_matmul(
 
   Example invocation:
 
-  sparse_matmul = functools.partial(
-      embedding.tpu_sparse_dense_matmul,
-      global_device_count=mesh.size,
-      feature_specs=feature_specs,
-      sharding_strategy="MOD",
-  )
+  config = embedding.SparseDenseMatmulConfig(...)
   sparse_matmul = shard_map.shard_map(
-      sparse_matmul,
+      embedding.tpu_sparse_dense_matmul,
       mesh=mesh,
       in_specs=(
           P(mesh.axis_names[0]),
           P(mesh.axis_names[0]),
+          None,
       ),
       out_specs=P(mesh.axis_names[0]),
       check_rep=False,
   )
-  sparse_matmul = jax.jit(sparse_matmul)
+  sparse_matmul = jax.jit(sparse_matmul, static_argnums=(2,))
   activations = sparse_matmul(
-      preprocessed_inputs=preprocessed_inputs,
-      embedding_variables,
+      preprocessed_inputs, embedding_variables, config
   )
 
   Args:
@@ -472,10 +486,7 @@ def tpu_sparse_dense_matmul(
     embedding_variables: A tuple of embedding tables and slot variables. The
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
-    feature_specs: The input features for the current process.
-    global_device_count: The number of global devices (chips). Typically
-      `mesh.size`.
-    sharding_strategy: The sharding strategy (e.g., MOD)
+    config: The config of sparse dense matmul.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -491,10 +502,10 @@ def tpu_sparse_dense_matmul(
 
   assert lhs_row_pointers.keys() == embedding_variables.keys()
 
-  stacked_table_specs = get_stacked_table_specs(feature_specs)
+  stacked_table_specs = get_stacked_table_specs(config.feature_specs)
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
-  sharding_strategy = _sharding_strategy_to_enum(sharding_strategy)
+  sharding_strategy = _sharding_strategy_to_enum(config.sharding_strategy)
 
   activations = {}
   for stacked_table_name in stacked_table_specs:
@@ -512,7 +523,7 @@ def tpu_sparse_dense_matmul(
             gain,
             embedding_variable[0],  # [0] is the embedding table
             device_batch_size=stacked_table.total_sample_count
-            // global_device_count,
+            // config.global_device_count,
             max_ids_per_partition=stacked_table.max_ids_per_partition,
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy,
@@ -520,7 +531,7 @@ def tpu_sparse_dense_matmul(
     )
 
   return _unstack_embedding_activations(
-      activations, feature_specs, global_device_count
+      activations, config.feature_specs, config.global_device_count
   )
 
 
@@ -579,37 +590,30 @@ def tpu_sparse_dense_matmul_grad(
     activation_gradients: Nested[jax.Array],
     preprocessed_inputs: SparseDenseMatmulInput,
     embedding_variables: Mapping[str, EmbeddingVariables],
-    feature_specs: Nested[embedding_spec.FeatureSpec],
-    sharding_strategy: str = "MOD",
-    label: str = "",
+    config: SparseDenseMatmulConfig,
     step: int | None = None,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
   Example invocation with jit + shard_map:
 
-  grad_update = functools.partial(
-      embedding.tpu_sparse_dense_matmul_grad,
-      feature_specs=feature_specs,
-      sharding_strategy="MOD",
-  )
+  config = embedding.SparseDenseMatmulConfig(...)
   grad_update = shard_map.shard_map(
-      grad_update,
+      embedding.tpu_sparse_dense_matmul_grad,
       mesh=mesh,
       in_specs=(
           P(mesh.axis_names[0]),
           P(mesh.axis_names[0]),
           P(mesh.axis_names[0]),
+          None,
       ),
       out_specs=P(mesh.axis_names[0]),
       check_rep=False,
   )
 
-  grad_update = jax.jit(grad_update)
+  grad_update = jax.jit(grad_update, static_argnums=(3,))
   updated_embedding_variables = grad_update(
-      activations_grad,
-      preprocessed_inputs=preprocessed_inputs,
-      embedding_variables,
+      activations_grad, preprocessed_inputs, embedding_variables, config
   )
 
   Args:
@@ -618,9 +622,7 @@ def tpu_sparse_dense_matmul_grad(
     embedding_variables: A tuple of embedding tables and slot variables. The
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
-    feature_specs: The input features for the current process.
-    sharding_strategy: The sharding strategy (e.g., MOD)
-    label: The label for the optimizer computation.
+    config: The config of sparse dense matmul.
     step: The current step number.
 
   Returns:
@@ -634,15 +636,17 @@ def tpu_sparse_dense_matmul_grad(
 
   assert lhs_row_pointers.keys() == embedding_variables.keys()
   # Activations match the feature specs structure
-  tree.assert_same_structure(feature_specs, activation_gradients)
+  tree.assert_same_structure(config.feature_specs, activation_gradients)
 
-  stacked_table_specs = get_stacked_table_specs(feature_specs)
+  stacked_table_specs = get_stacked_table_specs(config.feature_specs)
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
-  gradients = _stack_embedding_gradients(activation_gradients, feature_specs)
+  gradients = _stack_embedding_gradients(
+      activation_gradients, config.feature_specs
+  )
   assert lhs_row_pointers.keys() == gradients.keys()
 
-  sharding_strategy = _sharding_strategy_to_enum(sharding_strategy)
+  sharding_strategy = _sharding_strategy_to_enum(config.sharding_strategy)
 
   updated_embedding_variables = {}
   for stacked_table_name in stacked_table_specs:
@@ -659,7 +663,7 @@ def tpu_sparse_dense_matmul_grad(
     symbol_name = "{}-{}{}".format(
         stack_table_spec.optimizer.short_name(),
         stack_table_spec.stack_name,
-        label,
+        config.optimizer_label,
     )
     optimizer_primitive = stack_table_spec.optimizer.get_optimizer_primitive()
 

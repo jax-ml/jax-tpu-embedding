@@ -172,13 +172,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
 
   def test_preprocess_static_buffer_size_multiplier(self):
     multiplier = 32
-    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
-        features={
-            "feature_b": self.feature_b_input,
-        },
-        features_weights={
-            "feature_b": self.input_weights_b,
-        },
+    sparse_dense_matmul_config = embedding.SparseDenseMatmulConfig(
         feature_specs={
             "feature_b": self.feature_spec_b,
         },
@@ -187,6 +181,15 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         static_buffer_size_multiplier=multiplier,
         num_sc_per_device=4,
         sharding_strategy="MOD",
+    )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+        },
+        features_weights={
+            "feature_b": self.input_weights_b,
+        },
+        config=sparse_dense_matmul_config,
     )
     self.assertLen(preprocessed_input.lhs_row_pointers, 1)
     self.assertLen(preprocessed_input.lhs_embedding_ids, 1)
@@ -208,13 +211,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     )
 
   def test_preprocess_for_single_feature_single_device(self):
-    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
-        features={
-            "feature_b": self.feature_b_input,
-        },
-        features_weights={
-            "feature_b": self.input_weights_b,
-        },
+    sparse_dense_matmul_config = embedding.SparseDenseMatmulConfig(
         feature_specs={
             "feature_b": self.feature_spec_b,
         },
@@ -222,6 +219,15 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         sharding_strategy="MOD",
+    )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+        },
+        features_weights={
+            "feature_b": self.input_weights_b,
+        },
+        config=sparse_dense_matmul_config,
     )
     self.assertLen(preprocessed_input.lhs_row_pointers, 1)
     self.assertLen(preprocessed_input.lhs_embedding_ids, 1)
@@ -263,6 +269,16 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     )
 
   def test_preprocess_sparse_dense_matmul_input_for_two_features(self):
+    sparse_dense_matmul_config = embedding.SparseDenseMatmulConfig(
+        feature_specs={
+            "feature_b": self.feature_spec_b,
+            "feature_a": self.feature_spec_a,
+        },
+        local_device_count=2,
+        global_device_count=2,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features={
             "feature_b": self.feature_b_input,
@@ -272,14 +288,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
             "feature_a": self.input_weights_a,
             "feature_b": self.input_weights_b,
         },
-        feature_specs={
-            "feature_b": self.feature_spec_b,
-            "feature_a": self.feature_spec_a,
-        },
-        local_device_count=2,
-        global_device_count=2,
-        num_sc_per_device=4,
-        sharding_strategy="MOD",
+        config=sparse_dense_matmul_config,
     )
     self.assertLen(preprocessed_input.lhs_row_pointers, 2)
     self.assertLen(preprocessed_input.lhs_embedding_ids, 2)
@@ -379,15 +388,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
   def test_preprocess_sparse_dense_matmul_input_for_two_features_with_leading_dim(
       self,
   ):
-    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
-        features={
-            "feature_b": self.feature_b_input,
-            "feature_a": self.feature_a_input,
-        },
-        features_weights={
-            "feature_a": self.input_weights_a,
-            "feature_b": self.input_weights_b,
-        },
+    sparse_dense_matmul_config = embedding.SparseDenseMatmulConfig(
         feature_specs={
             "feature_b": self.feature_spec_b,
             "feature_a": self.feature_spec_a,
@@ -397,6 +398,17 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         num_sc_per_device=4,
         sharding_strategy="MOD",
         has_leading_dimension=True,
+    )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features={
+            "feature_b": self.feature_b_input,
+            "feature_a": self.feature_a_input,
+        },
+        features_weights={
+            "feature_a": self.input_weights_a,
+            "feature_b": self.input_weights_b,
+        },
+        config=sparse_dense_matmul_config,
     )
 
     self.assertLen(preprocessed_input.lhs_row_pointers, 2)

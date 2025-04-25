@@ -102,6 +102,7 @@ pytype_strict_contrib_test(
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("einops"),
+        pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
         pypi_requirement("tree"),

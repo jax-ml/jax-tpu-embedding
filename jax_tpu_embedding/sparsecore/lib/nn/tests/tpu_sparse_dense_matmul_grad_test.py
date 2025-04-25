@@ -226,6 +226,13 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         num_sc_per_device=4,
         global_device_count=len(devices),
     )
+    config = embedding.SparseDenseMatmulConfig(
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
     preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
@@ -238,11 +245,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
                 "feature_spec_b": self.input_weights_table_b,
                 "feature_spec_c": self.input_weights_table_c,
             },
-            feature_specs,
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
+            config=config,
         )
     )
 
@@ -356,8 +359,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
-        feature_specs=feature_specs,
-        sharding_strategy="MOD",
+        config=config,
     )
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(
@@ -490,6 +492,13 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
+    config = embedding.SparseDenseMatmulConfig(
+        feature_specs=feature_specs,
+        local_device_count=num_devices,
+        global_device_count=num_devices,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
     # Add another table.
     preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
@@ -503,11 +512,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
                 "feature_spec_b": self.input_weights_table_b,
                 "feature_spec_c": self.input_weights_table_c,
             },
-            feature_specs,
-            local_device_count=num_devices,
-            global_device_count=num_devices,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
+            config=config,
         )
     )
     table_dim_a = table_stacking._next_largest_multiple(_DIM_A, 8)
@@ -620,8 +625,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
-        feature_specs=feature_specs,
-        sharding_strategy="MOD",
+        config=config,
     )
     sharded_grad_update = shard_map.shard_map(
         sharded_grad_update,
@@ -764,6 +768,13 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
+    config = embedding.SparseDenseMatmulConfig(
+        feature_specs=feature_specs,
+        local_device_count=num_devices,
+        global_device_count=num_devices,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
     preprocessed_inputs, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {
@@ -776,11 +787,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
                 "feature_spec_b": self.input_weights_table_b,
                 "feature_spec_c": self.input_weights_table_c,
             },
-            feature_specs,
-            local_device_count=num_devices,
-            global_device_count=num_devices,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
+            config=config,
         )
     )
     padded_vocab_a = 64
@@ -870,8 +877,7 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
     )
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
-        feature_specs=feature_specs,
-        sharding_strategy="MOD",
+        config=config,
     )
     sharded_grad_update = shard_map.shard_map(
         sharded_grad_update,

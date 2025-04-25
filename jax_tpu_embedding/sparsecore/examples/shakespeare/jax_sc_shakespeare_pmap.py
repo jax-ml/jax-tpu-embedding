@@ -260,10 +260,9 @@ def run_model():
   )
 
   def train_step_fn(
-      global_device_count: int,
       model: nn.Module,
       optimizer,
-      feature_specs,
+      config,
       train_state: TrainState,
       preprocessed_inputs,
       emb_variables: Mapping[str, embedding.EmbeddingVariables],
@@ -276,9 +275,7 @@ def run_model():
     with jax.named_scope('sc_forward_pass'):
       tpu_sparse_dense_matmul = partial(
           embedding.tpu_sparse_dense_matmul,
-          global_device_count=global_device_count,
-          feature_specs=feature_specs,
-          sharding_strategy='MOD',
+          config=config,
       )
       emb_act = tpu_sparse_dense_matmul(
           preprocessed_inputs,
@@ -312,8 +309,7 @@ def run_model():
     with jax.named_scope('sc_backward_pass'):
       tpu_sparse_dense_matmul_grad = partial(
           embedding.tpu_sparse_dense_matmul_grad,
-          feature_specs=feature_specs,
-          sharding_strategy='MOD',
+          config=config,
       )
       emb_variables = tpu_sparse_dense_matmul_grad(
           emb_grad,
@@ -337,14 +333,16 @@ def run_model():
   vlog1('Replicating train_state')
   train_state = flax_utils.replicate(train_state, local_devices)
   parameter_overview.log_parameter_overview(train_state.params)
+
+  config = embedding.SparseDenseMatmulConfig(
+      feature_specs=feature_specs,
+      local_device_count=global_mesh.local_mesh.size,
+      global_device_count=global_mesh.size,
+      num_sc_per_device=num_sc_per_device,
+      has_leading_dimension=True,
+  )
   p_train_step_fn = jax.pmap(
-      partial(
-          train_step_fn,
-          num_global_devices,
-          model,
-          optimizer,
-          feature_specs,
-      ),
+      partial(train_step_fn, model, optimizer, config),
       axis_name='batch',
   )
 
@@ -376,15 +374,15 @@ def run_model():
     )
 
     # Preprocess the inputs.
-    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
-        features,
-        feature_weights,
-        feature_specs,
+    config = embedding.SparseDenseMatmulConfig(
+        feature_specs=flax.core.freeze(feature_specs),
         local_device_count=global_mesh.local_mesh.size,
         global_device_count=global_mesh.size,
         num_sc_per_device=num_sc_per_device,
-        sharding_strategy='MOD',
         has_leading_dimension=True,
+    )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features, feature_weights, config
     )
 
     # TODO(patn): This (local_slice)will go away once the input processor is
