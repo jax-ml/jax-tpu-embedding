@@ -68,6 +68,15 @@ class SparseDenseMatmulInputStats:
   max_ids_per_partition: Mapping[str, np.ndarray]
   max_unique_ids_per_partition: Mapping[str, np.ndarray]
 
+  @classmethod
+  def from_dict(
+      cls, stats: Mapping[str, Mapping[str, np.ndarray]]
+  ) -> "SparseDenseMatmulInputStats":
+    return cls(
+        max_ids_per_partition=stats["max_ids"],
+        max_unique_ids_per_partition=stats["max_unique_ids"],
+    )
+
 
 # TODO: b/346873239 - Add more checks for the feature specs to ensure all the
 # fields are valid.
@@ -371,10 +380,7 @@ def preprocess_sparse_dense_matmul_input(
 
   return SparseDenseMatmulInput(
       *preprocessed_inputs
-  ), SparseDenseMatmulInputStats(
-      max_ids_per_partition=stats["max_ids"],
-      max_unique_ids_per_partition=stats["max_unique_ids"],
-  )
+  ), SparseDenseMatmulInputStats.from_dict(stats)
 
 
 def _get_activation_for_feature(
