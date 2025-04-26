@@ -443,8 +443,6 @@ def tpu_sparse_dense_matmul(
       embedding.tpu_sparse_dense_matmul,
       global_device_count=mesh.size,
       feature_specs=feature_specs,
-      max_ids_per_partition_per_table=(16, 16),
-      max_unique_ids_per_partition_per_table=(16, 16),
       sharding_strategy="MOD",
   )
   sparse_matmul = shard_map.shard_map(
@@ -586,10 +584,7 @@ def tpu_sparse_dense_matmul_grad(
 
   grad_update = functools.partial(
       embedding.tpu_sparse_dense_matmul_grad,
-      table_specs=ordered_table_specs,
       feature_specs=feature_specs,
-      max_ids_per_partition_per_table=(16, 16),
-      max_unique_ids_per_partition_per_table=(16, 16),
       sharding_strategy="MOD",
   )
   grad_update = shard_map.shard_map(
