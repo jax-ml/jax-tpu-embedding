@@ -88,6 +88,14 @@ class SparseCoreEmbed(nn.Module):
         self.mesh.devices.item(0)
     )
 
+    self.config = embedding.SparseDenseMatmulConfig(
+        feature_specs=self.feature_specs,
+        local_device_count=self.mesh.local_mesh.size,
+        global_device_count=self.mesh.size,
+        num_sc_per_device=self.num_sc_per_device,
+        sharding_strategy=self.table_sharding_strategy,
+    )
+
     super().__post_init__()
 
   def setup(self):
@@ -143,11 +151,7 @@ class SparseCoreEmbed(nn.Module):
     return embedding.preprocess_sparse_dense_matmul_input(
         features,
         features_weights,
-        self.feature_specs,
-        self.mesh.local_mesh.size,
-        self.mesh.size,
-        num_sc_per_device=self.num_sc_per_device,
-        sharding_strategy=self.table_sharding_strategy,
+        self.config,
     )[0]
 
   def __call__(self, embedding_lookups: EmbeddingLookups) -> Nested[jax.Array]:
@@ -198,20 +202,12 @@ def _emb_lookup(
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
   return shard_map(
-      functools.partial(
-          embedding.tpu_sparse_dense_matmul,
-          global_device_count=embedding_layer.mesh.size,
-          feature_specs=embedding_layer.feature_specs,
-          sharding_strategy=embedding_layer.table_sharding_strategy,
-      ),
+      embedding.tpu_sparse_dense_matmul,
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pt),
+      in_specs=(pd, pt, None),
       out_specs=pd,
       check_rep=False,
-  )(
-      embedding_lookups,
-      emb_table,
-  )
+  )(embedding_lookups, emb_table, embedding_layer.config)
 
 
 def _emb_lookup_fwd(
@@ -219,13 +215,9 @@ def _emb_lookup_fwd(
     embedding_lookups: EmbeddingLookups,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
-  return _emb_lookup(
-      embedding_layer,
-      embedding_lookups,
-      emb_table,
-  ), (
-      embedding_lookups,
-      emb_table,
+  return (
+      _emb_lookup(embedding_layer, embedding_lookups, emb_table),
+      (embedding_lookups, emb_table),
   )
 
 
@@ -236,20 +228,12 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
   emb_table_grads = shard_map(
-      functools.partial(
-          embedding.tpu_sparse_dense_matmul_grad,
-          feature_specs=embedding_layer.feature_specs,
-          sharding_strategy=embedding_layer.table_sharding_strategy,
-      ),
+      embedding.tpu_sparse_dense_matmul_grad,
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pd, pt),
+      in_specs=(pd, pd, pt, None),
       out_specs=pt,
       check_rep=False,
-  )(
-      gradients,
-      embedding_lookups,
-      emb_table,
-  )
+  )(gradients, embedding_lookups, emb_table, embedding_layer.config)
 
   # tpu_sparse_dense_matmul_grad returns a general Mapping (usually a dict).
   # It may not be the same type as the embedding table (e.g. FrozenDict).
@@ -258,10 +242,7 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
       jax.tree.structure(emb_table), jax.tree.leaves(emb_table_grads)
   )
 
-  return (
-      None,
-      emb_table_grads,
-  )
+  return (None, emb_table_grads)
 
 
 _emb_lookup.defvjp(_emb_lookup_fwd, _emb_lookup_bwd)

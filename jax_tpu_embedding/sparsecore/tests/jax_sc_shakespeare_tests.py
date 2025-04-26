@@ -150,11 +150,16 @@ class ShakespeareTest(absltest.TestCase):
         global_device_count=mesh.size,
         num_sc_per_device=num_sc_per_device,
     )
+    config = embedding.SparseDenseMatmulConfig(
+        feature_specs=feature_specs,
+        global_device_count=mesh.size,
+        num_sc_per_device=num_sc_per_device,
+        local_device_count=mesh.local_mesh.size,
+        sharding_strategy='MOD',
+    )
     sharded_matmul = functools.partial(
         embedding.tpu_sparse_dense_matmul,
-        global_device_count=mesh.size,
-        feature_specs=feature_specs,
-        sharding_strategy='MOD',
+        config=config,
     )
     sparse_matmul = shard_map.shard_map(
         sharded_matmul,
@@ -170,8 +175,7 @@ class ShakespeareTest(absltest.TestCase):
 
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
-        feature_specs=feature_specs,
-        sharding_strategy='MOD',
+        config=config,
     )
     sparse_grad_update = shard_map.shard_map(
         sharded_grad_update,
@@ -200,16 +204,8 @@ class ShakespeareTest(absltest.TestCase):
           feature_structure, [feature_weights]
       )
 
-      preprocessed_inputs, _ = (
-          embedding.preprocess_sparse_dense_matmul_input(
-              features,
-              feature_weights,
-              feature_specs,
-              local_device_count=mesh.local_mesh.size,
-              global_device_count=mesh.size,
-              num_sc_per_device=num_sc_per_device,
-              sharding_strategy='MOD',
-          )
+      preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+          features, feature_weights, config
       )
 
       # --------------------------------------------------------------------------
@@ -242,9 +238,7 @@ class ShakespeareTest(absltest.TestCase):
           )
       }
       embedding_variables = sparse_grad_update(
-          gradient_updates,
-          preprocessed_inputs,
-          embedding_variables,
+          gradient_updates, preprocessed_inputs, embedding_variables
       )
 
       if step % 10 == 0:
