@@ -64,30 +64,42 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
 
   def __init__(
       self,
-      learning_rate,
+      learning_rate: float | Callable[..., float | jax.Array],
   ):
     self.learning_rate = learning_rate
 
-  def get_learning_rate(self, step: int | None = None) -> jax.Array:
+  def get_learning_rate(self, step: jax.Array | int | None = None) -> jax.Array:
     """Returns the learning rate for the optimizer."""
-    if callable(self.learning_rate):
+    learning_rate = self.learning_rate
+    if callable(learning_rate):
       # Callable learning rate functions are expected to take a singular step
-      # count argument, or none at all.
-      if step is not None:
-        arg_spec = inspect.getfullargspec(self.learning_rate)
-        assert len(arg_spec.args) == 1, (
-            "Learning rate callbacks should only take a singular step count"
-            " argument."
-        )
-
-        return jnp.array(self.learning_rate(step), dtype=jnp.float32)
+      # count argument, or no arguments.
+      args = inspect.getfullargspec(learning_rate).args
+      # If not a function, then it's an object instance with `self` as the first
+      # argument.
+      num_args = (
+          len(args) if inspect.isfunction(learning_rate) else len(args) - 1
+      )
+      if num_args == 0:
+        return jnp.array(learning_rate(), dtype=jnp.float32)
+      elif num_args == 1:
+        if step is not None:
+          return jnp.array(learning_rate(step), dtype=jnp.float32)
+        else:
+          raise ValueError(
+              "Specified learning rate callable {learning_rate} requires "
+              "a `step` argument to be specified."
+          )
       else:
-        return jnp.array(self.learning_rate(), dtype=jnp.float32)
+        raise ValueError(
+            "Learning rate callbacks should either take no parameters, or "
+            "a single step count argument."
+        )
     else:
-      return jnp.array(self.learning_rate, dtype=jnp.float32)
+      return jnp.array(learning_rate, dtype=jnp.float32)
 
   def get_hyperparameters(
-      self, step: int | None = None
+      self, step: jax.Array | int | None = None
   ) -> tuple[jax.Array, ...]:
     """Returns the hyperparameters for the optimizer."""
     return (self.get_learning_rate(step),)
@@ -250,7 +262,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
         nu=jax.nn.initializers.constant(self.initial_slot_value),
     )
 
-  def get_decay_rate(self, step: int | None = None) -> jax.Array:
+  def get_decay_rate(self, step: jax.Array | int | None = None) -> jax.Array:
     """Returns the decay rate for the optimizer."""
 
     if step is None:
@@ -265,7 +277,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
     return jnp.array(decay_rate, dtype=jnp.float32)
 
   def get_hyperparameters(
-      self, step: int | None = None
+      self, step: jax.Array | int | None = None
   ) -> tuple[jax.Array, ...]:
     """Returns the LaProp hyperparameters: (learning_rate, b1, decay_rate, eps)."""
     return (

@@ -132,6 +132,7 @@ pytype_strict_contrib_test(
         "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),  # buildcleaner: keep
         pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),

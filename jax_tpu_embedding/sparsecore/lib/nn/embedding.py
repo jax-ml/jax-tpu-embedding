@@ -582,7 +582,7 @@ def tpu_sparse_dense_matmul_grad(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     sharding_strategy: str = "MOD",
     label: str = "",
-    step: int | None = None,
+    step: jax.Array | int | None = None,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 

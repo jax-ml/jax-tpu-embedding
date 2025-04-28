@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+from typing import Callable
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import einops
 import jax
 from jax.experimental import shard_map
@@ -48,7 +50,17 @@ def count_num(arr: embedding.Nested[jnp.ndarray], num: int) -> int:
   return count
 
 
-class TpuSparseDenseMatmulGradTest(absltest.TestCase):
+class LinearLearningRateSchedule:
+  """Simple linear learning rate schedule for tests."""
+
+  def __init__(self, initial_learning_rate: float):
+    self.initial_learning_rate = initial_learning_rate
+
+  def __call__(self, step: int | jax.Array):
+    return self.initial_learning_rate / (step + 1)
+
+
+class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -1005,6 +1017,143 @@ class TpuSparseDenseMatmulGradTest(absltest.TestCase):
         expected_accumulator_c[:_VOC_C, :_DIM_C],
         grad_update["table_c"][1][:_VOC_C, :_DIM_C],
     )
+
+  @parameterized.named_parameters(
+      ("constant", 0.01),
+      ("function", lambda step: 0.01 / (step + 1)),
+      ("object", LinearLearningRateSchedule(0.01)),
+  )
+  def test_tpu_sparse_dense_matmul_grad_with_learning_rate(
+      self,
+      learning_rate: float | Callable[..., float | jax.Array],
+  ):
+    devices = jax.devices()
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_devices = len(devices)
+    mesh = jax.sharding.Mesh(devices, "x")
+    feature_specs = {
+        "feature_spec_a": self.feature_spec_a,
+    }
+
+    table_a_optimizer = embedding_spec.SGDOptimizerSpec(
+        learning_rate=learning_rate
+    )
+    feature_specs["feature_spec_a"].table_spec.optimizer = table_a_optimizer
+
+    embedding.auto_stack_tables(
+        feature_specs,
+        global_device_count=num_devices,
+        num_sc_per_device=num_sc_per_device,
+    )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+        },
+        {
+            "feature_spec_a": self.input_weights,
+        },
+        feature_specs,
+        local_device_count=num_devices,
+        global_device_count=num_devices,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+    )
+    padded_vocab_a = feature_specs[
+        "feature_spec_a"
+    ].table_spec.setting_in_stack.padded_vocab_size
+    padded_embedding_dim_a = feature_specs[
+        "feature_spec_a"
+    ].table_spec.setting_in_stack.padded_embedding_dim
+
+    emb_table_a = np.array([
+        [i for _ in range(padded_embedding_dim_a)]
+        for i in range(padded_vocab_a)
+    ]).astype(np.float32)
+    emb_table_a_sharded = einops.rearrange(
+        emb_table_a,
+        "(v c s) f -> c (s v) f",
+        c=num_devices,
+        s=num_sc_per_device,
+    )
+    embedding_variables = {}
+    embedding_variables["table_a"] = [
+        jax.device_put(
+            emb_table_a_sharded[i],
+            device=local_device,
+        )
+        for i, local_device in enumerate(devices)
+    ]
+    sharding = NamedSharding(mesh, P("x", None))
+    embedding_variables["table_a"] = tuple([
+        jax.make_array_from_single_device_arrays(
+            shape=(padded_vocab_a, padded_embedding_dim_a),
+            sharding=sharding,
+            arrays=embedding_variables["table_a"],
+        )
+    ])
+
+    activations_grad = {}
+    activations_grad["feature_spec_a"] = jnp.ones(
+        (_BATCH_SIZE, _DIM_A),
+        dtype=jnp.float32,
+    )
+
+    def sharded_grad_update(
+        activation_gradients,
+        preprocessed_inputs,
+        embedding_variables,
+        step,
+    ):
+      return embedding.tpu_sparse_dense_matmul_grad(
+          activation_gradients,
+          preprocessed_inputs,
+          embedding_variables,
+          feature_specs=feature_specs,
+          step=step,
+      )
+
+    sharded_grad_update = shard_map.shard_map(
+        sharded_grad_update,
+        mesh=mesh,
+        in_specs=(
+            P(mesh.axis_names[0]),
+            P(mesh.axis_names[0]),
+            P(mesh.axis_names[0], None),
+            P(),  # Step is replicated.
+        ),
+        out_specs=P(mesh.axis_names[0], None),
+        check_rep=False,
+    )
+    sharded_grad_update = jax.jit(sharded_grad_update)
+
+    for step in range(10):
+      # In Keras models, the step counter is a 0-D integer array.
+      step_var = jnp.array(step, dtype=jnp.int32)
+      grad_update = sharded_grad_update(
+          activations_grad,
+          preprocessed_inputs,
+          embedding_variables,
+          step_var,
+      )
+
+      # Generate the expected updates.
+      # For each col ID, we subtract the learning rate times the number of
+      # times the ID appears in the input.
+      expected_grad_table_a = np.zeros(
+          (padded_vocab_a, _DIM_A), dtype=np.float32
+      )
+      for i, array in enumerate(embedding_variables["table_a"][0]):
+        col_id = array[0]
+        new_col_id = col_id - (
+            count_num(self.input_tensor, col_id)
+        ) * table_a_optimizer.get_learning_rate(step)
+        expected_grad_table_a[i] = np.full(
+            (1, _DIM_A), new_col_id, dtype=np.float32
+        )
+
+      np.testing.assert_allclose(
+          expected_grad_table_a, grad_update["table_a"][0][:, :_DIM_A]
+      )
 
 
 if __name__ == "__main__":
