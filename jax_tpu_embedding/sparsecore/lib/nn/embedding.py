@@ -157,7 +157,7 @@ def get_stacked_table_specs(
     )
   return {
       stacked_table_specs.stack_name: stacked_table_specs
-      for stacked_table_specs in stacked_table_specs
+      for stacked_table_specs in stacked_table_specs  # pytype: disable=annotation-type-mismatch
   }
 
 
