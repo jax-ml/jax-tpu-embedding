@@ -2718,6 +2718,138 @@ class InputPreprocessingTest(parameterized.TestCase):
           np.ravel(expected_ragged_table_gains),
       )
 
+  def _compute_gains(self, weights, combiner: str):
+    gains = []
+    for w in weights:
+      if combiner == "mean":
+        w = w / np.sum(w)
+      elif combiner == "sqrtn":
+        w = w / np.sqrt(np.sum(np.square(w)))
+
+      gains.append(w)
+
+    if weights.ndim == 1:
+      gains = np.array(gains, dtype=np.ndarray)
+    else:
+      gains = np.array(gains, dtype=np.float32)
+
+    return gains
+
+  @parameterized.product(combiner=["mean", "sqrtn"], ragged=[True, False])
+  def test_combiner(
+      self,
+      combiner: str,
+      ragged: bool,
+  ):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=8,
+        initializer=lambda: np.zeros((32, 8), dtype=np.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(
+            learning_rate=0.001,
+        ),
+        combiner=combiner,
+        name="table",
+        max_ids_per_partition=32,
+        max_unique_ids_per_partition=32,
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=[4, None],  # Ragged or dense input.
+        output_shape=[
+            4,
+            table_spec.embedding_dim,
+        ],
+        name="feature",
+    )
+    embedding.prepare_feature_specs_for_training(
+        feature_spec,
+        global_device_count=1,
+        num_sc_per_device=1,
+    )
+
+    # Generate random samples.
+    batch_size = feature_spec.input_shape[0]
+    max_ids_per_row = table_spec.max_ids_per_partition // batch_size
+    vocab_size = table_spec.vocabulary_size
+    rng = np.random.default_rng(12345)
+    input_features = []
+    input_weights = []
+    for _ in range(batch_size):
+      n = max_ids_per_row
+      if ragged:
+        n = rng.integers(low=0, high=max_ids_per_row, size=1)
+
+      input_features.append(
+          rng.integers(low=0, high=vocab_size, size=n).astype(np.int32)
+      )
+      input_weights.append(
+          rng.uniform(low=-1.0, high=1.0, size=n).astype(np.float32)
+      )
+
+    if ragged:
+      input_features = np.array(input_features, dtype=np.ndarray)
+      input_weights = np.array(input_weights, dtype=np.ndarray)
+    else:
+      input_features = np.array(input_features, dtype=np.int32)
+      input_weights = np.array(input_weights, dtype=np.float32)
+
+    row_pointers, embedding_ids, sample_ids, gains, _ = (
+        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+            [input_features],
+            [input_weights],
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=1,
+            sharding_strategy=1,
+            has_leading_dimension=False,
+            static_buffer_size_multiplier=0,
+            allow_id_dropping=False,
+        )
+    )
+
+    # Compute expected by re-adjusting the weights using a "sum" combiner.
+    table_spec.combiner = "sum"
+    table_spec.stacked_table_spec = None
+    embedding.prepare_feature_specs_for_training(
+        feature_spec,
+        global_device_count=1,
+        num_sc_per_device=1,
+    )
+    input_weights = self._compute_gains(input_weights, combiner)
+    (
+        expected_row_pointers,
+        expected_embedding_ids,
+        expected_sample_ids,
+        expected_gains,
+        _,
+    ) = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        [input_features],
+        [input_weights],
+        [feature_spec],
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=1,
+        sharding_strategy=1,
+        has_leading_dimension=False,
+        static_buffer_size_multiplier=0,
+        allow_id_dropping=False,
+    )
+
+    np.testing.assert_array_equal(
+        row_pointers["table"], expected_row_pointers["table"]
+    )
+    np.testing.assert_array_equal(
+        embedding_ids["table"], expected_embedding_ids["table"]
+    )
+    np.testing.assert_array_equal(
+        sample_ids["table"], expected_sample_ids["table"]
+    )
+    np.testing.assert_allclose(
+        gains["table"], expected_gains["table"], rtol=1e-5
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

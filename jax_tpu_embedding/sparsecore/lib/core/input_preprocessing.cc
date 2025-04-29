@@ -42,12 +42,28 @@ namespace py = ::pybind11;
 
 namespace {
 
-float ComputeGain(RowCombiner combiner, int elements_in_row, float gain) {
+float ComputeWeightDivisor(RowCombiner combiner, const float* gains_buffer,
+                         py::ssize_t stride, py::ssize_t size) {
   switch (combiner) {
     case RowCombiner::kSum:
-      return gain;
-    case RowCombiner::kMean:
-      return gain / elements_in_row;
+      return 1.0f;
+    case RowCombiner::kMean: {
+      // Sum of elements.
+      float sum = 0.0f;
+      for (py::ssize_t i = 0; i < size; ++i) {
+        sum += gains_buffer[i * stride];
+      }
+      return sum;
+    }
+    case RowCombiner::kSqrtn: {
+      // Sqrt of sum of squares.
+      float sum = 0.0f;
+      for (py::ssize_t i = 0; i < size; ++i) {
+        float gain = gains_buffer[i * stride];
+        sum += gain * gain;
+      }
+      return std::sqrt(sum);
+    }
   }
 }
 
@@ -72,23 +88,28 @@ int ExtractCooTensorsFrom2dArray(const py::array& features,
   // The remaining section doesn't require the GIL.
   py::gil_scoped_release release_gil;
 
-  coo_tensors.reserve(features_array_t.shape(0) * features_array_t.shape(1));
-  CHECK_EQ(features_array_t.shape(0), features_weight_array_t.shape(0));
-  CHECK_EQ(features_array_t.shape(1), features_weight_array_t.shape(1));
+  const py::ssize_t nrows = features_array_t.shape(0);
+  const py::ssize_t ncols = features_array_t.shape(1);
+  const py::ssize_t cstride = features_weight_array.strides(1) / sizeof(float);
+
+  coo_tensors.reserve(nrows * ncols);
+  CHECK_EQ(nrows, features_weight_array_t.shape(0));
+  CHECK_EQ(ncols, features_weight_array_t.shape(1));
   const int row_offset_per_device = row_offset / global_device_count;
-  for (py::ssize_t i = 0; i < features_array_t.shape(0); ++i) {
+  for (py::ssize_t i = 0; i < nrows; ++i) {
     const int row_id = i + row_offset_per_device;
-    for (py::ssize_t j = 0; j < features_array_t.shape(1); ++j) {
+    const float divisor = ComputeWeightDivisor(
+        combiner, features_weight_array_t.data(i, 0), cstride, ncols);
+    for (py::ssize_t j = 0; j < ncols; ++j) {
       const int col = features_array_t(i, j);
-      const float gain = ComputeGain(combiner, features_array_t.shape(1),
-                                     features_weight_array_t(i, j));
+      const float gain = features_weight_array_t(i, j) / divisor;
       coo_tensors.emplace_back(
           row_id,
           GetColId(col, col_shift, col_offset, num_scs_mod, num_scs_mod_inv),
           gain);
     }
   }
-  return features_array_t.shape(0) * features_array_t.shape(1);
+  return nrows * ncols;
 }
 
 // `features` and `feature_weights` are 1D arrays of arrays. That is, they
@@ -121,12 +142,15 @@ int ExtractCooTensorsFrom1dArray(const py::array& features,
   for (int i = 0; i < f.shape(0); ++i) {
     auto curr_features_t = f(i).unchecked<1>();
     auto curr_feature_weights_t = fw(i).unchecked<1>();
-    CHECK_EQ(curr_features_t.shape(0), curr_feature_weights_t.shape(0));
-    coo_tensors_extracted += curr_features_t.shape(0);
+    const py::ssize_t stride = fw(i).strides(0) / sizeof(float);
+    const py::ssize_t size = fw(i).shape(0);
+    CHECK_EQ(curr_features_t.shape(0), size);
+    coo_tensors_extracted += size;
     const int row_id = i + row_offset_per_device;
-    for (int j = 0; j < curr_features_t.shape(0); ++j) {
-      const float gain = ComputeGain(combiner, curr_features_t.shape(0),
-                                     curr_feature_weights_t(j));
+    const float divisor = ComputeWeightDivisor(
+        combiner, curr_feature_weights_t.data(0), stride, size);
+    for (int j = 0; j < size; ++j) {
+      const float gain = curr_feature_weights_t(j) / divisor;
       coo_tensors.emplace_back(
           row_id,
           GetColId(curr_features_t(j), col_shift, col_offset, num_scs_mod,

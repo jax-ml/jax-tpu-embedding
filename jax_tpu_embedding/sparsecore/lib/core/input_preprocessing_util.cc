@@ -50,6 +50,8 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
     return RowCombiner::kSum;
   } else if (combiner == "mean") {
     return RowCombiner::kMean;
+  } else if (combiner == "sqrtn") {
+    return RowCombiner::kSqrtn;
   }
   return RowCombiner::kSum;
 }
@@ -98,7 +100,9 @@ void SortAndGroupCooTensors(
     for (const auto key : keys) {
       const uint32_t index = static_cast<uint32_t>(key);
       const CooFormat& coo_tensor = coo_tensors[index];
-      const uint32_t sc_id = static_cast<uint32_t>(key >> (64 - num_scs_bit));
+      const uint32_t sc_id =
+          num_scs_bit > 0 ? static_cast<uint32_t>(key >> (64 - num_scs_bit))
+                          : 0;
       const uint32_t col_id = static_cast<uint32_t>(key >> 32);
       const uint32_t row_id = coo_tensor.row_id;
 

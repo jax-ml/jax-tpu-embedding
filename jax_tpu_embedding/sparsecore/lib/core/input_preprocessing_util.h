@@ -29,6 +29,7 @@ namespace jax_sc_embedding {
 enum class RowCombiner {
   kSum = 0,
   kMean = 1,
+  kSqrtn = 2,
 };
 
 RowCombiner GetRowCombiner(absl::string_view combiner);
