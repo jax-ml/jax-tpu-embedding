@@ -69,11 +69,11 @@ def round_up_dim_and_vocab_size(
       n: _next_largest_multiple(spec.embedding_dim, 8)
       for (n, spec) in tables.items()
   }
-  tables_to_padded_vocab_size = {
+  table_to_padded_vocab_size = {
       n: _next_largest_multiple(spec.vocabulary_size, 8 * num_sc)
       for (n, spec) in tables.items()
   }
-  return table_to_padded_dim, tables_to_padded_vocab_size
+  return table_to_padded_dim, table_to_padded_vocab_size
 
 
 def _get_stack_table_names(
@@ -81,7 +81,6 @@ def _get_stack_table_names(
 ) -> Sequence[Sequence[str]]:
   """Returns the stack groups for the tables based on their specs."""
   table_to_padded_dim, _ = round_up_dim_and_vocab_size(tables, num_sc)
-
   table_name_map = collections.defaultdict(list)
   for table_name, dim in table_to_padded_dim.items():
     key = (dim, tables[table_name].optimizer, tables[table_name].combiner)
@@ -95,7 +94,6 @@ def _verify_stack_tables(
     table_names: Sequence[str],
     features: Sequence[embedding_spec.FeatureSpec],
     tables: Mapping[str, embedding_spec.TableSpec],
-    table_to_padded_dim: Mapping[str, int],
 ):
   """Verifies that the provided stacking groups are valid."""
   logging.vlog(
@@ -148,21 +146,12 @@ def _verify_stack_tables(
     raise ValueError(
         f"Tables {table_names} in group {stack_name} have different combiners."
     )
-  # All tables in a group should have same embedding dimension after round up.
-  if not all([
-      table_to_padded_dim[t] == table_to_padded_dim[table_names[0]]
-      for t in table_names
-  ]):
-    raise ValueError(
-        f"Tables {table_names} in group {stack_name} have different"
-        " embedding dimensions after round up."
-    )
 
 
 def _compute_table_to_setting_in_stack(
     stack_name: str,
     table_names: Sequence[str],
-    table_to_padded_dim: Mapping[str, int],
+    padded_embedding_dim: int,
     table_to_padded_vocab_size: Mapping[str, int],
     global_device_count: int,
     num_sc_per_device: int,
@@ -176,13 +165,12 @@ def _compute_table_to_setting_in_stack(
   for tname in table_names:
     if tname not in table_to_padded_vocab_size:
       raise ValueError(f"Padded vocab size for Table {tname} is missing.")
-    if tname not in table_to_padded_dim:
-      raise ValueError(f"Padded dimension for Table {tname} is missing.")
+
     num_rows_in_shard = table_to_padded_vocab_size[tname] // num_sc
     setting_in_stack = embedding_spec.TableSettingInStack(
         stack_name=stack_name,
         padded_vocab_size=table_to_padded_vocab_size[tname],
-        padded_embedding_dim=table_to_padded_dim[tname],
+        padded_embedding_dim=padded_embedding_dim,
         row_offset_in_shard=row_offset_in_shard,
         shard_rotation=shard_rotation,
     )
@@ -223,7 +211,7 @@ def _stack_feature_specs(
     stack_name: str,
     features: Nested[embedding_spec.FeatureSpec],
     table_names: Sequence[str],
-    table_to_padded_dim: Mapping[str, int],
+    padded_embedding_dim: int,
     table_to_padded_vocab_size: Mapping[str, int],
     global_device_count: int,
     num_sc_per_device: int,
@@ -240,7 +228,7 @@ def _stack_feature_specs(
   table_name_to_setting_in_stack = _compute_table_to_setting_in_stack(
       stack_name=stack_name,
       table_names=table_names,
-      table_to_padded_dim=table_to_padded_dim,
+      padded_embedding_dim=padded_embedding_dim,
       table_to_padded_vocab_size=table_to_padded_vocab_size,
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
@@ -280,7 +268,7 @@ def _stack_feature_specs(
       stack_vocab_size=sum(
           table_to_padded_vocab_size[tname] for tname in table_names
       ),
-      stack_embedding_dim=table_to_padded_dim[table_names[0]],
+      stack_embedding_dim=padded_embedding_dim,
       optimizer=stacked_features[0].table_spec.optimizer,
       combiner=stacked_features[0].table_spec.combiner,
       total_sample_count=stack_sample_count,
@@ -334,6 +322,7 @@ def stack_tables(
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     stack_name: str | None = None,
+    fail_on_excess_padding: bool = False,
 ) -> None:
   """Creates new feature specs based on specified stacking groups.
 
@@ -347,14 +336,17 @@ def stack_tables(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: The number of sparsecores per device.
-    rotation: The shard rotation factor for each stacked table.  If None,
-      sets to num_sc_per_device.  Default: None.
+    rotation: The shard rotation factor for each stacked table.  If None, sets
+      to num_sc_per_device.  Default: None.
     stack_to_max_ids_per_partition: Override the max_ids_per_partition for each
       stack.
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
     stack_name: A unique name for the table stack. If None, a default name will
       be chosen.
+    fail_on_excess_padding: If `True`, raises an error if the embedding
+      dimensions of the tables to stack would lead to excessive padding (i.e. do
+      not match when rounded up to the nearest multiple of 8 values).
   """
   if stack_name is None:
     # TODO(b/355289256): Consider better name for the stack.
@@ -365,25 +357,52 @@ def stack_tables(
       for feature in flatten_features
       if feature.table_spec.name in table_names
   }
-  table_to_padded_dim, tables_to_padded_vocab_size = (
-      round_up_dim_and_vocab_size(
-          tables_in_group, num_sc_per_device * global_device_count
-      )
+  table_to_padded_dim, table_to_padded_vocab_size = round_up_dim_and_vocab_size(
+      tables_in_group, num_sc_per_device * global_device_count
   )
+
+  # Pad to maximum embedding dim.
+  padded_embedding_dim = max(table_to_padded_dim.values())
+  # All tables in a group _should_ have same embedding dimension after round up
+  # to preserve memory - but this is not a hard requirement.
+  if not all(
+      [table_to_padded_dim[t] == padded_embedding_dim for t in table_names]
+  ):
+    excess_padding = 0
+    for table_name in table_names:
+      padded_dim = table_to_padded_dim[table_name]
+      padded_vocab = table_to_padded_vocab_size[table_name]
+      excess_padding += (padded_embedding_dim - padded_dim) * padded_vocab
+
+    msg = (
+        f"Excess padding detected for stacked table {stack_name}.\n"
+        f"  Tables: {table_names},\n"
+        f"  Padded sizes: {table_to_padded_dim.values()},\n"
+        f"  Excess padding: {excess_padding} values.\n"
+        "To reduce the memory footprint, stack tables that have consistent "
+        "embedding dimensions when rounded up to the nearest multiple of 8 "
+        "values."
+    )
+
+    if fail_on_excess_padding:
+      raise ValueError(msg)
+    else:
+      logging.warning("WARNING during stack_tables:\n%s", msg)
+
   _verify_stack_tables(
       stack_name,
       table_names,
       flatten_features,
       tables_in_group,
-      table_to_padded_dim,
   )
+
   rotation = rotation if rotation is not None else num_sc_per_device
   _stack_feature_specs(
       stack_name=stack_name,
       features=features,
       table_names=table_names,
-      table_to_padded_dim=table_to_padded_dim,
-      table_to_padded_vocab_size=tables_to_padded_vocab_size,
+      padded_embedding_dim=padded_embedding_dim,
+      table_to_padded_vocab_size=table_to_padded_vocab_size,
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
       rotation=rotation,
@@ -439,6 +458,7 @@ def auto_stack_tables(
         rotation=rotation,
         stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
         stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
+        fail_on_excess_padding=False  # Guaranteed to be satisfied.
     )
 
 
