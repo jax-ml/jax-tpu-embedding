@@ -195,16 +195,28 @@ int ComputeCooBufferSize(
     const int static_buffer_size_multiplier) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
-  const int max_ids_rounded_up = (max_ids_per_partition + 7) & -8;
-  const int theoretical_max = max_ids_rounded_up * num_scs_per_device * num_scs;
+
+  // This 8-alignment only works for certain TPU models.
+  const int64_t max_ids_rounded_up = (max_ids_per_partition + 7) & -8;
+
+  // The theoretical max could easily be larger than INT_MAX. We need to make
+  // sure the result is within the range of int before using it.
+  const int64_t theoretical_max =
+      max_ids_rounded_up * num_scs_per_device * num_scs;
   if (static_buffer_size_multiplier <= 0) {
-    return theoretical_max;
+    CHECK(theoretical_max > 0 && theoretical_max < INT_MAX);
+    return static_cast<int>(theoretical_max);
   }
-  int batch_size = 0;
+  int64_t batch_size = 0;
   for (const auto& metadata : stacked_table_metadata) {
     batch_size += metadata.batch_size;
   }
-  return std::min(static_buffer_size_multiplier * batch_size, theoretical_max);
+  // The batch_size could be very large and cause overflow. We need to make
+  // sure the result is within the range of int before using it.
+  int64_t result =
+      std::min(static_buffer_size_multiplier * batch_size, theoretical_max);
+  CHECK(result > 0 && result < INT_MAX);
+  return static_cast<int>(result);
 }
 
 void IncrementScId(std::pair<int, int>& sc_id, const int num_scs,
