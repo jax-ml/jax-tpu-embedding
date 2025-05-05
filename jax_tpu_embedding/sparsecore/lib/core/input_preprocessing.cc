@@ -338,16 +338,24 @@ void PreprocessInputForStackedTable(
   }
 }
 
-py::array::ShapeContainer GetShapeContainer(bool has_leading_dimension,
-                                            int local_device_count,
-                                            int inner_dim_size) {
+// Helper function to get the shape container for the output arrays.
+// If `has_leading_dimension` is true, the shape will be
+// [local_device_count, inner_dim_size]. Otherwise, the shape will be
+// [local_device_count * inner_dim_size].
+static inline py::array::ShapeContainer GetArrayShapeBasedOnLeadingDim(
+    bool has_leading_dimension, int local_device_count, int inner_dim_size) {
   return has_leading_dimension
              ? py::array::ShapeContainer({local_device_count, inner_dim_size})
              : py::array::ShapeContainer({local_device_count * inner_dim_size});
 }
 
-py::slice GetSliceForDevice(bool has_leading_dimension, int start_index,
-                            int first_dim_size) {
+// Helper function to get the slice for a given device.
+// If `has_leading_dimension` is true, the slice will be
+// [device_index:device_index+1]. Otherwise, the slice will be
+// [device_index * first_dim_size:(device_index + 1) * first_dim_size].
+static inline py::slice GetBufferSliceForGivenDevice(bool has_leading_dimension,
+                                                     int start_index,
+                                                     int first_dim_size) {
   return has_leading_dimension
              ? py::slice(start_index, start_index + 1, 1)
              : py::slice(start_index * first_dim_size,
@@ -416,12 +424,14 @@ py::tuple PreprocessSparseDenseMatmulInput(
 
         // Acquire GIL before creating Python arrays.
         py::gil_scoped_acquire acq;
-        py::array_t<int> row_pointers_per_device = py::array_t<int>(
-            GetShapeContainer(has_leading_dimension, local_device_count,
-                              row_pointers_size_per_sc * num_sc_per_device));
+        py::array_t<int> row_pointers_per_device =
+            py::array_t<int>(GetArrayShapeBasedOnLeadingDim(
+                has_leading_dimension, local_device_count,
+                row_pointers_size_per_sc * num_sc_per_device));
 
-        py::array::ShapeContainer shape_container = GetShapeContainer(
-            has_leading_dimension, local_device_count, coo_buffer_size);
+        py::array::ShapeContainer shape_container =
+            GetArrayShapeBasedOnLeadingDim(has_leading_dimension,
+                                           local_device_count, coo_buffer_size);
         py::array_t<int> embedding_ids_per_device =
             py::array_t<int>(shape_container);
         py::array_t<int> sample_ids_per_device =
@@ -429,7 +439,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
         py::array_t<float> gains_per_device =
             py::array_t<float>(shape_container);
         const int stats_size_per_device = num_scs;
-        py::array::ShapeContainer stats_shape = GetShapeContainer(
+        py::array::ShapeContainer stats_shape = GetArrayShapeBasedOnLeadingDim(
             /*has_leading_dimension=*/false, local_device_count,
             stats_size_per_device);
         py::array_t<int> max_ids_per_partition_per_sc =
@@ -439,18 +449,19 @@ py::tuple PreprocessSparseDenseMatmulInput(
         for (int local_device = 0; local_device < local_device_count;
              ++local_device) {
           // Get the tuple outputs for the current split.
-          auto row_pointer_buffer = row_pointers_per_device[GetSliceForDevice(
-              has_leading_dimension, local_device,
-              row_pointers_size_per_sc * num_sc_per_device)];
-          py::slice static_buffer_slice = GetSliceForDevice(
+          auto row_pointer_buffer =
+              row_pointers_per_device[GetBufferSliceForGivenDevice(
+                  has_leading_dimension, local_device,
+                  row_pointers_size_per_sc * num_sc_per_device)];
+          py::slice static_buffer_slice = GetBufferSliceForGivenDevice(
               has_leading_dimension, local_device, coo_buffer_size);
           auto embedding_id_buffer =
               embedding_ids_per_device[static_buffer_slice];
           auto sample_id_buffer = sample_ids_per_device[static_buffer_slice];
           auto gain_buffer = gains_per_device[static_buffer_slice];
           py::slice stats_slice =
-              GetSliceForDevice(/*has_leading_dimension=*/false, local_device,
-                                stats_size_per_device);
+              GetBufferSliceForGivenDevice(/*has_leading_dimension=*/false,
+                                           local_device, stats_size_per_device);
           auto max_ids_per_partition_per_sc_buffer =
               max_ids_per_partition_per_sc[stats_slice];
           auto max_unique_ids_per_partition_per_sc_buffer =
