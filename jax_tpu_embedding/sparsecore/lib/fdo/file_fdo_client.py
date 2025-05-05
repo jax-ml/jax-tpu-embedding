@@ -57,6 +57,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     self._base_dir = base_dir
     self._max_ids_per_partition = collections.defaultdict(np.ndarray)
     self._max_unique_ids_per_partition = collections.defaultdict(np.ndarray)
+    self._used_coo_buffer_size = collections.defaultdict(np.ndarray)
 
   def record(self, data: embedding.SparseDenseMatmulInputStats) -> None:
     """Records stats per process.
@@ -92,6 +93,14 @@ class NPZFileFDOClient(fdo_client.FDOClient):
       else:
         self._max_unique_ids_per_partition[table_name] = np.vstack(
             (self._max_unique_ids_per_partition[table_name], stats)
+        )
+    used_coo_buffer_size = data.used_coo_buffer_size
+    for table_name, stats in used_coo_buffer_size.items():
+      if table_name not in self._used_coo_buffer_size:
+        self._used_coo_buffer_size[table_name] = stats
+      else:
+        self._used_coo_buffer_size[table_name] = np.vstack(
+            (self._used_coo_buffer_size[table_name], stats)
         )
 
   # LINT.IfChange(generate_file_name)
@@ -206,3 +215,6 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     self._max_ids_per_partition = max_id_stats
     self._max_unique_ids_per_partition = max_unique_id_stats
     return (max_id_stats, max_unique_id_stats)
+
+  def get_coo_buffer_usage_size(self) -> Mapping[str, np.ndarray]:
+    return dict(self._used_coo_buffer_size)
