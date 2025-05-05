@@ -67,6 +67,9 @@ class SparseDenseMatmulInputStats:
 
   max_ids_per_partition: Mapping[str, np.ndarray]
   max_unique_ids_per_partition: Mapping[str, np.ndarray]
+  used_coo_buffer_size: Mapping[str, np.ndarray] = struct.field(
+      default_factory=dict
+  )
 
   @classmethod
   def from_dict(
@@ -75,6 +78,7 @@ class SparseDenseMatmulInputStats:
     return cls(
         max_ids_per_partition=stats["max_ids"],
         max_unique_ids_per_partition=stats["max_unique_ids"],
+        used_coo_buffer_size=stats["used_coo_buffer_size"],
     )
 
 
@@ -378,9 +382,10 @@ def preprocess_sparse_dense_matmul_input(
       )
   )
 
-  return SparseDenseMatmulInput(
-      *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_dict(stats)
+  preprocessed_inputs = SparseDenseMatmulInput(*preprocessed_inputs)
+  stats = SparseDenseMatmulInputStats.from_dict(stats)
+
+  return preprocessed_inputs, stats
 
 
 def _get_activation_for_feature(

@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -116,11 +117,12 @@ void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
 int MaxIdsPerPartitionForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
-void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
-                     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
-                     int batch_size_per_sc, int num_scs, int num_sc_per_device,
-                     int* row_pointers, int* embedding_ids, int* sample_ids,
-                     float* gains);
+void FillRowPointers(
+    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
+    int batch_size_per_sc, int num_scs, int num_sc_per_device,
+    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains,
+    std::optional<int*> device_used_coo_buffer_size = std::nullopt);
 
 }  // namespace jax_sc_embedding
 
