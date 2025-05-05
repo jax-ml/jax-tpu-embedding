@@ -352,7 +352,7 @@ class TableSpec:
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
   # The minimum size of the input buffer that the preprocessing should try to
-  # create.
+  # create (per device).
   suggested_coo_buffer_size: int | None = None
   # This points to the stacked table spec which this table belongs to.
   # If this is None, this table is the top-most table.
@@ -427,4 +427,6 @@ class StackedTableSpec:
   total_sample_count: int
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
+  # The minimum size of the input buffer that the preprocessing should try to
+  # create (per device).
   suggested_coo_buffer_size: int | None = None

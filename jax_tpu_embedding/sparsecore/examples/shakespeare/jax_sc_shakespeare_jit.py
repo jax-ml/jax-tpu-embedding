@@ -46,6 +46,7 @@ import optax
 import orbax.checkpoint as ocp
 import tree
 
+
 np.set_printoptions(threshold=np.inf)
 Nested = embedding.Nested
 
@@ -247,6 +248,120 @@ def _try_restore_latest_checkpoint(
   return latest_step, restored
 
 
+class FdoManager:
+  """A class to manage FDO updates."""
+
+  def __init__(self, fdo_dir: str, num_sc_per_device: int):
+    out_path = os.path.join(fdo_dir, 'fdo_dump')
+    os.makedirs(out_path, exist_ok=True)
+    logging.info('FDO storage path: %s', out_path)
+    self.fdo_client = file_fdo_client.NPZFileFDOClient(out_path)
+    self.num_sc_per_device = num_sc_per_device
+
+  def _update_feature_spec_limits(
+      self,
+      f: embedding_spec.FeatureSpec,
+      max_ids_per_partition: Mapping[str, np.ndarray],
+      max_unique_ids_per_partition: Mapping[str, np.ndarray],
+      max_required_buffer_size_per_sc: Mapping[str, np.ndarray],
+      current_buffer_size: Mapping[str, np.ndarray],
+  ) -> embedding_spec.FeatureSpec:
+    """Updates the feature spec limits based on the provided mappings.
+
+    Args:
+      f: The feature spec.
+      max_ids_per_partition: A mapping of table names to max_ids_per_partition.
+      max_unique_ids_per_partition: A mapping of table names to
+        max_unique_ids_per_partition.
+      max_required_buffer_size_per_sc: A mapping of table names to
+        max_required_buffer_size.
+      current_buffer_size: A mapping of table names to current buffer size.
+
+    Returns:
+      The updated feature spec.
+    """
+    stacked_table_spec = f.table_spec.stacked_table_spec
+    if stacked_table_spec is None:
+      raise ValueError(f'stacked_table_spec is None for feature {f.name}')
+    stack_name = stacked_table_spec.stack_name
+    logging.info('Maybe updating limits for table: %s', stack_name)
+    max_id = max_ids_per_partition.get(
+        stack_name,
+        stacked_table_spec.max_ids_per_partition,
+    )
+    max_unique_id = max_unique_ids_per_partition.get(
+        stack_name,
+        stacked_table_spec.max_unique_ids_per_partition,
+    )
+    max_required_buffer_size = max_required_buffer_size_per_sc.get(
+        stack_name,
+        stacked_table_spec.suggested_coo_buffer_size,
+    )
+    new_buffer_size_per_device = (
+        max_required_buffer_size * self.num_sc_per_device
+    )
+    # Just use the new values. For shakespeare, the new values are
+    # smaller than the old values and then they don't change at all
+    # This will trigger recompilation once after the 10th step (Log interval).
+    logging.info(
+        'Updating limits for table %s. Prev (max_id, max_unique_id,'
+        ' required_size): (%s, %s, %s) -> New: (%s, %s, %s)',
+        stack_name,
+        stacked_table_spec.max_ids_per_partition,
+        stacked_table_spec.max_unique_ids_per_partition,
+        current_buffer_size.get(stack_name),
+        np.max(max_id),
+        np.max(max_unique_id),
+        new_buffer_size_per_device,
+    )
+    new_stacked_spec = dataclasses.replace(
+        stacked_table_spec,
+        max_ids_per_partition=int(np.max(max_id)),
+        max_unique_ids_per_partition=int(np.max(max_unique_id)),
+        suggested_coo_buffer_size=int(new_buffer_size_per_device),
+    )
+    new_table_spec = dataclasses.replace(
+        f.table_spec, stacked_table_spec=new_stacked_spec
+    )
+    return dataclasses.replace(f, table_spec=new_table_spec)
+
+  def maybe_perform_fdo_update(
+      self,
+      feature_specs: embedding.Nested[embedding_spec.FeatureSpec],
+      preprocessed_inputs: embedding.SparseDenseMatmulInput,
+  ) -> embedding.Nested[embedding_spec.FeatureSpec]:
+    """Updates feature specs based on FDO data.
+
+    Args:
+      feature_specs: The current feature specs.
+      preprocessed_inputs: The current preprocessed inputs.
+
+    Returns:
+      The updated feature specs.
+    """
+    # NOTE: we do not write required buffer size to disk, so it is not part of
+    #   `load()` function yet.
+    max_ids_per_partition, max_unique_ids_per_partition = self.fdo_client.load()
+    max_required_buffer_size_per_sc = jax.tree.map(
+        jnp.max, self.fdo_client.get_required_buffer_size_per_sc()
+    )
+    current_buffer_size = jax.tree.map(
+        lambda x: jnp.shape(x)[0], preprocessed_inputs.lhs_embedding_ids
+    )
+
+    maybe_update_limits = partial(
+        self._update_feature_spec_limits,
+        max_ids_per_partition=max_ids_per_partition,
+        max_unique_ids_per_partition=max_unique_ids_per_partition,
+        max_required_buffer_size_per_sc=max_required_buffer_size_per_sc,
+        current_buffer_size=current_buffer_size,
+    )
+    return jax.tree_util.tree_map(
+        maybe_update_limits,
+        feature_specs,
+    )
+
+
 def run_model():
   """Runs the model including input processing and training."""
   local_devices = jax.local_devices()
@@ -358,10 +473,6 @@ def run_model():
       ),
       global_emb_sharding,
   )
-  out_path = os.path.join(_FDO_DIR.value, 'fdo_dump')
-  os.makedirs(out_path, exist_ok=True)
-  logging.info('FDO storage path: %s', out_path)
-  fdo_client = file_fdo_client.NPZFileFDOClient(out_path)
   @partial(
       utils.jit_with_dump,
       static_argnums=(0, 1, 2, 3),
@@ -462,6 +573,7 @@ def run_model():
   # Distributed training.
   parameter_overview.log_parameter_overview(train_state.params)
 
+  fdo_manager = FdoManager(_FDO_DIR.value, num_sc_per_device)
   train_metrics = None
   step = latest_step or -1
   for features, labels in zip(
@@ -515,7 +627,7 @@ def run_model():
             sharding_strategy='MOD',
         ),
     )
-    fdo_client.record(stats)
+    fdo_manager.fdo_client.record(stats)
 
     # ----------------------------------------------------------------------
     # Combined: SC forward, TC, SC backward
@@ -541,54 +653,13 @@ def run_model():
       m = train_metrics.compute()
       info('Step %s: Loss = %s', step, m['train_loss'])
       parameter_overview.log_parameter_overview(train_state.params)
-      fdo_client.publish()
+      fdo_manager.fdo_client.publish()
 
     if (step + 1) % _LOSS_RESET_FREQUENCY.value == 0:
       train_metrics = None
-      max_ids_per_partition, max_unique_ids_per_partition = fdo_client.load()
-
-      def update_ids(f, max_ids_per_partition, max_unique_ids_per_partition):
-        stack_name = f.table_spec.stacked_table_spec.stack_name
-        logging.info('Maybe updating limits for table: %s', stack_name)
-        max_id = max_ids_per_partition.get(
-            stack_name,
-            f.table_spec.stacked_table_spec.max_ids_per_partition,
-        )
-        max_unique_id = max_unique_ids_per_partition.get(
-            stack_name,
-            f.table_spec.stacked_table_spec.max_unique_ids_per_partition,
-        )
-        # Just use the new values. For shakespeare, the new values are
-        # smaller than the old values and then they donot change at all
-        # This will trigger recompilation once after the 10th step.
-        logging.info(
-            'Updating limits for table %s. Prev: (%s, %s) -> New: (%s, %s)',
-            stack_name,
-            f.table_spec.stacked_table_spec.max_ids_per_partition,
-            f.table_spec.stacked_table_spec.max_unique_ids_per_partition,
-            np.max(max_id),
-            np.max(max_unique_id),
-        )
-        new_stacked_spec = dataclasses.replace(
-            f.table_spec.stacked_table_spec,
-            max_ids_per_partition=int(np.max(max_id)),
-            max_unique_ids_per_partition=int(np.max(max_unique_id)),
-        )
-        new_table_spec = dataclasses.replace(
-            f.table_spec, stacked_table_spec=new_stacked_spec
-        )
-        return dataclasses.replace(f, table_spec=new_table_spec)
-
-      maybe_update_limits = partial(
-          update_ids,
-          max_ids_per_partition=max_ids_per_partition,
-          max_unique_ids_per_partition=max_unique_ids_per_partition,
+      feature_specs = fdo_manager.maybe_perform_fdo_update(
+          feature_specs, preprocessed_inputs
       )
-      feature_specs = jax.tree_util.tree_map(
-          maybe_update_limits,
-          feature_specs,
-      )
-
     if chkpt_mgr:
       chkpt_mgr.save(
           step,
@@ -620,7 +691,7 @@ def run_model():
           force=True,
       )
 
-    # close the checkpoint manager and wait for background save or deletion
+    # Close the checkpoint manager and wait for background save or deletion.
     chkpt_mgr.close()
 
 

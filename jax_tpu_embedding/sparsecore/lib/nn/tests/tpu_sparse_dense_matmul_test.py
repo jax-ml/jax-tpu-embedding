@@ -153,7 +153,7 @@ class ErrorHandlingTest(absltest.TestCase):
         sharding_strategy="MOD",
     )
     np.testing.assert_array_less(
-        64, stats.required_buffer_size["table"]
+        64, stats.required_buffer_size_per_sc["table"]
     )  # required buffer is bigger than actually suggested
     self.assertNotEmpty(preprocessed_inputs.lhs_row_pointers)
     self.assertNotEmpty(preprocessed_inputs.lhs_embedding_ids)

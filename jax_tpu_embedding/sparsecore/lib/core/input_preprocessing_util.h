@@ -145,7 +145,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     int num_sc_per_device, int total_num_coo_tensors, int max_ids_per_sc[],
     int max_unique_ids_per_sc[], int required_buffer_size_per_sc[]);
 
-int ComputeCooBufferSize(
+int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 

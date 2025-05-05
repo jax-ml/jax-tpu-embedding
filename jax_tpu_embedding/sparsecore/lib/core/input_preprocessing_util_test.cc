@@ -88,28 +88,28 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       /*feature_index=*/2, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/24));
-  EXPECT_EQ(
-      ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata),
-      16 * 4 * 4);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
+                                          /*num_scs_per_device=*/4,
+                                          stacked_table_metadata),
+            16 * 4 * 4);
   stacked_table_metadata[0].suggested_coo_buffer_size = 48;
-  EXPECT_EQ(
-      ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata),
-      64);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
+                                          /*num_scs_per_device=*/4,
+                                          stacked_table_metadata),
+            64);
 
   stacked_table_metadata[0].suggested_coo_buffer_size = 96;
-  EXPECT_EQ(
-      ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata),
-      96);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
+                                          /*num_scs_per_device=*/4,
+                                          stacked_table_metadata),
+            96);
 
   stacked_table_metadata[0].suggested_coo_buffer_size = 99999;
   // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
-  EXPECT_EQ(
-      ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata),
-      16 * 4 * 4);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
+                                          /*num_scs_per_device=*/4,
+                                          stacked_table_metadata),
+            16 * 4 * 4);
 }
 
 TEST(InputPreprocessingUtilTest, IncrementScId) {
