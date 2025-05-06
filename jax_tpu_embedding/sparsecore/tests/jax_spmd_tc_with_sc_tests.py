@@ -111,7 +111,6 @@ class ShakespeareTest(absltest.TestCase):
     super().setUp()
     self.devices = jax.devices()
     self.mesh = Mesh(np.array(self.devices), axis_names=['device'])
-    self.pd = P('device')
     self.num_sc_per_device = utils.num_sparsecores_per_device(self.devices[0])
 
     self.shakespeare_table_spec = embedding_spec.TableSpec(
@@ -216,8 +215,8 @@ class ShakespeareTest(absltest.TestCase):
     self.sparse_matmul = shard_map.shard_map(
         sharded_matmul,
         mesh=self.mesh,
-        in_specs=(self.pd,) + (P(self.pd, None),),
-        out_specs=self.pd,
+        in_specs=(P('device'), P('device', None)),
+        out_specs=P('device'),
         check_rep=False,
     )
 
@@ -229,8 +228,8 @@ class ShakespeareTest(absltest.TestCase):
     self.sparse_grad_update = shard_map.shard_map(
         sharded_grad_update,
         mesh=self.mesh,
-        in_specs=(self.pd, self.pd, P(self.pd, None)),
-        out_specs=P(self.pd, None),
+        in_specs=(P('device'), P('device'), P('device', None)),
+        out_specs=P('device', None),
         check_rep=False,
     )
 
