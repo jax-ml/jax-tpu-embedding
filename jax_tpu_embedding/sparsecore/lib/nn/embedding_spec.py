@@ -351,6 +351,9 @@ class TableSpec:
   combiner: str
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
+  # The minimum size of the input buffer that the preprocessing should try to
+  # create.
+  suggested_coo_buffer_size: int | None = None
   # This points to the stacked table spec which this table belongs to.
   # If this is None, this table is the top-most table.
   stacked_table_spec: StackedTableSpec | None = dataclasses.field(
@@ -424,3 +427,4 @@ class StackedTableSpec:
   total_sample_count: int
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
+  suggested_coo_buffer_size: int | None = None

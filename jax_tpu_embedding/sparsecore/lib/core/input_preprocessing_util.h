@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -84,14 +85,17 @@ inline unsigned int CeilOfRatio(unsigned int numerator,
 // python representation and the c++ representation.
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;
-  StackedTableMetadata(int feature_index, int max_ids_per_partition,
-                       int max_unique_ids_per_partition, int row_offset,
-                       int col_offset, int col_shift, int batch_size,
-                       RowCombiner row_combiner = RowCombiner::kSum,
-                       int max_col_id = std::numeric_limits<int>::max())
+  StackedTableMetadata(
+      int feature_index, int max_ids_per_partition,
+      int max_unique_ids_per_partition, int row_offset, int col_offset,
+      int col_shift, int batch_size,
+      std::optional<int> suggested_coo_buffer_size = std::nullopt,
+      RowCombiner row_combiner = RowCombiner::kSum,
+      int max_col_id = std::numeric_limits<int>::max())
       : feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
         max_unique_ids_per_partition(max_unique_ids_per_partition),
+        suggested_coo_buffer_size(suggested_coo_buffer_size),
         row_offset(row_offset),
         col_offset(col_offset),
         col_shift(col_shift),
@@ -104,6 +108,7 @@ struct StackedTableMetadata {
 
   int max_ids_per_partition;
   int max_unique_ids_per_partition;
+  std::optional<int> suggested_coo_buffer_size;
   int row_offset;
   int col_offset;
   int col_shift;
@@ -130,12 +135,16 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
 int ComputeCooBufferSize(
     int num_scs, int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    int static_buffer_size_multiplier);
+    int static_buffer_size_multiplier = 0,
+    std::optional<absl::string_view> stacked_table_name = std::nullopt);
 
 void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
                    int num_scs_per_device);
 
 int MaxIdsPerPartitionForStackedTables(
+    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+
+std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
 void FillRowPointersPerLocalDevice(

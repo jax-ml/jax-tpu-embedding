@@ -85,25 +85,25 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/24));
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/0),
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
       16 * 4 * 4);
+  stacked_table_metadata[0].suggested_coo_buffer_size = 48;
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/1),
-      jax_sc_embedding::RoundUpTo(8 + 16 + 24, 8 * 4));
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
+      64);
+
+  stacked_table_metadata[0].suggested_coo_buffer_size = 96;
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/2),
-      2 * (8 + 16 + 24));
-  // The theoretical max is 16 * 4 * 4 = 256. This is less than the multiplier
-  // times the batch size (200 x (8 + 16 + 24)).
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
+      96);
+
+  stacked_table_metadata[0].suggested_coo_buffer_size = 99999;
+  // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/200),
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
       16 * 4 * 4);
 }
 
