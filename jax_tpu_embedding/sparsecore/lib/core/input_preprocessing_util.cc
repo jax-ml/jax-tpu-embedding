@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -239,12 +240,12 @@ int MaxIdsPerPartitionForStackedTables(
   return max_ids_per_partition;
 }
 
-void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
-                     const int row_pointers_size_per_sc,
-                     const int coo_buffer_size_per_sc,
-                     const int batch_size_per_sc, const int num_scs,
-                     const int num_sc_per_device, int* row_pointers,
-                     int* embedding_ids, int* sample_ids, float* gains) {
+void FillRowPointers(
+    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
+    const int batch_size_per_sc, const int num_scs, const int num_sc_per_device,
+    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains,
+    std::optional<int*> device_used_coo_buffer_size /* = std::nullopt */) {
   tsl::profiler::TraceMe t("FillRowPointers");
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;
@@ -314,6 +315,10 @@ void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
       ++lhs_row_index;
     }
 
+    if (device_used_coo_buffer_size.has_value()) {
+      device_used_coo_buffer_size.value()[local_sc_id] =
+          padded_coo_tensor_index;
+    }
     while (padded_coo_tensor_index < coo_buffer_size_per_sc) {
       const int current_index = buffer_index_start + padded_coo_tensor_index;
       ++padded_coo_tensor_index;
