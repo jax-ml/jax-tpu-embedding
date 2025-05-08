@@ -13,16 +13,20 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
@@ -189,32 +193,44 @@ void SortAndGroupCooTensors(
   }
 }
 
+// Rounds up `value` to the next multiple of `multiple`.
+static inline int64_t RoundUpTo(int64_t value, int64_t multiple) {
+  return (value + multiple - 1) / multiple * multiple;
+}
+
 int ComputeCooBufferSize(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    const int static_buffer_size_multiplier) {
+    const int static_buffer_size_multiplier
+        ABSL_DEPRECATED("Use "
+                        "feature_spec.table_spec.stacked_table_spec.suggested_"
+                        "coo_buffer_size"),
+    std::optional<absl::string_view> stacked_table_name) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
+  const std::optional<int> suggested_coo_buffer_size =
+      SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
 
   // This 8-alignment only works for certain TPU models.
-  const int64_t max_ids_rounded_up = (max_ids_per_partition + 7) & -8;
+  const int64_t max_ids_rounded_up =
+      RoundUpTo(static_cast<int64_t>(max_ids_per_partition), 8);
 
-  // The theoretical max could easily be larger than INT_MAX. We need to make
-  // sure the result is within the range of int before using it.
-  const int64_t theoretical_max =
-      max_ids_rounded_up * num_scs_per_device * num_scs;
-  if (static_buffer_size_multiplier <= 0) {
-    CHECK(theoretical_max > 0 && theoretical_max < INT_MAX);
-    return static_cast<int>(theoretical_max);
-  }
   int64_t batch_size = 0;
   for (const auto& metadata : stacked_table_metadata) {
     batch_size += metadata.batch_size;
   }
-  // The batch_size could be very large and cause overflow. We need to make
+  if (static_buffer_size_multiplier > 0) {
+    LOG(WARNING) << "static_buffer_size_multiplier is deprecated, use "
+                 << (static_buffer_size_multiplier * batch_size)
+                 << " as the suggested_coo_buffer_size for table "
+                 << stacked_table_name.value_or("undefined-stacked-table-name");
+  }
+  const int64_t theoretical_max =
+      max_ids_rounded_up * num_scs_per_device * num_scs;
+  int64_t result = std::min<int64_t>(
+      suggested_coo_buffer_size.value_or(INT_MAX), theoretical_max);
+  // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
-  int64_t result =
-      std::min(static_buffer_size_multiplier * batch_size, theoretical_max);
   CHECK(result > 0 && result < INT_MAX);
   return static_cast<int>(result);
 }
@@ -239,12 +255,19 @@ int MaxIdsPerPartitionForStackedTables(
   return max_ids_per_partition;
 }
 
-void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
-                     const int row_pointers_size_per_sc,
-                     const int coo_buffer_size_per_sc,
-                     const int batch_size_per_sc, const int num_scs,
-                     const int num_sc_per_device, int* row_pointers,
-                     int* embedding_ids, int* sample_ids, float* gains) {
+std::optional<int> SuggestedCooBufferSizeForStackedTables(
+    const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+  std::optional<int> suggested_coo_buffer_size =
+      stacked_table_metadata[0].suggested_coo_buffer_size;
+  return suggested_coo_buffer_size;
+}
+
+void FillRowPointers(
+    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
+    const int batch_size_per_sc, const int num_scs, const int num_sc_per_device,
+    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains,
+    std::optional<int*> device_used_coo_buffer_size /* = std::nullopt */) {
   tsl::profiler::TraceMe t("FillRowPointers");
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;
@@ -314,6 +337,10 @@ void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
       ++lhs_row_index;
     }
 
+    if (device_used_coo_buffer_size.has_value()) {
+      device_used_coo_buffer_size.value()[local_sc_id] =
+          padded_coo_tensor_index;
+    }
     while (padded_coo_tensor_index < coo_buffer_size_per_sc) {
       const int current_index = buffer_index_start + padded_coo_tensor_index;
       ++padded_coo_tensor_index;

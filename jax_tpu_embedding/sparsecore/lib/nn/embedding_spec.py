@@ -424,3 +424,4 @@ class StackedTableSpec:
   total_sample_count: int
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
+  suggested_coo_buffer_size: int | None = None

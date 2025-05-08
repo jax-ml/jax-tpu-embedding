@@ -136,6 +136,19 @@ _FDO_DIR = flags.DEFINE_string(
     'If set, FDO dumps will be written to the directory.',
 )
 
+_MAX_BUFFER_USAGE_QUEUE_LENGTH = flags.DEFINE_integer(
+    'max_buffer_usage_queue_length',
+    300,
+    'The length of the queue for max buffer usage.',
+)
+
+_MAX_BUFFER_USAGE_DIFF = flags.DEFINE_float(
+    'max_buffer_usage_diff',
+    0.2,
+    'The maximum difference allowed between the current and target buffer'
+    ' usage.',
+)
+
 info = logging.info
 vlog1 = partial(logging.vlog, 1)
 
@@ -245,6 +258,67 @@ def _try_restore_latest_checkpoint(
   )
 
   return latest_step, restored
+
+
+def _update_static_buffer_multiplier(
+    fdo_client: file_fdo_client.NPZFileFDOClient,
+    preprocessed_inputs: embedding.SparseDenseMatmulInput,
+    static_buffer_multiplier: float,
+    max_buffer_usage_history: collections.deque[float],
+    step: int,
+) -> tuple[float, collections.deque[float]]:
+  """Updates the static buffer multiplier based on the current buffer usage.
+
+  Args:
+    fdo_client: The FDO client.
+    preprocessed_inputs: The preprocessed inputs.
+    static_buffer_multiplier: The current static buffer multiplier.
+    max_buffer_usage_history: The queue of max buffer usages.
+    step: The current step.
+
+  Returns:
+    The updated static buffer multiplier and the updated max buffer usage queue.
+  """
+  current_coo_buffer_shape = jax.tree.map(
+      jnp.shape, preprocessed_inputs.lhs_embedding_ids
+  )
+  max_coo_buffer_usage_fraction = jax.tree.map(
+      jnp.max, fdo_client.get_coo_buffer_usage_fraction()
+  )
+  logging.info(
+      'Step: %s, Current coo buffer shape: %s, recorded_buffer_usage: %s',
+      step,
+      current_coo_buffer_shape,
+      max_coo_buffer_usage_fraction,
+  )
+  # TODO: static_buffer_multiplier should probably be per table (here we
+  #   aggregate across tables)
+  max_coo_buffer_usage_fraction = jax.tree.reduce(
+      jnp.max, max_coo_buffer_usage_fraction
+  )
+  max_buffer_usage_history.append(max_coo_buffer_usage_fraction)
+  curr_max_buffer_usage = max(max_buffer_usage_history)
+  logging.info(
+      'step: %s, max_usage: %s, current_max_usage: %s, queue: %s',
+      step,
+      max_coo_buffer_usage_fraction,
+      curr_max_buffer_usage,
+      max_buffer_usage_history,
+  )
+  # NOTE: Since this value is rounded up to a multiple of 8*num_scs,
+  #   utilization may never reach 1.0, and if we try to force it to 1.0, we
+  #   may unnecessarily reduce buffer size too much and start dropping IDs.
+  if abs(curr_max_buffer_usage - 1.0) >= _MAX_BUFFER_USAGE_DIFF.value:
+    static_buffer_multiplier *= curr_max_buffer_usage
+    logging.info(
+        'Updated static buffer multiplier to: %s (step=%s)',
+        static_buffer_multiplier,
+        step,
+    )
+    max_buffer_usage_history.extend( # reset history
+        _MAX_BUFFER_USAGE_QUEUE_LENGTH.value * [1.0]
+    )
+  return static_buffer_multiplier, max_buffer_usage_history
 
 
 def run_model():
@@ -463,6 +537,14 @@ def run_model():
   parameter_overview.log_parameter_overview(train_state.params)
 
   train_metrics = None
+  static_buffer_multiplier = (
+      8  # starting value, still very large than actual usage
+  )
+  max_buffer_usage_history_length = _MAX_BUFFER_USAGE_QUEUE_LENGTH.value
+  max_buffer_usage_history = collections.deque(
+      max_buffer_usage_history_length * [1.0],
+      maxlen=max_buffer_usage_history_length,
+  )
   step = latest_step or -1
   for features, labels in zip(
       feature_batches[step + 1 :], label_batches[step + 1 :]
@@ -512,10 +594,22 @@ def run_model():
             local_device_count=global_mesh.local_mesh.size,
             global_device_count=global_mesh.size,
             num_sc_per_device=num_sc_per_device,
+            static_buffer_size_multiplier=static_buffer_multiplier,
+            allow_id_dropping=False,
             sharding_strategy='MOD',
         ),
     )
     fdo_client.record(stats)
+
+    static_buffer_multiplier, max_buffer_usage_history = (
+        _update_static_buffer_multiplier(
+            fdo_client,
+            preprocessed_inputs,
+            static_buffer_multiplier,
+            max_buffer_usage_history,
+            step,
+        )
+    )
 
     # ----------------------------------------------------------------------
     # Combined: SC forward, TC, SC backward
