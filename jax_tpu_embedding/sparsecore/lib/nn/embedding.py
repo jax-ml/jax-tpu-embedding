@@ -16,6 +16,7 @@
 import collections
 import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
+import warnings
 
 from absl import logging
 from flax import struct
@@ -67,6 +68,9 @@ class SparseDenseMatmulInputStats:
 
   max_ids_per_partition: Mapping[str, np.ndarray]
   max_unique_ids_per_partition: Mapping[str, np.ndarray]
+  used_coo_buffer_size: Mapping[str, np.ndarray] = struct.field(
+      default_factory=dict
+  )
 
   @classmethod
   def from_dict(
@@ -75,6 +79,7 @@ class SparseDenseMatmulInputStats:
     return cls(
         max_ids_per_partition=stats["max_ids"],
         max_unique_ids_per_partition=stats["max_unique_ids"],
+        used_coo_buffer_size=stats["used_coo_buffer_size"],
     )
 
 
@@ -255,6 +260,7 @@ def prepare_feature_specs_for_training(
         total_sample_count=total_sample_count,
         max_ids_per_partition=feature.table_spec.max_ids_per_partition,
         max_unique_ids_per_partition=feature.table_spec.max_unique_ids_per_partition,
+        suggested_coo_buffer_size=feature.table_spec.suggested_coo_buffer_size,
     )
     feature.id_transformation = embedding_spec.FeatureIdTransformation(
         row_offset=feature_to_row_offset.get(feature.name, 0),
@@ -363,6 +369,13 @@ def preprocess_sparse_dense_matmul_input(
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
 
+  if static_buffer_size_multiplier > 0:
+    warnings.warn(
+        "static_buffer_size_multiplier is deprecated. Use"
+        " feature_spec.table_spec.stacked_table_spec.suggested_coo_buffer_size"
+        " instead."
+    )
+
   *preprocessed_inputs, stats = (
       input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
           tree.flatten(features),
@@ -378,9 +391,10 @@ def preprocess_sparse_dense_matmul_input(
       )
   )
 
-  return SparseDenseMatmulInput(
-      *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_dict(stats)
+  preprocessed_inputs = SparseDenseMatmulInput(*preprocessed_inputs)
+  stats = SparseDenseMatmulInputStats.from_dict(stats)
+
+  return preprocessed_inputs, stats
 
 
 def _get_activation_for_feature(

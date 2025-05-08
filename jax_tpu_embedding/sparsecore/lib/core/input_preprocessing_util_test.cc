@@ -85,25 +85,25 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/24));
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/0),
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
       16 * 4 * 4);
+  stacked_table_metadata[0].suggested_coo_buffer_size = 48;
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/1),
-      (8 + 16 + 24));
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
+      48);
+
+  stacked_table_metadata[0].suggested_coo_buffer_size = 96;
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/2),
-      2 * (8 + 16 + 24));
-  // The theoretical max is 16 * 4 * 4 = 256. This is less than the multiplier
-  // times the batch size (200 x (8 + 16 + 24)).
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
+      96);
+
+  stacked_table_metadata[0].suggested_coo_buffer_size = 99999;
+  // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
-                           /*num_scs_per_device=*/4, stacked_table_metadata,
-                           /*static_buffer_size_multiplier=*/200),
+                           /*num_scs_per_device=*/4, stacked_table_metadata),
       16 * 4 * 4);
 }
 
@@ -520,10 +520,12 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
   std::vector<int> embedding_ids(32 * 4);
   std::vector<int> sample_ids(32 * 4);
   std::vector<float> gains(32 * 4);
+  std::vector<int> used_coo_buffer_size_per_sc(4);
   FillRowPointers(coo_tensors_by_id, /*row_pointers_size_per_sc=*/8,
                   /*coo_buffer_size_per_sc=*/32, /*batch_size_per_sc=*/2,
                   /*num_scs=*/4, /*num_sc_per_device=*/4, row_pointers.data(),
-                  embedding_ids.data(), sample_ids.data(), gains.data());
+                  embedding_ids.data(), sample_ids.data(), gains.data(),
+                  used_coo_buffer_size_per_sc.data());
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 26, 26, 26, 26, 2, 10, 18, 26, 26, 26, 26, 26,
@@ -587,6 +589,10 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
           IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(),
           IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
           IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan()));
+
+  std::array<int, 4> expected_usage_fraction_per_sc = {26, 26, 26, 26};
+  EXPECT_THAT(used_coo_buffer_size_per_sc,
+              ElementsAreArray(expected_usage_fraction_per_sc));
 }
 
 }  // namespace
