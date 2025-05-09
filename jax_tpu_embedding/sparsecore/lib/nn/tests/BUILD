@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("@rules_python//python:py_binary.bzl", "py_binary")
-load("//jax_tpu_embedding/sparsecore:tpu.bzl", "tpu_py_strict_test")
+load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 

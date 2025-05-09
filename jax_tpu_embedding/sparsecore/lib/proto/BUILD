@@ -11,16 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/protobuf:proto_library.bzl", "proto_library")
 load("//third_party/bazel/python:proto.bzl", "py_proto_library")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = [
-        "//jax_tpu_embedding/sparsecore:__subpackages__",
-        "//video/youtube/discovery/ml_infra/jax:__subpackages__",
-    ],
+    default_visibility = EXTERNAL_USERS,
 )
 
 proto_library(

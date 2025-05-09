@@ -11,13 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pybind11.bzl", "pybind_extension")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
+    default_visibility = CORE_USERS,
 )
 
 cc_library(

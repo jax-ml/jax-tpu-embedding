@@ -15,6 +15,14 @@
 
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
 
+# Visibility rules.
+EXTERNAL_USERS = ["//visibility:public"]
+
+# Use jax_tpu_embedding/sparsecore/lib/nn/embedding.py.
+CORE_USERS = [
+    "//jax_tpu_embedding/sparsecore:__subpackages__",
+]
+
 def tpu_py_strict_test(
         name,
         tags = None,
