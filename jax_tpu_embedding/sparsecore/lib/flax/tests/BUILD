@@ -16,7 +16,7 @@ load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
+    default_visibility = ["//visibility:private"],
 )
 
 tpu_py_strict_test(
