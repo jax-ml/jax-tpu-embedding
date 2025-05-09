@@ -20,6 +20,13 @@ package(
     default_visibility = ["//visibility:public"],
 )
 
+package_group(
+    name = "internal",
+    packages = [
+        "//jax_tpu_embedding/sparsecore/...",
+    ],
+)
+
 # Sets the version suffix for the package, e.g. dev20250321-805775f.
 string_flag(
     name = "version_suffix",

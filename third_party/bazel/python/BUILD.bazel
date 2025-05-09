@@ -17,7 +17,7 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
+    default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
 )
 
 bzl_library(
