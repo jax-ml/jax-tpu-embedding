@@ -241,7 +241,7 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
 // where we don't have any table stacking, the table itself is top level.
 //
 // IMPORTANT: Assumes that GIL is held.
-void PreprocessInputForStackedTable(
+void PreprocessInputForStackedTablePerLocalDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     py::list features, py::list feature_weights, const int local_device_id,
     const int local_device_count, const int coo_buffer_size,
@@ -250,7 +250,8 @@ void PreprocessInputForStackedTable(
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
     py::array_t<int> row_pointer_buffer, py::array_t<int> embedding_id_buffer,
     py::array_t<int> sample_id_buffer, py::array_t<float> gain_buffer,
-    py::array_t<int> max_ids_buffer, py::array_t<int> max_unique_ids_buffer) {
+    py::array_t<int> max_ids_buffer, py::array_t<int> max_unique_ids_buffer,
+    py::array_t<int> required_buffer_size_per_sc_buffer) {
   const int num_scs = num_sc_per_device * num_global_devices;
   int batch_size_for_device = 0;
   int total_num_coo_tensors = 0;
@@ -300,6 +301,8 @@ void PreprocessInputForStackedTable(
   auto* gains_data = gain_buffer.mutable_data();
   auto* total_max_ids_per_sc = max_ids_buffer.mutable_data();
   auto* total_max_unique_ids_per_sc = max_unique_ids_buffer.mutable_data();
+  auto* required_buffer_size_per_sc =
+      required_buffer_size_per_sc_buffer.mutable_data();
   // The remaining section does not require GIL.
   py::gil_scoped_release release;
 
@@ -317,12 +320,13 @@ void PreprocessInputForStackedTable(
     // Roughly estimate the number of COO tensors for each SC.
     coo_tensors_by_id[i].reserve(approximate_num_coo_tensors_per_sc);
   }
-  SortAndGroupCooTensors(
+  SortAndGroupCooTensorsPerLocalDevice(
       coo_tensors, batch_size_per_sc, num_scs, batch_size_for_device,
       stacked_table_metadata[0].max_ids_per_partition,
       stacked_table_metadata[0].max_unique_ids_per_partition,
       stacked_table_name, allow_id_dropping, coo_tensors_by_id,
-      total_max_ids_per_sc, total_max_unique_ids_per_sc);
+      total_max_ids_per_sc, total_max_unique_ids_per_sc,
+      required_buffer_size_per_sc);
   for (int i = 0; i < num_sc_per_device; ++i) {
     coo_tensors_by_id[i].emplace_back(batch_size_per_sc * (i + 1), 0, 0.0);
   }
@@ -331,10 +335,10 @@ void PreprocessInputForStackedTable(
   //
   {
     const int coo_buffer_size_per_sc = coo_buffer_size / num_sc_per_device;
-    FillRowPointers(coo_tensors_by_id, row_pointers_size_per_sc,
-                    coo_buffer_size_per_sc, batch_size_per_sc, num_scs,
-                    num_sc_per_device, row_pointer_data, embedding_ids_data,
-                    sample_ids_data, gains_data);
+    FillRowPointersPerLocalDevice(
+        coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
+        batch_size_per_sc, num_scs, num_sc_per_device, row_pointer_data,
+        embedding_ids_data, sample_ids_data, gains_data);
   }
 }
 
@@ -384,6 +388,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
   py::dict lhs_gains;
   py::dict max_ids_per_partition;
   py::dict max_unique_ids_per_partition;
+  py::dict required_buffer_sizes;
   const int num_scs = num_sc_per_device * global_device_count;
   const int row_pointers_size_per_sc = std::max(num_scs, 8);
 
@@ -446,6 +451,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
             py::array_t<int>(stats_shape);
         py::array_t<int> max_unique_ids_per_partition_per_sc =
             py::array_t<int>(stats_shape);
+        py::array_t<int> required_buffer_size_per_sc =
+            py::array_t<int>(stats_shape);
         for (int local_device = 0; local_device < local_device_count;
              ++local_device) {
           // Get the tuple outputs for the current split.
@@ -466,7 +473,9 @@ py::tuple PreprocessSparseDenseMatmulInput(
               max_ids_per_partition_per_sc[stats_slice];
           auto max_unique_ids_per_partition_per_sc_buffer =
               max_unique_ids_per_partition_per_sc[stats_slice];
-          PreprocessInputForStackedTable(
+          auto required_buffer_size_per_sc_buffer =
+              required_buffer_size_per_sc[stats_slice];
+          PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, features, feature_weights, local_device,
               local_device_count, coo_buffer_size, row_pointers_size_per_sc,
               global_device_count, num_sc_per_device, sharding_strategy,
@@ -477,7 +486,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
               py::cast<py::array_t<float>>(gain_buffer),
               py::cast<py::array_t<int>>(max_ids_per_partition_per_sc_buffer),
               py::cast<py::array_t<int>>(
-                  max_unique_ids_per_partition_per_sc_buffer));
+                  max_unique_ids_per_partition_per_sc_buffer),
+              py::cast<py::array_t<int>>(required_buffer_size_per_sc_buffer));
         }
         lhs_row_pointers[stacked_table_name.c_str()] =
             std::move(row_pointers_per_device);
@@ -490,6 +500,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
             std::move(max_ids_per_partition_per_sc);
         max_unique_ids_per_partition[stacked_table_name.c_str()] =
             std::move(max_unique_ids_per_partition_per_sc);
+        required_buffer_sizes[stacked_table_name.c_str()] =
+            std::move(required_buffer_size_per_sc);
         counter.DecrementCount();
       });
     }
@@ -498,6 +510,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
   py::dict stats;
   stats["max_ids"] = max_ids_per_partition;
   stats["max_unique_ids"] = max_unique_ids_per_partition;
+  stats["required_buffer_size"] = std::move(required_buffer_sizes);
+
   // GIL is held at this point.
   return py::make_tuple(lhs_row_pointers, lhs_embedding_ids, lhs_sample_ids,
                         lhs_gains, stats);
