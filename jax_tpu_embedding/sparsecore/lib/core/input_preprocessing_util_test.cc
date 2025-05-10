@@ -21,6 +21,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "hwy/base.h"  // from @highway
 
 namespace jax_sc_embedding {
 namespace {
@@ -92,7 +93,7 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       ComputeCooBufferSize(/*num_scs=*/4,
                            /*num_scs_per_device=*/4, stacked_table_metadata,
                            /*static_buffer_size_multiplier=*/1),
-      (8 + 16 + 24));
+      hwy::RoundUpTo(8 + 16 + 24, 8 * 4));
   EXPECT_EQ(
       ComputeCooBufferSize(/*num_scs=*/4,
                            /*num_scs_per_device=*/4, stacked_table_metadata,

@@ -197,7 +197,7 @@ int ComputeCooBufferSize(
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
 
   // This 8-alignment only works for certain TPU models.
-  const int64_t max_ids_rounded_up = (max_ids_per_partition + 7) & -8;
+  const int64_t max_ids_rounded_up = hwy::RoundUpTo(max_ids_per_partition, 8);
 
   // The theoretical max could easily be larger than INT_MAX. We need to make
   // sure the result is within the range of int before using it.
@@ -213,8 +213,9 @@ int ComputeCooBufferSize(
   }
   // The batch_size could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
-  int64_t result =
-      std::min(static_buffer_size_multiplier * batch_size, theoretical_max);
+  int64_t result = std::min<int64_t>(
+      hwy::RoundUpTo(static_buffer_size_multiplier * batch_size, 8 * num_scs),
+      theoretical_max);
   CHECK(result > 0 && result < INT_MAX);
   return static_cast<int>(result);
 }
