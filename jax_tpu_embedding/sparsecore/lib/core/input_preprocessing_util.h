@@ -37,7 +37,21 @@ RowCombiner GetRowCombiner(absl::string_view combiner);
 struct CooFormat {
   CooFormat(int row_id, int col_id, float gain)
       : row_id(row_id), col_id(col_id), gain(gain) {}
+  // Defines the Row ID as the sum of the Sample ID and the Row Offset,
+  // where Row Offset accounts for table stacking.
+  //
+  // - Row Offset: Specifies the offset of the sample within the feature input,
+  //               facilitating addressing in stacked tables.
   int row_id;
+  // Represents a packed structure where a single integer word encodes:
+  // Col ID (Embedding ID), Col Shift, and Col Offset.
+  //
+  // - Col Shift: Defines table rotation.
+  // - Col Offset: Specifies the embedding's offset in a stacked embedding
+  // table.
+  //
+  // This packing allows for efficient storage and extractions using bitwise
+  // masks (assuming `num_scs` is a power of 2).
   int col_id;
   float gain;
 
@@ -96,14 +110,14 @@ struct StackedTableMetadata {
   int max_col_id;
 };
 
-void SortAndGroupCooTensors(
+void SortAndGroupCooTensorsPerLocalDevice(
     absl::Span<const CooFormat> coo_tensors, int batch_size_per_sc,
-    int num_scs,  // Number of total sparsecores, across all devices.
+    int global_sc_count,
     int32_t batch_size_for_device,  // Batch size for the local device.
     int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
     absl::string_view stacked_table_name, bool allow_id_dropping,
-    std::vector<std::vector<CooFormat>>& coo_tensors_by_id,
-    int* aggregated_max_ids_per_sc, int* aggregated_max_unique_ids_per_sc);
+    std::vector<std::vector<CooFormat>>& coo_tensors_by_id, int* max_ids_per_sc,
+    int* max_unique_ids_per_sc);
 
 int ComputeCooBufferSize(
     int num_scs, int num_scs_per_device,
@@ -116,11 +130,11 @@ void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
 int MaxIdsPerPartitionForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
-void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
-                     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
-                     int batch_size_per_sc, int num_scs, int num_sc_per_device,
-                     int* row_pointers, int* embedding_ids, int* sample_ids,
-                     float* gains);
+void FillRowPointersPerLocalDevice(
+    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
+    int batch_size_per_sc, int num_scs, int num_sc_per_device,
+    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains);
 
 }  // namespace jax_sc_embedding
 

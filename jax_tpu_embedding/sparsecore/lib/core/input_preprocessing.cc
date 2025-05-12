@@ -241,7 +241,7 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
 // where we don't have any table stacking, the table itself is top level.
 //
 // IMPORTANT: Assumes that GIL is held.
-void PreprocessInputForStackedTable(
+void PreprocessInputForStackedTablePerLocalDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     py::list features, py::list feature_weights, const int local_device_id,
     const int local_device_count, const int coo_buffer_size,
@@ -317,7 +317,7 @@ void PreprocessInputForStackedTable(
     // Roughly estimate the number of COO tensors for each SC.
     coo_tensors_by_id[i].reserve(approximate_num_coo_tensors_per_sc);
   }
-  SortAndGroupCooTensors(
+  SortAndGroupCooTensorsPerLocalDevice(
       coo_tensors, batch_size_per_sc, num_scs, batch_size_for_device,
       stacked_table_metadata[0].max_ids_per_partition,
       stacked_table_metadata[0].max_unique_ids_per_partition,
@@ -331,10 +331,10 @@ void PreprocessInputForStackedTable(
   //
   {
     const int coo_buffer_size_per_sc = coo_buffer_size / num_sc_per_device;
-    FillRowPointers(coo_tensors_by_id, row_pointers_size_per_sc,
-                    coo_buffer_size_per_sc, batch_size_per_sc, num_scs,
-                    num_sc_per_device, row_pointer_data, embedding_ids_data,
-                    sample_ids_data, gains_data);
+    FillRowPointersPerLocalDevice(
+        coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
+        batch_size_per_sc, num_scs, num_sc_per_device, row_pointer_data,
+        embedding_ids_data, sample_ids_data, gains_data);
   }
 }
 
@@ -466,7 +466,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
               max_ids_per_partition_per_sc[stats_slice];
           auto max_unique_ids_per_partition_per_sc_buffer =
               max_unique_ids_per_partition_per_sc[stats_slice];
-          PreprocessInputForStackedTable(
+          PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, features, feature_weights, local_device,
               local_device_count, coo_buffer_size, row_pointers_size_per_sc,
               global_device_count, num_sc_per_device, sharding_strategy,

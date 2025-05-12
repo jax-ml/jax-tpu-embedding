@@ -56,34 +56,36 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
   return RowCombiner::kSum;
 }
 
-void SortAndGroupCooTensors(
+void SortAndGroupCooTensorsPerLocalDevice(
     absl::Span<const CooFormat> coo_tensors, const int batch_size_per_sc,
-    const int num_scs, const int32_t batch_size_for_device,
+    const int global_sc_count, const int32_t batch_size_for_device,
     const int32_t max_ids_per_partition,
     const int32_t max_unique_ids_per_partition,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
-    std::vector<std::vector<CooFormat>>& coo_tensors_by_id,
-    int* aggregated_max_ids_per_sc, int* aggregated_max_unique_ids_per_sc) {
+    std::vector<std::vector<CooFormat>>& coo_tensors_by_id, int* max_ids_per_sc,
+    int* max_unique_ids_per_sc) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
-  const int local_sc = batch_size_for_device / batch_size_per_sc;
+  const int local_sc_count = batch_size_for_device / batch_size_per_sc;
   uint32_t index = 0;
-  const int32_t num_scs_bit = std::log2(num_scs);
+  const int32_t num_scs_bit = std::log2(global_sc_count);
   const int total_coo_tensors = coo_tensors.size();
   // Initialize the aggregated max ids and unique ids per SC to 0.
-  for (int32_t i = 0; i < num_scs; ++i) {
-    aggregated_max_ids_per_sc[i] = 0;
-    aggregated_max_unique_ids_per_sc[i] = 0;
+  for (int32_t global_sc_id = 0; global_sc_id < global_sc_count;
+       ++global_sc_id) {
+    max_ids_per_sc[global_sc_id] = 0;
+    max_unique_ids_per_sc[global_sc_id] = 0;
   }
-  for (int32_t i = 0; i < local_sc; ++i) {
-    std::vector<int32_t> max_ids_per_sc(num_scs, 0);
-    std::vector<int32_t> max_unique_ids_per_sc(num_scs, 0);
+  // Loop over scs for this device.
+  for (int32_t local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
+    const int num_partitions = global_sc_count;
+    std::vector<int32_t> ids_per_sc_partition(num_partitions, 0);
+    std::vector<int32_t> unique_ids_per_sc_partition(num_partitions, 0);
     std::vector<uint64_t> keys;
     keys.reserve(batch_size_per_sc);
     // We take the advantage of the fact that the row_ids are already sorted
     // within each batch.
     while (index < total_coo_tensors &&
-           (unsigned)(coo_tensors[index].row_id - i * batch_size_per_sc) <
-               batch_size_per_sc) {
+           coo_tensors[index].row_id < (local_sc_id + 1) * batch_size_per_sc) {
       // The key here is [col_ids % num_scs, col_ids / num_scs, index].
       // Note that this assumes `num_scs` is a power of 2.
       keys.push_back(
@@ -100,59 +102,63 @@ void SortAndGroupCooTensors(
     for (const auto key : keys) {
       const uint32_t index = static_cast<uint32_t>(key);
       const CooFormat& coo_tensor = coo_tensors[index];
-      const uint32_t sc_id =
+      const uint32_t global_sc_id =
           num_scs_bit > 0 ? static_cast<uint32_t>(key >> (64 - num_scs_bit))
                           : 0;
       const uint32_t col_id = static_cast<uint32_t>(key >> 32);
       const uint32_t row_id = coo_tensor.row_id;
 
       if (col_id != prev_col_id) {
-        max_unique_ids_per_sc[sc_id] += 1;
+        unique_ids_per_sc_partition[global_sc_id] += 1;
       }
 
       // If the row ids and col ids are both same as the previous one,
       // dedup the id by adding the gains.
       if (col_id == prev_col_id && row_id == prev_row_id) {
-        coo_tensors_by_id[i].back().gain += coo_tensor.gain;
+        coo_tensors_by_id[local_sc_id].back().gain += coo_tensor.gain;
       } else {
-        max_ids_per_sc[sc_id] += 1;
+        ids_per_sc_partition[global_sc_id] += 1;
         // If either max_unique_ids_per_partition or max_ids_per_partition is
         // exceeded, we drop the id.
-        if (max_unique_ids_per_sc[sc_id] <= max_unique_ids_per_partition &&
-            max_ids_per_sc[sc_id] <= max_ids_per_partition) {
-          coo_tensors_by_id[i].push_back(coo_tensor);
+        if (unique_ids_per_sc_partition[global_sc_id] <=
+                max_unique_ids_per_partition &&
+            ids_per_sc_partition[global_sc_id] <= max_ids_per_partition) {
+          coo_tensors_by_id[local_sc_id].push_back(coo_tensor);
         }
       }
       prev_col_id = col_id;
       prev_row_id = row_id;
     }
 
-    for (int j = 0; j < num_scs; ++j) {
-      aggregated_max_ids_per_sc[j] =
-          std::max(aggregated_max_ids_per_sc[j], max_ids_per_sc[j]);
-      aggregated_max_unique_ids_per_sc[j] = std::max(
-          aggregated_max_unique_ids_per_sc[j], max_unique_ids_per_sc[j]);
+    // Update global max using this device's values.
+    for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
+      max_ids_per_sc[global_sc_id] = std::max(
+          max_ids_per_sc[global_sc_id], ids_per_sc_partition[global_sc_id]);
+      max_unique_ids_per_sc[global_sc_id] =
+          std::max(max_unique_ids_per_sc[global_sc_id],
+                   unique_ids_per_sc_partition[global_sc_id]);
     }
     if (VLOG_IS_ON(2)) {
       LOG(INFO) << "Observed ids per partition/sparsecore"
                 << " for table " << stacked_table_name << ": ["
-                << absl::StrJoin(max_ids_per_sc, ", ") << "]";
+                << absl::StrJoin(ids_per_sc_partition, ", ") << "]";
 
       LOG(INFO) << "Observed unique ids per partition/sparsecore"
                 << " for table " << stacked_table_name << ": ["
-                << absl::StrJoin(max_unique_ids_per_sc, ", ") << "]";
+                << absl::StrJoin(unique_ids_per_sc_partition, ", ") << "]";
 
       LOG(INFO) << "Total number of ids for table " << stacked_table_name
-                << " on Sparsecore" << i << ": " << keys.size()
+                << " on Sparsecore" << local_sc_id << ": " << keys.size()
                 << ", after deduplication: "
-                << std::reduce(max_ids_per_sc.begin(), max_ids_per_sc.end())
-                << ", after drop id: " << coo_tensors_by_id[i].size();
+                << std::reduce(ids_per_sc_partition.begin(),
+                               ids_per_sc_partition.end())
+                << ", after drop id: " << coo_tensors_by_id[local_sc_id].size();
     }
 
     const int32_t observed_max_ids_per_partition =
-        *absl::c_max_element(max_ids_per_sc);
+        *absl::c_max_element(ids_per_sc_partition);
     const int32_t observed_max_unique_ids_per_partition =
-        *absl::c_max_element(max_unique_ids_per_sc);
+        *absl::c_max_element(unique_ids_per_sc_partition);
     // If id dropping is allowed, we log a warning if the observed max ids per
     // partition is greater than the set max ids per partition.
     if (observed_max_ids_per_partition > max_ids_per_partition) {
@@ -240,12 +246,11 @@ int MaxIdsPerPartitionForStackedTables(
   return max_ids_per_partition;
 }
 
-void FillRowPointers(absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
-                     const int row_pointers_size_per_sc,
-                     const int coo_buffer_size_per_sc,
-                     const int batch_size_per_sc, const int num_scs,
-                     const int num_sc_per_device, int* row_pointers,
-                     int* embedding_ids, int* sample_ids, float* gains) {
+void FillRowPointersPerLocalDevice(
+    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
+    const int batch_size_per_sc, const int num_scs, const int num_sc_per_device,
+    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains) {
   tsl::profiler::TraceMe t("FillRowPointers");
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;
