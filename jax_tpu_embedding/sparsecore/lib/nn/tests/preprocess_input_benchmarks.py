@@ -25,6 +25,7 @@ bazel run -c opt --dynamic_mode=off --copt=-gmlt :preprocess_input_benchmarks --
 """
 
 import google_benchmark
+from jax_tpu_embedding.sparsecore.lib.core import fdo_types_cc  # pylint: disable=unused-import # used for type conversion of stat data type
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_cc
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
@@ -107,6 +108,7 @@ def generate_samples_for_feature_spec(feature_specs, num_samples, ragged=False):
       all_features.append(np.array(features, dtype=object))
       all_feature_weights.append(np.array(feature_weights, dtype=object))
   return all_features, all_feature_weights
+
 
 # Total local batch size that is measured is 16000x100 = 1,600,000.
 _GLOBAL_SPECS = generate_feature_specs(num_features=100)

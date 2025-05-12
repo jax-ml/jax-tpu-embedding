@@ -105,8 +105,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     const int32_t max_unique_ids_per_partition,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
     const int num_sc_per_device, const int total_num_coo_tensors,
-    int max_ids_per_sc[], int max_unique_ids_per_sc[],
-    int required_buffer_size_per_sc[]) {
+    absl::Span<int> max_ids_per_sc, absl::Span<int> max_unique_ids_per_sc,
+    absl::Span<int> required_buffer_size_per_sc) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const int local_sc_count = batch_size_for_device / batch_size_per_sc;
   std::vector<std::vector<CooFormat>> coo_tensors_by_id;

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
-load("//third_party/bazel/python:pybind11.bzl", "pybind_extension")
+load("//third_party/bazel/python:pybind11.bzl", "pybind_extension", "pybind_library")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
@@ -77,6 +77,7 @@ pybind_extension(
     name = "input_preprocessing_cc",
     srcs = ["input_preprocessing.cc"],
     deps = [
+        ":fdo_types",
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -86,6 +87,24 @@ pybind_extension(
         "@com_google_absl//absl/types:span",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+pybind_library(
+    name = "fdo_types",
+    hdrs = ["fdo_types.h"],
+    deps = ["@com_google_absl//absl/container:flat_hash_map"],
+)
+
+pybind_extension(
+    name = "fdo_types_cc",
+    srcs = [
+        "fdo_types.cc",
+        "fdo_types.h",
+    ],
+    deps = [
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@pybind11_abseil//:absl_casters",
     ],
 )
 
@@ -160,12 +179,17 @@ pytype_strict_library(
     srcs = ["__init__.py"],
     # C++ dependencies must go in "data".
     data = [
+        ":fdo_types",  # buildcleaner: keep
         ":input_preprocessing_threads",  # buildcleaner: keep
         ":input_preprocessing_util",  # buildcleaner: keep
     ],
-    visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
+    visibility = [
+        "//jax_tpu_embedding/sparsecore/lib:__pkg__",
+        "//jax_tpu_embedding/sparsecore/lib/extensions:__pkg__",
+    ],
     deps = [
         ":constants",  # buildcleaner: keep
+        ":fdo_types_cc",  # buildcleaner: keep
         ":input_preprocessing",  # buildcleaner: keep
         ":input_preprocessing_cc",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
