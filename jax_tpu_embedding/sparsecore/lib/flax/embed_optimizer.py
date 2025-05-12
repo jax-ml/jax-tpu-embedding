@@ -13,7 +13,7 @@
 # limitations under the License.
 """Optimizer for models with SparseCore modules."""
 
-import logging
+from typing import Any
 
 import jax
 from jax import numpy as jnp
@@ -21,12 +21,26 @@ from jax_tpu_embedding.sparsecore.lib.flax import embed
 import optax
 
 
-def _is_emb_path(path):
-  return len(path) > 2 and path[2].key == embed.EMBEDDING_PARAM_NAME
+def _is_emb_path(path: list[Any]) -> bool:
+  return any(
+      isinstance(level, jax.tree_util.DictKey)
+      and level.key == embed.EMBEDDING_PARAM_NAME
+      for level in path
+  )
 
 
-def create_optimizer_for_sc_model(params, tc_optimizier):
-  """Create the optimizer for the model."""
+def create_optimizer_for_sc_model(
+    params: Any, tc_optimizer: optax.GradientTransformation
+) -> optax.GradientTransformation:
+  """Create the optimizer for the model.
+
+  Args:
+    params: A PyTree of model parameters.
+    tc_optimizer: The optimizer for the TensorCore part of the model.
+
+  Returns:
+    An optax.GradientTransformation that applies updates to the model.
+  """
   embedding_params_tree = jax.tree_util.tree_map_with_path(
       lambda path, v: (
           'tc_optimizer' if not _is_emb_path(path) else 'sc_optimizer'
@@ -34,12 +48,10 @@ def create_optimizer_for_sc_model(params, tc_optimizier):
       params,
   )
 
-  logging.info('embedding_params_tree is %s', embedding_params_tree)
-
   # Create optimizer for the model.
   return optax.multi_transform(
       {
-          'tc_optimizer': tc_optimizier,
+          'tc_optimizer': tc_optimizer,
           'sc_optimizer': _get_optimizer_for_optax(),
       },
       embedding_params_tree,
