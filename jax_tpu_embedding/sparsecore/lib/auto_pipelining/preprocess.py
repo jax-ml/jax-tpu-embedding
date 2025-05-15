@@ -56,12 +56,12 @@ def _inline_custom_vjp(jaxpr: jex.core.Jaxpr) -> jex.core.Jaxpr:
   """Inlines embedding lookup inside custom_vjp_call_jaxpr."""
   eqns = []
   for eqn in jaxpr.eqns:
-    if eqn.primitive.name == 'custom_vjp_call_jaxpr' and _has_embedding_lookup(
+    if eqn.primitive.name == 'custom_vjp_call' and _has_embedding_lookup(
         eqn
     ):
       eqns.extend(
           utils.inline_jaxpr(
-              eqn.params['fun_jaxpr'].jaxpr, eqn.invars, eqn.outvars
+              eqn.params['call_jaxpr'].jaxpr, eqn.invars, eqn.outvars
           )
       )
     else:
