@@ -419,6 +419,8 @@ def auto_stack_tables(
     rotation: int | None = None,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
+    *,
+    activation_mem_bytes_limit=2024 * 1024,
 ) -> None:
   """Creates new feature specs based on auto stacking logic.
 
@@ -438,6 +440,8 @@ def auto_stack_tables(
       stack.
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
+    activation_mem_bytes_limit: If the activation memory
+      usage is larger than this limit, the table will not be stacked.
   """
   flatten_features = tree.flatten(features)
   flatten_tables = {
@@ -447,8 +451,72 @@ def auto_stack_tables(
   groups = _get_stack_table_names(
       flatten_tables, num_sc=num_sc_per_device * global_device_count
   )
-  updated_features = features
+
+  # We do not need the vocab size information for auto stacking.
+  num_sc = global_device_count * num_sc_per_device
+  table_to_padded_dim, _ = round_up_dim_and_vocab_size(
+      flatten_tables, num_sc
+  )
+
+  # Calculate sample_count per sparsecore.
+  table_to_sample_count = {}
+  for feature in flatten_features:
+    if feature.table_spec.name in table_to_sample_count:
+      sample_count = table_to_sample_count[feature.table_spec.name]
+    else:
+      sample_count = 0
+    table_to_sample_count[feature.table_spec.name] = sample_count + (
+        int(np.prod(feature.output_shape[:-1]) // num_sc)
+    )
+
+  table_to_activation_mem_bytes = {}
+  validated_groups = []
   for group in groups:
+    # A list of groups that are split from the current group.
+    split_groups = []
+    # Iterate through all tables in the current group.
+    for table_name in group:
+      # Calculate and register the activation memory usage of this table.
+      table_to_activation_mem_bytes[table_name] = (
+          table_to_padded_dim[table_name]
+          * table_to_sample_count[table_name]
+          * 4  # 4 bytes per f32
+      )
+      found = False
+      # Iterate through all candidate groups to check if the table can be
+      # joined.
+      for candidate_group in split_groups:
+        accumuated_activation_mem_bytes = 0
+        # Sum up the activation memory usage of all tables in this candidate
+        # group. We re-calculate because the tables could have been added into
+        # the group in the previous iteration.
+        for candidate_table in candidate_group:
+          accumuated_activation_mem_bytes += table_to_activation_mem_bytes[
+              candidate_table
+          ]
+        if (
+            accumuated_activation_mem_bytes
+            + table_to_activation_mem_bytes[table_name]
+        ) <= activation_mem_bytes_limit:
+          # Append to this candidate group.
+          candidate_group.append(table_name)
+          found = True
+          break
+      if not found:
+        # If the table cannot be joined with any existing group, create a new
+        # group with only this table.
+        split_groups.append([table_name])
+        if split_groups:
+          logging.info(
+              "Table %s cannot be joined with any existing group, create a new"
+              " one.",
+              table_name,
+          )
+    # Add into the validated groups.
+    validated_groups.extend(split_groups)
+
+  updated_features = features
+  for group in validated_groups:
     logging.info("Stack group with tables: %s", group)
     stack_tables(
         features=updated_features,
