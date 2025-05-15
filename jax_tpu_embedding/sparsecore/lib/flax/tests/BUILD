@@ -71,7 +71,6 @@ tpu_py_strict_test(
     srcs = ["embed_optimizer_test.py"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax:embed_optimizer",
-        "//testing/pybase",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("flax:core"),
