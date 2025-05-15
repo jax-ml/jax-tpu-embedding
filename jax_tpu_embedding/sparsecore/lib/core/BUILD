@@ -70,7 +70,6 @@ cc_test(
     deps = [
         ":input_preprocessing_util",
         "@com_google_googletest//:gtest_main",
-        "@highway//:abort_header_only",
     ],
 )
 

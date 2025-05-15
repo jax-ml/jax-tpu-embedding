@@ -65,6 +65,12 @@ struct CooFormat {
 int GetColId(int col_id, int col_shift, int col_offset, int num_scs_mod,
              int num_scs_mod_inv);
 
+// Rounds up the given value to the next multiple of the given alignment.
+template <typename T>
+static inline T RoundUpTo(T value, T align) {
+  return (value + align - 1) / align * align;
+};
+
 inline unsigned int CeilOfRatio(unsigned int numerator,
                                 unsigned int denominator) {
   // Note: Unsigned values allow better compiler optimizations.  This precise

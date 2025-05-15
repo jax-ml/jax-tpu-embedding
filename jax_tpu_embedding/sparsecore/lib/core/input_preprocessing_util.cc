@@ -29,7 +29,6 @@
 #include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
-#include "hwy/base.h"  // from @highway
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
 #include "tsl/profiler/lib/traceme.h"
@@ -195,6 +194,8 @@ void SortAndGroupCooTensorsPerLocalDevice(
   }
 }
 
+
+
 int ComputeCooBufferSize(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
@@ -203,7 +204,7 @@ int ComputeCooBufferSize(
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
 
   // This 8-alignment only works for certain TPU models.
-  const int64_t max_ids_rounded_up = hwy::RoundUpTo(max_ids_per_partition, 8);
+  const int64_t max_ids_rounded_up = RoundUpTo(max_ids_per_partition, 8);
 
   // The theoretical max could easily be larger than INT_MAX. We need to make
   // sure the result is within the range of int before using it.
