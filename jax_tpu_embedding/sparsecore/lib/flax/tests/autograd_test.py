@@ -140,7 +140,7 @@ class ShakespeareTest(absltest.TestCase):
           feature_structure, [feature_weights]
       )
 
-      return embed.EmbeddingLookups(
+      return embed.EmbeddingLookupInput(
           *embedding.preprocess_sparse_dense_matmul_input(
               features,
               feature_weights,
@@ -174,7 +174,7 @@ class ShakespeareTest(absltest.TestCase):
     )
     def train_step(
         params: Any,
-        embedding_lookups: embed.EmbeddingLookups,
+        embedding_lookup_inputs: embed.EmbeddingLookupInput,
         labels: jax.Array,
         opt_state,
     ):
@@ -191,7 +191,7 @@ class ShakespeareTest(absltest.TestCase):
       )
 
       (loss_val, unused_logits), grads = train_step_fn(
-          params, embedding_lookups, labels
+          params, embedding_lookup_inputs, labels
       )
 
       updates, opt_state = tx.update(grads, opt_state)

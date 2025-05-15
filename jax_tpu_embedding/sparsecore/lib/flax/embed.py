@@ -32,7 +32,7 @@ LogicalNames = typing.LogicalNames
 P = jax.sharding.PartitionSpec
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
-EmbeddingLookups = embedding.SparseDenseMatmulInput
+EmbeddingLookupInput = embedding.SparseDenseMatmulInput
 
 EMBEDDING_PARAM_NAME = 'sc_embedding_variables'
 
@@ -124,7 +124,7 @@ class SparseCoreEmbed(nn.Module):
       self,
       features: Nested[np.ndarray],
       features_weights: Nested[np.ndarray],
-  ) -> EmbeddingLookups:
+  ) -> EmbeddingLookupInput:
     """Preprocesses the input for sparse dense matmul.
 
     This method do not need to be invoked with module.apply().
@@ -150,36 +150,40 @@ class SparseCoreEmbed(nn.Module):
         sharding_strategy=self.table_sharding_strategy,
     )[0]
 
-  def __call__(self, embedding_lookups: EmbeddingLookups) -> Nested[jax.Array]:
+  def __call__(
+      self, embedding_lookup_inputs: EmbeddingLookupInput
+  ) -> Nested[jax.Array]:
     """Computes the embedding activations.
 
     Args:
-      embedding_lookups: The preprocessed data for embedding lookup.
+      embedding_lookup_inputs: The preprocessed data for embedding lookup.
 
     Returns:
       The activations structure with the same structure as feature_specs.
     """
     return _emb_lookup(
         self,
-        embedding_lookups,
+        embedding_lookup_inputs,
         self.embedding_table,
     )
 
   def apply_gradient(
-      self, gradients: Nested[jax.Array], embedding_lookups: EmbeddingLookups
+      self,
+      gradients: Nested[jax.Array],
+      embedding_lookup_inputs: EmbeddingLookupInput,
   ) -> Mapping[str, Mapping[str, jax.Array]]:
     """Apply the gradients to the embedding variables.
 
     Args:
       gradients: The activation gradients.
-      embedding_lookups: The preprocessed data for embedding lookup.
+      embedding_lookup_inputs: The preprocessed data for embedding lookup.
 
     Returns:
       The updated activation embedding tables.
     """
     _, embed_table = _emb_lookup_bwd(
         self,
-        (embedding_lookups, self.embedding_table),
+        (embedding_lookup_inputs, self.embedding_table),
         gradients,
     )
     path = '/'.join(self.path + (EMBEDDING_PARAM_NAME,))
@@ -192,7 +196,7 @@ class SparseCoreEmbed(nn.Module):
 @functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
 def _emb_lookup(
     embedding_layer: SparseCoreEmbed,
-    embedding_lookups: EmbeddingLookups,
+    embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
   pt = embedding_layer.embedding_table_partition
@@ -209,22 +213,22 @@ def _emb_lookup(
       out_specs=pd,
       check_rep=False,
   )(
-      embedding_lookups,
+      embedding_lookup_inputs,
       emb_table,
   )
 
 
 def _emb_lookup_fwd(
     embedding_layer: SparseCoreEmbed,
-    embedding_lookups: EmbeddingLookups,
+    embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
   return _emb_lookup(
       embedding_layer,
-      embedding_lookups,
+      embedding_lookup_inputs,
       emb_table,
   ), (
-      embedding_lookups,
+      embedding_lookup_inputs,
       emb_table,
   )
 

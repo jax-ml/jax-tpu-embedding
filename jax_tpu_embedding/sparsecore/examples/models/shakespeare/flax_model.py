@@ -42,12 +42,12 @@ class Model(nn.Module):
   sharding_axis: str = 'sparsecore_sharding'
 
   @nn.compact
-  def __call__(self, embedding_lookups: embed.EmbeddingLookups):
+  def __call__(self, embedding_lookup_inputs: embed.EmbeddingLookupInput):
     x = embed.SparseCoreEmbed(
         feature_specs=self.feature_specs,
         mesh=self.mesh,
         sharding_axis=self.sharding_axis,
-    )(embedding_lookups)
+    )(embedding_lookup_inputs)
 
     # Unpack the activations.
     x = x[self.feature_name]
