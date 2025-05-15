@@ -174,6 +174,86 @@ class TableStackingTest(parameterized.TestCase):
     )
 
   @parameterized.parameters(
+      dict(mem_limit=128, expected_num_stacked_tables=2),
+      dict(mem_limit=1024, expected_num_stacked_tables=1),
+  )
+  def test_auto_stack_two_tables_with_mem_limit(
+      self, mem_limit: int, expected_num_stacked_tables: int
+  ):
+    device_count = 2
+
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=64,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_b',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_a,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_a.embedding_dim,
+            ),
+            name='feature_spec_a',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_b.embedding_dim,
+            ),
+            name='feature_spec_b',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_b.embedding_dim,
+            ),
+            name='feature_spec_c',
+        ),
+    ]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=device_count,
+        num_sc_per_device=self.num_sc_per_device,
+        activation_mem_bytes_limit=mem_limit
+    )
+    feature_a, feature_b, _ = feature_specs
+    if expected_num_stacked_tables == 1:
+      self.assertEqual(
+          feature_b.table_spec.setting_in_stack.stack_name, 'table_a_table_b'
+      )
+      self.assertEqual(
+          feature_a.table_spec.setting_in_stack.stack_name, 'table_a_table_b'
+      )
+    else:
+      self.assertEqual(
+          feature_b.table_spec.setting_in_stack.stack_name, 'table_b'
+      )
+      self.assertEqual(
+          feature_a.table_spec.setting_in_stack.stack_name, 'table_a'
+      )
+
+  @parameterized.parameters(
       dict(device_count=1),
       dict(device_count=2),
       dict(device_count=4),
