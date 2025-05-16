@@ -19,10 +19,12 @@
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
@@ -224,30 +226,42 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
 int ComputeCooBufferSize(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    const int static_buffer_size_multiplier) {
+    const int static_buffer_size_multiplier
+        ABSL_DEPRECATED("Use "
+                        "feature_spec.table_spec.stacked_table_spec.suggested_"
+                        "coo_buffer_size"),
+    std::optional<absl::string_view> stacked_table_name) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
+  const std::optional<int> suggested_coo_buffer_size =
+      SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
 
   // This 8-alignment only works for certain TPU models.
-  const int64_t max_ids_rounded_up = RoundUpTo(max_ids_per_partition, 8);
+  const int64_t max_ids_rounded_up =
+      jax_sc_embedding::RoundUpTo<int64_t>(max_ids_per_partition, 8);
 
-  // The theoretical max could easily be larger than INT_MAX. We need to make
-  // sure the result is within the range of int before using it.
-  const int64_t theoretical_max =
-      max_ids_rounded_up * num_scs_per_device * num_scs;
-  if (static_buffer_size_multiplier <= 0) {
-    CHECK(theoretical_max > 0 && theoretical_max < INT_MAX);
-    return static_cast<int>(theoretical_max);
-  }
   int64_t batch_size = 0;
   for (const auto& metadata : stacked_table_metadata) {
     batch_size += metadata.batch_size;
   }
-  // The batch_size could be very large and cause overflow. We need to make
+  int64_t result =
+      max_ids_rounded_up * num_scs_per_device * num_scs;  // theoretical max
+  if (static_buffer_size_multiplier > 0) {
+    LOG(WARNING) << "static_buffer_size_multiplier is deprecated, use "
+                 << (static_buffer_size_multiplier * batch_size)
+                 << " as the suggested_coo_buffer_size for table "
+                 << stacked_table_name.value_or("undefined-stacked-table-name");
+    result = std::min(
+        result,
+        RoundUpTo<int64_t>(static_buffer_size_multiplier * batch_size, 8));
+  }
+  if (suggested_coo_buffer_size.has_value()) {
+    result = std::min<int64_t>(
+        result, RoundUpTo<int64_t>(suggested_coo_buffer_size.value(),
+                                   8 * num_scs_per_device));
+  }
+  // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
-  int64_t result = std::min<int64_t>(
-      hwy::RoundUpTo(static_buffer_size_multiplier * batch_size, 8 * num_scs),
-      theoretical_max);
   CHECK(result > 0 && result < INT_MAX);
   return static_cast<int>(result);
 }
@@ -270,6 +284,13 @@ int MaxIdsPerPartitionForStackedTables(
   int max_ids_per_partition = stacked_table_metadata[0].max_ids_per_partition;
   DCHECK_GT(max_ids_per_partition, 0);
   return max_ids_per_partition;
+}
+
+std::optional<int> SuggestedCooBufferSizeForStackedTables(
+    const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+  std::optional<int> suggested_coo_buffer_size =
+      stacked_table_metadata[0].suggested_coo_buffer_size;
+  return suggested_coo_buffer_size;
 }
 
 void FillRowPointersPerLocalDevice(

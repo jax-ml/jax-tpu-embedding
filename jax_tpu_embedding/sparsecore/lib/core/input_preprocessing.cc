@@ -13,11 +13,13 @@
 // limitations under the License.
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -213,6 +215,12 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
         py::cast<int>(stacked_table_spec.attr("max_ids_per_partition"));
     const int max_unique_ids_per_partition =
         py::cast<int>(stacked_table_spec.attr("max_unique_ids_per_partition"));
+    std::optional<int> suggested_coo_buffer_size;
+    py::object suggested_coo_buffer_size_attr =
+        stacked_table_spec.attr("suggested_coo_buffer_size");
+    if (!suggested_coo_buffer_size_attr.is_none()){
+      suggested_coo_buffer_size = py::cast<int>(suggested_coo_buffer_size_attr);
+    }
     const std::string row_combiner =
         py::cast<std::string>(stacked_table_spec.attr("combiner"));
     if (!feature_transformation.is_none()) {
@@ -222,8 +230,9 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
     }
     stacked_table_metadata[stacked_table_name].emplace_back(
         i, max_ids_per_partition, max_unique_ids_per_partition, row_offset,
-        col_offset, col_shift,
-        /*batch_size=*/feature.shape(0), GetRowCombiner(row_combiner));
+        col_offset, col_shift, /*batch_size=*/feature.shape(0),
+        suggested_coo_buffer_size, GetRowCombiner(row_combiner),
+        /*max_col_id=*/std::numeric_limits<int>::max());
   }
   // Sort the stacked tables by row_offset.
   for (auto& [_, t] : stacked_table_metadata) {
@@ -363,7 +372,11 @@ py::tuple PreprocessSparseDenseMatmulInput(
     py::list features, py::list feature_weights, py::list feature_specs,
     const int local_device_count, const int global_device_count,
     const int num_sc_per_device, const int sharding_strategy,
-    const bool has_leading_dimension, const int static_buffer_size_multiplier,
+    const bool has_leading_dimension,
+    const int static_buffer_size_multiplier
+        ABSL_DEPRECATED("Use "
+                        "feature_spec.table_spec.stacked_table_spec.suggested_"
+                        "coo_buffer_size"),
     const bool allow_id_dropping) {
   tsl::profiler::TraceMe t([=] {
     return absl::StrCat("input_preprocessing_cc-", local_device_count, "/",
@@ -418,7 +431,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
         // Allocate the static buffers.
         const int coo_buffer_size = ComputeCooBufferSize(
             num_scs, num_sc_per_device, stacked_table_metadata,
-            static_buffer_size_multiplier);
+            static_buffer_size_multiplier, stacked_table_name);
 
         // Acquire GIL before creating Python arrays.
         py::gil_scoped_acquire acq;
