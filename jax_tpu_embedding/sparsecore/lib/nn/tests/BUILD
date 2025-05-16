@@ -16,10 +16,7 @@ load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
-package(
-    default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:__subpackages__"],
-)
+package(default_applicable_licenses = ["//:license"])
 
 pytype_strict_contrib_test(
     name = "preprocess_sparse_dense_matmul_input_test",
