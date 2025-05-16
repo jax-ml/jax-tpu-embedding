@@ -34,6 +34,49 @@
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
+namespace {
+
+void ValidateMaxIdsOrDie(const int32_t observed_max_ids_per_partition,
+                         const int32_t observed_max_unique_ids_per_partition,
+                         const int32_t max_ids_per_partition,
+                         const int32_t max_unique_ids_per_partition,
+                         const absl::string_view stacked_table_name,
+                         const bool allow_id_dropping) {
+  // If id dropping is allowed, we log a warning if the observed max ids per
+  // partition is greater than the set max ids per partition.
+  if (observed_max_ids_per_partition > max_ids_per_partition) {
+    if (allow_id_dropping) {
+      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
+                   << " observed max ids per partition: "
+                   << observed_max_ids_per_partition
+                   << " is greater than the set max ids per partition: "
+                   << max_ids_per_partition;
+    } else {
+      LOG(FATAL) << "Observed max ids per partition: "
+                 << observed_max_ids_per_partition
+                 << " for table: " << stacked_table_name
+                 << " is greater than the set max ids per partition: "
+                 << max_ids_per_partition;
+    }
+  }
+  if (observed_max_unique_ids_per_partition > max_unique_ids_per_partition) {
+    if (allow_id_dropping) {
+      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
+                   << " observed max unique ids per partition: "
+                   << observed_max_unique_ids_per_partition
+                   << " is greater than the set max unique ids per partition: "
+                   << max_unique_ids_per_partition;
+    } else {
+      LOG(FATAL) << "Observed max unique ids per partition: "
+                 << observed_max_unique_ids_per_partition
+                 << " for table: " << stacked_table_name
+                 << " is greater than the set max unique ids per partition: "
+                 << max_unique_ids_per_partition;
+    }
+  }
+}
+
+}  // namespace
 
 int GetColId(const int col_id, const int col_shift, const int col_offset,
              const int num_scs_mod, const int num_scs_mod_inv) {
@@ -55,19 +98,28 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
   return RowCombiner::kSum;
 }
 
-void SortAndGroupCooTensorsPerLocalDevice(
+std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     absl::Span<const CooFormat> coo_tensors, const int batch_size_per_sc,
     const int global_sc_count, const int32_t batch_size_for_device,
     const int32_t max_ids_per_partition,
     const int32_t max_unique_ids_per_partition,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
-    std::vector<std::vector<CooFormat>>& coo_tensors_by_id, int* max_ids_per_sc,
-    int* max_unique_ids_per_sc) {
+    const int num_sc_per_device, const int total_num_coo_tensors,
+    int max_ids_per_sc[], int max_unique_ids_per_sc[],
+    int required_buffer_size_per_sc[]) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const int local_sc_count = batch_size_for_device / batch_size_per_sc;
-  uint32_t index = 0;
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
+  coo_tensors_by_id.resize(num_sc_per_device);
+  const int approximate_num_coo_tensors_per_sc =
+      total_num_coo_tensors / num_sc_per_device + 1;
+  for (int i = 0; i < num_sc_per_device; ++i) {
+    // Roughly estimate the number of COO tensors for each SC.
+    coo_tensors_by_id[i].reserve(approximate_num_coo_tensors_per_sc);
+  }
+
+  uint32_t coo_tensor_index = 0;
   const int32_t num_scs_bit = std::log2(global_sc_count);
-  const int total_coo_tensors = coo_tensors.size();
   // Initialize the aggregated max ids and unique ids per SC to 0.
   for (int32_t global_sc_id = 0; global_sc_id < global_sc_count;
        ++global_sc_id) {
@@ -76,29 +128,30 @@ void SortAndGroupCooTensorsPerLocalDevice(
   }
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
-    const int num_partitions = global_sc_count;
-    std::vector<int32_t> ids_per_sc_partition(num_partitions, 0);
-    std::vector<int32_t> unique_ids_per_sc_partition(num_partitions, 0);
+    std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
+    std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
     std::vector<uint64_t> keys;
     keys.reserve(batch_size_per_sc);
     // We take the advantage of the fact that the row_ids are already sorted
     // within each batch.
-    while (index < total_coo_tensors &&
-           coo_tensors[index].row_id < (local_sc_id + 1) * batch_size_per_sc) {
+    for (; coo_tensor_index < coo_tensors.size() &&
+           coo_tensors[coo_tensor_index].row_id <
+               (local_sc_id + 1) * batch_size_per_sc;
+         coo_tensor_index++) {
       // The key here is [col_ids % num_scs, col_ids / num_scs, index].
       // Note that this assumes `num_scs` is a power of 2.
       keys.push_back(
           (static_cast<uint64_t>(absl::rotr(
-               static_cast<uint32_t>(coo_tensors[index].col_id), num_scs_bit))
+               static_cast<uint32_t>(coo_tensors[coo_tensor_index].col_id),
+               num_scs_bit))
            << 32) +
-          index);
-      ++index;
+          coo_tensor_index);
     }
     hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
 
     uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
     uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
-    for (const auto key : keys) {
+    for (const uint64_t key : keys) {
       const uint32_t index = static_cast<uint32_t>(key);
       const CooFormat& coo_tensor = coo_tensors[index];
       const uint32_t global_sc_id =
@@ -133,6 +186,8 @@ void SortAndGroupCooTensorsPerLocalDevice(
     for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
       max_ids_per_sc[global_sc_id] = std::max(
           max_ids_per_sc[global_sc_id], ids_per_sc_partition[global_sc_id]);
+      required_buffer_size_per_sc[local_sc_id] +=
+          jax_sc_embedding::RoundUpTo(ids_per_sc_partition[global_sc_id], 8);
       max_unique_ids_per_sc[global_sc_id] =
           std::max(max_unique_ids_per_sc[global_sc_id],
                    unique_ids_per_sc_partition[global_sc_id]);
@@ -158,44 +213,14 @@ void SortAndGroupCooTensorsPerLocalDevice(
         *absl::c_max_element(ids_per_sc_partition);
     const int32_t observed_max_unique_ids_per_partition =
         *absl::c_max_element(unique_ids_per_sc_partition);
-    // If id dropping is allowed, we log a warning if the observed max ids per
-    // partition is greater than the set max ids per partition.
-    if (observed_max_ids_per_partition > max_ids_per_partition) {
-      if (allow_id_dropping) {
-        LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
-                     << " observed max ids per partition: "
-                     << observed_max_ids_per_partition
-                     << " is greater than the set max ids per partition: "
-                     << max_ids_per_partition;
-      } else {
-        LOG(FATAL) << "Observed max ids per partition: "
-                   << observed_max_ids_per_partition
-                   << " for table: " << stacked_table_name
-                   << " is greater than the set max ids per partition: "
-                   << max_ids_per_partition;
-      }
-    }
-    if (observed_max_unique_ids_per_partition > max_unique_ids_per_partition) {
-      if (allow_id_dropping) {
-        LOG(WARNING)
-            << "Allowing ID dropping for table: " << stacked_table_name
-            << " observed max unique ids per partition: "
-            << observed_max_unique_ids_per_partition
-            << " is greater than the set max unique ids per partition: "
-            << max_unique_ids_per_partition;
-      } else {
-        LOG(FATAL) << "Observed max unique ids per partition: "
-                   << observed_max_unique_ids_per_partition
-                   << " for table: " << stacked_table_name
-                   << " is greater than the set max unique ids per partition: "
-                   << max_unique_ids_per_partition;
-      }
-    }
+
+    ValidateMaxIdsOrDie(observed_max_ids_per_partition,
+                        observed_max_unique_ids_per_partition,
+                        max_ids_per_partition, max_unique_ids_per_partition,
+                        stacked_table_name, allow_id_dropping);
   }
+  return coo_tensors_by_id;
 }
-
-
-
 int ComputeCooBufferSize(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
@@ -251,7 +276,7 @@ void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc, const int num_scs, const int num_sc_per_device,
-    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains) {
+    int row_pointers[], int embedding_ids[], int sample_ids[], float gains[]) {
   tsl::profiler::TraceMe t("FillRowPointers");
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;

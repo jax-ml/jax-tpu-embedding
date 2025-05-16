@@ -51,7 +51,7 @@ struct CooFormat {
   // table.
   //
   // This packing allows for efficient storage and extractions using bitwise
-  // masks (assuming `num_scs` is a power of 2).
+  // masks (assuming number of sparsecores (SC) is a power of 2).
   int col_id;
   float gain;
 
@@ -66,6 +66,8 @@ int GetColId(int col_id, int col_shift, int col_offset, int num_scs_mod,
              int num_scs_mod_inv);
 
 // Rounds up the given value to the next multiple of the given alignment.
+// This is equivalent to ceil(value / align) * align, but implemented in an
+// integer-safe way.
 template <typename T>
 static inline T RoundUpTo(T value, T align) {
   return (value + align - 1) / align * align;
@@ -116,14 +118,14 @@ struct StackedTableMetadata {
   int max_col_id;
 };
 
-void SortAndGroupCooTensorsPerLocalDevice(
+std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     absl::Span<const CooFormat> coo_tensors, int batch_size_per_sc,
     int global_sc_count,
     int32_t batch_size_for_device,  // Batch size for the local device.
     int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
     absl::string_view stacked_table_name, bool allow_id_dropping,
-    std::vector<std::vector<CooFormat>>& coo_tensors_by_id, int* max_ids_per_sc,
-    int* max_unique_ids_per_sc);
+    int num_sc_per_device, int total_num_coo_tensors, int max_ids_per_sc[],
+    int max_unique_ids_per_sc[], int required_buffer_size_per_sc[]);
 
 int ComputeCooBufferSize(
     int num_scs, int num_scs_per_device,
@@ -140,7 +142,7 @@ void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
     int batch_size_per_sc, int num_scs, int num_sc_per_device,
-    int* row_pointers, int* embedding_ids, int* sample_ids, float* gains);
+    int row_pointers[], int embedding_ids[], int sample_ids[], float gains[]);
 
 }  // namespace jax_sc_embedding
 

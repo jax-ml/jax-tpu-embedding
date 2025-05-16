@@ -128,18 +128,19 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
-      /*batch_size_for_device=*/8,
-      /*max_ids_per_partition=*/32,
-      /*max_unique_ids_per_partition=*/32,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
+          /*batch_size_for_device=*/8,
+          /*max_ids_per_partition=*/32,
+          /*max_unique_ids_per_partition=*/32,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
 
   std::vector<CooFormat> expected_sc_0;
   expected_sc_0.push_back(CooFormat(0, 0, 1.0));
@@ -187,11 +188,57 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
   EXPECT_THAT(coo_tensors_by_id[3], ElementsAreArray(expected_sc_3));
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+}
+
+TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
+  std::vector<CooFormat> coo_formats;
+
+  for (int row = 0; row < 8; ++row) {
+    coo_formats.push_back(CooFormat(row, 0, 1.0));
+    coo_formats.push_back(CooFormat(row, 1, 1.0));
+    coo_formats.push_back(CooFormat(row, 2, 1.0));
+    coo_formats.push_back(CooFormat(row, 3, 1.0));
+  }
+  int32_t max_id_per_sc[2] = {0, 0};
+  int32_t max_unique_id_per_sc[2] = {0, 0};
+  int32_t required_buffer_sizes_per_sc[2] = {0, 0};
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/2,
+          /*batch_size_for_device=*/8,
+          /*max_ids_per_partition=*/32,
+          /*max_unique_ids_per_partition=*/32,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/2,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+
+  EXPECT_THAT(coo_tensors_by_id[0],
+              ElementsAre(CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0),
+                          CooFormat(2, 0, 1.0), CooFormat(3, 0, 1.0),
+                          CooFormat(0, 2, 1.0), CooFormat(1, 2, 1.0),
+                          CooFormat(2, 2, 1.0), CooFormat(3, 2, 1.0),
+                          CooFormat(0, 1, 1.0), CooFormat(1, 1, 1.0),
+                          CooFormat(2, 1, 1.0), CooFormat(3, 1, 1.0),
+                          CooFormat(0, 3, 1.0), CooFormat(1, 3, 1.0),
+                          CooFormat(2, 3, 1.0), CooFormat(3, 3, 1.0)));
+  EXPECT_THAT(coo_tensors_by_id[1],
+              ElementsAre(CooFormat(4, 0, 1.0), CooFormat(5, 0, 1.0),
+                          CooFormat(6, 0, 1.0), CooFormat(7, 0, 1.0),
+                          CooFormat(4, 2, 1.0), CooFormat(5, 2, 1.0),
+                          CooFormat(6, 2, 1.0), CooFormat(7, 2, 1.0),
+                          CooFormat(4, 1, 1.0), CooFormat(5, 1, 1.0),
+                          CooFormat(6, 1, 1.0), CooFormat(7, 1, 1.0),
+                          CooFormat(4, 3, 1.0), CooFormat(5, 3, 1.0),
+                          CooFormat(6, 3, 1.0), CooFormat(7, 3, 1.0)));
+  EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8}));
+  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({16, 16}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
   std::vector<CooFormat> coo_formats;
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
 
   // With 8 samples, each sample has 4 ids [0, 1, 2, 3]
   // Each sparsecore serves 1 row of data.
@@ -209,24 +256,27 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
-      /*batch_size_for_device=*/8,
-      /*max_ids_per_partition=*/2,
-      /*max_unique_ids_per_partition=*/1,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
+          /*batch_size_for_device=*/8,
+          /*max_ids_per_partition=*/2,
+          /*max_unique_ids_per_partition=*/1,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
   std::vector<CooFormat> coo_formats;
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
 
   // With 16 samples, each sample has 4 ids [0, 1, 2, 3]
   // Each sparsecore serves 1 row of data.
@@ -244,24 +294,26 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
-      /*batch_size_for_device=*/16,
-      /*max_ids_per_partition=*/4,
-      /*max_unique_ids_per_partition=*/1,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
+          /*batch_size_for_device=*/16,
+          /*max_ids_per_partition=*/4,
+          /*max_unique_ids_per_partition=*/1,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
   std::vector<CooFormat> coo_formats;
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
 
   // With 16 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
   // Each sparsecore serves 2 rows of data [0, 4], [1, 5], [2, 6], [3, 7]
@@ -284,24 +336,28 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
-      /*batch_size_for_device=*/16,
-      /*max_ids_per_partition=*/8,
-      /*max_unique_ids_per_partition=*/2,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
+          /*batch_size_for_device=*/16,
+          /*max_ids_per_partition=*/8,
+          /*max_unique_ids_per_partition=*/2,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8, 8, 8}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
+  // 4 partitions of size 8 with 2 elements each
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
   std::vector<CooFormat> coo_formats;
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
 
   // With 128 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
   // Each sparsecore serves 2 rows of data [0, 4], [1, 5], [2, 6], [3, 7]
@@ -324,24 +380,29 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/32, /*num_scs=*/4,
-      /*batch_size_for_device=*/128,
-      /*max_ids_per_partition=*/64,
-      /*max_unique_ids_per_partition=*/2,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/32, /*num_scs=*/4,
+          /*batch_size_for_device=*/128,
+          /*max_ids_per_partition=*/64,
+          /*max_unique_ids_per_partition=*/2,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({64, 64, 64, 64}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
+  // 8 partitions of size 256 with 32 elements each
+  EXPECT_THAT(required_buffer_sizes_per_sc,
+              ElementsAreArray({256, 256, 256, 256}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
   std::vector<CooFormat> coo_formats;
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
 
   // With 128 samples, each sample has 8 ids [0, 4, 8, 16]
   // Sparsecore 0 alone serves all 4 rows of data [0, 4, 8, 16]
@@ -359,24 +420,29 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
     coo_formats.push_back(CooFormat(row, 8, 1.0));
     coo_formats.push_back(CooFormat(row, 16, 1.0));
   }
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/32, /*num_scs=*/4,
-      /*batch_size_for_device=*/128,
-      /*max_ids_per_partition=*/128,
-      /*max_unique_ids_per_partition=*/4,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/32, /*num_scs=*/4,
+          /*batch_size_for_device=*/128,
+          /*max_ids_per_partition=*/128,
+          /*max_unique_ids_per_partition=*/4,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({128, 0, 0, 0}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({4, 0, 0, 0}));
+  // 1 partition of size 128 with 128 elements
+  EXPECT_THAT(required_buffer_sizes_per_sc,
+              ElementsAreArray({128, 128, 128, 128}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   std::vector<CooFormat> coo_formats;
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
 
   // This is one of the worst case scenarios.
   // Every ID is unique, and all IDs come from the same sparsecore.
@@ -394,19 +460,24 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   for (int row = 0; row < 128; ++row) {
     coo_formats.push_back(CooFormat(row, row * 4, 1.0));
   }
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/32, /*num_scs=*/4,
-      /*batch_size_for_device=*/128,
-      /*max_ids_per_partition=*/32,
-      /*max_unique_ids_per_partition=*/32,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/32, /*num_scs=*/4,
+          /*batch_size_for_device=*/128,
+          /*max_ids_per_partition=*/32,
+          /*max_unique_ids_per_partition=*/32,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
+  // 1 partition of size 32 with 32 elements
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
@@ -428,22 +499,26 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
-  coo_tensors_by_id.resize(4);
   // Force dropping of IDs here with max_ids_per_partition == 2
   // The later 2 samples for each sparsecore will be dropped.
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
-      /*batch_size_for_device=*/16,
-      /*max_ids_per_partition=*/2,
-      /*max_unique_ids_per_partition=*/1,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/true, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
+          /*batch_size_for_device=*/16,
+          /*max_ids_per_partition=*/2,
+          /*max_unique_ids_per_partition=*/1,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/true, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
+  // 4 partition of size 8 with 4 element each
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 
   // Note that sample 2, 3, 6, 7, 10, 11, 14, 15 are dropped.
   // It's unclear how embedding activations will be constructed without these
@@ -503,18 +578,19 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
-  coo_tensors_by_id.resize(4);
   int32_t max_id_per_sc[4] = {0, 0, 0, 0};
   int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  SortAndGroupCooTensorsPerLocalDevice(
-      coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
-      /*batch_size_for_device=*/8,
-      /*max_ids_per_partition=*/32,
-      /*max_unique_ids_per_partition=*/32,
-      /*stacked_table_name=*/"stacked_table",
-      /*allow_id_dropping=*/false, coo_tensors_by_id, max_id_per_sc,
-      max_unique_id_per_sc);
+  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
+          /*batch_size_for_device=*/8,
+          /*max_ids_per_partition=*/32,
+          /*max_unique_ids_per_partition=*/32,
+          /*stacked_table_name=*/"stacked_table",
+          /*allow_id_dropping=*/false, /*num_sc_per_device=*/4,
+          /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
 
   std::vector<int> row_pointers(8 * 4);
   std::vector<int> embedding_ids(32 * 4);
