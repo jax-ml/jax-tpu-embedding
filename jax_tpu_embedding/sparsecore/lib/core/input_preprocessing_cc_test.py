@@ -763,7 +763,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             allow_id_dropping=False,
         )
     )
-    stats = embedding.SparseDenseMatmulInputStats.from_dict(stats)
+    stats = embedding.SparseDenseMatmulInputStats.from_cc(stats)
     fdo_client.record(stats)
     fdo_client.publish()
     # Duplicated ids on row 0 and 6 are combined.

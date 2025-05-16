@@ -24,6 +24,7 @@ from jax.experimental import shard_map
 from jax.experimental.layout import DeviceLocalLayout as DLL
 from jax.experimental.layout import Layout
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core import fdo_types_cc
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_cc
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -69,12 +70,12 @@ class SparseDenseMatmulInputStats:
   max_unique_ids_per_partition: Mapping[str, np.ndarray]
 
   @classmethod
-  def from_dict(
-      cls, stats: Mapping[str, Mapping[str, np.ndarray]]
+  def from_cc(
+      cls, stats: fdo_types_cc.FdoStats
   ) -> "SparseDenseMatmulInputStats":
     return cls(
-        max_ids_per_partition=stats["max_ids"],
-        max_unique_ids_per_partition=stats["max_unique_ids"],
+        max_ids_per_partition=stats.max_ids_per_partition,
+        max_unique_ids_per_partition=stats.max_unique_ids_per_partition,
     )
 
 
@@ -380,7 +381,7 @@ def preprocess_sparse_dense_matmul_input(
 
   return SparseDenseMatmulInput(
       *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_dict(stats)
+  ), SparseDenseMatmulInputStats.from_cc(stats)
 
 
 def _get_activation_for_feature(

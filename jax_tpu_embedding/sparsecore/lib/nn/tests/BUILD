@@ -41,6 +41,7 @@ py_binary(
     name = "preprocess_input_benchmarks",
     srcs = ["preprocess_input_benchmarks.py"],
     deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:fdo_types_cc",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("google_benchmark"),

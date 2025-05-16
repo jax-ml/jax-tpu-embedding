@@ -120,17 +120,18 @@ struct StackedTableMetadata {
 
 std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     absl::Span<const CooFormat> coo_tensors, int batch_size_per_sc,
-    int global_sc_count,
-    int32_t batch_size_for_device,  // Batch size for the local device.
+    int global_sc_count, int32_t batch_size_for_device,
     int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
     absl::string_view stacked_table_name, bool allow_id_dropping,
-    int num_sc_per_device, int total_num_coo_tensors, int max_ids_per_sc[],
-    int max_unique_ids_per_sc[], int required_buffer_size_per_sc[]);
+    int num_sc_per_device, int total_num_coo_tensors,
+    absl::Span<int> max_ids_per_sc, absl::Span<int> max_unique_ids_per_sc,
+    absl::Span<int> required_buffer_size_per_sc);
 
 int ComputeCooBufferSize(
     int num_scs, int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
     int static_buffer_size_multiplier);
+
 
 void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
                    int num_scs_per_device);

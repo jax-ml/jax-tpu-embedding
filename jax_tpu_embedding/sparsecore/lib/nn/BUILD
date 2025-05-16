@@ -40,6 +40,7 @@ pytype_strict_library(
     deps = [
         ":embedding_spec",
         ":table_stacking",
+        "//jax_tpu_embedding/sparsecore/lib/core:fdo_types_cc",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
