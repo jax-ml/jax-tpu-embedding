@@ -77,16 +77,90 @@ def round_up_dim_and_vocab_size(
 
 
 def _get_stack_table_names(
-    tables: Mapping[str, embedding_spec.TableSpec], num_sc: int
+    num_sc: int,
+    flatten_tables: Mapping[str, embedding_spec.TableSpec],
+    flatten_features: Sequence[embedding_spec.FeatureSpec],
+    activation_mem_bytes_limit: int,
 ) -> Sequence[Sequence[str]]:
   """Returns the stack groups for the tables based on their specs."""
-  table_to_padded_dim, _ = round_up_dim_and_vocab_size(tables, num_sc)
+  original_table_names = set(flatten_tables.keys())
+
+  table_to_padded_dim, _ = round_up_dim_and_vocab_size(flatten_tables, num_sc)
   table_name_map = collections.defaultdict(list)
   for table_name, dim in table_to_padded_dim.items():
-    key = (dim, tables[table_name].optimizer, tables[table_name].combiner)
+    key = (
+        dim,
+        flatten_tables[table_name].optimizer,
+        flatten_tables[table_name].combiner,
+    )
     table_name_map[key].append(table_name)
 
-  return list(table_name_map.values())
+  groups = list(table_name_map.values())
+
+  # Calculate sample_count per sparsecore for each table.
+  table_to_sample_count = collections.defaultdict(int)
+  for feature in flatten_features:
+    table_to_sample_count[feature.table_spec.name] += int(
+        np.prod(feature.output_shape[:-1]) // num_sc
+    )
+
+  # Calculate and register the activation memory usage of this table.
+  table_to_activation_mem_bytes = {
+      tname: table_to_padded_dim[tname] * table_to_sample_count[tname] * 4
+      for tname in flatten_tables.keys()
+  }
+
+  validated_groups = []
+  for group in groups:
+    # A list of groups that are split from the current group.
+    split_groups = []
+    # Iterate through all tables in the current group.
+    for table_name in group:
+      found = False
+      # Iterate through all candidate groups to check if the table can be
+      # joined.
+      for candidate_group in split_groups:
+        accumuated_activation_mem_bytes = 0
+        # Sum up the activation memory usage of all tables in this candidate
+        # group. We re-calculate because the tables could have been added into
+        # the group in the previous iteration.
+        for candidate_table in candidate_group:
+          accumuated_activation_mem_bytes += table_to_activation_mem_bytes[
+              candidate_table
+          ]
+        # Check for limit violation.
+        if (
+            accumuated_activation_mem_bytes
+            + table_to_activation_mem_bytes[table_name]
+        ) <= activation_mem_bytes_limit:
+          # Append to this candidate group if no limit violation.
+          candidate_group.append(table_name)
+          found = True
+          break
+      if not found:
+        # If the table cannot be joined with any existing group, create a new
+        # group with only this table.
+        split_groups.append([table_name])
+        if split_groups:
+          logging.info(
+              "Table %s cannot be joined with any existing group, create a new"
+              " one.",
+              table_name,
+          )
+    # Add into the validated groups.
+    validated_groups.extend(split_groups)
+
+  grouped_table_names = set()
+  for group in validated_groups:
+    grouped_table_names.update(group)
+
+  if original_table_names != grouped_table_names:
+    raise ValueError(
+        "Table names are not grouped correctly. Original table names:"
+        f" {original_table_names}, grouped table names: {grouped_table_names}"
+    )
+
+  return validated_groups
 
 
 def _verify_stack_tables(
@@ -419,6 +493,8 @@ def auto_stack_tables(
     rotation: int | None = None,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
+    *,
+    activation_mem_bytes_limit=2048 * 1024,
 ) -> None:
   """Creates new feature specs based on auto stacking logic.
 
@@ -438,6 +514,9 @@ def auto_stack_tables(
       stack.
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
+    activation_mem_bytes_limit: If the activation memory
+      usage is larger than this limit, the table will not be stacked. Default
+      is 2MB.
   """
   flatten_features = tree.flatten(features)
   flatten_tables = {
@@ -445,8 +524,12 @@ def auto_stack_tables(
       for feature in flatten_features
   }
   groups = _get_stack_table_names(
-      flatten_tables, num_sc=num_sc_per_device * global_device_count
+      num_sc=num_sc_per_device * global_device_count,
+      flatten_tables=flatten_tables,
+      flatten_features=flatten_features,
+      activation_mem_bytes_limit=activation_mem_bytes_limit,
   )
+
   updated_features = features
   for group in groups:
     logging.info("Stack group with tables: %s", group)
