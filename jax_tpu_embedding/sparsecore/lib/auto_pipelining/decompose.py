@@ -106,11 +106,11 @@ def _combine_shard_maps(
   # Combine shard_map parameters.
   updated_params = update_eqn.params | {
       'jaxpr': jaxpr,
-      'in_names': (
-          update_eqn.params['in_names'] + lookup_eqn.params['in_names'][:-1]
+      'in_specs': (
+          update_eqn.params['in_specs'] + lookup_eqn.params['in_specs'][:-1]
       ),
-      'out_names': (
-          update_eqn.params['out_names'] + lookup_eqn.params['out_names']
+      'out_specs': (
+          update_eqn.params['out_specs'] + lookup_eqn.params['out_specs']
       ),
   }
 
