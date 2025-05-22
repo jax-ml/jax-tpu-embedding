@@ -57,7 +57,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
-        "@highway//:hwy",
         "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:traceme",
     ],

@@ -13,6 +13,7 @@
 // limitations under the License.
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -213,6 +214,12 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
         py::cast<int>(stacked_table_spec.attr("max_ids_per_partition"));
     const int max_unique_ids_per_partition =
         py::cast<int>(stacked_table_spec.attr("max_unique_ids_per_partition"));
+    std::optional<int> suggested_coo_buffer_size;
+    py::object suggested_coo_buffer_size_attr =
+        stacked_table_spec.attr("suggested_coo_buffer_size");
+    if (!suggested_coo_buffer_size_attr.is_none()){
+      suggested_coo_buffer_size = py::cast<int>(suggested_coo_buffer_size_attr);
+    }
     const std::string row_combiner =
         py::cast<std::string>(stacked_table_spec.attr("combiner"));
     if (!feature_transformation.is_none()) {
@@ -221,9 +228,11 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
       col_offset = py::cast<int>(feature_transformation.attr("col_offset"));
     }
     stacked_table_metadata[stacked_table_name].emplace_back(
-        i, max_ids_per_partition, max_unique_ids_per_partition, row_offset,
-        col_offset, col_shift,
-        /*batch_size=*/feature.shape(0), GetRowCombiner(row_combiner));
+        stacked_table_name, i, max_ids_per_partition,
+        max_unique_ids_per_partition, row_offset, col_offset, col_shift,
+        /*batch_size=*/feature.shape(0), suggested_coo_buffer_size,
+        GetRowCombiner(row_combiner),
+        /*max_col_id=*/std::numeric_limits<int>::max());
   }
   // Sort the stacked tables by row_offset.
   for (auto& [_, t] : stacked_table_metadata) {
@@ -363,8 +372,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
     py::list features, py::list feature_weights, py::list feature_specs,
     const int local_device_count, const int global_device_count,
     const int num_sc_per_device, const int sharding_strategy,
-    const bool has_leading_dimension, const int static_buffer_size_multiplier,
-    const bool allow_id_dropping) {
+    const bool has_leading_dimension, const bool allow_id_dropping) {
   tsl::profiler::TraceMe t([=] {
     return absl::StrCat("input_preprocessing_cc-", local_device_count, "/",
                         global_device_count);
@@ -383,7 +391,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
   py::dict max_unique_ids_per_partition;
   py::dict required_buffer_sizes;
   const int num_scs = num_sc_per_device * global_device_count;
-  const int row_pointers_size_per_sc = std::max(num_scs, 8);
+  const int row_pointers_size_per_sc =
+      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
 
   // Get the stacked table metadata for each top level table.
   // The keys are stacked table names (or the table itself if not stacked) and
@@ -416,9 +425,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
             },
             context_id);
         // Allocate the static buffers.
-        const int coo_buffer_size = ComputeCooBufferSize(
-            num_scs, num_sc_per_device, stacked_table_metadata,
-            static_buffer_size_multiplier);
+        const int coo_buffer_size_per_device = ComputeCooBufferSize(
+            num_scs, num_sc_per_device, stacked_table_metadata);
 
         // Acquire GIL before creating Python arrays.
         py::gil_scoped_acquire acq;
@@ -429,7 +437,8 @@ py::tuple PreprocessSparseDenseMatmulInput(
 
         py::array::ShapeContainer shape_container =
             GetArrayShapeBasedOnLeadingDim(has_leading_dimension,
-                                           local_device_count, coo_buffer_size);
+                                           local_device_count,
+                                           coo_buffer_size_per_device);
         py::array_t<int> embedding_ids_per_device =
             py::array_t<int>(shape_container);
         py::array_t<int> sample_ids_per_device =
@@ -454,7 +463,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
                   has_leading_dimension, local_device,
                   row_pointers_size_per_sc * num_sc_per_device)];
           py::slice static_buffer_slice = GetBufferSliceForGivenDevice(
-              has_leading_dimension, local_device, coo_buffer_size);
+              has_leading_dimension, local_device, coo_buffer_size_per_device);
           auto embedding_id_buffer =
               embedding_ids_per_device[static_buffer_slice];
           auto sample_id_buffer = sample_ids_per_device[static_buffer_slice];
@@ -470,9 +479,9 @@ py::tuple PreprocessSparseDenseMatmulInput(
               required_buffer_size_per_sc[stats_slice];
           PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, features, feature_weights, local_device,
-              local_device_count, coo_buffer_size, row_pointers_size_per_sc,
-              global_device_count, num_sc_per_device, sharding_strategy,
-              stacked_table_name, allow_id_dropping,
+              local_device_count, coo_buffer_size_per_device,
+              row_pointers_size_per_sc, global_device_count, num_sc_per_device,
+              sharding_strategy, stacked_table_name, allow_id_dropping,
               py::cast<py::array_t<int>>(row_pointer_buffer),
               py::cast<py::array_t<int>>(embedding_id_buffer),
               py::cast<py::array_t<int>>(sample_id_buffer),
@@ -519,7 +528,6 @@ PYBIND11_MODULE(input_preprocessing_cc, m) {
         pybind11::arg("global_device_count"),
         pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
         pybind11::arg("has_leading_dimension"),
-        pybind11::arg("static_buffer_size_multiplier"),
         pybind11::arg("allow_id_dropping"));
 }
 

@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import dataclasses
 from unittest import mock
 
 from absl.testing import absltest
@@ -170,8 +171,15 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     self.mesh.devices = self.global_devices
     self.mesh.local_mesh = self.local_mesh
 
-  def test_preprocess_static_buffer_size_multiplier(self):
-    multiplier = 32
+  def test_preprocess_suggested_buffer_size(self):
+    # theoretical max = max ids * num_sc_per_device * num_scs = 16 * 4 * 4 = 256
+    # This deeply nested setting in unwieldly, but we plan to move these
+    # settings out (b/418042262)
+    suggested_coo_buffer_size = 64
+    self.feature_spec_b.table_spec.stacked_table_spec = dataclasses.replace(
+        self.feature_spec_b.table_spec.stacked_table_spec,
+        suggested_coo_buffer_size=suggested_coo_buffer_size,
+    )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features={
             "feature_b": self.feature_b_input,
@@ -184,7 +192,6 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         },
         local_device_count=1,
         global_device_count=1,
-        static_buffer_size_multiplier=multiplier,
         num_sc_per_device=4,
         sharding_strategy="MOD",
     )
@@ -196,15 +203,15 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         preprocessed_input.lhs_embedding_ids[
             self.feature_spec_b.table_spec.name
         ],
-        len(self.feature_b_input) * multiplier,
+        suggested_coo_buffer_size,
     )
     self.assertLen(
         preprocessed_input.lhs_sample_ids[self.feature_spec_b.table_spec.name],
-        len(self.feature_b_input) * multiplier,
+        suggested_coo_buffer_size,
     )
     self.assertLen(
         preprocessed_input.lhs_gains[self.feature_spec_b.table_spec.name],
-        len(self.feature_b_input) * multiplier,
+        suggested_coo_buffer_size,
     )
 
   def test_preprocess_for_single_feature_single_device(self):

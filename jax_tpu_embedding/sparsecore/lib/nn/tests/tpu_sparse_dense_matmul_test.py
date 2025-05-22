@@ -119,6 +119,7 @@ class ErrorHandlingTest(absltest.TestCase):
         name="table",
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
+        suggested_coo_buffer_size=64,
     )
     lf_spec = embedding_spec.FeatureSpec(
         table_spec=long_spec,
@@ -138,22 +139,22 @@ class ErrorHandlingTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,
     )
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {
-                "feature": long_feature,
-            },
-            {
-                "feature": long_weights,
-            },
-            feature_specs,
-            local_device_count=1,
-            global_device_count=1,
-            static_buffer_size_multiplier=8,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
-        )
+    preprocessed_inputs, stats = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature": long_feature,
+        },
+        {
+            "feature": long_weights,
+        },
+        feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
     )
+    np.testing.assert_array_less(
+        64, stats.required_buffer_size["table"]
+    )  # required buffer is bigger than actually suggested
     self.assertNotEmpty(preprocessed_inputs.lhs_row_pointers)
     self.assertNotEmpty(preprocessed_inputs.lhs_embedding_ids)
     self.assertNotEmpty(preprocessed_inputs.lhs_sample_ids)
@@ -197,7 +198,7 @@ class ErrorHandlingTest(absltest.TestCase):
         preprocessed_inputs,
         embedding_variables,
     )
-    # The static buffer size is multiplier (8) x batch_size 8 = 64.
+    # The static buffer size is 64.
     # This means we will get only 64 activations back.
     row_sum = 0
     for act in tree.flatten(activations):

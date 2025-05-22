@@ -117,7 +117,6 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             num_sc_per_device=self.num_sc_per_device,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -157,7 +156,6 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             num_sc_per_device=self.num_sc_per_device,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -352,7 +350,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -759,7 +756,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -917,7 +913,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         num_sc_per_device=4,
         sharding_strategy=1,
         has_leading_dimension=has_leading_dimension,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
 
@@ -932,7 +927,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -953,7 +947,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -1057,7 +1050,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -1078,7 +1070,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -1665,7 +1656,6 @@ class InputPreprocessingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=False,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -1824,7 +1814,6 @@ class InputPreprocessingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -2079,19 +2068,16 @@ class InputPreprocessingTest(parameterized.TestCase):
             col_shift=4,
         ),
     )
-    _, _, _, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
-            [self.input_features],
-            [self.input_weights],
-            [feature_spec],
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
-            sharding_strategy=1,
-            has_leading_dimension=has_leading_dimension,
-            static_buffer_size_multiplier=0,
-            allow_id_dropping=False,
-        )
+    _, _, _, gains, _ = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        [self.input_features],
+        [self.input_weights],
+        [feature_spec],
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy=1,
+        has_leading_dimension=has_leading_dimension,
+        allow_id_dropping=False,
     )
 
     coo_buffer_size = 32 * 4 * 4
@@ -2173,7 +2159,6 @@ class InputPreprocessingTest(parameterized.TestCase):
             num_sc_per_device=4,
             sharding_strategy=1,
             has_leading_dimension=True,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -2202,7 +2187,6 @@ class InputPreprocessingTest(parameterized.TestCase):
         num_sc_per_device=4,
         sharding_strategy=1,
         has_leading_dimension=False,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
     with self.subTest(name="RowPointerEquality"):
@@ -2804,7 +2788,6 @@ class InputPreprocessingTest(parameterized.TestCase):
             num_sc_per_device=1,
             sharding_strategy=1,
             has_leading_dimension=False,
-            static_buffer_size_multiplier=0,
             allow_id_dropping=False,
         )
     )
@@ -2833,7 +2816,6 @@ class InputPreprocessingTest(parameterized.TestCase):
         num_sc_per_device=1,
         sharding_strategy=1,
         has_leading_dimension=False,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
 

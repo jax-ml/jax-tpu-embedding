@@ -16,6 +16,8 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -23,6 +25,14 @@
 #include "absl/types/span.h"  // from @com_google_absl
 
 namespace jax_sc_embedding {
+
+// TPU_VECTOR_REGISTER_ALIGMENT_SIZE represents the required alignment for data
+// loaded into TPU vector registers, which are typically 8 sublanes x 128 lanes.
+// Data dimensions, specially the second most minor, must be padded to be
+// multiples of this value to ensure efficient TPU processing and avoid memory
+// inefficiency. This alignment is enforced by XLA. This applies to most current
+// generations of TPUs (v2, v3, v4, v5, v6).
+inline constexpr int TPU_VECTOR_REGISTER_ALIGMENT_SIZE = 8;
 
 // Different combiners that are supported for samples with multiple ids.
 // By default, we use kSum (add the embeddings for all ids in the sample).
@@ -84,26 +94,34 @@ inline unsigned int CeilOfRatio(unsigned int numerator,
 // python representation and the c++ representation.
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;
-  StackedTableMetadata(int feature_index, int max_ids_per_partition,
-                       int max_unique_ids_per_partition, int row_offset,
-                       int col_offset, int col_shift, int batch_size,
-                       RowCombiner row_combiner = RowCombiner::kSum,
-                       int max_col_id = std::numeric_limits<int>::max())
-      : feature_index(feature_index),
+  StackedTableMetadata(
+      std::string_view name, int feature_index, int max_ids_per_partition,
+      int max_unique_ids_per_partition, int row_offset, int col_offset,
+      int col_shift, int batch_size,
+      std::optional<int> suggested_coo_buffer_size = std::nullopt,
+      RowCombiner row_combiner = RowCombiner::kSum,
+      int max_col_id = std::numeric_limits<int>::max())
+      : name(name),
+        feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
         max_unique_ids_per_partition(max_unique_ids_per_partition),
+        suggested_coo_buffer_size(suggested_coo_buffer_size),
         row_offset(row_offset),
         col_offset(col_offset),
         col_shift(col_shift),
         batch_size(batch_size),
         row_combiner(row_combiner),
         max_col_id(max_col_id) {}
+
+  std::string name;
+
   // The batch is given as a list of features (numpy arrays). `feature_index`
   // represents the index of the feature in the list.
   int feature_index;
 
   int max_ids_per_partition;
   int max_unique_ids_per_partition;
+  std::optional<int> suggested_coo_buffer_size;
   int row_offset;
   int col_offset;
   int col_shift;
@@ -129,13 +147,15 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
 
 int ComputeCooBufferSize(
     int num_scs, int num_scs_per_device,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    int static_buffer_size_multiplier);
+    absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
 void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
                    int num_scs_per_device);
 
 int MaxIdsPerPartitionForStackedTables(
+    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+
+std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
 void FillRowPointersPerLocalDevice(

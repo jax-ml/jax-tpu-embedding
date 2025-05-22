@@ -40,6 +40,7 @@ class NpzFdoClientTest(absltest.TestCase):
     stats = embedding.SparseDenseMatmulInputStats(
         max_ids_per_partition={"tab_one": np.array([10, 20, 30, 40])},
         max_unique_ids_per_partition={"tab_one": np.array([1, 2, 3, 4])},
+        required_buffer_size={},
     )
     fdo_client.record(stats)
     fdo_client.publish()
@@ -54,6 +55,7 @@ class NpzFdoClientTest(absltest.TestCase):
     stats = embedding.SparseDenseMatmulInputStats(
         max_ids_per_partition={"tab_one": np.array([10, 20, 30, 40])},
         max_unique_ids_per_partition={"tab_one": np.array([1, 2, 3, 4])},
+        required_buffer_size={},
     )
     fdo_client.record(stats)
     fdo_client.record(stats)

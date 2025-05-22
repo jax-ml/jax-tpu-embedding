@@ -67,6 +67,7 @@ class SparseDenseMatmulInputStats:
 
   max_ids_per_partition: Mapping[str, np.ndarray]
   max_unique_ids_per_partition: Mapping[str, np.ndarray]
+  required_buffer_size: Mapping[str, np.ndarray]
 
   @classmethod
   def from_dict(
@@ -75,6 +76,7 @@ class SparseDenseMatmulInputStats:
     return cls(
         max_ids_per_partition=stats["max_ids"],
         max_unique_ids_per_partition=stats["max_unique_ids"],
+        required_buffer_size=stats["required_buffer_size"],
     )
 
 
@@ -255,6 +257,7 @@ def prepare_feature_specs_for_training(
         total_sample_count=total_sample_count,
         max_ids_per_partition=feature.table_spec.max_ids_per_partition,
         max_unique_ids_per_partition=feature.table_spec.max_unique_ids_per_partition,
+        suggested_coo_buffer_size=feature.table_spec.suggested_coo_buffer_size,
     )
     feature.id_transformation = embedding_spec.FeatureIdTransformation(
         row_offset=feature_to_row_offset.get(feature.name, 0),
@@ -318,7 +321,6 @@ def preprocess_sparse_dense_matmul_input(
     local_device_count: int,
     global_device_count: int,
     num_sc_per_device: int,
-    static_buffer_size_multiplier: int = 0,
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
@@ -340,12 +342,6 @@ def preprocess_sparse_dense_matmul_input(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: The number of sparse cores per device.
-    static_buffer_size_multiplier: If larger than 0, this is the multiplier that
-      is used to determine the size of the static buffers (lhs_embedding_ids,
-      lhs_sample_ids and lhs_gains). The size of the buffer returned is
-      static_buffer_size_multiplier x batch_size. If less than or equal to 0,
-      the size of the buffer is determined based off of the
-      max_ids_per_partition limits.
     sharding_strategy: The sharding strategy (e.g., MOD)
     has_leading_dimension: If set to True, then the first dimension of the
       output will be the number of local devices. This is useful when using the
@@ -373,7 +369,6 @@ def preprocess_sparse_dense_matmul_input(
           num_sc_per_device,
           sharding_strategy_to_int(sharding_strategy),
           has_leading_dimension,
-          static_buffer_size_multiplier,
           allow_id_dropping=allow_id_dropping,
       )
   )

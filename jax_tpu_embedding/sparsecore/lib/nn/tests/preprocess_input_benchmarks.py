@@ -135,7 +135,6 @@ def preprocess_input_benchmark_ragged_tensor_jit(state):
         num_sc_per_device=4,
         sharding_strategy=1,
         has_leading_dimension=False,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
 
@@ -153,7 +152,6 @@ def preprocess_input_benchmark_ragged_tensor_pmap(state):
         num_sc_per_device=4,
         sharding_strategy=1,
         has_leading_dimension=True,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
 
@@ -171,7 +169,6 @@ def preprocess_input_benchmark_dense_tensor_jit(state):
         num_sc_per_device=4,
         sharding_strategy=1,
         has_leading_dimension=False,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
 
@@ -189,7 +186,6 @@ def preprocess_input_benchmark_dense_tensor_pmap(state):
         num_sc_per_device=4,
         sharding_strategy=1,
         has_leading_dimension=True,
-        static_buffer_size_multiplier=0,
         allow_id_dropping=False,
     )
 
