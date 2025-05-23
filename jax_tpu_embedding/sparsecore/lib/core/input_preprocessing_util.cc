@@ -303,8 +303,11 @@ void FillRowPointersPerLocalDevice(
       const auto sc_id = std::make_pair(coo_tensor.row_id / batch_size_per_sc,
                                         coo_tensor.col_id % num_scs);
       while (last_sc_id < sc_id) {
+        // We do not fill any extra buffer element for
+        // CooFormat(row_id=batch_size_per_sc * (local_sc_id + 1), col_id=0,
+        // gain=0.0), hence adding 1 to the check.
         if (lhs_row_index >= row_pointers_size_per_sc ||
-            padded_coo_tensor_index >= coo_buffer_size_per_sc) {
+            padded_coo_tensor_index >= coo_buffer_size_per_sc + 1) {
           LOG(ERROR) << "Static buffer size maybe too small for current "
                         "batch. IDs may be dropped! Static buffer size: "
                      << coo_buffer_size_per_sc * num_sc_per_device
@@ -333,7 +336,7 @@ void FillRowPointersPerLocalDevice(
         break;
       }
       if (lhs_row_index >= row_pointers_size_per_sc ||
-          padded_coo_tensor_index >= coo_buffer_size_per_sc) {
+          padded_coo_tensor_index >= coo_buffer_size_per_sc + 1) {
         LOG(ERROR) << "Static buffer size maybe too small for current "
                       "batch. IDs may be dropped! Static buffer size: "
                    << coo_buffer_size_per_sc * num_sc_per_device
