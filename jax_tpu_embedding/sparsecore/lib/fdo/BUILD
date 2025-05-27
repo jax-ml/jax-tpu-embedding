@@ -52,6 +52,17 @@ pytype_strict_contrib_test(
     ],
 )
 
+pytype_strict_library(
+    name = "fdo_utils",
+    srcs = ["fdo_utils.py"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
+)
+
 # Library target.
 pytype_strict_library(
     name = "fdo",
@@ -59,6 +70,7 @@ pytype_strict_library(
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
     deps = [
         ":fdo_client",  # buildcleaner: keep
+        ":fdo_utils",  # buildcleaner:keep
         ":file_fdo_client",  # buildcleaner: keep
     ],
 )

@@ -34,6 +34,7 @@ tpu_py_strict_test(
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
+        "//jax_tpu_embedding/sparsecore/lib/fdo:fdo_utils",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -65,6 +66,7 @@ pytype_strict_binary(
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
+        "//jax_tpu_embedding/sparsecore/lib/fdo:fdo_utils",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",

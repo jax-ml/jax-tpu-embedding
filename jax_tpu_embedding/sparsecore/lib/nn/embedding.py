@@ -67,7 +67,7 @@ class SparseDenseMatmulInputStats:
 
   max_ids_per_partition: Mapping[str, np.ndarray]
   max_unique_ids_per_partition: Mapping[str, np.ndarray]
-  required_buffer_size: Mapping[str, np.ndarray]
+  required_buffer_size_per_sc: Mapping[str, np.ndarray]
 
   @classmethod
   def from_dict(
@@ -76,7 +76,7 @@ class SparseDenseMatmulInputStats:
     return cls(
         max_ids_per_partition=stats["max_ids"],
         max_unique_ids_per_partition=stats["max_unique_ids"],
-        required_buffer_size=stats["required_buffer_size"],
+        required_buffer_size_per_sc=stats["required_buffer_size"],
     )
 
 

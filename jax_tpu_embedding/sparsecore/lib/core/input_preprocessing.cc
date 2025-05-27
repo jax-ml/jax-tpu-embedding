@@ -331,6 +331,7 @@ void PreprocessInputForStackedTablePerLocalDevice(
           total_max_unique_ids_per_sc, required_buffer_size_per_sc);
   for (int i = 0; i < num_sc_per_device; ++i) {
     coo_tensors_by_id[i].emplace_back(batch_size_per_sc * (i + 1), 0, 0.0);
+    required_buffer_size_per_sc[i]++;
   }
   //
   // Step 3: Compute the row pointers for each group of IDs.
@@ -425,7 +426,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
             },
             context_id);
         // Allocate the static buffers.
-        const int coo_buffer_size_per_device = ComputeCooBufferSize(
+        const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
             num_scs, num_sc_per_device, stacked_table_metadata);
 
         // Acquire GIL before creating Python arrays.
@@ -446,15 +447,25 @@ py::tuple PreprocessSparseDenseMatmulInput(
         py::array_t<float> gains_per_device =
             py::array_t<float>(shape_container);
         const int stats_size_per_device = num_scs;
-        py::array::ShapeContainer stats_shape = GetArrayShapeBasedOnLeadingDim(
-            /*has_leading_dimension=*/false, local_device_count,
-            stats_size_per_device);
+        // NOTE: max ids and max unique ids are {global_sc_count *
+        //   num_devices}, where they are then aggregated(max) along device
+        //   dimension to get {global_sc_count} (i.e. max [unique] ids for each
+        //   sc), which can be further aggregated(max) for a single value for
+        //   all SCs.
+        py::array::ShapeContainer max_ids_stats_shape =
+            GetArrayShapeBasedOnLeadingDim(
+                /*has_leading_dimension=*/false, local_device_count,
+                stats_size_per_device);
         py::array_t<int> max_ids_per_partition_per_sc =
-            py::array_t<int>(stats_shape);
+            py::array_t<int>(max_ids_stats_shape);
         py::array_t<int> max_unique_ids_per_partition_per_sc =
-            py::array_t<int>(stats_shape);
+            py::array_t<int>(max_ids_stats_shape);
+        // NOTE: required buffer size is {local_sc_count * num_devices}, which
+        //   is same as {global_sc_count}, and can be further aggregated to get
+        //   the maximum size of any SC buffer shard.
         py::array_t<int> required_buffer_size_per_sc =
-            py::array_t<int>(stats_shape);
+            py::array_t<int>(GetArrayShapeBasedOnLeadingDim(
+                false, local_device_count, num_sc_per_device));
         for (int local_device = 0; local_device < local_device_count;
              ++local_device) {
           // Get the tuple outputs for the current split.
@@ -468,15 +479,17 @@ py::tuple PreprocessSparseDenseMatmulInput(
               embedding_ids_per_device[static_buffer_slice];
           auto sample_id_buffer = sample_ids_per_device[static_buffer_slice];
           auto gain_buffer = gains_per_device[static_buffer_slice];
-          py::slice stats_slice =
+          py::slice max_ids_stats_slice =
               GetBufferSliceForGivenDevice(/*has_leading_dimension=*/false,
                                            local_device, stats_size_per_device);
           auto max_ids_per_partition_per_sc_buffer =
-              max_ids_per_partition_per_sc[stats_slice];
+              max_ids_per_partition_per_sc[max_ids_stats_slice];
           auto max_unique_ids_per_partition_per_sc_buffer =
-              max_unique_ids_per_partition_per_sc[stats_slice];
+              max_unique_ids_per_partition_per_sc[max_ids_stats_slice];
+
           auto required_buffer_size_per_sc_buffer =
-              required_buffer_size_per_sc[stats_slice];
+              required_buffer_size_per_sc[GetBufferSliceForGivenDevice(
+                  false, local_device, num_sc_per_device)];
           PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, features, feature_weights, local_device,
               local_device_count, coo_buffer_size_per_device,

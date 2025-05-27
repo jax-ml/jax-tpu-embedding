@@ -126,12 +126,12 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
        ++global_sc_id) {
     max_ids_per_sc[global_sc_id] = 0;
     max_unique_ids_per_sc[global_sc_id] = 0;
-    required_buffer_size_per_sc[global_sc_id] = 0;
   }
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
     std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
+    required_buffer_size_per_sc[local_sc_id] = 0;
     std::vector<uint64_t> keys;
     keys.reserve(batch_size_per_sc);
     // We take the advantage of the fact that the row_ids are already sorted
@@ -189,8 +189,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
       max_ids_per_sc[global_sc_id] = std::max(
           max_ids_per_sc[global_sc_id], ids_per_sc_partition[global_sc_id]);
       required_buffer_size_per_sc[local_sc_id] +=
-          jax_sc_embedding::RoundUpTo(ids_per_sc_partition[global_sc_id],
-                                      TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+          RoundUpTo(ids_per_sc_partition[global_sc_id],
+                    TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
       max_unique_ids_per_sc[global_sc_id] =
           std::max(max_unique_ids_per_sc[global_sc_id],
                    unique_ids_per_sc_partition[global_sc_id]);
@@ -224,7 +224,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
   }
   return coo_tensors_by_id;
 }
-int ComputeCooBufferSize(
+int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata) {
   const int max_ids_per_partition =
@@ -232,24 +232,32 @@ int ComputeCooBufferSize(
   const std::optional<int> suggested_coo_buffer_size =
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
 
-  const int64_t max_ids_rounded_up = jax_sc_embedding::RoundUpTo<int64_t>(
+  const int64_t max_ids_rounded_up = RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
   const int64_t theoretical_max =
       max_ids_rounded_up * num_scs_per_device * num_scs;
+  VLOG(1) << "Theoretical Max: " << theoretical_max;
   int64_t result = theoretical_max;
   if (suggested_coo_buffer_size.has_value()) {
+    VLOG(1) << "Suggested Coo Buffer Size: "
+            << suggested_coo_buffer_size.value();
+    // Since the suggested size corresponds to only current device (local SCs),
+    // Buffer for each SC should be properly aligned, hence ALIGNMENT *
+    // num_scs_per_device
     result = std::min<int64_t>(
         result, RoundUpTo<int64_t>(
                     suggested_coo_buffer_size.value(),
                     TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device));
   } else {
-    LOG(WARNING) << "No Coo Buffer Size provided for table "
-                 << stacked_table_metadata[0].name << ", the default value ("
-                 << theoretical_max
-                 << ") may be too "
-                    "large and can cause OOM. Utilize the stats returned from "
-                    "the sparse dense matmul preprocessing API.";
+    LOG_EVERY_POW_2(WARNING)
+        << "No Coo Buffer Size provided for table "
+        << stacked_table_metadata[0].name << ", the default value ("
+        << theoretical_max
+        << ") may be too "
+           "large and can cause OOM. Utilize the stats returned from "
+           "the sparse dense matmul preprocessing API.";
   }
+  VLOG(1) << "Computed Coo Buffer Size: " << result;
   // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
   CHECK(result > 0 && result < INT_MAX);
