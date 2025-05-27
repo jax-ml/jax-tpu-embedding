@@ -30,12 +30,14 @@ pytype_strict_contrib_test(
     ],
 )
 
-tpu_py_strict_test(
-    name = "jax_sc_shakespeare_tests",
+[tpu_py_strict_test(
+    name = "jax_sc_shakespeare_tests%s" % suffix,
     srcs = ["jax_sc_shakespeare_tests.py"],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
+        "JAX_USE_SHARDY_PARTITIONER": use_shardy,
     },
+    main = "jax_sc_shakespeare_tests.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
@@ -51,7 +53,19 @@ tpu_py_strict_test(
         pypi_requirement("optax"),
         pypi_requirement("orbax/checkpoint"),
     ],
-)
+) for [
+    use_shardy,
+    suffix,
+] in [
+    [
+        "False",
+        "",
+    ],
+    [
+        "True",
+        "_shardy",
+    ],
+]]
 
 tpu_py_strict_test(
     name = "jax_spmd_tc_with_sc_tests",
@@ -59,6 +73,32 @@ tpu_py_strict_test(
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
+    deps = [
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("einops"),
+        pypi_requirement("flax:core"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+        pypi_requirement("optax"),
+    ],
+)
+
+# We need to define this separately because buildozer.modify can't find target otherwise.
+tpu_py_strict_test(
+    name = "jax_spmd_tc_with_sc_tests_shardy",
+    srcs = ["jax_spmd_tc_with_sc_tests.py"],
+    env = {
+        "XLA_FLAGS": "--xla_dump_to=sponge",
+        "JAX_USE_SHARDY_PARTITIONER": "True",
+    },
+    main = "jax_spmd_tc_with_sc_tests.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

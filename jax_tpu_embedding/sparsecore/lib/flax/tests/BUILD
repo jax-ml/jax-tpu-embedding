@@ -19,9 +19,11 @@ package(
     default_visibility = ["//visibility:private"],
 )
 
-tpu_py_strict_test(
-    name = "embed_test",
+[tpu_py_strict_test(
+    name = "embed_test%s" % suffix,
     srcs = ["embed_test.py"],
+    env = {"JAX_USE_SHARDY_PARTITIONER": use_shardy},
+    main = "embed_test.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -36,17 +38,31 @@ tpu_py_strict_test(
         pypi_requirement("numpy"),
         pypi_requirement("tree"),
     ],
-)
+) for [
+    use_shardy,
+    suffix,
+] in [
+    [
+        "False",
+        "",
+    ],
+    [
+        "True",
+        "_shardy",
+    ],
+]]
 
-tpu_py_strict_test(
-    name = "autograd_test",
+[tpu_py_strict_test(
+    name = "autograd_test%s" % suffix,
     srcs = [
         "autograd_test.py",
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
         "JAX_TRACEBACK_FILTERING": "off",
+        "JAX_USE_SHARDY_PARTITIONER": use_shardy,
     },
+    main = "autograd_test.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_model",
@@ -64,7 +80,19 @@ tpu_py_strict_test(
         pypi_requirement("numpy"),
         pypi_requirement("optax"),
     ],
-)
+) for [
+    use_shardy,
+    suffix,
+] in [
+    [
+        "False",
+        "",
+    ],
+    [
+        "True",
+        "_shardy",
+    ],
+]]
 
 tpu_py_strict_test(
     name = "embed_optimizer_test",
