@@ -20,8 +20,8 @@ package(
     default_visibility = ["//visibility:private"],
 )
 
-tpu_py_strict_test(
-    name = "jax_sc_shakespeare_jit_test",
+[tpu_py_strict_test(
+    name = "jax_sc_shakespeare_jit_test%s" % suffix,
     srcs = ["jax_sc_shakespeare_jit.py"],
     args = [
         "--dump_dir=sponge",
@@ -29,6 +29,7 @@ tpu_py_strict_test(
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
+        "JAX_USE_SHARDY_PARTITIONER": use_shardy,
     },
     main = "jax_sc_shakespeare_jit.py",
     deps = [
@@ -52,7 +53,19 @@ tpu_py_strict_test(
         pypi_requirement("orbax/checkpoint"),
         pypi_requirement("tree"),
     ],
-)
+) for [
+    use_shardy,
+    suffix,
+] in [
+    [
+        "False",
+        "",
+    ],
+    [
+        "True",
+        "_shardy",
+    ],
+]]
 
 pytype_strict_binary(
     name = "jax_sc_shakespeare_jit",
