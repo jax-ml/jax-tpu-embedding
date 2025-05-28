@@ -118,7 +118,7 @@ build:public_cache_push --config=public_cache --remote_upload_local_results=true
 
 # TODO(b/356695103): We do not have a CPU only toolchain so we use the CUDA
 # toolchain for both CPU and GPU builds.  This is for use with the ml-build
-# docker image: us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest
+# docker image:  us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
 build:release_linux_x86_64 --host_crosstool_top="@local_config_cuda//crosstool:toolchain"
 build:release_linux_x86_64 --crosstool_top="@local_config_cuda//crosstool:toolchain"
 build:release_linux_x86_64 --extra_toolchains="@local_config_cuda//crosstool:toolchain-linux-x86_64"

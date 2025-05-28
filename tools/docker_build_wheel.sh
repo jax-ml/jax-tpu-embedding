@@ -4,7 +4,7 @@
 # Run from the root folder.
 
 if [ -z "$JTE_DOCKER_IMAGE" ]; then
-  JTE_DOCKER_IMAGE=us-central1-docker.pkg.dev/tensorflow-sigs/tensorflow/ml-build:latest
+  JTE_DOCKER_IMAGE=us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
 fi
 
 if [ -z "$JTE_DOCKER_WORKDIR" ]; then
