@@ -25,6 +25,7 @@ import jax
 import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 
@@ -45,7 +46,9 @@ SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
 AdagradSlotVariables = collections.namedtuple(
     "AdagradSlotVariables", ["accumulator"]
 )
-
+AdamSlotVariables = collections.namedtuple(
+    "AdamSlotVariables", ["momentum", "velocity"]
+)
 LaPropSlotVariables = collections.namedtuple(
     "LaPropSlotVariables", ["mu", "nu"]
 )
@@ -219,6 +222,102 @@ class AdagradOptimizerSpec(OptimizerSpec):
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
+    )
+
+
+class AdamOptimizerSpec(OptimizerSpec):
+  """Spec for the Adam optimizer.
+
+  Adam optimization is a stochastic gradient descent method that is based on
+  adaptive estimation of first-order and second-order moments.
+
+  According to
+  [Kingma et al., 2014](http://arxiv.org/abs/1412.6980), the method is
+  "*computationally efficient, has little memory requirement, invariant to
+  diagonal rescaling of gradients, and is well suited for problems that are
+  large in terms of data/parameters*".
+
+  Attributes:
+    learning_rate: The learning rate for the training variables or embeddings.
+    beta_1: A float value or a constant float tensor, or a callable that takes
+      no arguments and returns the actual value to use. The exponential decay
+      rate for the 1st moment estimates. Defaults to `0.9`.
+    beta_2: A float value or a constant float tensor, or a callable that takes
+      no arguments and returns the actual value to use. The exponential decay
+      rate for the 2nd moment estimates. Defaults to `0.999`.
+    epsilon: A small constant for numerical stability.  Defaults to `1e-8`.
+  """
+
+  def __init__(
+      self,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.001,
+      beta_1: float | jax.Array = 0.9,
+      beta_2: float | jax.Array = 0.999,
+      epsilon: float | jax.Array = 1e-8,
+  ):
+    super().__init__(
+        learning_rate=learning_rate,
+    )
+    self.beta_1 = beta_1
+    self.beta_2 = beta_2
+    self.epsilon = epsilon
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return AdamSlotVariables(
+        momentum=jax.nn.initializers.constant(0.0),
+        velocity=jax.nn.initializers.constant(0.0),
+    )
+
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Compute the bias-corrected Adam hyperparameters.
+
+    Here we use the bias-corrected parameters from section 2.1 of the
+    original paper:
+      alpha_t = alpha * sqrt(1 - beta_2^t) / (1 - beta_1^t)
+      epsilon_hat = epsilon * sqrt(1 + beta_2^t)
+
+    Args:
+      step: The step count for the optimizer.
+
+    Returns:
+      A tuple of the scaled hyperparameters (alpha_t, beta_1, beta_2,
+      epsilon_hat).
+    """
+    if step is None:
+      step = 0
+
+    beta_1 = jnp.asarray(self.beta_1, jnp.float32)
+    beta_2 = jnp.asarray(self.beta_2, jnp.float32)
+    beta_1_t = jnp.power(beta_1, step + 1)
+    beta_2_t = jnp.power(beta_2, step + 1)
+    c_2 = jnp.sqrt(1.0 - beta_2_t)
+    alpha_t = self.get_learning_rate(step) * c_2 / (1.0 - beta_1_t)
+    epsilon_hat = jnp.asarray(self.epsilon, jnp.float32) * c_2
+    return (
+        alpha_t,
+        beta_1,
+        beta_2,
+        epsilon_hat,
+    )
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.beta_1,
+        self.beta_2,
+        self.epsilon,
+    ))
+
+  def short_name(self) -> str:
+    return "adam"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive
     )
 
 

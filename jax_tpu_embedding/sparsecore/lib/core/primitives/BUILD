@@ -121,6 +121,21 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "sparse_dense_matmul_grad_with_adam",
+    srcs = [
+        "sparse_dense_matmul_grad_with_adam.py",
+    ],
+    deps = [
+        ":utils",
+        "//jax_tpu_embedding/sparsecore/lib/core:constants",
+        pypi_requirement("jax"),
+        pypi_requirement("jax/_src/lib"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
     name = "optimizers_computation",
     srcs = [
         "optimizers_computation.py",
