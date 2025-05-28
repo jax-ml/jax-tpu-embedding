@@ -25,12 +25,12 @@ import functools
 import json
 from typing import Tuple
 
-from jax._src import dispatch
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import func as func_dialect
 from jax._src.lib.mlir.dialects import hlo
 import jax.extend as jex
 from jax.interpreters import mlir
+from jax.interpreters import xla
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
@@ -44,7 +44,7 @@ tpu_sparse_dense_matmul_grad_with_laprop_primitive.multiple_results = True
 
 tpu_sparse_dense_matmul_grad_with_laprop_primitive.def_impl(
     functools.partial(
-        dispatch.apply_primitive,
+        xla.apply_primitive,
         tpu_sparse_dense_matmul_grad_with_laprop_primitive,
     )
 )

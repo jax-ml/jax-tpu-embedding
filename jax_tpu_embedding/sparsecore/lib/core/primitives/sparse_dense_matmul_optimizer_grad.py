@@ -42,11 +42,11 @@ from typing import Callable, Tuple
 
 from jax import core
 from jax import numpy as jnp
-from jax._src import dispatch
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import hlo
 import jax.extend as jex
 from jax.interpreters import mlir
+from jax.interpreters import xla
 from jax_tpu_embedding.sparsecore.lib.core import constants
 import numpy as np
 
@@ -60,7 +60,7 @@ tpu_sparse_dense_matmul_optimizer_grad_primitive.multiple_results = True
 
 tpu_sparse_dense_matmul_optimizer_grad_primitive.def_impl(
     functools.partial(
-        dispatch.apply_primitive,
+        xla.apply_primitive,
         tpu_sparse_dense_matmul_optimizer_grad_primitive,
     )
 )
