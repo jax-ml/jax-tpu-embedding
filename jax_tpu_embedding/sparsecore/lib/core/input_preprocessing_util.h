@@ -23,7 +23,7 @@
 
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
-#include "third_party/eigen3/Eigen/Core"
+#include "eigen3/Eigen/Core"  // from @eigen3
 
 namespace jax_sc_embedding {
 
