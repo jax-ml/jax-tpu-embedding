@@ -111,6 +111,49 @@ class OptimizerSpecTest(absltest.TestCase):
         ),
     )
 
+  def test_compare_ftrl(self):
+    self.assertEqual(
+        embedding_spec.FTRLOptimizerSpec(
+            learning_rate=0.1,
+            learning_rate_power=-0.5,
+            l1_regularization_strength=0.1,
+            l2_regularization_strength=0.1,
+            beta=0.1,
+            initial_accumulator_value=0.1,
+            initial_linear_value=0.0,
+            clip_weight_min=-1.0,
+            clip_weight_max=1.0,
+        ),
+        embedding_spec.FTRLOptimizerSpec(
+            learning_rate=0.1,
+            learning_rate_power=-0.5,
+            l1_regularization_strength=0.1,
+            l2_regularization_strength=0.1,
+            beta=0.1,
+            initial_accumulator_value=0.1,
+            initial_linear_value=0.0,
+            clip_weight_min=-1.0,
+            clip_weight_max=1.0,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.FTRLOptimizerSpec(learning_rate=0.1),
+        embedding_spec.FTRLOptimizerSpec(learning_rate=0.2),
+    )
+    self.assertNotEqual(
+        embedding_spec.FTRLOptimizerSpec(l1_regularization_strength=0.1),
+        embedding_spec.FTRLOptimizerSpec(l1_regularization_strength=0.2),
+    )
+    op = embedding_spec.FTRLOptimizerSpec(
+        learning_rate=0.05,
+        l1_regularization_strength=0.01,
+        clip_weight_max=2.0,
+    )
+    self.assertEqual(op.learning_rate, 0.05)
+    self.assertEqual(op.l1_regularization_strength, 0.01)
+    self.assertEqual(op.clip_weight_max, 2.0)
+    self.assertEqual(op.clip_weight_min, jnp.finfo(jnp.float32).min)
+
   def test_learning_rate_callable(self):
     def lr():
       return 0.1
@@ -154,6 +197,29 @@ class OptimizerSpecTest(absltest.TestCase):
         jnp.array(1e-30, dtype=jnp.float32),
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
+
+    op = embedding_spec.FTRLOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        ),
+        learning_rate_power=-0.5,
+        l1_regularization_strength=0.01,
+        l2_regularization_strength=0.02,
+        beta=0.001,
+        clip_weight_min=-0.5,
+        clip_weight_max=0.5,
+    )
+    expected_hyperparameters_ftrl = (
+        jnp.array(1.0, dtype=jnp.float32),  # learning_rate at step 0
+        jnp.array(-0.5, dtype=jnp.float32),  # learning_rate_power
+        jnp.array(0.01, dtype=jnp.float32),  # l1_regularization_strength
+        jnp.array(0.02, dtype=jnp.float32),  # l2_regularization_strength
+        jnp.array(0.001, dtype=jnp.float32),  # beta
+        jnp.array(-0.5, dtype=jnp.float32),  # clip_weight_min
+        jnp.array(0.5, dtype=jnp.float32),  # clip_weight_max
+    )
+    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_ftrl)
+
 
 
 if __name__ == "__main__":
