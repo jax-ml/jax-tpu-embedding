@@ -25,6 +25,8 @@ import jax
 import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_momentum
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 
@@ -45,7 +47,12 @@ SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
 AdagradSlotVariables = collections.namedtuple(
     "AdagradSlotVariables", ["accumulator"]
 )
-
+AdagradMomentumSlotVariables = collections.namedtuple(
+    "AdagradMomentumSlotVariables", ["accumulator", "momentum"]
+)
+FTRLSlotVariables = collections.namedtuple(
+    "FtrlSlotVariables", ["accumulator", "linear"]
+)
 LaPropSlotVariables = collections.namedtuple(
     "LaPropSlotVariables", ["mu", "nu"]
 )
@@ -219,6 +226,165 @@ class AdagradOptimizerSpec(OptimizerSpec):
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
+    )
+
+
+class AdagradMomentumOptimizerSpec(OptimizerSpec):
+  """Spec for the Adagrad with Momentum optimizer.
+
+  An Adagrad with Momentum optimizer is an adaptive optimizer that combines
+  the benefits of both Adagrad and Momentum. It adjusts the learning rate
+  for each embedding variable based on its past gradients, while also
+  incorporating momentum to accelerate convergence.
+  Attributes:
+    learning_rate: The learning rate for the training variables or embeddings.
+    momentum: The momentum parameter.
+    initial_accumulator_value: The initial value for the accumulator slot
+      variable.
+    initial_momentum_value: The initial value for the momentum slot variable.
+  """
+
+  def __init__(
+      self,
+      learning_rate=0.001,
+      momentum: float = 0.9,
+      initial_accumulator_value: float = 0.1,
+      initial_momentum_value: float = 0.0,
+  ):
+    super().__init__(
+        learning_rate=learning_rate,
+    )
+    self.momentum = momentum
+    self.initial_accumulator_value = initial_accumulator_value
+    self.initial_momentum_value = initial_momentum_value
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return AdagradMomentumSlotVariables(
+        accumulator=jax.nn.initializers.constant(
+            self.initial_accumulator_value
+        ),
+        momentum=jax.nn.initializers.constant(self.initial_momentum_value),
+    )
+
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the Adagrad Momentum hyperparameters."""
+    return (
+        self.get_learning_rate(step),
+        jnp.array(self.momentum, dtype=jnp.float32),
+    )
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.momentum,
+        self.initial_accumulator_value,
+        self.initial_momentum_value,
+    ))
+
+  def short_name(self) -> str:
+    return "adagrad_momentum"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive
+    )
+
+
+class FTRLOptimizerSpec(OptimizerSpec):
+  """Spec for the FTRL optimizer.
+
+  Follow The Regularized Leader (FTRL) is an optimization algorithm developed
+  at Google for click-through rate prediction.
+
+  Attributes:
+    learning_rate: The learning rate.
+    learning_rate_power: A float value, typically -0.5.
+    l1_regularization_strength: A float value, must be greater than or equal to
+      0.
+    l2_regularization_strength: A float value, must be greater than or equal to
+      0.
+    beta: A float value.
+    initial_accumulator_value: Initial value for the accumulator slot.
+    initial_linear_value: Initial value for the linear slot.
+    clip_weight_min: Minimum value for weight clipping.
+    clip_weight_max: Maximum value for weight clipping.
+  """
+
+  def __init__(
+      self,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.01,
+      learning_rate_power: float = -0.5,
+      l1_regularization_strength: float = 0.0,
+      l2_regularization_strength: float = 0.0,
+      beta: float = 0.0,
+      initial_accumulator_value: float = 0.1,
+      initial_linear_value: float = 0.0,
+      clip_weight_min: float | None = None,
+      clip_weight_max: float | None = None,
+  ):
+    super().__init__(learning_rate=learning_rate)
+    self.learning_rate_power = learning_rate_power
+    self.l1_regularization_strength = l1_regularization_strength
+    self.l2_regularization_strength = l2_regularization_strength
+    self.beta = beta
+    self.initial_accumulator_value = initial_accumulator_value
+    self.initial_linear_value = initial_linear_value
+    self.clip_weight_min = (
+        clip_weight_min
+        if clip_weight_min is not None
+        else jnp.finfo(jnp.float32).min
+    )
+    self.clip_weight_max = (
+        clip_weight_max
+        if clip_weight_max is not None
+        else jnp.finfo(jnp.float32).max
+    )
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return FTRLSlotVariables(
+        accumulator=jax.nn.initializers.constant(
+            self.initial_accumulator_value
+        ),
+        linear=jax.nn.initializers.constant(self.initial_linear_value),
+    )
+
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the FTRL hyperparameters."""
+    return (
+        self.get_learning_rate(step),
+        jnp.array(self.learning_rate_power, dtype=jnp.float32),
+        jnp.array(self.l1_regularization_strength, dtype=jnp.float32),
+        jnp.array(self.l2_regularization_strength, dtype=jnp.float32),
+        jnp.array(self.beta, dtype=jnp.float32),
+        jnp.array(self.clip_weight_min, dtype=jnp.float32),
+        jnp.array(self.clip_weight_max, dtype=jnp.float32),
+    )
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.learning_rate_power,
+        self.l1_regularization_strength,
+        self.l2_regularization_strength,
+        self.beta,
+        self.initial_accumulator_value,
+        self.initial_linear_value,
+        self.clip_weight_min,
+        self.clip_weight_max,
+    ))
+
+  def short_name(self) -> str:
+    return "ftrl"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive
     )
 
 
