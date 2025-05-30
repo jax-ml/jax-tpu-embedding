@@ -74,12 +74,14 @@ cc_test(
     ],
 )
 
-pybind_extension(
-    name = "input_preprocessing_cc",
+cc_library(
+    name = "input_preprocessing_core",
     srcs = ["input_preprocessing.cc"],
+    hdrs = ["input_preprocessing.h"],
     deps = [
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
+        "//jax_tpu_embedding/sparsecore/lib/core/input:input_formats",
         "//third_party/eigen3",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
@@ -87,7 +89,6 @@ pybind_extension(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@pybind11//:pybind11_eigen",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],
@@ -106,6 +107,21 @@ pytype_strict_library(
         pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
+    ],
+)
+
+pybind_extension(
+    name = "input_preprocessing_cc",
+    srcs = [
+        "pybind_input_preprocessing.cc",
+    ],
+    deps = [
+        ":input_preprocessing_core",
+        "//jax_tpu_embedding/sparsecore/lib/core/input:input_formats",
+        "//jax_tpu_embedding/sparsecore/lib/core/input:numpy",
+        "//third_party/eigen3",
+        "//third_party/pybind11_abseil:absl_casters",
+        "@pybind11//:pybind11_eigen",
     ],
 )
 

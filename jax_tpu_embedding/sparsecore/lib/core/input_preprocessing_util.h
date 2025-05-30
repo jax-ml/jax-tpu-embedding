@@ -35,6 +35,15 @@ namespace jax_sc_embedding {
 // generations of TPUs (v2, v3, v4, v5, v6).
 inline constexpr int TPU_VECTOR_REGISTER_ALIGMENT_SIZE = 8;
 
+// numpy uses row major order, while eigen defaults to column major.
+using MatrixXi =
+    Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+using MatrixXf =
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+// pybind11 converts this to a 1D numpy array when returning the value.
+using VectorXi = Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>;
+using VectorXf = Eigen::Matrix<float, 1, Eigen::Dynamic, Eigen::RowMajor>;
+
 // Different combiners that are supported for samples with multiple ids.
 // By default, we use kSum (add the embeddings for all ids in the sample).
 enum class RowCombiner {
@@ -144,9 +153,9 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
     absl::string_view stacked_table_name, bool allow_id_dropping,
     int num_sc_per_device, int total_num_coo_tensors,
-    Eigen::Ref<Eigen::VectorXi> max_ids_per_sc,
-    Eigen::Ref<Eigen::VectorXi> max_unique_ids_per_sc,
-    Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc);
+    Eigen::Ref<VectorXi> max_ids_per_sc,
+    Eigen::Ref<VectorXi> max_unique_ids_per_sc,
+    Eigen::Ref<VectorXi> required_buffer_size_per_sc);
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
@@ -165,9 +174,8 @@ void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
     int batch_size_per_sc, int num_scs, int num_sc_per_device,
-    Eigen::Ref<Eigen::VectorXi> row_pointers,
-    Eigen::Ref<Eigen::VectorXi> embedding_ids,
-    Eigen::Ref<Eigen::VectorXi> sample_ids, Eigen::Ref<Eigen::VectorXf> gains);
+    Eigen::Ref<VectorXi> row_pointers, Eigen::Ref<VectorXi> embedding_ids,
+    Eigen::Ref<VectorXi> sample_ids, Eigen::Ref<VectorXf> gains);
 
 }  // namespace jax_sc_embedding
 

@@ -505,18 +505,16 @@ def run_model():
         lambda y: jax.make_array_from_process_local_data(global_sharding, y),
         x,
     )
-    preprocessed_inputs, stats = map(
-        make_global_view,
-        embedding.preprocess_sparse_dense_matmul_input(
-            features,
-            feature_weights,
-            feature_specs,
-            local_device_count=global_mesh.local_mesh.size,
-            global_device_count=global_mesh.size,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy='MOD',
-        ),
+    preprocessed_inputs, stats = embedding.preprocess_sparse_dense_matmul_input(
+        features,
+        feature_weights,
+        feature_specs,
+        local_device_count=global_mesh.local_mesh.size,
+        global_device_count=global_mesh.size,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy='MOD',
     )
+    preprocessed_inputs = make_global_view(preprocessed_inputs)
     fdo_client.record(stats)
 
     # ----------------------------------------------------------------------

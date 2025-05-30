@@ -759,7 +759,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             allow_id_dropping=False,
         )
     )
-    stats = embedding.SparseDenseMatmulInputStats.from_dict(stats)
+    stats = embedding.SparseDenseMatmulInputStats.from_cc(stats)
     fdo_client.record(stats)
     fdo_client.publish()
     # Duplicated ids on row 0 and 6 are combined.
@@ -2020,9 +2020,7 @@ class InputPreprocessingTest(parameterized.TestCase):
       np.testing.assert_equal(gains[self.table_spec.name], expected_lhs_gains)
 
   @parameterized.parameters(False, True)
-  def test_mean_combiner(
-      self, has_leading_dimension
-  ):
+  def test_mean_combiner(self, has_leading_dimension):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=16,
         embedding_dim=8,
