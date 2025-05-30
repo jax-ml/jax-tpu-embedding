@@ -53,7 +53,7 @@ using MatrixXf =
 namespace {
 
 float ComputeWeightDivisor(RowCombiner combiner, const float* gains_buffer,
-                         py::ssize_t stride, py::ssize_t size) {
+                           py::ssize_t stride, py::ssize_t size) {
   switch (combiner) {
     case RowCombiner::kSum:
       return 1.0f;
@@ -214,7 +214,7 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
     const py::object& stacked_table_spec =
         table_spec.attr("stacked_table_spec");
     const std::string stacked_table_name = py::cast<std::string>(
-        table_spec.attr("_setting_in_stack").attr("stack_name"));
+        table_spec.attr("setting_in_stack").attr("stack_name"));
     int col_shift = 0;
     int col_offset = 0;
     int row_offset = 0;
@@ -225,7 +225,7 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
     std::optional<int> suggested_coo_buffer_size;
     py::object suggested_coo_buffer_size_attr =
         stacked_table_spec.attr("suggested_coo_buffer_size");
-    if (!suggested_coo_buffer_size_attr.is_none()){
+    if (!suggested_coo_buffer_size_attr.is_none()) {
       suggested_coo_buffer_size = py::cast<int>(suggested_coo_buffer_size_attr);
     }
     const std::string row_combiner =
@@ -339,13 +339,11 @@ void PreprocessInputForStackedTablePerLocalDevice(
   //
   // Step 3: Compute the row pointers for each group of IDs.
   //
-  {
-    const int coo_buffer_size_per_sc = coo_buffer_size / num_sc_per_device;
-    FillRowPointersPerLocalDevice(
-        coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
-        batch_size_per_sc, num_scs, num_sc_per_device, row_pointer_buffer,
-        embedding_id_buffer, sample_id_buffer, gain_buffer);
-  }
+  const int coo_buffer_size_per_sc = coo_buffer_size / num_sc_per_device;
+  FillRowPointersPerLocalDevice(
+      coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
+      batch_size_per_sc, num_scs, num_sc_per_device, row_pointer_buffer,
+      embedding_id_buffer, sample_id_buffer, gain_buffer);
 }
 
 py::tuple PreprocessSparseDenseMatmulInput(
