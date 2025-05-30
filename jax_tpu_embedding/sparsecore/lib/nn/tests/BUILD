@@ -43,8 +43,10 @@ py_binary(
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//net/http/handlers:wallz",  # buildcleaner: keep
         pypi_requirement("google_benchmark"),
         pypi_requirement("numpy"),
+        "//util/profiling/flags:contention",  # buildcleaner: keep
     ],
 )
 

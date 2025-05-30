@@ -13,10 +13,12 @@
 // limitations under the License.
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
@@ -25,13 +27,16 @@
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "third_party/eigen3/Eigen/Core"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/cast.h"  // from @pybind11
+#include "pybind11/eigen.h"  // from @pybind11
 #include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/numpy.h"  // from @pybind11
 #include "pybind11/pybind11.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
+#include "pybind11/stl.h"  // from @pybind11
 #include "tsl/profiler/lib/connected_traceme.h"
 #include "tsl/profiler/lib/traceme.h"
 
@@ -40,6 +45,10 @@ namespace jax_sc_embedding {
 namespace {
 
 namespace py = ::pybind11;
+using MatrixXi =
+    Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+using MatrixXf =
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
 namespace {
 
@@ -126,15 +135,14 @@ int ExtractCooTensorsFrom1dArray(const py::array& features,
                                  const int global_device_count,
                                  const RowCombiner combiner,
                                  std::vector<CooFormat>& coo_tensors) {
+  // We use proxy objects to the python array for the remainder of the function
+  // and can hence release the GIL.
+  py::gil_scoped_release release_gil;
   // The assumption here is that the gains are always represented as 32bit
   // float arrays (np array with dtype=np.float32) and the features are always
   // represented as 32bit int arrays (np array with dtype=np.int32).
   auto f = features.unchecked<py::array_t<int>, 1>();
   auto fw = feature_weights.unchecked<py::array_t<float>, 1>();
-
-  // We use proxy objects to the python array for the remainder of the function
-  // and can hence release the GIL.
-  py::gil_scoped_release release_gil;
 
   coo_tensors.reserve(f.shape(0));
   int coo_tensors_extracted = 0;
@@ -257,10 +265,13 @@ void PreprocessInputForStackedTablePerLocalDevice(
     const int row_pointers_size_per_sc, const int num_global_devices,
     const int num_sc_per_device, const int sharding_strategy,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
-    py::array_t<int> row_pointer_buffer, py::array_t<int> embedding_id_buffer,
-    py::array_t<int> sample_id_buffer, py::array_t<float> gain_buffer,
-    py::array_t<int> max_ids_buffer, py::array_t<int> max_unique_ids_buffer,
-    py::array_t<int> required_buffer_size_per_sc_buffer) {
+    Eigen::Ref<Eigen::VectorXi> row_pointer_buffer,
+    Eigen::Ref<Eigen::VectorXi> embedding_id_buffer,
+    Eigen::Ref<Eigen::VectorXi> sample_id_buffer,
+    Eigen::Ref<Eigen::VectorXf> gain_buffer,
+    Eigen::Ref<Eigen::VectorXi> max_ids_buffer,
+    Eigen::Ref<Eigen::VectorXi> max_unique_ids_buffer,
+    Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc_buffer) {
   const int num_scs = num_sc_per_device * num_global_devices;
   int batch_size_for_device = 0;
   int total_num_coo_tensors = 0;
@@ -302,18 +313,10 @@ void PreprocessInputForStackedTablePerLocalDevice(
         feature_split, feature_weights_split, row_offset, col_offset, col_shift,
         num_scs, num_global_devices, metadata.row_combiner, coo_tensors);
   }
-  row_pointer_buffer[py::make_tuple(py::ellipsis())] = coo_buffer_size;
-
-  auto* row_pointer_data = row_pointer_buffer.mutable_data();
-  auto* embedding_ids_data = embedding_id_buffer.mutable_data();
-  auto* sample_ids_data = sample_id_buffer.mutable_data();
-  auto* gains_data = gain_buffer.mutable_data();
-  auto* total_max_ids_per_sc = max_ids_buffer.mutable_data();
-  auto* total_max_unique_ids_per_sc = max_unique_ids_buffer.mutable_data();
-  auto* required_buffer_size_per_sc =
-      required_buffer_size_per_sc_buffer.mutable_data();
   // The remaining section does not require GIL.
   py::gil_scoped_release release;
+
+  row_pointer_buffer.setConstant(coo_buffer_size);
 
   //
   // Step 2: Sort the COO tensors and group them by SC.
@@ -327,11 +330,11 @@ void PreprocessInputForStackedTablePerLocalDevice(
           stacked_table_metadata[0].max_ids_per_partition,
           stacked_table_metadata[0].max_unique_ids_per_partition,
           stacked_table_name, allow_id_dropping, num_sc_per_device,
-          total_num_coo_tensors, total_max_ids_per_sc,
-          total_max_unique_ids_per_sc, required_buffer_size_per_sc);
+          total_num_coo_tensors, max_ids_buffer, max_unique_ids_buffer,
+          required_buffer_size_per_sc_buffer);
   for (int i = 0; i < num_sc_per_device; ++i) {
     coo_tensors_by_id[i].emplace_back(batch_size_per_sc * (i + 1), 0, 0.0);
-    required_buffer_size_per_sc[i]++;
+    required_buffer_size_per_sc_buffer[i]++;
   }
   //
   // Step 3: Compute the row pointers for each group of IDs.
@@ -340,33 +343,9 @@ void PreprocessInputForStackedTablePerLocalDevice(
     const int coo_buffer_size_per_sc = coo_buffer_size / num_sc_per_device;
     FillRowPointersPerLocalDevice(
         coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
-        batch_size_per_sc, num_scs, num_sc_per_device, row_pointer_data,
-        embedding_ids_data, sample_ids_data, gains_data);
+        batch_size_per_sc, num_scs, num_sc_per_device, row_pointer_buffer,
+        embedding_id_buffer, sample_id_buffer, gain_buffer);
   }
-}
-
-// Helper function to get the shape container for the output arrays.
-// If `has_leading_dimension` is true, the shape will be
-// [local_device_count, inner_dim_size]. Otherwise, the shape will be
-// [local_device_count * inner_dim_size].
-static inline py::array::ShapeContainer GetArrayShapeBasedOnLeadingDim(
-    bool has_leading_dimension, int local_device_count, int inner_dim_size) {
-  return has_leading_dimension
-             ? py::array::ShapeContainer({local_device_count, inner_dim_size})
-             : py::array::ShapeContainer({local_device_count * inner_dim_size});
-}
-
-// Helper function to get the slice for a given device.
-// If `has_leading_dimension` is true, the slice will be
-// [device_index:device_index+1]. Otherwise, the slice will be
-// [device_index * first_dim_size:(device_index + 1) * first_dim_size].
-static inline py::slice GetBufferSliceForGivenDevice(bool has_leading_dimension,
-                                                     int start_index,
-                                                     int first_dim_size) {
-  return has_leading_dimension
-             ? py::slice(start_index, start_index + 1, 1)
-             : py::slice(start_index * first_dim_size,
-                         (start_index + 1) * first_dim_size, 1);
 }
 
 py::tuple PreprocessSparseDenseMatmulInput(
@@ -429,81 +408,63 @@ py::tuple PreprocessSparseDenseMatmulInput(
         const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
             num_scs, num_sc_per_device, stacked_table_metadata);
 
-        // Acquire GIL before creating Python arrays.
-        py::gil_scoped_acquire acq;
-        py::array_t<int> row_pointers_per_device =
-            py::array_t<int>(GetArrayShapeBasedOnLeadingDim(
-                has_leading_dimension, local_device_count,
-                row_pointers_size_per_sc * num_sc_per_device));
+        MatrixXi row_pointers_per_device(
+            local_device_count, row_pointers_size_per_sc * num_sc_per_device);
+        MatrixXi embedding_ids_per_device(local_device_count,
+                                          coo_buffer_size_per_device);
+        MatrixXi sample_ids_per_device(local_device_count,
+                                       coo_buffer_size_per_device);
+        MatrixXf gains_per_device(local_device_count,
+                                  coo_buffer_size_per_device);
 
-        py::array::ShapeContainer shape_container =
-            GetArrayShapeBasedOnLeadingDim(has_leading_dimension,
-                                           local_device_count,
-                                           coo_buffer_size_per_device);
-        py::array_t<int> embedding_ids_per_device =
-            py::array_t<int>(shape_container);
-        py::array_t<int> sample_ids_per_device =
-            py::array_t<int>(shape_container);
-        py::array_t<float> gains_per_device =
-            py::array_t<float>(shape_container);
         const int stats_size_per_device = num_scs;
         // NOTE: max ids and max unique ids are {global_sc_count *
         //   num_devices}, where they are then aggregated(max) along device
         //   dimension to get {global_sc_count} (i.e. max [unique] ids for each
         //   sc), which can be further aggregated(max) for a single value for
         //   all SCs.
-        py::array::ShapeContainer max_ids_stats_shape =
-            GetArrayShapeBasedOnLeadingDim(
-                /*has_leading_dimension=*/false, local_device_count,
-                stats_size_per_device);
-        py::array_t<int> max_ids_per_partition_per_sc =
-            py::array_t<int>(max_ids_stats_shape);
-        py::array_t<int> max_unique_ids_per_partition_per_sc =
-            py::array_t<int>(max_ids_stats_shape);
+        MatrixXi max_ids_per_partition_per_sc(local_device_count,
+                                              stats_size_per_device);
+        MatrixXi max_unique_ids_per_partition_per_sc(local_device_count,
+                                                     stats_size_per_device);
         // NOTE: required buffer size is {local_sc_count * num_devices}, which
         //   is same as {global_sc_count}, and can be further aggregated to get
         //   the maximum size of any SC buffer shard.
-        py::array_t<int> required_buffer_size_per_sc =
-            py::array_t<int>(GetArrayShapeBasedOnLeadingDim(
-                false, local_device_count, num_sc_per_device));
+        MatrixXi required_buffer_size_per_sc(local_device_count,
+                                             num_sc_per_device);
         for (int local_device = 0; local_device < local_device_count;
              ++local_device) {
           // Get the tuple outputs for the current split.
-          auto row_pointer_buffer =
-              row_pointers_per_device[GetBufferSliceForGivenDevice(
-                  has_leading_dimension, local_device,
-                  row_pointers_size_per_sc * num_sc_per_device)];
-          py::slice static_buffer_slice = GetBufferSliceForGivenDevice(
-              has_leading_dimension, local_device, coo_buffer_size_per_device);
-          auto embedding_id_buffer =
-              embedding_ids_per_device[static_buffer_slice];
-          auto sample_id_buffer = sample_ids_per_device[static_buffer_slice];
-          auto gain_buffer = gains_per_device[static_buffer_slice];
-          py::slice max_ids_stats_slice =
-              GetBufferSliceForGivenDevice(/*has_leading_dimension=*/false,
-                                           local_device, stats_size_per_device);
-          auto max_ids_per_partition_per_sc_buffer =
-              max_ids_per_partition_per_sc[max_ids_stats_slice];
-          auto max_unique_ids_per_partition_per_sc_buffer =
-              max_unique_ids_per_partition_per_sc[max_ids_stats_slice];
+          Eigen::Ref<Eigen::VectorXi> row_pointer_buffer =
+              row_pointers_per_device.row(local_device);
+          Eigen::Ref<Eigen::VectorXi> embedding_id_buffer =
+              embedding_ids_per_device.row(local_device);
+          Eigen::Ref<Eigen::VectorXi> sample_id_buffer =
+              sample_ids_per_device.row(local_device);
+          Eigen::Ref<Eigen::VectorXf> gain_buffer =
+              gains_per_device.row(local_device);
+          Eigen::Ref<Eigen::VectorXi> max_ids_per_partition_per_sc_buffer =
+              max_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<Eigen::VectorXi>
+              max_unique_ids_per_partition_per_sc_buffer =
+                  max_unique_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc_buffer =
+              required_buffer_size_per_sc.row(local_device);
 
-          auto required_buffer_size_per_sc_buffer =
-              required_buffer_size_per_sc[GetBufferSliceForGivenDevice(
-                  false, local_device, num_sc_per_device)];
+          // Acquire GIL
+          py::gil_scoped_acquire acq;
           PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, features, feature_weights, local_device,
               local_device_count, coo_buffer_size_per_device,
               row_pointers_size_per_sc, global_device_count, num_sc_per_device,
               sharding_strategy, stacked_table_name, allow_id_dropping,
-              py::cast<py::array_t<int>>(row_pointer_buffer),
-              py::cast<py::array_t<int>>(embedding_id_buffer),
-              py::cast<py::array_t<int>>(sample_id_buffer),
-              py::cast<py::array_t<float>>(gain_buffer),
-              py::cast<py::array_t<int>>(max_ids_per_partition_per_sc_buffer),
-              py::cast<py::array_t<int>>(
-                  max_unique_ids_per_partition_per_sc_buffer),
-              py::cast<py::array_t<int>>(required_buffer_size_per_sc_buffer));
+              row_pointer_buffer, embedding_id_buffer, sample_id_buffer,
+              gain_buffer, max_ids_per_partition_per_sc_buffer,
+              max_unique_ids_per_partition_per_sc_buffer,
+              required_buffer_size_per_sc_buffer);
         }
+        // Acquire GIL before updating Python dicts.
+        py::gil_scoped_acquire acq;
         lhs_row_pointers[stacked_table_name.c_str()] =
             std::move(row_pointers_per_device);
         lhs_embedding_ids[stacked_table_name.c_str()] =
@@ -517,14 +478,29 @@ py::tuple PreprocessSparseDenseMatmulInput(
             std::move(max_unique_ids_per_partition_per_sc);
         required_buffer_sizes[stacked_table_name.c_str()] =
             std::move(required_buffer_size_per_sc);
+        // To be eventually extracted out of the library
+        if (!has_leading_dimension) {
+          for (auto& vec : {lhs_row_pointers, lhs_embedding_ids, lhs_gains,
+                            lhs_sample_ids}) {
+            vec[stacked_table_name.c_str()] =
+                py::cast<py::array>(vec[stacked_table_name.c_str()])
+                    .reshape({-1});
+          }
+        }
+        for (auto& vec : {max_ids_per_partition, max_unique_ids_per_partition,
+                          required_buffer_sizes}) {
+          vec[stacked_table_name.c_str()] =
+              py::cast<py::array>(vec[stacked_table_name.c_str()])
+                  .reshape({-1});
+        }
         counter.DecrementCount();
       });
     }
     counter.Wait();
   }
   py::dict stats;
-  stats["max_ids"] = max_ids_per_partition;
-  stats["max_unique_ids"] = max_unique_ids_per_partition;
+  stats["max_ids"] = std::move(max_ids_per_partition);
+  stats["max_unique_ids"] = std::move(max_unique_ids_per_partition);
   stats["required_buffer_size"] = std::move(required_buffer_sizes);
 
   // GIL is held at this point.

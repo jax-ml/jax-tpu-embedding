@@ -23,6 +23,7 @@
 
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "third_party/eigen3/Eigen/Core"
 
 namespace jax_sc_embedding {
 
@@ -142,8 +143,10 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     int32_t batch_size_for_device,  // Batch size for the local device.
     int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
     absl::string_view stacked_table_name, bool allow_id_dropping,
-    int num_sc_per_device, int total_num_coo_tensors, int max_ids_per_sc[],
-    int max_unique_ids_per_sc[], int required_buffer_size_per_sc[]);
+    int num_sc_per_device, int total_num_coo_tensors,
+    Eigen::Ref<Eigen::VectorXi> max_ids_per_sc,
+    Eigen::Ref<Eigen::VectorXi> max_unique_ids_per_sc,
+    Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc);
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
@@ -162,7 +165,9 @@ void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
     int batch_size_per_sc, int num_scs, int num_sc_per_device,
-    int row_pointers[], int embedding_ids[], int sample_ids[], float gains[]);
+    Eigen::Ref<Eigen::VectorXi> row_pointers,
+    Eigen::Ref<Eigen::VectorXi> embedding_ids,
+    Eigen::Ref<Eigen::VectorXi> sample_ids, Eigen::Ref<Eigen::VectorXf> gains);
 
 }  // namespace jax_sc_embedding
 

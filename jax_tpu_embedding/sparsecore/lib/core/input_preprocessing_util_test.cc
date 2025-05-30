@@ -21,6 +21,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "third_party/eigen3/Eigen/Core"
 
 namespace jax_sc_embedding {
 namespace {
@@ -133,9 +134,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
@@ -205,9 +206,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  int32_t max_id_per_sc[2] = {0, 0};
-  int32_t max_unique_id_per_sc[2] = {0, 0};
-  int32_t required_buffer_sizes_per_sc[2] = {0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0}};
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/2,
@@ -261,9 +262,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
@@ -299,9 +300,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           coo_formats, /*batch_size_per_sc=*/4, /*num_scs=*/4,
@@ -341,9 +342,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
@@ -385,9 +386,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
@@ -425,9 +426,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
     coo_formats.push_back(CooFormat(row, 8, 1.0));
     coo_formats.push_back(CooFormat(row, 16, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
@@ -465,9 +466,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   for (int row = 0; row < 128; ++row) {
     coo_formats.push_back(CooFormat(row, row * 4, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
@@ -506,9 +507,9 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
   }
   // Force dropping of IDs here with max_ids_per_partition == 2
   // The later 2 samples for each sparsecore will be dropped.
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
@@ -583,9 +584,9 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  int32_t max_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t max_unique_id_per_sc[4] = {0, 0, 0, 0};
-  int32_t required_buffer_sizes_per_sc[4] = {0, 0, 0, 0};
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           coo_formats, /*batch_size_per_sc=*/2, /*num_scs=*/4,
@@ -597,15 +598,16 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
           /*total_num_coo_tensors=*/coo_formats.size(), max_id_per_sc,
           max_unique_id_per_sc, required_buffer_sizes_per_sc);
 
-  std::vector<int> row_pointers(8 * 4);
-  std::vector<int> embedding_ids(32 * 4);
-  std::vector<int> sample_ids(32 * 4);
-  std::vector<float> gains(32 * 4);
-  FillRowPointersPerLocalDevice(
-      coo_tensors_by_id, /*row_pointers_size_per_sc=*/8,
-      /*coo_buffer_size_per_sc=*/32, /*batch_size_per_sc=*/2,
-      /*num_scs=*/4, /*num_sc_per_device=*/4, row_pointers.data(),
-      embedding_ids.data(), sample_ids.data(), gains.data());
+  Eigen::VectorXi row_pointers(8 * 4);
+  Eigen::VectorXi embedding_ids(32 * 4);
+  Eigen::VectorXi sample_ids(32 * 4);
+  Eigen::VectorXf gains(32 * 4);
+  FillRowPointersPerLocalDevice(coo_tensors_by_id,
+                                /*row_pointers_size_per_sc=*/8,
+                                /*coo_buffer_size_per_sc=*/32,
+                                /*batch_size_per_sc=*/2,
+                                /*num_scs=*/4, /*num_sc_per_device=*/4,
+                                row_pointers, embedding_ids, sample_ids, gains);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 26, 26, 26, 26, 2, 10, 18, 26, 26, 26, 26, 26,

@@ -30,6 +30,7 @@
 #include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "third_party/eigen3/Eigen/Core"
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
 #include "tsl/profiler/lib/traceme.h"
@@ -106,8 +107,9 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     const int32_t max_unique_ids_per_partition,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
     const int num_sc_per_device, const int total_num_coo_tensors,
-    int max_ids_per_sc[], int max_unique_ids_per_sc[],
-    int required_buffer_size_per_sc[]) {
+    Eigen::Ref<Eigen::VectorXi> max_ids_per_sc,
+    Eigen::Ref<Eigen::VectorXi> max_unique_ids_per_sc,
+    Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const int local_sc_count = batch_size_for_device / batch_size_per_sc;
   std::vector<std::vector<CooFormat>> coo_tensors_by_id;
@@ -122,16 +124,13 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
   uint32_t coo_tensor_index = 0;
   const int32_t num_scs_bit = std::log2(global_sc_count);
   // Initialize the aggregated max ids and unique ids per SC to 0.
-  for (int32_t global_sc_id = 0; global_sc_id < global_sc_count;
-       ++global_sc_id) {
-    max_ids_per_sc[global_sc_id] = 0;
-    max_unique_ids_per_sc[global_sc_id] = 0;
-  }
+  max_ids_per_sc.fill(0);
+  max_unique_ids_per_sc.fill(0);
+  required_buffer_size_per_sc.fill(0);
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
     std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
-    required_buffer_size_per_sc[local_sc_id] = 0;
     std::vector<uint64_t> keys;
     keys.reserve(batch_size_per_sc);
     // We take the advantage of the fact that the row_ids are already sorted
@@ -295,7 +294,9 @@ void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc, const int num_scs, const int num_sc_per_device,
-    int row_pointers[], int embedding_ids[], int sample_ids[], float gains[]) {
+    Eigen::Ref<Eigen::VectorXi> row_pointers,
+    Eigen::Ref<Eigen::VectorXi> embedding_ids,
+    Eigen::Ref<Eigen::VectorXi> sample_ids, Eigen::Ref<Eigen::VectorXf> gains) {
   tsl::profiler::TraceMe t("FillRowPointers");
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;
