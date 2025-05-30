@@ -21,7 +21,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include "third_party/eigen3/Eigen/Core"
+#include "Eigen/Core"  // from @eigen_archive
 
 namespace jax_sc_embedding {
 namespace {
