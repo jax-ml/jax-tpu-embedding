@@ -263,13 +263,12 @@ void PreprocessInputForStackedTablePerLocalDevice(
     const int row_pointers_size_per_sc, const int num_global_devices,
     const int num_sc_per_device, const int sharding_strategy,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
-    Eigen::Ref<Eigen::VectorXi> row_pointer_buffer,
-    Eigen::Ref<Eigen::VectorXi> embedding_id_buffer,
-    Eigen::Ref<Eigen::VectorXi> sample_id_buffer,
-    Eigen::Ref<Eigen::VectorXf> gain_buffer,
-    Eigen::Ref<Eigen::VectorXi> max_ids_buffer,
-    Eigen::Ref<Eigen::VectorXi> max_unique_ids_buffer,
-    Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc_buffer) {
+    Eigen::Ref<RowVectorXi> row_pointer_buffer,
+    Eigen::Ref<RowVectorXi> embedding_id_buffer,
+    Eigen::Ref<RowVectorXi> sample_id_buffer,
+    Eigen::Ref<RowVectorXf> gain_buffer, Eigen::Ref<RowVectorXi> max_ids_buffer,
+    Eigen::Ref<RowVectorXi> max_unique_ids_buffer,
+    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer) {
   const int num_scs = num_sc_per_device * num_global_devices;
   int batch_size_for_device = 0;
   int total_num_coo_tensors = 0;
@@ -429,20 +428,19 @@ py::tuple PreprocessSparseDenseMatmulInput(
         for (int local_device = 0; local_device < local_device_count;
              ++local_device) {
           // Get the tuple outputs for the current split.
-          Eigen::Ref<Eigen::VectorXi> row_pointer_buffer =
+          Eigen::Ref<RowVectorXi> row_pointer_buffer =
               row_pointers_per_device.row(local_device);
-          Eigen::Ref<Eigen::VectorXi> embedding_id_buffer =
+          Eigen::Ref<RowVectorXi> embedding_id_buffer =
               embedding_ids_per_device.row(local_device);
-          Eigen::Ref<Eigen::VectorXi> sample_id_buffer =
+          Eigen::Ref<RowVectorXi> sample_id_buffer =
               sample_ids_per_device.row(local_device);
-          Eigen::Ref<Eigen::VectorXf> gain_buffer =
+          Eigen::Ref<RowVectorXf> gain_buffer =
               gains_per_device.row(local_device);
-          Eigen::Ref<Eigen::VectorXi> max_ids_per_partition_per_sc_buffer =
+          Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
               max_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<Eigen::VectorXi>
-              max_unique_ids_per_partition_per_sc_buffer =
-                  max_unique_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc_buffer =
+          Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
+              max_unique_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
               required_buffer_size_per_sc.row(local_device);
 
           // Acquire GIL

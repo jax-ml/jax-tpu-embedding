@@ -16,15 +16,9 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
-#include "third_party/eigen3/Eigen/Core"
+#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
-
-using MatrixXi =
-    Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-using MatrixXf =
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-using RowVectorXi = Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>;
 
 template <typename T>
 using StackedTableMap = absl::flat_hash_map<std::string, T>;
