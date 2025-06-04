@@ -76,18 +76,22 @@ cc_test(
 
 pybind_extension(
     name = "input_preprocessing_cc",
-    srcs = ["input_preprocessing.cc"],
+    srcs = [
+        "input_preprocessing.cc",
+        "input_preprocessing.h",
+    ],
     deps = [
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
+        "//jax_tpu_embedding/sparsecore/lib/core/input:numpy",  # buildcleaner: keep
         "//third_party/eigen3",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@pybind11//:pybind11_eigen",
+        "@pybind11_abseil//:absl_casters",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],
