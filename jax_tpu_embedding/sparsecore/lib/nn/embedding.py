@@ -70,13 +70,13 @@ class SparseDenseMatmulInputStats:
   required_buffer_size_per_sc: Mapping[str, np.ndarray]
 
   @classmethod
-  def from_dict(
-      cls, stats: Mapping[str, Mapping[str, np.ndarray]]
+  def from_cc(
+      cls, stats: input_preprocessing_cc.SparseDenseMatmulInputStats
   ) -> "SparseDenseMatmulInputStats":
     return cls(
-        max_ids_per_partition=stats["max_ids"],
-        max_unique_ids_per_partition=stats["max_unique_ids"],
-        required_buffer_size_per_sc=stats["required_buffer_size"],
+        max_ids_per_partition=stats.max_ids_per_partition,
+        max_unique_ids_per_partition=stats.max_unique_ids_per_partition,
+        required_buffer_size_per_sc=stats.required_buffer_sizes,
     )
 
 
@@ -353,8 +353,7 @@ def preprocess_sparse_dense_matmul_input(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
 
   Returns:
-    A tuple of PreprocessSparseDenseMatmulInput and
-    PreprocessSparseDenseMatmulInputStats.
+    A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
   """
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
@@ -375,7 +374,7 @@ def preprocess_sparse_dense_matmul_input(
 
   return SparseDenseMatmulInput(
       *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_dict(stats)
+  ), SparseDenseMatmulInputStats.from_cc(stats)
 
 
 def _get_activation_for_feature(

@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -18,7 +20,6 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
@@ -37,6 +38,7 @@
 #include "pybind11/pybind11.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
 #include "pybind11/stl.h"  // from @pybind11
+#include "third_party/pybind11_abseil/absl_casters.h"
 #include "tsl/profiler/lib/connected_traceme.h"
 #include "tsl/profiler/lib/traceme.h"
 
@@ -45,10 +47,6 @@ namespace jax_sc_embedding {
 namespace {
 
 namespace py = ::pybind11;
-using MatrixXi =
-    Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-using MatrixXf =
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
 namespace {
 
@@ -365,9 +363,7 @@ py::tuple PreprocessSparseDenseMatmulInput(
   py::dict lhs_embedding_ids;
   py::dict lhs_sample_ids;
   py::dict lhs_gains;
-  py::dict max_ids_per_partition;
-  py::dict max_unique_ids_per_partition;
-  py::dict required_buffer_sizes;
+  SparseDenseMatmulInputStats stats;
   const int num_scs = num_sc_per_device * global_device_count;
   const int row_pointers_size_per_sc =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
@@ -470,11 +466,18 @@ py::tuple PreprocessSparseDenseMatmulInput(
         lhs_sample_ids[stacked_table_name.c_str()] =
             std::move(sample_ids_per_device);
         lhs_gains[stacked_table_name.c_str()] = std::move(gains_per_device);
-        max_ids_per_partition[stacked_table_name.c_str()] =
+
+        max_ids_per_partition_per_sc.resize(
+            1, max_ids_per_partition_per_sc.size());
+        max_unique_ids_per_partition_per_sc.resize(
+            1, max_unique_ids_per_partition_per_sc.size());
+        required_buffer_size_per_sc.resize(1,
+                                           required_buffer_size_per_sc.size());
+        stats.max_ids_per_partition[stacked_table_name.c_str()] =
             std::move(max_ids_per_partition_per_sc);
-        max_unique_ids_per_partition[stacked_table_name.c_str()] =
+        stats.max_unique_ids_per_partition[stacked_table_name.c_str()] =
             std::move(max_unique_ids_per_partition_per_sc);
-        required_buffer_sizes[stacked_table_name.c_str()] =
+        stats.required_buffer_sizes[stacked_table_name.c_str()] =
             std::move(required_buffer_size_per_sc);
         // To be eventually extracted out of the library
         if (!has_leading_dimension) {
@@ -485,21 +488,11 @@ py::tuple PreprocessSparseDenseMatmulInput(
                     .reshape({-1});
           }
         }
-        for (auto& vec : {max_ids_per_partition, max_unique_ids_per_partition,
-                          required_buffer_sizes}) {
-          vec[stacked_table_name.c_str()] =
-              py::cast<py::array>(vec[stacked_table_name.c_str()])
-                  .reshape({-1});
-        }
         counter.DecrementCount();
       });
     }
     counter.Wait();
   }
-  py::dict stats;
-  stats["max_ids"] = std::move(max_ids_per_partition);
-  stats["max_unique_ids"] = std::move(max_unique_ids_per_partition);
-  stats["required_buffer_size"] = std::move(required_buffer_sizes);
 
   // GIL is held at this point.
   return py::make_tuple(lhs_row_pointers, lhs_embedding_ids, lhs_sample_ids,
@@ -516,6 +509,14 @@ PYBIND11_MODULE(input_preprocessing_cc, m) {
         pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
         pybind11::arg("has_leading_dimension"),
         pybind11::arg("allow_id_dropping"));
+  py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
+      .def(py::init<>())
+      .def_readonly("max_ids_per_partition",
+                    &SparseDenseMatmulInputStats::max_ids_per_partition)
+      .def_readonly("max_unique_ids_per_partition",
+                    &SparseDenseMatmulInputStats::max_unique_ids_per_partition)
+      .def_readonly("required_buffer_sizes",
+                    &SparseDenseMatmulInputStats::required_buffer_sizes);
 }
 
 }  // namespace jax_sc_embedding
