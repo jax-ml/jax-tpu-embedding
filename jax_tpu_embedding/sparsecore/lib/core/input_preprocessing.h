@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -27,6 +28,11 @@ struct SparseDenseMatmulInputStats {
   StackedTableMap<RowVectorXi> max_ids_per_partition;
   StackedTableMap<RowVectorXi> max_unique_ids_per_partition;
   StackedTableMap<RowVectorXi> required_buffer_sizes;
+};
+
+struct ExtractedCooTensors {
+  std::vector<CooFormat> coo_tensors;
+  int batch_size_for_device = 0;
 };
 
 }  // namespace jax_sc_embedding

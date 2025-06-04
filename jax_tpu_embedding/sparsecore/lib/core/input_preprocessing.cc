@@ -80,14 +80,14 @@ float ComputeWeightDivisor(RowCombiner combiner, const float* gains_buffer,
 // `features` and `feature_weights` are 2D arrays, which means they are
 // rectangular shaped arrays of dtype int (features) and float
 // (feature_weights).
-int ExtractCooTensorsFrom2dArray(const py::array& features,
-                                 const py::array& feature_weights,
-                                 const int row_offset, const int col_offset,
-                                 const int col_shift, const int num_scs_mod,
-                                 const int num_scs_mod_inv,
-                                 const int global_device_count,
-                                 const RowCombiner combiner,
-                                 std::vector<CooFormat>& coo_tensors) {
+void ExtractCooTensorsFrom2dArray(const py::array& features,
+                                  const py::array& feature_weights,
+                                  const int row_offset, const int col_offset,
+                                  const int col_shift, const int num_scs_mod,
+                                  const int num_scs_mod_inv,
+                                  const int global_device_count,
+                                  const RowCombiner combiner,
+                                  std::vector<CooFormat>& coo_tensors) {
   auto features_array = py::cast<py::array_t<int>>(features);
   auto features_weight_array = py::cast<py::array_t<float>>(feature_weights);
   auto features_array_t = features_array.unchecked<2>();
@@ -117,7 +117,6 @@ int ExtractCooTensorsFrom2dArray(const py::array& features,
           gain);
     }
   }
-  return nrows * ncols;
 }
 
 // `features` and `feature_weights` are 1D arrays of arrays. That is, they
@@ -125,14 +124,14 @@ int ExtractCooTensorsFrom2dArray(const py::array& features,
 // (features) and floats (feature_weights). When looping over the inner arrays,
 // we have to cast the object to a py::array_t<T> and then access the inner
 // arrays.
-int ExtractCooTensorsFrom1dArray(const py::array& features,
-                                 const py::array& feature_weights,
-                                 const int row_offset, const int col_offset,
-                                 const int col_shift, const int num_scs_mod,
-                                 const int num_scs_mod_inv,
-                                 const int global_device_count,
-                                 const RowCombiner combiner,
-                                 std::vector<CooFormat>& coo_tensors) {
+void ExtractCooTensorsFrom1dArray(const py::array& features,
+                                  const py::array& feature_weights,
+                                  const int row_offset, const int col_offset,
+                                  const int col_shift, const int num_scs_mod,
+                                  const int num_scs_mod_inv,
+                                  const int global_device_count,
+                                  const RowCombiner combiner,
+                                  std::vector<CooFormat>& coo_tensors) {
   // We use proxy objects to the python array for the remainder of the function
   // and can hence release the GIL.
   py::gil_scoped_release release_gil;
@@ -165,15 +164,14 @@ int ExtractCooTensorsFrom1dArray(const py::array& features,
           gain);
     }
   }
-  return coo_tensors_extracted;
 }
 
-int ExtractCooTensors(const py::array& features,
-                      const py::array& feature_weights, const int row_offset,
-                      const int col_offset, const int col_shift,
-                      const int num_scs, const int global_device_count,
-                      const RowCombiner combiner,
-                      std::vector<CooFormat>& coo_tensors) {
+void ExtractCooTensors(const py::array& features,
+                       const py::array& feature_weights, const int row_offset,
+                       const int col_offset, const int col_shift,
+                       const int num_scs, const int global_device_count,
+                       const RowCombiner combiner,
+                       std::vector<CooFormat>& coo_tensors) {
   // We have to differentiate between 2D and 1D np.ndarray.
   // In the case of a 1D array of arrays, we have to iterate over the inner
   // arrays individually, collecting the COOFormat objects since the dtype of
@@ -187,15 +185,15 @@ int ExtractCooTensors(const py::array& features,
   const int num_scs_bit = std::log2(num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
   const int num_scs_mod_inv = ~num_scs_mod;
-  return features_buffer_info.ndim == 2
-             ? ExtractCooTensorsFrom2dArray(
-                   features, feature_weights, row_offset, col_offset, col_shift,
-                   num_scs_mod, num_scs_mod_inv, global_device_count, combiner,
-                   coo_tensors)
-             : ExtractCooTensorsFrom1dArray(
-                   features, feature_weights, row_offset, col_offset, col_shift,
-                   num_scs_mod, num_scs_mod_inv, global_device_count, combiner,
-                   coo_tensors);
+  features_buffer_info.ndim == 2
+      ? ExtractCooTensorsFrom2dArray(features, feature_weights, row_offset,
+                                     col_offset, col_shift, num_scs_mod,
+                                     num_scs_mod_inv, global_device_count,
+                                     combiner, coo_tensors)
+      : ExtractCooTensorsFrom1dArray(features, feature_weights, row_offset,
+                                     col_offset, col_shift, num_scs_mod,
+                                     num_scs_mod_inv, global_device_count,
+                                     combiner, coo_tensors);
 }
 
 absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
@@ -250,36 +248,13 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
   return stacked_table_metadata;
 }
 
-// Preprocess inputs for a single table. Stacked table here refers to a
-// a table that has no parent in the table stacking hierarchy. So in the case
-// of table stacking, the stacked table is the top level table and in the case
-// where we don't have any table stacking, the table itself is top level.
-//
-// IMPORTANT: Assumes that GIL is held.
-void PreprocessInputForStackedTablePerLocalDevice(
+// Extract the COO tensors for all features.
+ExtractedCooTensors ExtractCooTensorsForAllFeatures(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     py::list features, py::list feature_weights, const int local_device_id,
-    const int local_device_count, const int coo_buffer_size,
-    const int row_pointers_size_per_sc, const int num_global_devices,
-    const int num_sc_per_device, const int sharding_strategy,
-    const absl::string_view stacked_table_name, const bool allow_id_dropping,
-    Eigen::Ref<RowVectorXi> row_pointer_buffer,
-    Eigen::Ref<RowVectorXi> embedding_id_buffer,
-    Eigen::Ref<RowVectorXi> sample_id_buffer,
-    Eigen::Ref<RowVectorXf> gain_buffer, Eigen::Ref<RowVectorXi> max_ids_buffer,
-    Eigen::Ref<RowVectorXi> max_unique_ids_buffer,
-    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer) {
-  const int num_scs = num_sc_per_device * num_global_devices;
-  int batch_size_for_device = 0;
-  int total_num_coo_tensors = 0;
-
-  //
-  // Step 1: Extract the COO tensors for each feature.
-  //
-
-  // Note that the stacked_table_metadata list is sorted by row offsets of the
-  // features.
-  std::vector<CooFormat> coo_tensors;
+    const int local_device_count, const int num_scs,
+    const int num_global_devices) {
+  ExtractedCooTensors extracted_coo_tensors;
   for (int i = 0; i < stacked_table_metadata.size(); ++i) {
     const StackedTableMetadata& metadata = stacked_table_metadata[i];
     const int feature_index = metadata.feature_index;
@@ -302,14 +277,49 @@ void PreprocessInputForStackedTablePerLocalDevice(
     py::slice feature_slice = py::slice(start_index, end_index, 1);
     const py::array feature_split = curr_feature[feature_slice];
     const py::array feature_weights_split = curr_feature_weight[feature_slice];
-    batch_size_for_device += feature_split.shape(0);
+    extracted_coo_tensors.batch_size_for_device += feature_split.shape(0);
 
     // In the case of feature stacking, we need to group all the COO tensors
     // at this stage (i.e., before the sorting later on).
-    total_num_coo_tensors += ExtractCooTensors(
-        feature_split, feature_weights_split, row_offset, col_offset, col_shift,
-        num_scs, num_global_devices, metadata.row_combiner, coo_tensors);
+    ExtractCooTensors(feature_split, feature_weights_split, row_offset,
+                      col_offset, col_shift, num_scs, num_global_devices,
+                      metadata.row_combiner, extracted_coo_tensors.coo_tensors);
   }
+  return extracted_coo_tensors;
+}
+
+// Preprocess inputs for a single table. Stacked table here refers to a
+// a table that has no parent in the table stacking hierarchy. So in the case
+// of table stacking, the stacked table is the top level table and in the case
+// where we don't have any table stacking, the table itself is top level.
+//
+// IMPORTANT: Assumes that GIL is held.
+void PreprocessInputForStackedTablePerLocalDevice(
+    const absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    py::list features, py::list feature_weights, const int local_device_id,
+    const int local_device_count, const int coo_buffer_size,
+    const int row_pointers_size_per_sc, const int num_global_devices,
+    const int num_sc_per_device, const int sharding_strategy,
+    const absl::string_view stacked_table_name, const bool allow_id_dropping,
+    Eigen::Ref<RowVectorXi> row_pointer_buffer,
+    Eigen::Ref<RowVectorXi> embedding_id_buffer,
+    Eigen::Ref<RowVectorXi> sample_id_buffer,
+    Eigen::Ref<RowVectorXf> gain_buffer, Eigen::Ref<RowVectorXi> max_ids_buffer,
+    Eigen::Ref<RowVectorXi> max_unique_ids_buffer,
+    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer) {
+  const int num_scs = num_sc_per_device * num_global_devices;
+
+  //
+  // Step 1: Extract the COO tensors for each feature.
+  //
+
+  // Note that the stacked_table_metadata list is sorted by row offsets of the
+  // features.
+  ExtractedCooTensors extracted_coo_tensors = ExtractCooTensorsForAllFeatures(
+      stacked_table_metadata, features, feature_weights, local_device_id,
+      local_device_count, num_scs, num_global_devices);
+  int total_num_coo_tensors = extracted_coo_tensors.coo_tensors.size();
+
   // The remaining section does not require GIL.
   py::gil_scoped_release release;
 
@@ -318,12 +328,13 @@ void PreprocessInputForStackedTablePerLocalDevice(
   //
   // Step 2: Sort the COO tensors and group them by SC.
   //
-  const int batch_size_per_sc =
-      CeilOfRatio(batch_size_for_device, num_sc_per_device);
+  const int batch_size_per_sc = CeilOfRatio(
+      extracted_coo_tensors.batch_size_for_device, num_sc_per_device);
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          coo_tensors, batch_size_per_sc, num_scs, batch_size_for_device,
+          extracted_coo_tensors.coo_tensors, batch_size_per_sc, num_scs,
+          extracted_coo_tensors.batch_size_for_device,
           stacked_table_metadata[0].max_ids_per_partition,
           stacked_table_metadata[0].max_unique_ids_per_partition,
           stacked_table_name, allow_id_dropping, num_sc_per_device,
