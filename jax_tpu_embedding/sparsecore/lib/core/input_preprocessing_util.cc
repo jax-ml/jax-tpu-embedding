@@ -107,9 +107,9 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     const int32_t max_unique_ids_per_partition,
     const absl::string_view stacked_table_name, const bool allow_id_dropping,
     const int num_sc_per_device, const int total_num_coo_tensors,
-    Eigen::Ref<Eigen::VectorXi> max_ids_per_sc,
-    Eigen::Ref<Eigen::VectorXi> max_unique_ids_per_sc,
-    Eigen::Ref<Eigen::VectorXi> required_buffer_size_per_sc) {
+    Eigen::Ref<RowVectorXi> max_ids_per_sc,
+    Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
+    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const int local_sc_count = batch_size_for_device / batch_size_per_sc;
   std::vector<std::vector<CooFormat>> coo_tensors_by_id;
@@ -294,9 +294,8 @@ void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc, const int num_scs, const int num_sc_per_device,
-    Eigen::Ref<Eigen::VectorXi> row_pointers,
-    Eigen::Ref<Eigen::VectorXi> embedding_ids,
-    Eigen::Ref<Eigen::VectorXi> sample_ids, Eigen::Ref<Eigen::VectorXf> gains) {
+    Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
+    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains) {
   tsl::profiler::TraceMe t("FillRowPointers");
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;
