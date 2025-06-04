@@ -197,10 +197,11 @@ void ExtractCooTensors(const py::array& features,
 }
 
 absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-GetStackedTableMetadata(py::list feature_specs, py::list features) {
+GetStackedTableMetadata(py::list& feature_specs, py::list& features) {
   tsl::profiler::TraceMe t([] { return "GetStackedTableMetadata"; });
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_table_metadata;
+  py::gil_scoped_acquire acq;
   for (int i = 0; i < feature_specs.size(); ++i) {
     const py::object& feature_spec = feature_specs[i];
     const py::array& feature = features[i].cast<py::array>();
@@ -251,9 +252,10 @@ GetStackedTableMetadata(py::list feature_specs, py::list features) {
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeatures(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    py::list features, py::list feature_weights, const int local_device_id,
+    py::list& features, py::list& feature_weights, const int local_device_id,
     const int local_device_count, const int num_scs,
     const int num_global_devices) {
+  py::gil_scoped_acquire acq;
   ExtractedCooTensors extracted_coo_tensors;
   for (int i = 0; i < stacked_table_metadata.size(); ++i) {
     const StackedTableMetadata& metadata = stacked_table_metadata[i];
@@ -292,11 +294,9 @@ ExtractedCooTensors ExtractCooTensorsForAllFeatures(
 // a table that has no parent in the table stacking hierarchy. So in the case
 // of table stacking, the stacked table is the top level table and in the case
 // where we don't have any table stacking, the table itself is top level.
-//
-// IMPORTANT: Assumes that GIL is held.
 void PreprocessInputForStackedTablePerLocalDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    py::list features, py::list feature_weights, const int local_device_id,
+    py::list& features, py::list& feature_weights, const int local_device_id,
     const int local_device_count, const int coo_buffer_size,
     const int row_pointers_size_per_sc, const int num_global_devices,
     const int num_sc_per_device, const int sharding_strategy,
@@ -319,9 +319,6 @@ void PreprocessInputForStackedTablePerLocalDevice(
       stacked_table_metadata, features, feature_weights, local_device_id,
       local_device_count, num_scs, num_global_devices);
   int total_num_coo_tensors = extracted_coo_tensors.coo_tensors.size();
-
-  // The remaining section does not require GIL.
-  py::gil_scoped_release release;
 
   row_pointer_buffer.setConstant(coo_buffer_size);
 
@@ -454,8 +451,6 @@ py::tuple PreprocessSparseDenseMatmulInput(
           Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
               required_buffer_size_per_sc.row(local_device);
 
-          // Acquire GIL
-          py::gil_scoped_acquire acq;
           PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, features, feature_weights, local_device,
               local_device_count, coo_buffer_size_per_device,
@@ -466,6 +461,13 @@ py::tuple PreprocessSparseDenseMatmulInput(
               max_unique_ids_per_partition_per_sc_buffer,
               required_buffer_size_per_sc_buffer);
         }
+        max_ids_per_partition_per_sc.resize(
+            1, max_ids_per_partition_per_sc.size());
+        max_unique_ids_per_partition_per_sc.resize(
+            1, max_unique_ids_per_partition_per_sc.size());
+        required_buffer_size_per_sc.resize(1,
+                                           required_buffer_size_per_sc.size());
+
         // Acquire GIL before updating Python dicts.
         py::gil_scoped_acquire acq;
         lhs_row_pointers[stacked_table_name.c_str()] =
@@ -476,12 +478,6 @@ py::tuple PreprocessSparseDenseMatmulInput(
             std::move(sample_ids_per_device);
         lhs_gains[stacked_table_name.c_str()] = std::move(gains_per_device);
 
-        max_ids_per_partition_per_sc.resize(
-            1, max_ids_per_partition_per_sc.size());
-        max_unique_ids_per_partition_per_sc.resize(
-            1, max_unique_ids_per_partition_per_sc.size());
-        required_buffer_size_per_sc.resize(1,
-                                           required_buffer_size_per_sc.size());
         stats.max_ids_per_partition[stacked_table_name.c_str()] =
             std::move(max_ids_per_partition_per_sc);
         stats.max_unique_ids_per_partition[stacked_table_name.c_str()] =
