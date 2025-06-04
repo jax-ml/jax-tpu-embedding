@@ -64,6 +64,7 @@ tpu_py_strict_test(
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/utils",
+        "//tech/env:envelope_loader_dev",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
