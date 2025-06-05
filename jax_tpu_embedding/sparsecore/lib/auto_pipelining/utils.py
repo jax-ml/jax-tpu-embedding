@@ -70,7 +70,7 @@ def update_params(
 
 
 def clone_vars(var_list: Iterable[jex.core.Var]) -> list[jex.core.Var]:
-  return [jex.core.Var(var.suffix, var.aval) for var in var_list]
+  return [jex.core.Var(var.aval) for var in var_list]
 
 
 def inline_jaxpr(
