@@ -79,19 +79,15 @@ class SparseDenseMatmulInputStats:
         required_buffer_size_per_sc=stats.required_buffer_sizes,
     )
 
-  # copybara:strip_begin(internal)
   @classmethod
   def from_dict(
       cls, stats: Mapping[str, Mapping[str, np.ndarray]]
   ) -> "SparseDenseMatmulInputStats":
-    # tf sparse tensor input preprocessing and minibatching versions return a
-    # dict. This will eventually be removed.
     return cls(
         max_ids_per_partition=stats["max_ids"],
         max_unique_ids_per_partition=stats["max_unique_ids"],
         required_buffer_size_per_sc=stats["required_buffer_size"],
     )
-  # copybara:strip_end(internal)
 
 
 # TODO: b/346873239 - Add more checks for the feature specs to ensure all the
