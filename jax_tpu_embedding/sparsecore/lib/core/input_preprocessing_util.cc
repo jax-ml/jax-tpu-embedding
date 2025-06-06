@@ -30,7 +30,7 @@
 #include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
-#include "third_party/eigen3/Eigen/Core"
+#include "Eigen/Core"  // from @eigen_archive
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
 #include "tsl/profiler/lib/traceme.h"

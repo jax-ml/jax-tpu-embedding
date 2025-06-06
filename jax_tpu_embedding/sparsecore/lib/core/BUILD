@@ -50,7 +50,6 @@ cc_library(
     srcs = ["input_preprocessing_util.cc"],
     hdrs = ["input_preprocessing_util.h"],
     deps = [
-        "//third_party/eigen3",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -58,6 +57,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
+        "@eigen_archive//:eigen3",
         "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:traceme",
     ],
@@ -69,8 +69,8 @@ cc_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":input_preprocessing_util",
-        "//third_party/eigen3",
         "@com_google_googletest//:gtest_main",
+        "@eigen_archive//:eigen3",
     ],
 )
 
@@ -83,14 +83,14 @@ pybind_extension(
     deps = [
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
-        "//third_party/eigen3",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
+        "@eigen_archive//:eigen3",
         "@pybind11//:pybind11_eigen",
-        "@pybind11_abseil//:absl_casters",
+        "@pybind11_abseil//pybind11_abseil:absl_casters",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],
