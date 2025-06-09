@@ -111,6 +111,36 @@ class OptimizerSpecTest(absltest.TestCase):
         ),
     )
 
+  def test_compare_adam(self):
+    self.assertEqual(
+        embedding_spec.AdamOptimizerSpec(
+            learning_rate=0.1,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-8,
+        ),
+        embedding_spec.AdamOptimizerSpec(
+            learning_rate=0.1,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-8,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.AdamOptimizerSpec(
+            learning_rate=0.1,
+            beta_1=0.8,
+            beta_2=0.999,
+            epsilon=1e-8,
+        ),
+        embedding_spec.AdamOptimizerSpec(
+            learning_rate=0.1,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-8,
+        ),
+    )
+
   def test_learning_rate_callable(self):
     def lr():
       return 0.1
@@ -152,6 +182,25 @@ class OptimizerSpecTest(absltest.TestCase):
         jnp.array(0.9, dtype=jnp.float32),
         jnp.array(0.0, dtype=jnp.float32),
         jnp.array(1e-30, dtype=jnp.float32),
+    )
+    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
+
+    op = embedding_spec.AdamOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        ),
+        beta_1=0.9,
+        beta_2=0.999,
+        epsilon=1e-8,
+    )
+    c2 = jnp.sqrt(1 - jnp.float32(op.beta_2))
+    alpha_t = op.learning_rate(0) * c2 / (1 - jnp.float32(op.beta_1))
+    epsilon_hat = op.epsilon * c2
+    expected_hyperparameters = (
+        jnp.array(alpha_t, dtype=jnp.float32),  # alpha_t
+        jnp.array(0.9, dtype=jnp.float32),  # beta_1
+        jnp.array(0.999, dtype=jnp.float32),  # beta_2
+        jnp.array(epsilon_hat, dtype=jnp.float32),  # epsilon_hat
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
 
