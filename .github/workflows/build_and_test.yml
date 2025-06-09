@@ -58,12 +58,15 @@ jobs:
       - name: Build all targets
         run: |
           export HERMETIC_PYTHON_VERSION=3.10
-          bazel build //...
+          bazel build --config=release_linux_x86_64 //...
 
       - name: Build pip wheel
         run: |
-          bash tools/local_build_wheel.sh
+          export HERMETIC_PYTHON_VERSION=3.10
+          bazel run --config=release_linux_x86_64 //tools:build_wheel
+
 
       - name: Run CPU tests
         run: |
-          bazel test --test_tag_filters=-requires-tpu --test_output=errors --keep_going //...
+          export HERMETIC_PYTHON_VERSION=3.10
+          bazel test --config=release_linux_x86_64 --test_tag_filters=-requires-tpu --test_output=errors --keep_going //...
