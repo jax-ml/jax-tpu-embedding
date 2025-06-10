@@ -14,7 +14,11 @@
 """Tests for embedding spec."""
 
 from absl.testing import absltest
+import jax
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from optax import schedules
 
@@ -141,23 +145,163 @@ class OptimizerSpecTest(absltest.TestCase):
         ),
     )
 
-  def test_learning_rate_callable(self):
-    def lr():
-      return 0.1
+  def test_compare_ftrl(self):
+    self.assertEqual(
+        embedding_spec.FTRLOptimizerSpec(
+            learning_rate=0.1,
+            learning_rate_power=-0.5,
+            l1_regularization_strength=0.1,
+            l2_regularization_strength=0.1,
+            beta=0.1,
+            initial_accumulator_value=0.1,
+            initial_linear_value=0.0,
+        ),
+        embedding_spec.FTRLOptimizerSpec(
+            learning_rate=0.1,
+            learning_rate_power=-0.5,
+            l1_regularization_strength=0.1,
+            l2_regularization_strength=0.1,
+            beta=0.1,
+            initial_accumulator_value=0.1,
+            initial_linear_value=0.0,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.FTRLOptimizerSpec(learning_rate=0.1),
+        embedding_spec.FTRLOptimizerSpec(learning_rate=0.2),
+    )
+    self.assertNotEqual(
+        embedding_spec.FTRLOptimizerSpec(l1_regularization_strength=0.1),
+        embedding_spec.FTRLOptimizerSpec(l1_regularization_strength=0.2),
+    )
+    op = embedding_spec.FTRLOptimizerSpec(
+        learning_rate=0.05,
+        l1_regularization_strength=0.01,
+    )
+    self.assertEqual(op.learning_rate, 0.05)
+    self.assertEqual(op.l1_regularization_strength, 0.01)
 
-    op = embedding_spec.AdagradOptimizerSpec(learning_rate=lr)
-    self.assertEqual(op.get_learning_rate(), 0.1)
-
-  def test_learning_rate_schedule(self):
+  def test_adagrad_optimizer_primitive_and_initializers(self):
     op = embedding_spec.AdagradOptimizerSpec(
-        learning_rate=schedules.linear_schedule(
-            init_value=1.0, end_value=0.1, transition_steps=100
+        learning_rate=0.1, initial_accumulator_value=0.05
+    )
+    expected_primitive = (
+        sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
+    )
+    self.assertEqual(op.get_optimizer_primitive(), expected_primitive)
+
+    slot_inits = op.slot_variables_initializers()
+    self.assertIsInstance(slot_inits, embedding_spec.AdagradSlotVariables)
+    self.assertTrue(callable(slot_inits.accumulator))
+
+    dummy_key = jax.random.PRNGKey(0)
+    dummy_shape = (2, 3)
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.accumulator(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
 
-    self.assertEqual(op.get_learning_rate(0), 1.0)
-    self.assertEqual(op.get_learning_rate(50), 0.55)
-    self.assertEqual(op.get_learning_rate(100), 0.1)
+  def test_laprop_optimizer_primitive_and_initializers(self):
+    op = embedding_spec.LaPropOptimizerSpec(
+        learning_rate=0.1, initial_slot_value=0.02
+    )
+    expected_primitive = (
+        sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive
+    )
+    self.assertEqual(op.get_optimizer_primitive(), expected_primitive)
+
+    slot_inits = op.slot_variables_initializers()
+    self.assertIsInstance(slot_inits, embedding_spec.LaPropSlotVariables)
+    self.assertTrue(callable(slot_inits.mu))
+    self.assertTrue(callable(slot_inits.nu))
+
+    dummy_key = jax.random.PRNGKey(1)
+    dummy_shape = (3, 2)
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.mu(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_slot_value),
+        )
+    )
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.nu(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_slot_value),
+        )
+    )
+
+  def test_ftrl_optimizer_primitive_and_initializers(self):
+    op = embedding_spec.FTRLOptimizerSpec(
+        learning_rate=0.05,
+        initial_accumulator_value=0.1,
+        initial_linear_value=0.01,
+    )
+    expected_primitive = (
+        sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive
+    )
+    self.assertEqual(op.get_optimizer_primitive(), expected_primitive)
+
+    slot_inits = op.slot_variables_initializers()
+    self.assertIsInstance(slot_inits, embedding_spec.FTRLSlotVariables)
+    self.assertTrue(callable(slot_inits.accumulator))
+    self.assertTrue(callable(slot_inits.linear))
+
+    dummy_key = jax.random.PRNGKey(2)
+    dummy_shape = (1, 5)
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.accumulator(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_accumulator_value),
+        )
+    )
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.linear(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_linear_value),
+        )
+    )
+
+  def test_learning_rate_callable(self):
+
+    def lr_callable():
+      return 0.1
+
+    optimizer_specs = [
+        embedding_spec.SGDOptimizerSpec(learning_rate=lr_callable),
+        embedding_spec.AdagradOptimizerSpec(learning_rate=lr_callable),
+        embedding_spec.LaPropOptimizerSpec(learning_rate=lr_callable),
+        embedding_spec.FTRLOptimizerSpec(learning_rate=lr_callable),
+    ]
+    for op_spec in optimizer_specs:
+      self.assertEqual(op_spec.get_learning_rate(), 0.1)
+
+  def test_short_name(self):
+    optimizers = {
+        "sgd": embedding_spec.SGDOptimizerSpec(),
+        "adagrad": embedding_spec.AdagradOptimizerSpec(),
+        "laprop": embedding_spec.LaPropOptimizerSpec(),
+        "ftrl": embedding_spec.FTRLOptimizerSpec(),
+    }
+    for expected_name, optimizer_spec in optimizers.items():
+      self.assertEqual(optimizer_spec.short_name(), expected_name)
+
+  def test_learning_rate_schedule(self):
+    lr_schedule = schedules.linear_schedule(
+        init_value=1.0, end_value=0.1, transition_steps=100
+    )
+    optimizer_specs = [
+        embedding_spec.SGDOptimizerSpec(learning_rate=lr_schedule),
+        embedding_spec.AdagradOptimizerSpec(learning_rate=lr_schedule),
+        embedding_spec.LaPropOptimizerSpec(learning_rate=lr_schedule),
+        embedding_spec.FTRLOptimizerSpec(learning_rate=lr_schedule),
+    ]
+
+    for op_spec in optimizer_specs:
+      self.assertEqual(op_spec.get_learning_rate(0), 1.0)
+      self.assertEqual(op_spec.get_learning_rate(50), 0.55)
+      self.assertEqual(op_spec.get_learning_rate(100), 0.1)
 
   def test_hyperparameters(self):
     op = embedding_spec.AdagradOptimizerSpec(
@@ -203,6 +347,25 @@ class OptimizerSpecTest(absltest.TestCase):
         jnp.array(epsilon_hat, dtype=jnp.float32),  # epsilon_hat
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
+
+    op = embedding_spec.FTRLOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        ),
+        learning_rate_power=-0.5,
+        l1_regularization_strength=0.01,
+        l2_regularization_strength=0.02,
+        beta=0.001,
+    )
+    expected_hyperparameters_ftrl = (
+        jnp.array(1.0, dtype=jnp.float32),
+        jnp.array(-0.5, dtype=jnp.float32),
+        jnp.array(0.01, dtype=jnp.float32),
+        jnp.array(0.02, dtype=jnp.float32),
+        jnp.array(0.001, dtype=jnp.float32),
+        jnp.array(False, dtype=jnp.bool_),
+    )
+    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_ftrl)
 
 
 if __name__ == "__main__":

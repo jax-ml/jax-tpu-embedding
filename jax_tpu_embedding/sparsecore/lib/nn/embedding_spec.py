@@ -26,6 +26,7 @@ import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 
@@ -48,6 +49,10 @@ AdagradSlotVariables = collections.namedtuple(
 )
 AdamSlotVariables = collections.namedtuple(
     "AdamSlotVariables", ["momentum", "velocity"]
+)
+
+FTRLSlotVariables = collections.namedtuple(
+    "FtrlSlotVariables", ["accumulator", "linear"]
 )
 LaPropSlotVariables = collections.namedtuple(
     "LaPropSlotVariables", ["mu", "nu"]
@@ -318,6 +323,90 @@ class AdamOptimizerSpec(OptimizerSpec):
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive
+    )
+
+
+class FTRLOptimizerSpec(OptimizerSpec):
+  """Spec for the FTRL optimizer.
+
+  Follow The Regularized Leader (FTRL) is an optimization algorithm developed
+  at Google for click-through rate prediction.
+
+  Attributes:
+    learning_rate: The learning rate.
+    learning_rate_power: A float value, typically -0.5.
+    l1_regularization_strength: A float value, must be greater than or equal to
+      0.
+    l2_regularization_strength: A float value, must be greater than or equal to
+      0.
+    beta: A float value.
+    initial_accumulator_value: Initial value for the accumulator slot.
+    initial_linear_value: Initial value for the linear slot.
+    multiply_linear_by_learning_rate: A bool value, if True, multiply the linear
+      slot by the learning rate.
+  """
+
+  def __init__(
+      self,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.01,
+      learning_rate_power: float = -0.5,
+      l1_regularization_strength: float = 0.0,
+      l2_regularization_strength: float = 0.0,
+      beta: float = 0.0,
+      initial_accumulator_value: float = 0.1,
+      initial_linear_value: float = 0.0,
+      multiply_linear_by_learning_rate: bool = False,
+  ):
+    super().__init__(learning_rate=learning_rate)
+    self.learning_rate_power = learning_rate_power
+    self.l1_regularization_strength = l1_regularization_strength
+    self.l2_regularization_strength = l2_regularization_strength
+    self.beta = beta
+    self.initial_accumulator_value = initial_accumulator_value
+    self.initial_linear_value = initial_linear_value
+    self.multiply_linear_by_learning_rate = multiply_linear_by_learning_rate
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return FTRLSlotVariables(
+        accumulator=jax.nn.initializers.constant(
+            self.initial_accumulator_value
+        ),
+        linear=jax.nn.initializers.constant(self.initial_linear_value),
+    )
+
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the FTRL hyperparameters."""
+    return (
+        self.get_learning_rate(step),
+        jnp.array(self.learning_rate_power, dtype=jnp.float32),
+        jnp.array(self.l1_regularization_strength, dtype=jnp.float32),
+        jnp.array(self.l2_regularization_strength, dtype=jnp.float32),
+        jnp.array(self.beta, dtype=jnp.float32),
+        jnp.array(self.multiply_linear_by_learning_rate, dtype=jnp.bool_),
+    )
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.learning_rate_power,
+        self.l1_regularization_strength,
+        self.l2_regularization_strength,
+        self.beta,
+        self.initial_accumulator_value,
+        self.initial_linear_value,
+        self.multiply_linear_by_learning_rate,
+    ))
+
+  def short_name(self) -> str:
+    return "ftrl"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive
     )
 
 
