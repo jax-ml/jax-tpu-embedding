@@ -41,10 +41,12 @@ py_binary(
     name = "preprocess_input_benchmarks",
     srcs = ["preprocess_input_benchmarks.py"],
     deps = [
+        pypi_requirement("google_benchmark"),
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_cc",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("google_benchmark"),
         pypi_requirement("numpy"),
+        # "//util/profiling/flags:contention",
+        # "//util/profiling/flags:cpu",
     ],
 )
 
@@ -181,6 +183,7 @@ pytype_strict_contrib_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_momentum",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_ftrl",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_laprop",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",

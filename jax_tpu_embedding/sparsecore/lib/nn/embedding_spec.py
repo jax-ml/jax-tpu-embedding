@@ -25,6 +25,7 @@ import jax
 import jax.extend as jex
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_momentum
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
@@ -49,6 +50,10 @@ AdagradSlotVariables = collections.namedtuple(
 )
 AdamSlotVariables = collections.namedtuple(
     "AdamSlotVariables", ["momentum", "velocity"]
+)
+
+AdagradMomentumSlotVariables = collections.namedtuple(
+    "AdagradMomentumSlotVariables", ["accumulator", "momentum"]
 )
 
 FTRLSlotVariables = collections.namedtuple(
@@ -323,6 +328,86 @@ class AdamOptimizerSpec(OptimizerSpec):
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive
+    )
+
+
+class AdagradMomentumOptimizerSpec(OptimizerSpec):
+  """Spec for the Adagrad with Momentum optimizer.
+
+  An Adagrad with Momentum optimizer is an adaptive optimizer that combines
+  the benefits of both Adagrad and Momentum. It adjusts the learning rate
+  for each embedding variable based on its past gradients, while also
+  incorporating momentum to accelerate convergence.
+  Attributes:
+    learning_rate: The learning rate for the training variables or embeddings.
+    momentum: The momentum parameter.
+    initial_accumulator_value: The initial value for the accumulator slot
+      variable.
+    initial_momentum_value: The initial value for the momentum slot variable.
+    beta2: The exponential decay rate for the 2nd moment estimates.
+    epsilon: A small constant for numerical stability.
+    exponent: The exponent for the gradient squared accumulator.
+    use_nesterov: Whether to use Nesterov momentum.
+  """
+
+  def __init__(
+      self,
+      learning_rate=0.001,
+      momentum: float = 0.9,
+      beta2: float = 1.0,
+      epsilon: float = 1e-10,
+      exponent: float = 2.0,
+      use_nesterov: bool = False,
+      initial_accumulator_value: float = 0.1,
+      initial_momentum_value: float = 0.0,
+  ):
+    super().__init__(
+        learning_rate=learning_rate,
+    )
+    self.momentum = momentum
+    self.beta2 = beta2
+    self.epsilon = epsilon
+    self.exponent = exponent
+    self.use_nesterov = use_nesterov
+    self.initial_accumulator_value = initial_accumulator_value
+    self.initial_momentum_value = initial_momentum_value
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return AdagradMomentumSlotVariables(
+        accumulator=jax.nn.initializers.constant(
+            self.initial_accumulator_value
+        ),
+        momentum=jax.nn.initializers.constant(self.initial_momentum_value),
+    )
+
+  def get_hyperparameters(self, step=None) -> tuple[jax.Array, ...]:
+    return (
+        self.get_learning_rate(step),  # λ
+        jnp.array(self.momentum, dtype=jnp.float32),  # k (β₁)
+        jnp.array(self.beta2, dtype=jnp.float32),  # β₂
+        jnp.array(self.epsilon, dtype=jnp.float32),  # ε
+        jnp.array(self.exponent, dtype=jnp.float32),  # k-exp
+        jnp.array(self.use_nesterov, dtype=jnp.bool_),
+    )
+
+  def __hash__(self):
+    return hash((
+        self.learning_rate,
+        self.momentum,
+        self.beta2,
+        self.epsilon,
+        self.exponent,
+        self.use_nesterov,
+        self.initial_accumulator_value,
+        self.initial_momentum_value,
+    ))
+
+  def short_name(self) -> str:
+    return "adagrad_momentum"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive
     )
 
 

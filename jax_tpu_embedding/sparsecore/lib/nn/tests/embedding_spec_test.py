@@ -17,6 +17,7 @@ from absl.testing import absltest
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_momentum
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -76,6 +77,60 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(op.learning_rate, 0.1)
     self.assertEqual(op.initial_accumulator_value, 0.1)
+
+  def test_compare_adagrad_momentum(self):
+    self.assertEqual(
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.1,
+            momentum=0.9,
+            initial_accumulator_value=0.1,
+            initial_momentum_value=0.0,
+        ),
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.1,
+            momentum=0.9,
+            initial_accumulator_value=0.1,
+            initial_momentum_value=0.0,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.1,
+            momentum=0.8,
+            initial_accumulator_value=0.1,
+            initial_momentum_value=0.0,
+        ),
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.1,
+            momentum=0.9,
+            initial_accumulator_value=0.1,
+            initial_momentum_value=0.0,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.1,
+            momentum=0.9,
+            initial_accumulator_value=0.2,
+            initial_momentum_value=0.0,
+        ),
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.1,
+            momentum=0.9,
+            initial_accumulator_value=0.1,
+            initial_momentum_value=0.0,
+        ),
+    )
+    op = embedding_spec.AdagradMomentumOptimizerSpec(
+        learning_rate=0.2,
+        momentum=0.7,
+        initial_accumulator_value=0.3,
+        initial_momentum_value=0.1,
+    )
+    self.assertEqual(op.learning_rate, 0.2)
+    self.assertEqual(op.momentum, 0.7)
+    self.assertEqual(op.initial_accumulator_value, 0.3)
+    self.assertEqual(op.initial_momentum_value, 0.1)
 
   def test_compare_laprop(self):
     self.assertEqual(
@@ -203,6 +258,40 @@ class OptimizerSpecTest(absltest.TestCase):
         )
     )
 
+  def test_adagrad_momentum_optimizer_primitive_and_initializers(self):
+    op = embedding_spec.AdagradMomentumOptimizerSpec(
+        learning_rate=0.1,
+        momentum=0.9,
+        initial_accumulator_value=0.05,
+        initial_momentum_value=0.02,
+    )
+    expected_primitive = (
+        sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive
+    )
+    self.assertEqual(op.get_optimizer_primitive(), expected_primitive)
+
+    slot_inits = op.slot_variables_initializers()
+    self.assertIsInstance(
+        slot_inits, embedding_spec.AdagradMomentumSlotVariables
+    )
+    self.assertTrue(callable(slot_inits.accumulator))
+    self.assertTrue(callable(slot_inits.momentum))
+
+    dummy_key = jax.random.PRNGKey(0)
+    dummy_shape = (2, 3)
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.accumulator(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_accumulator_value),
+        )
+    )
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.momentum(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_momentum_value),
+        )
+    )
+
   def test_laprop_optimizer_primitive_and_initializers(self):
     op = embedding_spec.LaPropOptimizerSpec(
         learning_rate=0.1, initial_slot_value=0.02
@@ -273,6 +362,7 @@ class OptimizerSpecTest(absltest.TestCase):
         embedding_spec.AdagradOptimizerSpec(learning_rate=lr_callable),
         embedding_spec.LaPropOptimizerSpec(learning_rate=lr_callable),
         embedding_spec.FTRLOptimizerSpec(learning_rate=lr_callable),
+        embedding_spec.AdagradMomentumOptimizerSpec(learning_rate=lr_callable),
     ]
     for op_spec in optimizer_specs:
       self.assertEqual(op_spec.get_learning_rate(), 0.1)
@@ -283,6 +373,7 @@ class OptimizerSpecTest(absltest.TestCase):
         "adagrad": embedding_spec.AdagradOptimizerSpec(),
         "laprop": embedding_spec.LaPropOptimizerSpec(),
         "ftrl": embedding_spec.FTRLOptimizerSpec(),
+        "adagrad_momentum": embedding_spec.AdagradMomentumOptimizerSpec(),
     }
     for expected_name, optimizer_spec in optimizers.items():
       self.assertEqual(optimizer_spec.short_name(), expected_name)
@@ -296,6 +387,7 @@ class OptimizerSpecTest(absltest.TestCase):
         embedding_spec.AdagradOptimizerSpec(learning_rate=lr_schedule),
         embedding_spec.LaPropOptimizerSpec(learning_rate=lr_schedule),
         embedding_spec.FTRLOptimizerSpec(learning_rate=lr_schedule),
+        embedding_spec.AdagradMomentumOptimizerSpec(learning_rate=lr_schedule),
     ]
 
     for op_spec in optimizer_specs:
@@ -311,23 +403,27 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(op.get_hyperparameters(0), (1.0,))
 
-    op = embedding_spec.LaPropOptimizerSpec(
+    op = embedding_spec.AdagradMomentumOptimizerSpec(
         learning_rate=schedules.linear_schedule(
             init_value=1.0, end_value=0.1, transition_steps=100
         ),
-        b1=0.9,
-        b2=0.95,
-        eps=1e-30,
-        rms_clip_threshold=1.0,
-        initial_slot_value=0.0,
+        momentum=0.9,
     )
-    expected_hyperparameters = (
+    expected_hyperparameters_adagrad_momentum = (
         jnp.array(1.0, dtype=jnp.float32),
         jnp.array(0.9, dtype=jnp.float32),
-        jnp.array(0.0, dtype=jnp.float32),
-        jnp.array(1e-30, dtype=jnp.float32),
+        jnp.array(1.0, dtype=jnp.float32),
+        jnp.array(1e-10, dtype=jnp.float32),
+        jnp.array(2.0, dtype=jnp.float32),
+        jnp.array(False, dtype=jnp.bool_),
     )
-    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
+    self.assertEqual(
+        op.get_hyperparameters(0), expected_hyperparameters_adagrad_momentum
+    )
+
+    self.assertEqual(
+        op.get_hyperparameters(0), expected_hyperparameters_adagrad_momentum
+    )
 
     op = embedding_spec.AdamOptimizerSpec(
         learning_rate=schedules.linear_schedule(
