@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
-load("//third_party/bazel/python:pybind11.bzl", "pybind_extension")
+load("//third_party/bazel/python:pybind11.bzl", "pybind_extension", "pybind_library")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
@@ -74,24 +74,39 @@ cc_test(
     ],
 )
 
-pybind_extension(
-    name = "input_preprocessing_cc",
-    srcs = [
-        "input_preprocessing.cc",
-        "input_preprocessing.h",
-    ],
+# NOTE: This library still has some `pybind11::` usage. After removing those,
+# it can be changed to `cc_library`.
+pybind_library(
+    name = "input_preprocessing_core",
+    srcs = ["input_preprocessing.cc"],
+    hdrs = ["input_preprocessing.h"],
     deps = [
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
         "@pybind11//:pybind11_eigen",
         "@pybind11_abseil//pybind11_abseil:absl_casters",
         "@tsl//tsl/profiler/lib:connected_traceme",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+pybind_extension(
+    name = "pybind_input_preprocessing",
+    srcs = ["pybind_input_preprocessing.cc"],
+    deps = [
+        ":input_preprocessing_core",
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:check",
+        "@pybind11//:pybind11_eigen",
+        "@pybind11_abseil//pybind11_abseil:absl_casters",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -126,7 +141,6 @@ pytype_strict_contrib_test(
     ],
     env = {
         "JAX_PLATFORMS": "cpu",
-        "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     deps = [
         ":constants",
@@ -138,20 +152,16 @@ pytype_strict_contrib_test(
 )
 
 pytype_strict_contrib_test(
-    name = "input_preprocessing_cc_test",
+    name = "pybind_input_preprocessing_test",
     srcs = [
-        "input_preprocessing_cc_test.py",
-    ],
-    args = [
-        # "--vmodule=input_preprocessing_util=2",
+        "pybind_input_preprocessing_test.py",
     ],
     env = {
         "JAX_PLATFORMS": "cpu",
-        "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     deps = [
         ":constants",
-        ":input_preprocessing_cc",
+        ":pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -167,6 +177,7 @@ pytype_strict_library(
     srcs = ["__init__.py"],
     # C++ dependencies must go in "data".
     data = [
+        ":input_preprocessing_core",  # buildcleaner: keep
         ":input_preprocessing_threads",  # buildcleaner: keep
         ":input_preprocessing_util",  # buildcleaner: keep
     ],
@@ -174,7 +185,7 @@ pytype_strict_library(
     deps = [
         ":constants",  # buildcleaner: keep
         ":input_preprocessing",  # buildcleaner: keep
-        ":input_preprocessing_cc",  # buildcleaner: keep
+        ":pybind_input_preprocessing",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
     ],
 )

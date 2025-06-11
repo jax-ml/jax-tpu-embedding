@@ -17,7 +17,7 @@ import math
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax_tpu_embedding.sparsecore.lib.core import constants
-from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_cc
+from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -108,7 +108,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_transformation_with_col_transformations(self, has_leading_dimension):
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
@@ -147,7 +147,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         + self.feature_spec.id_transformation.col_offset
     )
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [input_features_shifted],
             [self.input_weights],
             [feature_spec_no_col_shift],
@@ -341,7 +341,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         ),
     )
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [feature_spec_1, feature_spec_2],
@@ -747,7 +747,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     out_path = self.create_tempdir().full_path
     fdo_client = file_fdo_client.NPZFileFDOClient(out_path)
     (_, _, _, _, stats) = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [feature_spec_1, feature_spec_2],
@@ -904,7 +904,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         stacked_sample_ids,
         stacked_gains,
         _,
-    ) = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         [feature_stacked_inputs],
         [feature_stacked_weights],
         [feature_spec_for_feature_stacking_expectation],
@@ -918,7 +918,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
 
     # Preprocess inputs for the stacked features.
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, input_features_a2],
             [self.input_weights_a, input_weights_a2],
             [self.feature_spec_a, feature_spec_a2],
@@ -938,7 +938,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_table_stacking_single_chip(self, has_leading_dimension):
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -1041,7 +1041,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         dtype=object,
     )
     s_row_pointers, s_embedding_ids, s_sample_ids, s_gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [all_samples],
             [all_weights],
             [expected_merged_feature_spec],
@@ -1061,7 +1061,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_table_stacking_multi_chip(self, has_leading_dimension):
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -1647,7 +1647,7 @@ class InputPreprocessingTest(parameterized.TestCase):
       self, has_leading_dimension
   ):
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.singleton_input_features],
             [self.singleton_input_weights],
             [self.singleton_input_feature_spec],
@@ -1805,7 +1805,7 @@ class InputPreprocessingTest(parameterized.TestCase):
       self, has_leading_dimension
   ):
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
@@ -2068,16 +2068,18 @@ class InputPreprocessingTest(parameterized.TestCase):
             col_shift=4,
         ),
     )
-    _, _, _, gains, _ = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
-        [self.input_features],
-        [self.input_weights],
-        [feature_spec],
-        local_device_count=1,
-        global_device_count=1,
-        num_sc_per_device=4,
-        sharding_strategy=1,
-        has_leading_dimension=has_leading_dimension,
-        allow_id_dropping=False,
+    _, _, _, gains, _ = (
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            [self.input_features],
+            [self.input_weights],
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sharding_strategy=1,
+            has_leading_dimension=has_leading_dimension,
+            allow_id_dropping=False,
+        )
     )
 
     coo_buffer_size = 32 * 4 * 4
@@ -2141,7 +2143,7 @@ class InputPreprocessingTest(parameterized.TestCase):
   ):
     # Outputs with leading dimension (pmap)
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [
                 self.singleton_input_features,
                 self.ragged_input_features,
@@ -2169,7 +2171,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         sample_ids_flattened,
         gains_flattened,
         _,
-    ) = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         [
             self.singleton_input_features,
             self.ragged_input_features,
@@ -2779,7 +2781,7 @@ class InputPreprocessingTest(parameterized.TestCase):
       input_weights = np.array(input_weights, dtype=np.float32)
 
     row_pointers, embedding_ids, sample_ids, gains, _ = (
-        input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [input_features],
             [input_weights],
             [feature_spec],
@@ -2807,7 +2809,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         expected_sample_ids,
         expected_gains,
         _,
-    ) = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         [input_features],
         [input_weights],
         [feature_spec],

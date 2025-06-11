@@ -25,7 +25,7 @@ bazel run -c opt --dynamic_mode=off --copt=-gmlt :preprocess_input_benchmarks --
 """
 
 import google_benchmark
-from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_cc
+from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
 
@@ -126,7 +126,7 @@ _GLOBAL_2D_FEATURES, _GLOBAL_2D_FEATURE_WEIGHTS = (
 def preprocess_input_benchmark_ragged_tensor_jit(state):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   while state:
-    _ = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    _ = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         _GLOBAL_RAGGED_FEATURES,
         _GLOBAL_RAGGED_FEATURE_WEIGHTS,
         _GLOBAL_SPECS,
@@ -143,7 +143,7 @@ def preprocess_input_benchmark_ragged_tensor_jit(state):
 def preprocess_input_benchmark_ragged_tensor_pmap(state):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   while state:
-    _ = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    _ = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         _GLOBAL_RAGGED_FEATURES,
         _GLOBAL_RAGGED_FEATURE_WEIGHTS,
         _GLOBAL_SPECS,
@@ -160,7 +160,7 @@ def preprocess_input_benchmark_ragged_tensor_pmap(state):
 def preprocess_input_benchmark_dense_tensor_jit(state):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   while state:
-    _ = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    _ = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         _GLOBAL_2D_FEATURES,
         _GLOBAL_2D_FEATURE_WEIGHTS,
         _GLOBAL_SPECS,
@@ -177,7 +177,7 @@ def preprocess_input_benchmark_dense_tensor_jit(state):
 def preprocess_input_benchmark_dense_tensor_pmap(state):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   while state:
-    _ = input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+    _ = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         _GLOBAL_2D_FEATURES,
         _GLOBAL_2D_FEATURE_WEIGHTS,
         _GLOBAL_SPECS,

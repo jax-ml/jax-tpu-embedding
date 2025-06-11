@@ -24,7 +24,7 @@ from jax.experimental import shard_map
 from jax.experimental.layout import DeviceLocalLayout as DLL
 from jax.experimental.layout import Layout
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_cc
+from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
@@ -71,7 +71,7 @@ class SparseDenseMatmulInputStats:
 
   @classmethod
   def from_cc(
-      cls, stats: input_preprocessing_cc.SparseDenseMatmulInputStats
+      cls, stats: pybind_input_preprocessing.SparseDenseMatmulInputStats
   ) -> "SparseDenseMatmulInputStats":
     return cls(
         max_ids_per_partition=stats.max_ids_per_partition,
@@ -369,7 +369,7 @@ def preprocess_sparse_dense_matmul_input(
   tree.assert_same_structure(features_weights, feature_specs)
 
   *preprocessed_inputs, stats = (
-      input_preprocessing_cc.PreprocessSparseDenseMatmulInput(
+      pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
           tree.flatten(features),
           tree.flatten(features_weights),
           tree.flatten(feature_specs),

@@ -18,6 +18,7 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "pybind11/pytypes.h"  // from @pybind11
 
 namespace jax_sc_embedding {
 
@@ -52,6 +53,12 @@ struct PreprocessSparseDenseMatmulOutput {
   StackedTableMap<MatrixXf> lhs_gains;
   SparseDenseMatmulInputStats stats;
 };
+
+PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
+    pybind11::list& features, pybind11::list& feature_weights,
+    const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
+        stacked_tables,
+    const PreprocessSparseDenseMatmulInputOptions& options);
 
 }  // namespace jax_sc_embedding
 
