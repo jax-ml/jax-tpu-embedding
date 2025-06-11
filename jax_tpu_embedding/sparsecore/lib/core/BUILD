@@ -104,6 +104,7 @@ pybind_extension(
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@pybind11//:pybind11_eigen",
         "@pybind11_abseil//pybind11_abseil:absl_casters",

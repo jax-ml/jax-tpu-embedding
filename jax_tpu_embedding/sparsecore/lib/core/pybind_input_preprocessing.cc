@@ -18,6 +18,7 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/cast.h"  // from @pybind11
@@ -49,6 +50,10 @@ GetStackedTableMetadata(py::list& feature_specs, py::list& features) {
     const py::object& table_spec = feature_spec.attr("table_spec");
     const py::object& stacked_table_spec =
         table_spec.attr("stacked_table_spec");
+    if (stacked_table_spec.is_none()) {
+      LOG(ERROR) << "stacked_table_spec is none for table"
+                 << py::cast<std::string>(table_spec.attr("name"));
+    }
     const std::string stacked_table_name = py::cast<std::string>(
         table_spec.attr("setting_in_stack").attr("stack_name"));
     int col_shift = 0;
