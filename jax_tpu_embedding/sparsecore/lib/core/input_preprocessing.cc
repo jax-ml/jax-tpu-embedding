@@ -356,7 +356,9 @@ void PreprocessInputForStackedTablePerLocalDevice(
 }
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
-    py::list& features, py::list& feature_weights, py::list& feature_specs,
+    py::list& features, py::list& feature_weights,
+    const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
+        stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options) {
   tsl::profiler::TraceMe t([=] {
     return absl::StrCat("input_preprocessing_cc-", options.local_device_count,
@@ -371,13 +373,6 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_sc =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
-
-  // Get the stacked table metadata for each top level table.
-  // The keys are stacked table names (or the table itself if not stacked) and
-  // the values are a vector of StackedTableMetadata for each feature that is
-  // mapped to the table.
-  const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-      stacked_tables = GetStackedTableMetadata(feature_specs, features);
 
   // Main thread release GIL so that the other threads can acquire / release.
   // The input preprocessing is essentially broken into 3 parts.
@@ -510,8 +505,16 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     // We release the lock by default and acquire it when we deal with python
     // objects (features, specs and weights).
     py::gil_scoped_release release;
+
+    // Get the stacked table metadata for each top level table.
+    // The keys are stacked table names (or the table itself if not stacked) and
+    // the values are a vector of StackedTableMetadata for each feature that is
+    // mapped to the table.
+    const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+        stacked_tables = GetStackedTableMetadata(feature_specs, features);
+
     out = PreprocessSparseDenseMatmulInput(features, feature_weights,
-                                           feature_specs, options);
+                                           stacked_tables, options);
   }
   // We need the GIL back to create the output tuple. The tuple creation
   // implicitly wraps Eigen matrices into numpy arrays (without copying), which
