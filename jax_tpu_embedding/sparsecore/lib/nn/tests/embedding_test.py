@@ -1080,6 +1080,104 @@ class EmbeddingTest(parameterized.TestCase):
         text_format.MessageToString(actual),
     )
 
+  def _make_single_feature(
+      self,
+      *,
+      vocab_size: int = 32,
+      embedding_dim: int = 16,
+      fdo_vals: tuple[int, int, int | None] | None,
+  ) -> embedding_spec.FeatureSpec:
+    """Create and stack one feature."""
+    max_ids, max_unique, buf_size = (
+        fdo_vals if fdo_vals is not None else (256, 256, None)
+    )
+    table = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size,
+        embedding_dim=embedding_dim,
+        initializer=jax.nn.initializers.zeros,
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_test",
+        max_ids_per_partition=max_ids,
+        max_unique_ids_per_partition=max_unique,
+        suggested_coo_buffer_size=buf_size,
+    )
+    feature = embedding_spec.FeatureSpec(
+        table_spec=table,
+        input_shape=[16, 1],
+        output_shape=[16, embedding_dim],
+        name="feature",
+    )
+    # Stack the table.
+    embedding.prepare_feature_specs_for_training(
+        (feature,),
+        global_device_count=jax.device_count(),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    return feature
+
+  def test_fdo_no_input_params_no_change(self):
+    feature = self._make_single_feature(fdo_vals=(128, 64, 1024))
+    before = (
+        feature.table_spec.max_ids_per_partition,
+        feature.table_spec.max_unique_ids_per_partition,
+        feature.table_spec.suggested_coo_buffer_size,
+    )
+
+    embedding._apply_fdo_overrides((feature,), None)
+
+    after = (
+        feature.table_spec.max_ids_per_partition,
+        feature.table_spec.max_unique_ids_per_partition,
+        feature.table_spec.suggested_coo_buffer_size,
+    )
+    self.assertEqual(after, before)
+
+  def test_fdo_runtime_overrides(self):
+    feature = self._make_single_feature(fdo_vals=None)
+    params = embedding_spec.InputParams(
+        fdo_params={
+            "table_test": embedding_spec.FdoParams(
+                max_ids_per_partition=42,
+                max_unique_ids_per_partition=7,
+                suggested_coo_buffer_size=2048,
+            )
+        }
+    )
+
+    embedding._apply_fdo_overrides((feature,), params)
+
+    self.assertEqual(feature.table_spec.max_ids_per_partition, 42)
+    self.assertEqual(feature.table_spec.max_unique_ids_per_partition, 7)
+    self.assertEqual(feature.table_spec.suggested_coo_buffer_size, 2048)
+    stacked_table_spec = feature.table_spec.stacked_table_spec
+    self.assertIsNotNone(stacked_table_spec)
+    self.assertEqual(stacked_table_spec.max_ids_per_partition, 42)
+    self.assertEqual(stacked_table_spec.max_unique_ids_per_partition, 7)
+    self.assertEqual(stacked_table_spec.suggested_coo_buffer_size, 2048)
+
+  def test_fdo_conflict_warns_and_overrides(self):
+    feature = self._make_single_feature(fdo_vals=(128, 64, None))
+    params = embedding_spec.InputParams(
+        fdo_params={
+            "table_test": embedding_spec.FdoParams(
+                # different
+                max_ids_per_partition=256,
+                # same
+                max_unique_ids_per_partition=64,
+                suggested_coo_buffer_size=None,
+            )
+        }
+    )
+
+    with self.assertWarnsRegex(DeprecationWarning, "take precedence"):
+      embedding._apply_fdo_overrides((feature,), params)
+
+    self.assertEqual(feature.table_spec.max_ids_per_partition, 256)
+
+    stacked_table_spec = feature.table_spec.stacked_table_spec
+    self.assertIsNotNone(stacked_table_spec)
+    self.assertEqual(stacked_table_spec.max_ids_per_partition, 256)
 
 if __name__ == "__main__":
   absltest.main()

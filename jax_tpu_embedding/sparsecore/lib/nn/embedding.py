@@ -14,8 +14,10 @@
 """List of functions for embedding lookup."""
 
 import collections
+import dataclasses
 import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
+import warnings
 
 from absl import logging
 from flax import struct
@@ -178,6 +180,7 @@ def prepare_feature_specs_for_training(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
+    input_params: embedding_spec.InputParams | None = None,
 ) -> None:
   """Prepares the feature specs for training by populating missing fields.
 
@@ -191,11 +194,15 @@ def prepare_feature_specs_for_training(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: Number of sparse cores per device.
+    input_params: Optional input parameters. If provided, FDO parameters from
+      `input_params.fdo_params` can override limits set in `StackedTableSpec`.
 
   Raises:
     ValueError: If there is duplicate table/feature name or if there is
       invalid table stacking.
   """
+  _apply_fdo_overrides(feature_specs, input_params)
+
   not_stacked = [
       feature
       for feature in tree.flatten(feature_specs)
@@ -287,6 +294,7 @@ def auto_stack_tables(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
+    input_params: embedding_spec.InputParams | None = None,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
 ) -> None:
@@ -297,6 +305,8 @@ def auto_stack_tables(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: The number of sparse cores per device.
+    input_params: Optional input parameters. If provided, FDO parameters from
+      `input_params.fdo_params` can override limits set in `StackedTableSpec`.
     stack_to_max_ids_per_partition: Override the max_ids_per_partition for each
       stack.
     stack_to_max_unique_ids_per_partition: Override the
@@ -305,6 +315,8 @@ def auto_stack_tables(
   Returns:
     None. The feature specs are updated with stacking information.
   """
+  _apply_fdo_overrides(feature_specs, input_params)
+
   table_stacking.auto_stack_tables(
       feature_specs,
       global_device_count=global_device_count,
@@ -334,6 +346,7 @@ def preprocess_sparse_dense_matmul_input(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
+    input_params: embedding_spec.InputParams | None = None,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -361,10 +374,14 @@ def preprocess_sparse_dense_matmul_input(
       if using jax.pmap and set it to False if using jax.jit.
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
+    input_params: Optional input parameters. If provided, FDO parameters from
+      `input_params.fdo_params` can override limits set in `StackedTableSpec`.
 
   Returns:
     A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
   """
+  _apply_fdo_overrides(feature_specs, input_params)
+
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
 
@@ -441,6 +458,7 @@ def tpu_sparse_dense_matmul(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     sharding_strategy: str = "MOD",
+    input_params: embedding_spec.InputParams | None = None,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -480,6 +498,8 @@ def tpu_sparse_dense_matmul(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     sharding_strategy: The sharding strategy (e.g., MOD)
+    input_params: Optional input parameters. If provided, FDO parameters from
+      `input_params.fdo_params` can override limits set in `StackedTableSpec`.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -488,6 +508,8 @@ def tpu_sparse_dense_matmul(
     ValueError: The input arrays and tuples are not of the expected structure or
       the sharding strategy is not supported.
   """
+  _apply_fdo_overrides(feature_specs, input_params)
+
   lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
   lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
   lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
@@ -587,6 +609,7 @@ def tpu_sparse_dense_matmul_grad(
     sharding_strategy: str = "MOD",
     label: str = "",
     step: jax.Array | int | None = None,
+    input_params: embedding_spec.InputParams | None = None,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -626,10 +649,14 @@ def tpu_sparse_dense_matmul_grad(
     sharding_strategy: The sharding strategy (e.g., MOD)
     label: The label for the optimizer computation.
     step: The current step number.
+    input_params: Optional input parameters. If provided, FDO parameters from
+      `input_params.fdo_params` can override limits set in `StackedTableSpec`.
 
   Returns:
     The updated activation embedding variables.
   """
+  _apply_fdo_overrides(feature_specs, input_params)
+
   # Verify the input structures and lengths.
   lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
   lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
@@ -1004,3 +1031,70 @@ def create_proto_from_feature_specs(
   return embedding_spec_pb2.EmbeddingSpecProto(
       stacked_table_specs=stacked_table_specs.values()
   )
+
+
+def _apply_fdo_overrides(
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    input_params: embedding_spec.InputParams | None,
+) -> None:
+  """Override StackedTableSpec limits using input_params.fdo_params.
+
+  Args:
+    feature_specs: A Nested (e.g., list, dict etc.) of FeatureSpec.
+    input_params: Optional input parameters. If provided, FDO parameters from
+      `input_params.fdo_params` can override limits set in `StackedTableSpec`.
+
+  Returns:
+    `feature_specs` where `StackedTableSpec` limits are overridden
+    by `input_params.fdo_params`, emitting a warning if both are set.
+  """
+
+  if input_params is None or not input_params.fdo_params:
+    return
+
+  stack_to_fdo: Mapping[str, embedding_spec.FdoParams] = input_params.fdo_params
+
+  def _override(spec: embedding_spec.FeatureSpec) -> embedding_spec.FeatureSpec:
+    stacked_table_spec = spec.table_spec.stacked_table_spec
+    # Nothing to override if the table has not been stacked yet.
+    if stacked_table_spec is None:
+      return spec
+
+    input_fdo_params = stack_to_fdo.get(stacked_table_spec.stack_name)
+    if input_fdo_params is None:
+      return spec
+
+    # Warn when user sets the same values in two places.
+    if (
+        stacked_table_spec.max_ids_per_partition
+        != input_fdo_params.max_ids_per_partition
+        or stacked_table_spec.max_unique_ids_per_partition
+        != input_fdo_params.max_unique_ids_per_partition
+        or stacked_table_spec.suggested_coo_buffer_size
+        != input_fdo_params.suggested_coo_buffer_size
+    ):
+      warnings.warn(
+          "StackedTableSpec still carries FDO limits; values from "
+          "input_params.fdo_params now take precedence.",
+          DeprecationWarning,
+          stacklevel=2,
+      )
+
+    spec.table_spec = dataclasses.replace(
+        spec.table_spec,
+        max_ids_per_partition=input_fdo_params.max_ids_per_partition,
+        max_unique_ids_per_partition=input_fdo_params.max_unique_ids_per_partition,
+        suggested_coo_buffer_size=input_fdo_params.suggested_coo_buffer_size,
+    )
+
+    new_stacked_table_spec = dataclasses.replace(
+        stacked_table_spec,
+        max_ids_per_partition=input_fdo_params.max_ids_per_partition,
+        max_unique_ids_per_partition=input_fdo_params.max_unique_ids_per_partition,
+        suggested_coo_buffer_size=input_fdo_params.suggested_coo_buffer_size,
+    )
+    spec.table_spec.stacked_table_spec = new_stacked_table_spec
+    return spec
+
+  # Mutate in place.
+  jax.tree_util.tree_map(_override, feature_specs)
