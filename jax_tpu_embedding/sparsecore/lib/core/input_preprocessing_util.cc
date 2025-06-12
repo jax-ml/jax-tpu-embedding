@@ -256,7 +256,19 @@ int ComputeCooBufferSizePerDevice(
            "large and can cause OOM. Utilize the stats returned from "
            "the sparse dense matmul preprocessing API.";
   }
-  VLOG(1) << "Computed Coo Buffer Size: " << result;
+
+  LOG_EVERY_POW_2(INFO) << " Stacked Table Name: " << stacked_table_metadata[0].name
+            << " Theoretical Max: " << theoretical_max
+            << " max_ids_rounded_up: " << max_ids_rounded_up
+            << " num_scs_per_device: " << num_scs_per_device
+            << " num_scs: " << num_scs
+            << " suggested_coo_buffer_size: " << suggested_coo_buffer_size.value()
+            << " Computed COO Buffer Size: " << result;
+  if (stacked_table_metadata[0].suggested_coo_buffer_size.has_value()) {
+    LOG_EVERY_POW_2(INFO) << " User COO buffer size: Table Name: " << stacked_table_metadata[0].name
+            << " buffer size: " << stacked_table_metadata[0].suggested_coo_buffer_size.value();
+  }
+
   // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
   CHECK(result > 0 && result < INT_MAX);
@@ -287,6 +299,17 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
   std::optional<int> suggested_coo_buffer_size =
       stacked_table_metadata[0].suggested_coo_buffer_size;
+  // Add default fallback logic
+  if (!suggested_coo_buffer_size.has_value()) {
+    int batch_size = 0;
+    for (const auto& metadata : stacked_table_metadata) {
+      batch_size += metadata.batch_size;
+    }
+
+    const int static_buffer_size_multiplier = 64;
+    suggested_coo_buffer_size = static_buffer_size_multiplier * batch_size;
+  }
+
   return suggested_coo_buffer_size;
 }
 
