@@ -11,16 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <Python.h>
+
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
-#include "absl/log/log.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
 #include "pybind11/cast.h"  // from @pybind11
 #include "pybind11/eigen.h"  // from @pybind11
 #include "pybind11/gil.h"  // from @pybind11
@@ -38,10 +43,10 @@ namespace py = ::pybind11;
 namespace {
 absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
 GetStackedTableMetadata(py::list& feature_specs, py::list& features) {
+  CHECK(PyGILState_Check());  // Requires GIL
   tsl::profiler::TraceMe t([] { return "GetStackedTableMetadata"; });
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_table_metadata;
-  py::gil_scoped_acquire acq;
   for (int i = 0; i < feature_specs.size(); ++i) {
     const py::object& feature_spec = feature_specs[i];
     const py::array& feature = features[i].cast<py::array>();
@@ -97,8 +102,14 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     py::list features, py::list feature_weights, py::list feature_specs,
     int local_device_count, int global_device_count, int num_sc_per_device,
     int sharding_strategy, bool has_leading_dimension, bool allow_id_dropping) {
-  CHECK(features.size() == feature_weights.size());
-  CHECK(features.size() == feature_specs.size());
+  CHECK_EQ(features.size(), feature_weights.size());
+  CHECK_EQ(features.size(), feature_specs.size());
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.reserve(features.size());
+  for (int i = 0; i < features.size(); ++i) {
+    input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
+        features[i], feature_weights[i]));
+  }
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = local_device_count,
       .global_device_count = global_device_count,
@@ -106,20 +117,19 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
       .sharding_strategy = sharding_strategy,
       .allow_id_dropping = allow_id_dropping,
   };
+  // Get the stacked table metadata for each top level table.
+  // The keys are stacked table names (or the table itself if not stacked) and
+  // the values are a vector of StackedTableMetadata for each feature that is
+  // mapped to the table.
+  const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables = GetStackedTableMetadata(feature_specs, features);
   PreprocessSparseDenseMatmulOutput out;
   {
     // We release the lock by default and acquire it when we deal with python
     // objects (features, specs and weights).
     py::gil_scoped_release release;
 
-    // Get the stacked table metadata for each top level table.
-    // The keys are stacked table names (or the table itself if not stacked) and
-    // the values are a vector of StackedTableMetadata for each feature that is
-    // mapped to the table.
-    const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-        stacked_tables = GetStackedTableMetadata(feature_specs, features);
-
-    out = PreprocessSparseDenseMatmulInput(features, feature_weights,
+    out = PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                            stacked_tables, options);
   }
   // We need the GIL back to create the output tuple. The tuple creation

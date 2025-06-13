@@ -29,14 +29,15 @@ class AbstractInputBatch {
   virtual ssize_t size() const = 0;
 
   // Create a slice of this batch.
-  virtual std::unique_ptr<AbstractInputBatch> Slice(int start_index,
-                                                    int end_index) const = 0;
+  virtual AbstractInputBatch* Slice(int start_index, int end_index) const = 0;
 
   // Extract COO Tensors. The flow should mostly be similar and we could make
   // this thinner, operating on lower level abstraction for inputs.
-  virtual std::vector<CooFormat> ExtractCooTensors(
-      int row_offset, int col_offset, int col_shift, int num_scs,
-      int global_device_count, RowCombiner combiner) const = 0;
+  // coo_tensors accumulates the extracted tensors.
+  virtual void ExtractCooTensors(int row_offset, int col_offset, int col_shift,
+                                 int num_scs, int global_device_count,
+                                 RowCombiner combiner,
+                                 std::vector<CooFormat>& coo_tensors) const = 0;
 
   virtual ~AbstractInputBatch() = default;
 };

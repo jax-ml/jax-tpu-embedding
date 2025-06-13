@@ -101,6 +101,7 @@ pybind_library(
     srcs = ["input_preprocessing.cc"],
     hdrs = ["input_preprocessing.h"],
     deps = [
+        ":abstract_input_batch",
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -120,11 +121,14 @@ pybind_extension(
     name = "pybind_input_preprocessing",
     srcs = ["pybind_input_preprocessing.cc"],
     deps = [
+        ":abstract_input_batch",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":numpy_input_batch",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/types:span",
         "@pybind11//:pybind11_eigen",
         "@pybind11_abseil//pybind11_abseil:absl_casters",
         "@tsl//tsl/profiler/lib:traceme",

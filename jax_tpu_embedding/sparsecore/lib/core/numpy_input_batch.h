@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
@@ -32,24 +33,28 @@ class NumpySparseInputBatch : public AbstractInputBatch {
  public:
   NumpySparseInputBatch(const py::array& feature, const py::array& weights)
       : feature_(feature), weights_(weights) {
-    CHECK_EQ(feature_.shape(0), weights_.shape(0));
-    CHECK_EQ(feature_.ndim(), weights_.ndim());
-    CHECK(feature_.ndim() == 1 || feature_.ndim() == 2);
+    CHECK(PyGILState_Check())
+        << "Need GIL to create references to features and weights.";
+    CHECK_EQ(feature_.shape(0), weights_.shape(0))
+        << "Batch size mismatch for features and weights.";
+    CHECK_EQ(feature_.ndim(), weights_.ndim())
+        << "Dimension mismatch for features and weights";
+    CHECK(feature_.ndim() == 1 || feature_.ndim() == 2)
+        << "Only 1D and 2D numpy arrays supported as inputs.";
   }
 
   py::ssize_t size() const override { return feature_.shape(0); }
 
-  std::unique_ptr<AbstractInputBatch> Slice(int start_index,
-                                            int end_index) const override;
+  AbstractInputBatch* Slice(int start_index, int end_index) const override;
 
-  std::vector<CooFormat> ExtractCooTensors(int row_offset, int col_offset,
-                                           int col_shift, int num_scs,
-                                           int global_device_count,
-                                           RowCombiner combiner) const override;
+  void ExtractCooTensors(int row_offset, int col_offset, int col_shift,
+                         int num_scs, int global_device_count,
+                         RowCombiner combiner,
+                         std::vector<CooFormat>& coo_tensors) const override;
 
  private:
-  const py::array& feature_;
-  const py::array& weights_;
+  const py::array feature_;
+  const py::array weights_;
 };
 
 }  // namespace jax_sc_embedding

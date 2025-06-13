@@ -13,9 +13,12 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
+#include <Python.h>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -29,6 +32,7 @@
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
+#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/cast.h"  // from @pybind11
@@ -48,6 +52,7 @@ namespace {
 namespace py = ::pybind11;
 float ComputeWeightDivisor(RowCombiner combiner, const float* gains_buffer,
                            py::ssize_t stride, py::ssize_t size) {
+  DCHECK(!PyGILState_Check());  // Does not require GIL
   switch (combiner) {
     case RowCombiner::kSum:
       return 1.0f;
@@ -81,13 +86,15 @@ void ExtractCooTensorsFrom2dArray(const py::array& features,
                                   const int global_device_count,
                                   const RowCombiner combiner,
                                   std::vector<CooFormat>& coo_tensors) {
+  DCHECK(PyGILState_Check());  // Requires GIL.
+
   auto features_array = py::cast<py::array_t<int>>(features);
   auto features_weight_array = py::cast<py::array_t<float>>(feature_weights);
+
+  py::gil_scoped_release _;
+
   auto features_array_t = features_array.unchecked<2>();
   auto features_weight_array_t = features_weight_array.unchecked<2>();
-
-  // The remaining section doesn't require the GIL.
-  py::gil_scoped_release release_gil;
 
   const py::ssize_t nrows = features_array_t.shape(0);
   const py::ssize_t ncols = features_array_t.shape(1);
@@ -125,9 +132,8 @@ void ExtractCooTensorsFrom1dArray(const py::array& features,
                                   const int global_device_count,
                                   const RowCombiner combiner,
                                   std::vector<CooFormat>& coo_tensors) {
-  // We use proxy objects to the python array for the remainder of the function
-  // and can hence release the GIL.
-  py::gil_scoped_release release_gil;
+  DCHECK(PyGILState_Check());  // Requires GIL
+  py::gil_scoped_release _;
   // The assumption here is that the gains are always represented as 32bit
   // float arrays (np array with dtype=np.float32) and the features are always
   // represented as 32bit int arrays (np array with dtype=np.int32).
@@ -166,20 +172,18 @@ void ExtractCooTensors(const py::array& features,
                        const int num_scs, const int global_device_count,
                        const RowCombiner combiner,
                        std::vector<CooFormat>& coo_tensors) {
+  DCHECK(PyGILState_Check());  // Requires GIL
   // We have to differentiate between 2D and 1D np.ndarray.
   // In the case of a 1D array of arrays, we have to iterate over the inner
   // arrays individually, collecting the COOFormat objects since the dtype of
   // the array is a py::object.
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
 
-  const py::buffer_info& features_buffer_info = features.request();
-  CHECK(features_buffer_info.ndim == feature_weights.request().ndim &&
-        (features_buffer_info.ndim == 1 || features_buffer_info.ndim == 2));
   CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
   const int num_scs_bit = std::log2(num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
   const int num_scs_mod_inv = ~num_scs_mod;
-  features_buffer_info.ndim == 2
+  features.ndim() == 2
       ? ExtractCooTensorsFrom2dArray(features, feature_weights, row_offset,
                                      col_offset, col_shift, num_scs_mod,
                                      num_scs_mod_inv, global_device_count,
@@ -194,10 +198,9 @@ namespace {
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeatures(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    py::list& features, py::list& feature_weights, const int local_device_id,
-    const int local_device_count, const int num_scs,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    const int local_device_id, const int local_device_count, const int num_scs,
     const int num_global_devices) {
-  py::gil_scoped_acquire acq;
   ExtractedCooTensors extracted_coo_tensors;
   for (int i = 0; i < stacked_table_metadata.size(); ++i) {
     const StackedTableMetadata& metadata = stacked_table_metadata[i];
@@ -205,12 +208,10 @@ ExtractedCooTensors ExtractCooTensorsForAllFeatures(
     const int row_offset = metadata.row_offset;
     const int col_offset = metadata.col_offset;
     const int col_shift = metadata.col_shift;
-    const py::array& curr_feature =
-        py::cast<py::array>(features[feature_index]);
-    const py::array& curr_feature_weight =
-        py::cast<py::array>(feature_weights[feature_index]);
+    const std::unique_ptr<AbstractInputBatch>& curr_batch =
+        input_batches[feature_index];
 
-    const int num_samples = curr_feature.shape(0);
+    const int num_samples = curr_batch->size();
     const int num_samples_per_split = num_samples / local_device_count;
     const int start_index = local_device_id * num_samples_per_split;
     int end_index = (local_device_id + 1) * num_samples_per_split;
@@ -218,16 +219,15 @@ ExtractedCooTensors ExtractCooTensorsForAllFeatures(
       // Just in case the last split is not a full batch.
       end_index = num_samples;
     }
-    py::slice feature_slice = py::slice(start_index, end_index, 1);
-    const py::array feature_split = curr_feature[feature_slice];
-    const py::array feature_weights_split = curr_feature_weight[feature_slice];
-    extracted_coo_tensors.batch_size_for_device += feature_split.shape(0);
+    const AbstractInputBatch* batch_split =
+        curr_batch->Slice(start_index, end_index);
+    extracted_coo_tensors.batch_size_for_device += batch_split->size();
 
     // In the case of feature stacking, we need to group all the COO tensors
     // at this stage (i.e., before the sorting later on).
-    ExtractCooTensors(feature_split, feature_weights_split, row_offset,
-                      col_offset, col_shift, num_scs, num_global_devices,
-                      metadata.row_combiner, extracted_coo_tensors.coo_tensors);
+    batch_split->ExtractCooTensors(row_offset, col_offset, col_shift, num_scs,
+                                   num_global_devices, metadata.row_combiner,
+                                   extracted_coo_tensors.coo_tensors);
   }
   return extracted_coo_tensors;
 }
@@ -238,7 +238,8 @@ ExtractedCooTensors ExtractCooTensorsForAllFeatures(
 // where we don't have any table stacking, the table itself is top level.
 void PreprocessInputForStackedTablePerLocalDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    py::list& features, py::list& feature_weights, const int local_device_id,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options,
     const int coo_buffer_size, const int row_pointers_size_per_sc,
     const absl::string_view stacked_table_name,
@@ -258,7 +259,7 @@ void PreprocessInputForStackedTablePerLocalDevice(
   // features.
 
   ExtractedCooTensors extracted_coo_tensors = ExtractCooTensorsForAllFeatures(
-      stacked_table_metadata, features, feature_weights, local_device_id,
+      stacked_table_metadata, input_batches, local_device_id,
       options.local_device_count, num_scs, options.global_device_count);
 
   int total_num_coo_tensors = extracted_coo_tensors.coo_tensors.size();
@@ -297,7 +298,7 @@ void PreprocessInputForStackedTablePerLocalDevice(
 }  // namespace
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
-    py::list& features, py::list& feature_weights,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options) {
@@ -384,8 +385,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
           Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
               required_buffer_size_per_sc.row(local_device);
           PreprocessInputForStackedTablePerLocalDevice(
-              stacked_table_metadata, features, feature_weights, local_device,
-              options, coo_buffer_size_per_device, row_pointers_size_per_sc,
+              stacked_table_metadata, input_batches, local_device, options,
+              coo_buffer_size_per_device, row_pointers_size_per_sc,
               stacked_table_name, row_pointer_buffer, embedding_id_buffer,
               sample_id_buffer, gain_buffer,
               max_ids_per_partition_per_sc_buffer,

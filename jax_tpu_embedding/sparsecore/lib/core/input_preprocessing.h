@@ -13,10 +13,13 @@
 // limitations under the License.
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/numpy.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
@@ -65,7 +68,7 @@ void ExtractCooTensors(const py::array& features,
                        std::vector<CooFormat>& coo_tensors);
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
-    py::list& features, py::list& feature_weights,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options);
