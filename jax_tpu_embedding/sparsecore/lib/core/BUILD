@@ -80,6 +80,7 @@ pybind_library(
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_absl//absl/log:check",
+        "@tsl//tsl/profiler/lib:traceme",
     ],
 )
 
@@ -94,9 +95,7 @@ cc_test(
     ],
 )
 
-# NOTE: This library still has some `pybind11::` usage. After removing those,
-# it can be changed to `cc_library`.
-pybind_library(
+cc_library(
     name = "input_preprocessing_core",
     srcs = ["input_preprocessing.cc"],
     hdrs = ["input_preprocessing.h"],
@@ -111,7 +110,6 @@ pybind_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
-        "@pybind11//:pybind11_eigen",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],

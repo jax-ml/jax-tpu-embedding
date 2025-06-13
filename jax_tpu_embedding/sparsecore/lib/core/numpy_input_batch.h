@@ -14,7 +14,6 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #include <memory>
-#include <utility>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
