@@ -50,6 +50,18 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "tf_sparse_tensor_input_preprocessing_benchmarks",
+    srcs = ["tf_sparse_tensor_input_preprocessing_benchmarks.py"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("google_benchmark"),
+        pypi_requirement("numpy"),
+        "//util/profiling/flags:cpu",
+    ],
+)
+
 pytype_strict_library(
     name = "test_utils",
     testonly = 1,

@@ -14,7 +14,6 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #include <memory>
-#include <utility>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
@@ -33,7 +32,7 @@ class NumpySparseInputBatch : public AbstractInputBatch {
  public:
   NumpySparseInputBatch(const py::array& feature, const py::array& weights)
       : feature_(feature), weights_(weights) {
-    CHECK(PyGILState_Check())
+    DCHECK(PyGILState_Check())
         << "Need GIL to create references to features and weights.";
     CHECK_EQ(feature_.shape(0), weights_.shape(0))
         << "Batch size mismatch for features and weights.";
