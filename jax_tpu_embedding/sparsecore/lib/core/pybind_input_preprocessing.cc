@@ -176,7 +176,6 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     int num_sc_per_device, int sharding_strategy, bool has_leading_dimension,
     bool allow_id_dropping) {
   CHECK(indices.size() == values.size());
-  // NOTE: dense_shapes is unused and can be removed.
   CHECK(indices.size() == dense_shapes.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches(
       indices.size());
@@ -186,7 +185,8 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
         feature_specs[i].attr("table_spec").attr("vocabulary_size").cast<int>();
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
         indices[i].cast<py::array_t<int64_t>>(),
-        values[i].cast<py::array_t<int32_t>>(), max_col_id);
+        values[i].cast<py::array_t<int32_t>>(),
+        dense_shapes[i].cast<py::array_t<int64_t>>(), max_col_id);
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
