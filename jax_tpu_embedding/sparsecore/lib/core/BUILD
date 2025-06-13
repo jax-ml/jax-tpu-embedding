@@ -63,6 +63,26 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "abstract_input_batch",
+    hdrs = ["abstract_input_batch.h"],
+    deps = [
+        ":input_preprocessing_util",
+    ],
+)
+
+pybind_library(
+    name = "numpy_input_batch",
+    srcs = ["numpy_input_batch.cc"],
+    hdrs = ["numpy_input_batch.h"],
+    deps = [
+        ":abstract_input_batch",
+        ":input_preprocessing_core",
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
 cc_test(
     name = "input_preprocessing_util_test",
     srcs = ["input_preprocessing_util_test.cc"],
@@ -91,7 +111,6 @@ pybind_library(
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
         "@pybind11//:pybind11_eigen",
-        "@pybind11_abseil//pybind11_abseil:absl_casters",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],

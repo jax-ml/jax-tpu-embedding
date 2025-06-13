@@ -18,9 +18,12 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "pybind11/numpy.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
 
 namespace jax_sc_embedding {
+
+namespace py = ::pybind11;
 
 struct PreprocessSparseDenseMatmulInputOptions {
   int local_device_count;
@@ -54,8 +57,15 @@ struct PreprocessSparseDenseMatmulOutput {
   SparseDenseMatmulInputStats stats;
 };
 
+// Temporary: until we move this to numpy_input_batch.cc.
+void ExtractCooTensors(const py::array& features,
+                       const py::array& feature_weights, int row_offset,
+                       int col_offset, int col_shift, int num_scs,
+                       int global_device_count, RowCombiner combiner,
+                       std::vector<CooFormat>& coo_tensors);
+
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
-    pybind11::list& features, pybind11::list& feature_weights,
+    py::list& features, py::list& feature_weights,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options);

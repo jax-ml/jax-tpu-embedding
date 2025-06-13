@@ -15,9 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
-#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -161,6 +159,7 @@ void ExtractCooTensorsFrom1dArray(const py::array& features,
   }
 }
 
+}  // namespace
 void ExtractCooTensors(const py::array& features,
                        const py::array& feature_weights, const int row_offset,
                        const int col_offset, const int col_shift,
@@ -191,6 +190,7 @@ void ExtractCooTensors(const py::array& features,
                                      combiner, coo_tensors);
 }
 
+namespace {
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeatures(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
