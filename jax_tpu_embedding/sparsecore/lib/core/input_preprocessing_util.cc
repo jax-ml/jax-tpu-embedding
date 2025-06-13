@@ -297,6 +297,7 @@ void FillRowPointersPerLocalDevice(
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
     Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains) {
   tsl::profiler::TraceMe t("FillRowPointers");
+  DCHECK_GT(batch_size_per_sc, 0);
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     int lhs_row_index = 0;
     int padded_coo_tensor_index = 0;

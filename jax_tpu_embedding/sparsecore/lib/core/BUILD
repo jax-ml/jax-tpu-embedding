@@ -80,6 +80,22 @@ pybind_library(
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_absl//absl/log:check",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+pybind_library(
+    name = "tf_sparse_tensor_input_batch",
+    srcs = ["tf_sparse_tensor_input_batch.cc"],
+    hdrs = ["tf_sparse_tensor_input_batch.h"],
+    deps = [
+        ":abstract_input_batch",
+        ":input_preprocessing_util",
+        "//util/tuple:streamable",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/types:span",
+        "@tsl//tsl/profiler/lib:traceme",
     ],
 )
 
@@ -94,9 +110,7 @@ cc_test(
     ],
 )
 
-# NOTE: This library still has some `pybind11::` usage. After removing those,
-# it can be changed to `cc_library`.
-pybind_library(
+cc_library(
     name = "input_preprocessing_core",
     srcs = ["input_preprocessing.cc"],
     hdrs = ["input_preprocessing.h"],
@@ -111,7 +125,6 @@ pybind_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
-        "@pybind11//:pybind11_eigen",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
     ],
@@ -125,6 +138,7 @@ pybind_extension(
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         ":numpy_input_batch",
+        ":tf_sparse_tensor_input_batch",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -192,6 +206,22 @@ pytype_strict_contrib_test(
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_contrib_test(
+    name = "tf_sparse_tensor_input_preprocessing_test",
+    srcs = [
+        "tf_sparse_tensor_input_preprocessing_test.py",
+    ],
+    shard_count = 10,
+    deps = [
+        ":pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("numpy"),
+        pypi_requirement("tensorflow:tensorflow_no_contrib"),
     ],
 )
 
