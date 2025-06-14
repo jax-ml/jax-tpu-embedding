@@ -19,7 +19,7 @@ import abc
 import collections
 import dataclasses
 import inspect
-from typing import Callable, Sequence, TypeAlias
+from typing import Callable, Sequence, TypeAlias, Mapping
 
 import jax
 import jax.extend as jex
@@ -703,3 +703,20 @@ class StackedTableSpec:
   # The minimum size of the input buffer that the preprocessing should try to
   # create (per device).
   suggested_coo_buffer_size: int | None = None
+
+
+@dataclasses.dataclass(eq=True, frozen=True, order=True)
+class FdoParams:
+  """Spec for FDO params values per stacked table."""
+
+  max_ids_per_partition: int = 256
+  max_unique_ids_per_partition: int = 256
+  suggested_coo_buffer_size: int | None = None
+
+
+@dataclasses.dataclass(eq=True, frozen=True, order=True)
+class InputParams:
+  """Spec for input params."""
+
+  # TODO(b/422035935): Add batch size.
+  fdo_params: Mapping[str, FdoParams]
