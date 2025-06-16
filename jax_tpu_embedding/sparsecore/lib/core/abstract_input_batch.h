@@ -15,7 +15,6 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_FEATURE_INPUT_WRAPPER_H_
 #include <sys/types.h>
 
-#include <memory>
 #include <vector>
 
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
