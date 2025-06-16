@@ -44,11 +44,9 @@ class NumpySparseInputBatch : public AbstractInputBatch {
 
   py::ssize_t size() const override { return feature_.shape(0); }
 
-  AbstractInputBatch* Slice(int start_index, int end_index) const override;
-
-  void ExtractCooTensors(int row_offset, int col_offset, int col_shift,
-                         int num_scs, int global_device_count,
-                         RowCombiner combiner,
+  void ExtractCooTensors(int start_index, int end_index, int row_offset,
+                         int col_offset, int col_shift, int num_scs,
+                         int global_device_count, RowCombiner combiner,
                          std::vector<CooFormat>& coo_tensors) const override;
 
  private:

@@ -61,15 +61,14 @@ ExtractedCooTensors ExtractCooTensorsForAllFeatures(
       // Just in case the last split is not a full batch.
       end_index = num_samples;
     }
-    const AbstractInputBatch* batch_split =
-        curr_batch->Slice(start_index, end_index);
-    extracted_coo_tensors.batch_size_for_device += batch_split->size();
+    extracted_coo_tensors.batch_size_for_device += end_index - start_index;
 
     // In the case of feature stacking, we need to group all the COO tensors
     // at this stage (i.e., before the sorting later on).
-    batch_split->ExtractCooTensors(row_offset, col_offset, col_shift, num_scs,
-                                   num_global_devices, metadata.row_combiner,
-                                   extracted_coo_tensors.coo_tensors);
+    curr_batch->ExtractCooTensors(start_index, end_index, row_offset,
+                                  col_offset, col_shift, num_scs,
+                                  num_global_devices, metadata.row_combiner,
+                                  extracted_coo_tensors.coo_tensors);
   }
   return extracted_coo_tensors;
 }

@@ -142,38 +142,36 @@ void ExtractCooTensorsFrom1dArray(const py::array& features,
 }
 }  // namespace
 
-AbstractInputBatch* NumpySparseInputBatch::Slice(int start_index,
-                                                 int end_index) const {
-  DCHECK(!PyGILState_Check());  // Does not require external GIL
-  py::gil_scoped_acquire _;
-  py::slice slice = py::slice(start_index, end_index, 1);
-  return new NumpySparseInputBatch(feature_[slice], weights_[slice]);
-}
-
 void NumpySparseInputBatch::ExtractCooTensors(
-    int row_offset, int col_offset, int col_shift, int num_scs,
-    int global_device_count, RowCombiner combiner,
+    int start_index, int end_index, int row_offset, int col_offset,
+    int col_shift, int num_scs, int global_device_count, RowCombiner combiner,
     std::vector<CooFormat>& coo_tensors) const {
   DCHECK(!PyGILState_Check());  // Does not require external GIL
-  py::gil_scoped_acquire _;
-  // We have to differentiate between 2D and 1D np.ndarray.
-  // In the case of a 1D array of arrays, we have to iterate over the inner
-  // arrays individually, collecting the COOFormat objects since the dtype of
-  // the array is a py::object.
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
-
   CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
   const int num_scs_bit = std::log2(num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
   const int num_scs_mod_inv = ~num_scs_mod;
+
+  py::gil_scoped_acquire _;
+  py::slice slice = py::slice(start_index, end_index, 1);
+  auto feature_slice = feature_[slice];
+  auto weights_slice = weights_[slice];
+
+  // We have to differentiate between 2D and 1D np.ndarray.
+  // In the case of a 1D array of arrays, we have to iterate over the inner
+  // arrays individually, collecting the COOFormat objects since the dtype of
+  // the array is a py::object.
   if (feature_.ndim() == 2) {
-    ExtractCooTensorsFrom2dArray(feature_, weights_, row_offset, col_offset,
-                                 col_shift, num_scs_mod, num_scs_mod_inv,
-                                 global_device_count, combiner, coo_tensors);
+    ExtractCooTensorsFrom2dArray(feature_slice, weights_slice, row_offset,
+                                 col_offset, col_shift, num_scs_mod,
+                                 num_scs_mod_inv, global_device_count, combiner,
+                                 coo_tensors);
   } else {
-    ExtractCooTensorsFrom1dArray(feature_, weights_, row_offset, col_offset,
-                                 col_shift, num_scs_mod, num_scs_mod_inv,
-                                 global_device_count, combiner, coo_tensors);
+    ExtractCooTensorsFrom1dArray(feature_slice, weights_slice, row_offset,
+                                 col_offset, col_shift, num_scs_mod,
+                                 num_scs_mod_inv, global_device_count, combiner,
+                                 coo_tensors);
   }
 }
 
