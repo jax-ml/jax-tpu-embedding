@@ -46,17 +46,19 @@ namespace py = ::pybind11;
 
 namespace {
 absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-GetStackedTableMetadata(py::list& feature_specs, py::list& features) {
+GetStackedTableMetadata(py::list& feature_specs) {
   CHECK(PyGILState_Check());  // Requires GIL
   tsl::profiler::TraceMe t([] { return "GetStackedTableMetadata"; });
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_table_metadata;
   for (int i = 0; i < feature_specs.size(); ++i) {
     const py::object& feature_spec = feature_specs[i];
-    const py::array& feature = features[i].cast<py::array>();
     const py::object& feature_transformation =
         feature_spec.attr("_id_transformation");
     const py::object& table_spec = feature_spec.attr("table_spec");
+    const py::list& input_shape =
+        feature_spec.attr("input_shape").cast<py::list>();
+    const int batch_size = py::cast<int>(input_shape[0]);
     const py::object& stacked_table_spec =
         table_spec.attr("stacked_table_spec");
     if (stacked_table_spec.is_none()) {
@@ -88,7 +90,7 @@ GetStackedTableMetadata(py::list& feature_specs, py::list& features) {
     stacked_table_metadata[stacked_table_name].emplace_back(
         stacked_table_name, i, max_ids_per_partition,
         max_unique_ids_per_partition, row_offset, col_offset, col_shift,
-        /*batch_size=*/feature.shape(0), suggested_coo_buffer_size,
+        /*batch_size=*/batch_size, suggested_coo_buffer_size,
         GetRowCombiner(row_combiner),
         /*max_col_id=*/std::numeric_limits<int>::max());
   }
@@ -126,7 +128,7 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
   // the values are a vector of StackedTableMetadata for each feature that is
   // mapped to the table.
   const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
-      stacked_tables = GetStackedTableMetadata(feature_specs, features);
+      stacked_tables = GetStackedTableMetadata(feature_specs);
   PreprocessSparseDenseMatmulOutput out;
   {
     // We release the lock by default and acquire it when we deal with python
