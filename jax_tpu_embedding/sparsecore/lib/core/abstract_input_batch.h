@@ -33,7 +33,7 @@ class AbstractInputBatch {
   virtual void ExtractCooTensors(int slice_start, int slice_end, int row_offset,
                                  int col_offset, int col_shift, int num_scs,
                                  int global_device_count, RowCombiner combiner,
-                                 std::vector<CooFormat>& coo_tensors) const = 0;
+                                 std::vector<CooFormat>& coo_tensors) = 0;
 
   virtual ~AbstractInputBatch() = default;
 };

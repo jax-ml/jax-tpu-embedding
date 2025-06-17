@@ -15,7 +15,7 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <limits>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -30,6 +30,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/sparse_coo_input_batch.h"
 #include "pybind11/cast.h"  // from @pybind11
 #include "pybind11/eigen.h"  // from @pybind11
 #include "pybind11/gil.h"  // from @pybind11
@@ -56,6 +57,8 @@ GetStackedTableMetadata(py::list& feature_specs) {
     const py::object& feature_transformation =
         feature_spec.attr("_id_transformation");
     const py::object& table_spec = feature_spec.attr("table_spec");
+    const int64_t max_col_id =
+        py::cast<int64_t>(table_spec.attr("vocabulary_size"));
     const py::list& input_shape =
         feature_spec.attr("input_shape").cast<py::list>();
     const int batch_size = py::cast<int>(input_shape[0]);
@@ -91,8 +94,7 @@ GetStackedTableMetadata(py::list& feature_specs) {
         stacked_table_name, i, max_ids_per_partition,
         max_unique_ids_per_partition, row_offset, col_offset, col_shift,
         /*batch_size=*/batch_size, suggested_coo_buffer_size,
-        GetRowCombiner(row_combiner),
-        /*max_col_id=*/std::numeric_limits<int>::max());
+        GetRowCombiner(row_combiner), max_col_id);
   }
   // Sort the stacked tables by row_offset.
   for (auto& [_, t] : stacked_table_metadata) {
@@ -104,18 +106,12 @@ GetStackedTableMetadata(py::list& feature_specs) {
   return stacked_table_metadata;
 }
 
-py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
-    py::list features, py::list feature_weights, py::list feature_specs,
-    int local_device_count, int global_device_count, int num_sc_per_device,
-    int sharding_strategy, bool has_leading_dimension, bool allow_id_dropping) {
-  CHECK_EQ(features.size(), feature_weights.size());
-  CHECK_EQ(features.size(), feature_specs.size());
-  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
-  input_batches.reserve(features.size());
-  for (int i = 0; i < features.size(); ++i) {
-    input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
-        features[i], feature_weights[i]));
-  }
+py::tuple PyPreprocessSparseDenseMatmulInput(
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    py::list feature_specs, int local_device_count, int global_device_count,
+    int num_sc_per_device, int sharding_strategy, bool has_leading_dimension,
+    bool allow_id_dropping) {
+  CHECK_EQ(input_batches.size(), feature_specs.size());
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = local_device_count,
       .global_device_count = global_device_count,
@@ -156,6 +152,47 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
   }
   return ret_object;
 }
+
+py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
+    py::list features, py::list feature_weights, py::list feature_specs,
+    int local_device_count, int global_device_count, int num_sc_per_device,
+    int sharding_strategy, bool has_leading_dimension, bool allow_id_dropping) {
+  CHECK_EQ(features.size(), feature_weights.size());
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.reserve(features.size());
+  for (int i = 0; i < features.size(); ++i) {
+    input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
+        features[i], feature_weights[i]));
+  }
+  return PyPreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches), feature_specs, local_device_count,
+      global_device_count, num_sc_per_device, sharding_strategy,
+      has_leading_dimension, allow_id_dropping);
+}
+
+py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
+    py::list indices, py::list values, py::list dense_shapes,
+    py::list feature_specs, int local_device_count, int global_device_count,
+    int num_sc_per_device, int sharding_strategy, bool has_leading_dimension,
+    bool allow_id_dropping) {
+  CHECK(indices.size() == values.size());
+  // NOTE: dense_shapes is unused and can be removed.
+  CHECK(indices.size() == dense_shapes.size());
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches(
+      indices.size());
+
+  for (int i = 0; i < indices.size(); ++i) {
+    const int64_t max_col_id =
+        feature_specs[i].attr("table_spec").attr("vocabulary_size").cast<int>();
+    input_batches[i] = std::make_unique<PySparseCooInputBatch>(
+        indices[i].cast<py::array_t<int64_t>>(),
+        values[i].cast<py::array_t<int32_t>>(), max_col_id);
+  }
+  return PyPreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches), feature_specs, local_device_count,
+      global_device_count, num_sc_per_device, sharding_strategy,
+      has_leading_dimension, allow_id_dropping);
+}
 }  // namespace
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
@@ -163,6 +200,14 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         &PyNumpyPreprocessSparseDenseMatmulInput, pybind11::arg("features"),
         pybind11::arg("feature_weights"), pybind11::arg("feature_specs"),
         pybind11::arg("local_device_count"),
+        pybind11::arg("global_device_count"),
+        pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
+        pybind11::arg("has_leading_dimension"),
+        pybind11::arg("allow_id_dropping"));
+  m.def("PreprocessSparseDenseMatmulSparseCooInput",
+        &PySparseCooPreprocessSparseDenseMatmulInput, pybind11::arg("indices"),
+        pybind11::arg("values"), pybind11::arg("dense_shapes"),
+        pybind11::arg("feature_specs"), pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),
         pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
         pybind11::arg("has_leading_dimension"),

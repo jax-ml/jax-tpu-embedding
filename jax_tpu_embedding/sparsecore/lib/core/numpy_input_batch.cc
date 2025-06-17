@@ -14,12 +14,9 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
 
 #include <cmath>
-#include <memory>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
-#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "tsl/profiler/lib/traceme.h"
 
@@ -145,7 +142,7 @@ void ExtractCooTensorsFrom1dArray(const py::array& features,
 void NumpySparseInputBatch::ExtractCooTensors(
     int start_index, int end_index, int row_offset, int col_offset,
     int col_shift, int num_scs, int global_device_count, RowCombiner combiner,
-    std::vector<CooFormat>& coo_tensors) const {
+    std::vector<CooFormat>& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
   CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);

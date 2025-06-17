@@ -84,6 +84,20 @@ pybind_library(
     ],
 )
 
+pybind_library(
+    name = "sparse_coo_input_batch",
+    srcs = ["sparse_coo_input_batch.cc"],
+    hdrs = ["sparse_coo_input_batch.h"],
+    deps = [
+        ":abstract_input_batch",
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/types:span",
+        "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
 cc_test(
     name = "input_preprocessing_util_test",
     srcs = ["input_preprocessing_util_test.cc"],
@@ -123,6 +137,7 @@ pybind_extension(
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         ":numpy_input_batch",
+        ":sparse_coo_input_batch",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -186,6 +201,21 @@ pytype_strict_contrib_test(
         ":pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_contrib_test(
+    name = "sparse_coo_input_preprocessing_test",
+    srcs = [
+        "sparse_coo_input_preprocessing_test.py",
+    ],
+    shard_count = 10,
+    deps = [
+        ":pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),

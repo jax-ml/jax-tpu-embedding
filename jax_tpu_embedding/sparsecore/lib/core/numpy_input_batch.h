@@ -13,7 +13,6 @@
 // limitations under the License.
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
-#include <memory>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
@@ -47,7 +46,7 @@ class NumpySparseInputBatch : public AbstractInputBatch {
   void ExtractCooTensors(int start_index, int end_index, int row_offset,
                          int col_offset, int col_shift, int num_scs,
                          int global_device_count, RowCombiner combiner,
-                         std::vector<CooFormat>& coo_tensors) const override;
+                         std::vector<CooFormat>& coo_tensors) override;
 
  private:
   const py::array feature_;
