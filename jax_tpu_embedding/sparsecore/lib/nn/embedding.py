@@ -314,8 +314,9 @@ def auto_stack_tables(
   )
 
 
-def sharding_strategy_to_int(sharding_strategy: str) -> int:
-  if sharding_strategy == "MOD":
+def sharding_strategy_to_enum(sharding_strategy: str) -> int:
+  """Converts the sharding strategy string to the enum."""
+  if sharding_strategy.upper() == "MOD":
     return 1
   else:
     raise ValueError(
@@ -376,7 +377,7 @@ def preprocess_sparse_dense_matmul_input(
           local_device_count,
           global_device_count,
           num_sc_per_device,
-          sharding_strategy_to_int(sharding_strategy),
+          sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
       )
@@ -498,7 +499,7 @@ def tpu_sparse_dense_matmul(
   stacked_table_specs = get_stacked_table_specs(feature_specs)
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
-  sharding_strategy = _sharding_strategy_to_enum(sharding_strategy)
+  sharding_strategy = sharding_strategy_to_enum(sharding_strategy)
 
   activations = {}
   for stacked_table_name in stacked_table_specs:
@@ -526,17 +527,6 @@ def tpu_sparse_dense_matmul(
   return _unstack_embedding_activations(
       activations, feature_specs, global_device_count
   )
-
-
-def _sharding_strategy_to_enum(sharding_strategy: str) -> int:
-  """Converts the sharding strategy string to the enum."""
-  if sharding_strategy.upper() == "MOD":
-    return 1
-  else:
-    raise ValueError(
-        f"Unsupported sharding strategy: {sharding_strategy}. Only MOD is"
-        " supported."
-    )
 
 
 def _stack_embedding_gradients(
@@ -646,7 +636,7 @@ def tpu_sparse_dense_matmul_grad(
   gradients = _stack_embedding_gradients(activation_gradients, feature_specs)
   assert lhs_row_pointers.keys() == gradients.keys()
 
-  sharding_strategy = _sharding_strategy_to_enum(sharding_strategy)
+  sharding_strategy = sharding_strategy_to_enum(sharding_strategy)
 
   updated_embedding_variables = {}
   for stacked_table_name in stacked_table_specs:
