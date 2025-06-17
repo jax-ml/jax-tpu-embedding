@@ -14,9 +14,10 @@ classifiers = [  # List of https://pypi.org/classifiers/
     'Programming Language :: Python :: 3.13',
 ]
 dependencies = [
-    'jax',
     'absl-py',
+    'dm-tree',
     'flax',
+    'jax',
     'numpy',
 ]
 
