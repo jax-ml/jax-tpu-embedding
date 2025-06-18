@@ -27,7 +27,7 @@ import numpy as np
 
 
 DeviceLocalLayout = layout.DeviceLocalLayout
-Layout = layout.Layout
+Layout = layout.Format
 LogicalNames = typing.LogicalNames
 P = jax.sharding.PartitionSpec
 shard_map = jax.experimental.shard_map.shard_map

@@ -22,7 +22,7 @@ from flax import struct
 import jax
 from jax.experimental import shard_map
 from jax.experimental.layout import DeviceLocalLayout as DLL
-from jax.experimental.layout import Layout
+from jax.experimental.layout import Format
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
@@ -783,7 +783,7 @@ def _init_stacked_embedding_table(
             in_specs=P(sharding_axis),
             out_specs=global_sharding.spec,
         ),
-        out_shardings=Layout(
+        out_shardings=Format(
             DLL(
                 major_to_minor=(0, 1),
                 _tiling=((8,),),

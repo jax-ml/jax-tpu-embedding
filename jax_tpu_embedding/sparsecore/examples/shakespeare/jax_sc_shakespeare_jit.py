@@ -28,7 +28,7 @@ import flax
 from flax import linen as nn
 import jax
 from jax.experimental.layout import DeviceLocalLayout as DLL
-from jax.experimental.layout import Layout
+from jax.experimental.layout import Format
 from jax.experimental.shard_map import shard_map
 import jax.numpy as jnp
 from jax.sharding import Mesh
@@ -352,7 +352,7 @@ def run_model():
     emb_variables = embedding.init_embedding_variables(
         jax.random.key(13), table_specs, global_emb_sharding, num_sc_per_device
     )
-  emb_var_outsharding = Layout(
+  emb_var_outsharding = Format(
       DLL(
           major_to_minor=(0, 1),
           _tiling=((8,),),
