@@ -40,19 +40,20 @@ namespace py = ::pybind11;
 //   with the corresponding (row_id, col_id) pair in `indices`.
 class PySparseCooInputBatch : public AbstractInputBatch {
  public:
-  PySparseCooInputBatch(const py::array& indices, const py::array& values,
+  PySparseCooInputBatch(const py::array_t<int64_t>& indices,
+                        const py::array_t<int32_t>& values,
+                        const py::array_t<int64_t>& dense_shape,
                         const int64_t max_col_id)
       : indices_(indices),
         values_(values),
         max_col_id_(max_col_id),
-        row_start_(indices_.at(0, 0)),
-        row_end_(indices_.at(indices_.shape(0) - 1, 0) + 1) {
+        batch_size_(dense_shape.at(0)) {
     DCHECK(PyGILState_Check())
         << "Need GIL to create references to indices and values.";
   }
 
   // Returns the number of rows in the current slice.
-  int64_t size() const override { return row_end_ - row_start_; }
+  int64_t size() const override { return batch_size_; }
 
   // Extracts COO tensors for each SparseCore.
   void ExtractCooTensors(int row_start, int row_end, int row_offset,
@@ -66,8 +67,7 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   const py::array_t<int32_t> values_;
   const int64_t max_col_id_;
   std::vector<int64_t> row_pointers_;
-  const int64_t row_start_;
-  const int64_t row_end_;  // exclusive
+  const int64_t batch_size_;
   absl::once_flag row_pointer_construction_flag_;
 
   // Converts this to a CSR format. A refactor could return an object of type

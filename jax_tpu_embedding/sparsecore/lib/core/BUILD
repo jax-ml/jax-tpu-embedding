@@ -93,7 +93,6 @@ pybind_library(
         ":input_preprocessing_util",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/types:span",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
