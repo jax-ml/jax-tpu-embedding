@@ -111,9 +111,9 @@ void PySparseCooInputBatch::ExtractCooTensors(
     const float gain = ComputeGain(combiner, elements_in_row);
     for (int i = row_pointers_[row_id]; i < row_pointers_[row_id + 1]; ++i) {
       const int col_id = values_array(i);
-      DCHECK(col_id >= 0 && col_id <= max_col_id_)
+      DCHECK(col_id >= 0 && col_id <= max_vocab_id_)
           << "Invalid col id: " << col_id
-          << " for table vocabulary size: " << max_col_id_;
+          << " for table vocabulary size: " << max_vocab_id_;
       coo_tensors.emplace_back(
           adjusted_row,
           GetColId(col_id, col_shift, col_offset, num_scs_mod, num_scs_mod_inv),

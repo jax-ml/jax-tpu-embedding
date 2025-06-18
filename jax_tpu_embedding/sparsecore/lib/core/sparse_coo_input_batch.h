@@ -43,10 +43,10 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   PySparseCooInputBatch(const py::array_t<int64_t>& indices,
                         const py::array_t<int32_t>& values,
                         const py::array_t<int64_t>& dense_shape,
-                        const int64_t max_col_id)
+                        const int64_t max_vocab_id)
       : indices_(indices),
         values_(values),
-        max_col_id_(max_col_id),
+        max_vocab_id_(max_vocab_id),
         batch_size_(dense_shape.at(0)) {
     DCHECK(PyGILState_Check())
         << "Need GIL to create references to indices and values.";
@@ -65,7 +65,7 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   // (N,2) array, sorted by row_id.
   const py::array_t<int64_t> indices_;
   const py::array_t<int32_t> values_;
-  const int64_t max_col_id_;
+  const int64_t max_vocab_id_;
   std::vector<int64_t> row_pointers_;
   const int64_t batch_size_;
   absl::once_flag row_pointer_construction_flag_;

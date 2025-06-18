@@ -181,12 +181,12 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
       indices.size());
 
   for (int i = 0; i < indices.size(); ++i) {
-    const int64_t max_col_id =
+    const int64_t max_vocab_id =
         feature_specs[i].attr("table_spec").attr("vocabulary_size").cast<int>();
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
         indices[i].cast<py::array_t<int64_t>>(),
         values[i].cast<py::array_t<int32_t>>(),
-        dense_shapes[i].cast<py::array_t<int64_t>>(), max_col_id);
+        dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id);
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
