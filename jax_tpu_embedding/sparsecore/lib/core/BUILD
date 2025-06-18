@@ -93,7 +93,6 @@ pybind_library(
         ":input_preprocessing_util",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/types:span",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -217,6 +216,7 @@ pytype_strict_contrib_test(
     deps = [
         ":pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("numpy"),

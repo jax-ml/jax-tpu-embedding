@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import dataclasses
+
+from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
@@ -140,6 +143,92 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
           ],
           dtype=np.int32,
       )
+
+    self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            [numpy_features],
+            [numpy_weights],
+            [self.feature_spec],
+            local_device_count=4,
+            global_device_count=4,
+            num_sc_per_device=4,
+            sharding_strategy=1,
+            has_leading_dimension=has_leading_dimension,
+            allow_id_dropping=False,
+        )
+    )
+    np.testing.assert_equal(
+        row_pointers_sparse[self.stacked_name],
+        row_pointers_raw[self.stacked_name],
+    )
+    np.testing.assert_equal(
+        embedding_ids_sparse[self.stacked_name],
+        embedding_ids_raw[self.stacked_name],
+    )
+    np.testing.assert_equal(
+        sample_ids_sparse[self.stacked_name], sample_ids_raw[self.stacked_name]
+    )
+    np.testing.assert_equal(
+        gains_sparse[self.stacked_name], gains_raw[self.stacked_name]
+    )
+
+  @parameterized.parameters(False, True)
+  def test_sparse_tensor_input_with_empty_rows(self, has_leading_dimension):
+    # Create a sparse tensor with 2400 rows and 1 column.
+    # Only some rows have values, specifically rows 0, 150, 300, 450, ...
+    indices = []
+    values = []
+    for i in range(0, 2251, 150):
+      indices.append((i, 0))
+      values.append(0)
+
+    sparse_tensor = SparseCooInput(
+        indices=indices,
+        values=values,
+        dense_shape=[2400, 1],
+    )
+    sparse_tensor_input_preprocessing = (
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput
+    )
+    indices_tensor = [sparse_tensor.indices]
+    values_tensor = [sparse_tensor.values]
+    dense_shape_tensor = [sparse_tensor.dense_shape]
+    self.feature_spec.table_spec.stacked_table_spec = dataclasses.replace(
+        self.feature_spec.table_spec.stacked_table_spec,
+        suggested_coo_buffer_size=1000,
+        max_ids_per_partition=150,
+    )
+    (
+        row_pointers_sparse,
+        embedding_ids_sparse,
+        sample_ids_sparse,
+        gains_sparse,
+        _,
+    ) = sparse_tensor_input_preprocessing(
+        indices_tensor,
+        values_tensor,
+        dense_shape_tensor,
+        [self.feature_spec],
+        local_device_count=4,
+        global_device_count=4,
+        num_sc_per_device=4,
+        sharding_strategy=1,
+        has_leading_dimension=has_leading_dimension,
+        allow_id_dropping=False,
+    )
+
+    numpy_features = []
+    numpy_weights = []
+    for i in range(2400):
+      if i % 150 == 0:
+        numpy_features.append(np.array([0], dtype=np.int32))
+        numpy_weights.append(np.array([1.0], dtype=np.float32))
+      else:
+        numpy_features.append(np.array([], dtype=np.int32))
+        numpy_weights.append(np.array([], dtype=np.float32))
+    numpy_features = np.array(numpy_features, dtype=object)
+    numpy_weights = np.array(numpy_weights, dtype=object)
 
     self.feature_spec.table_spec.suggested_coo_buffer_size = 64
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
