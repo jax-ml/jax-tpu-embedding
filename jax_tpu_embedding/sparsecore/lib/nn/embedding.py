@@ -289,6 +289,7 @@ def auto_stack_tables(
     num_sc_per_device: int,
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
+    use_legacy_stack_names: bool = True,
 ) -> None:
   """Computes the stacked tables based on the feature specs.
 
@@ -301,6 +302,7 @@ def auto_stack_tables(
       stack.
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
+    use_legacy_stack_names: If true, use the legacy stack names.
 
   Returns:
     None. The feature specs are updated with stacking information.
@@ -311,6 +313,7 @@ def auto_stack_tables(
       num_sc_per_device=num_sc_per_device,
       stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
       stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
+      use_legacy_stack_names=use_legacy_stack_names,
   )
 
 
