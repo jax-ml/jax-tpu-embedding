@@ -26,7 +26,7 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-DeviceLocalLayout = layout.DeviceLocalLayout
+Layout = layout.Layout
 Layout = layout.Format
 LogicalNames = typing.LogicalNames
 P = jax.sharding.PartitionSpec
@@ -45,7 +45,7 @@ class WithSparseCoreLayout(nn.Partitioned[A]):
   def get_sharding(self, _: jax.sharding.Mesh) -> jax.sharding.Sharding:
     assert self.mesh is not None
     return Layout(  # pytype: disable=bad-return-type
-        DeviceLocalLayout(
+        Layout(
             major_to_minor=(0, 1),
             _tiling=((8,),),
         ),
