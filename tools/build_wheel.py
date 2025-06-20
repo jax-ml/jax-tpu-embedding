@@ -62,6 +62,29 @@ def _extract_wheel_info(filename: str) -> dict[str, str]:
   return wheel_info
 
 
+def run_process(cmd: Sequence[str]):
+  """Run a command as a subprocess, checking the return code.
+
+  Args:
+    cmd: process string tokens.
+
+  Returns:
+    The subprocess.run result.
+
+  Raises:
+    RuntimeError: on failure.
+  """
+  process = subprocess.run(cmd, check=False, capture_output=True, text=True)
+  if process.returncode != 0:
+    logging.error('Process failed with exit code %s', process.returncode)
+    logging.error('Command: %s', ' '.join(cmd))
+    logging.error('stdout: %s', process.stdout)
+    logging.error('stderr: %s', process.stderr)
+    raise RuntimeError(f'Process failed with exit code {process.returncode}')
+
+  return process
+
+
 def run_build(output_dir: str) -> str:
   """Builds the wheel using the python `build` package.
 
@@ -76,11 +99,8 @@ def run_build(output_dir: str) -> str:
     RuntimeError: if we fail to parse the output of the build command.
   """
   logging.info('Building wheels in %s', output_dir)
-  process = subprocess.run(
+  process = run_process(
       [sys.executable, '-m', 'build', '--outdir', output_dir],
-      check=True,
-      capture_output=True,
-      text=True,
   )
   stdout = process.stdout
   logging.debug('Build output:\n%s', stdout)
@@ -111,11 +131,8 @@ def run_auditwheel_show(bdist_path: str) -> str:
     RuntimeError: if we fail to parse the output of the command.
   """
   logging.info('Running auditwheel show on %s', bdist_path)
-  process = subprocess.run(
+  process = run_process(
       [sys.executable, '-m', 'auditwheel', 'show', bdist_path],
-      check=True,
-      capture_output=True,
-      text=True,
   )
   stdout = process.stdout
   logging.debug(stdout)
@@ -155,7 +172,7 @@ def run_auditwheel_repair(
       bdist_path,
       platform_tag,
   )
-  process = subprocess.run(
+  process = run_process(
       [
           sys.executable,
           '-m',
@@ -167,9 +184,6 @@ def run_auditwheel_repair(
           output_dir,
           bdist_path,
       ],
-      check=True,
-      capture_output=True,
-      text=True,
   )
   # Auditwheel repair outputs to stderr.
   stderr = process.stderr
