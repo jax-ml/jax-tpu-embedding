@@ -21,7 +21,7 @@ from absl import logging
 from flax import struct
 import jax
 from jax.experimental import shard_map
-from jax.experimental.layout import DeviceLocalLayout as DLL
+from jax.experimental.layout import Layout as DLL
 from jax.experimental.layout import Format
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing

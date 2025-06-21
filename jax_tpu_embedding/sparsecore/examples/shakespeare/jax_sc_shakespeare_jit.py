@@ -27,7 +27,7 @@ from clu import parameter_overview
 import flax
 from flax import linen as nn
 import jax
-from jax.experimental.layout import DeviceLocalLayout as DLL
+from jax.experimental.layout import Layout as DLL
 from jax.experimental.layout import Format
 from jax.experimental.shard_map import shard_map
 import jax.numpy as jnp
