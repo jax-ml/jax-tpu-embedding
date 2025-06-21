@@ -463,6 +463,40 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_ftrl)
 
+  def test_table_spec_quantization_config_equality(self):
+    """Tables should compare equal only when the quantization config matches."""
+    q_cfg = embedding_spec.QuantizationConfig(0.0, 10.0, 128)
+    initializer = jax.nn.initializers.normal()
+    ts1 = embedding_spec.TableSpec(
+        vocabulary_size=8,
+        embedding_dim=4,
+        name="t",
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        initializer=initializer,
+        quantization_config=q_cfg,
+    )
+    ts2 = embedding_spec.TableSpec(
+        vocabulary_size=8,
+        embedding_dim=4,
+        name="t",
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        initializer=initializer,
+        quantization_config=q_cfg,
+    )
+    ts3 = embedding_spec.TableSpec(  # No quantization
+        vocabulary_size=8,
+        embedding_dim=4,
+        name="t",
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        initializer=initializer,
+        quantization_config=None,
+    )
+    self.assertEqual(ts1, ts2)
+    self.assertNotEqual(ts1, ts3)
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -52,6 +52,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
+    quantization_config: tuple[float, float, int] | None = None,
 ):
   """Abstract eval for sdmm_csr."""
   if lhs_row_pointers.dtype != np.int32:
@@ -116,6 +117,22 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
         f" {max_unique_ids_per_partition}"
     )
 
+  if quantization_config is not None:
+    quantization_min_value, quantization_max_value, quantization_num_buckets = (
+        quantization_config
+    )
+    if quantization_num_buckets < 2:
+      raise ValueError(
+          "quantization_num_buckets must be at least 2, got"
+          f" {quantization_num_buckets}"
+      )
+
+    if quantization_min_value >= quantization_max_value:
+      raise ValueError(
+          "quantization_min_valuemust be less than quantization_max_value,"
+          f" got {quantization_min_value} and {quantization_max_value}"
+      )
+
   return core.ShapedArray(
       (device_batch_size, embedding_table.shape[1]),
       dtype=jnp.float32,
@@ -140,6 +157,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
+    quantization_config: tuple[float, float, int] | None = None,
 ) -> jnp.ndarray:
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
@@ -168,6 +186,14 @@ def _tpu_sparse_dense_matmul_csr_lowering(
       "sharding_strategy": sharding_strategy,
       "pad_value": constants.PADDING_VALUE,
   }
+  # Add quantization params only when enabled
+  if quantization_config is not None:
+    q_min, q_max, q_buckets = quantization_config
+    sdmm_csr_config["quantization_config"] = {
+        "min_value": q_min,
+        "max_value": q_max,
+        "num_buckets": q_buckets,
+    }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_csr_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",

@@ -125,6 +125,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
+          quantization_config=None,
       )
 
     with self.subTest("invalid_local_embedding_ids_type"):
@@ -143,6 +144,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
+          quantization_config=None,
       )
 
     with self.subTest("invalid_local_sample_ids_type"):
@@ -159,6 +161,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
+          quantization_config=None,
       )
 
     with self.subTest("invalid_gains_type"):
@@ -175,6 +178,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
+          quantization_config=None,
       )
 
     with self.subTest("invalid_emb_table_type"):
@@ -191,6 +195,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
+          quantization_config=None,
       )
 
   def test_sc_emb_forward_pass_invalid_input_shapes(self):
@@ -229,6 +234,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
+          quantization_config=None,
       )
 
   def test_sc_emb_forward_pass_invalid_max_ids_per_partition(self):
@@ -263,6 +269,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=0,
         max_unique_ids_per_partition=256,
         sharding_strategy=1,
+        quantization_config=None,
     )
     self.assertRaises(
         ValueError,
@@ -276,6 +283,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=256,
         max_unique_ids_per_partition=0,
         sharding_strategy=1,
+        quantization_config=None,
     )
 
   def test_sc_emb_forward_pass_invalid_sharding(self):
@@ -310,6 +318,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=256,
         max_unique_ids_per_partition=256,
         sharding_strategy=2,
+        quantization_config=None,
     )
 
   def test_sc_emb_forward_pass(self):
@@ -345,6 +354,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         sharding_strategy=1,
+        quantization_config=None,
     )
 
     # Check the embedding activations.
@@ -371,6 +381,93 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     )
 
     np.testing.assert_equal(emb_activations, expected_emb_activations)
+
+  def test_sc_emb_quantization_config_validation(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    lhs_row_pointers, lhs_ids, lhs_sids, lhs_gains = (
+        input_preprocessing.preprocess_sparse_dense_matmul_input(
+            self.input_tensor,
+            self.input_weights,
+            mesh,
+            max_ids_per_partition=16,
+            num_sc_per_device=self.num_sc_per_device,
+        )
+    )
+    emb_table_sharded = einops.rearrange(
+        self.emb_table,
+        "(v c s) f -> c (s v) f",
+        c=len(self.global_devices),
+        s=self.num_sc_per_device,
+    )
+
+    # num_buckets must be >= 2
+    with self.assertRaises(ValueError):
+      self.tpu_sparse_dense_matmul_csr(
+          lhs_row_pointers,
+          lhs_ids,
+          lhs_sids,
+          lhs_gains,
+          emb_table_sharded[0],
+          device_batch_size=self.batch_size // self.num_chips,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=16,
+          sharding_strategy=1,
+          # num_buckets < 2
+          quantization_config=(0.0, 1.0, 1),
+      )
+
+    # min must be < max
+    with self.assertRaises(ValueError):
+      self.tpu_sparse_dense_matmul_csr(
+          lhs_row_pointers,
+          lhs_ids,
+          lhs_sids,
+          lhs_gains,
+          emb_table_sharded[0],
+          device_batch_size=self.batch_size // self.num_chips,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=16,
+          sharding_strategy=1,
+          # min < max
+          quantization_config=(5.0, 5.0, 4),
+      )
+
+  def test_sc_emb_forward_pass_with_quantization_enabled(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    lhs_row_pointers, lhs_ids, lhs_sids, lhs_gains = (
+        input_preprocessing.preprocess_sparse_dense_matmul_input(
+            self.input_tensor,
+            self.input_weights,
+            mesh,
+            max_ids_per_partition=16,
+            num_sc_per_device=self.num_sc_per_device,
+        )
+    )
+    emb_table_sharded = einops.rearrange(
+        self.emb_table,
+        "(v c s) f -> c (s v) f",
+        c=len(self.global_devices),
+        s=self.num_sc_per_device,
+    )
+
+    activations = self.tpu_sparse_dense_matmul_csr(
+        lhs_row_pointers,
+        lhs_ids,
+        lhs_sids,
+        lhs_gains,
+        emb_table_sharded[0],
+        device_batch_size=self.batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        # valid config
+        quantization_config=(0.0, 15.0, 256),
+    )
+
+    # Quantization happens on-device, so numerical values stay identical
+    # for the table.
+    self.assertEqual(activations.shape, (self.batch_size, self.emb_size))
+    self.assertEqual(activations.dtype, jnp.float32)
 
 
 if __name__ == "__main__":

@@ -627,6 +627,10 @@ class TableSpec:
   # The minimum size of the input buffer that the preprocessing should try to
   # create (per device).
   suggested_coo_buffer_size: int | None = None
+  # Quantization config (min, max, num_buckets) which represent the float
+  # range and number of discrete integer buckets to use for quantization.
+  quantization_config: QuantizationConfig | None = None
+
   # This points to the stacked table spec which this table belongs to.
   # If this is None, this table is the top-most table.
   stacked_table_spec: StackedTableSpec | None = dataclasses.field(
@@ -703,3 +707,23 @@ class StackedTableSpec:
   # The minimum size of the input buffer that the preprocessing should try to
   # create (per device).
   suggested_coo_buffer_size: int | None = None
+  # Quantization config (min, max, num_buckets) which represent the float
+  # range and number of discrete integer buckets to use for quantization.
+  quantization_config: QuantizationConfig | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QuantizationConfig:
+  """Per-table quantization parameters (None means disabled)."""
+  min_value: float
+  max_value: float
+  num_buckets: int
+
+  def __post_init__(self):
+    if self.num_buckets < 2:
+      raise ValueError("num_buckets must be ≥ 2.")
+    if self.min_value >= self.max_value:
+      raise ValueError("min_value must be < max_value.")
+
+  def as_tuple(self) -> tuple[float, float, int]:
+    return (self.min_value, self.max_value, self.num_buckets)

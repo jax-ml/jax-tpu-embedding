@@ -268,6 +268,7 @@ def prepare_feature_specs_for_training(
         max_ids_per_partition=feature.table_spec.max_ids_per_partition,
         max_unique_ids_per_partition=feature.table_spec.max_unique_ids_per_partition,
         suggested_coo_buffer_size=feature.table_spec.suggested_coo_buffer_size,
+        quantization_config=feature.table_spec.quantization_config,
     )
     feature.id_transformation = embedding_spec.FeatureIdTransformation(
         row_offset=feature_to_row_offset.get(feature.name, 0),
@@ -509,6 +510,10 @@ def tpu_sparse_dense_matmul(
     gain = lhs_gains[stacked_table_name]
     embedding_variable = embedding_variables[stacked_table_name]
     stacked_table = stacked_table_specs[stacked_table_name]
+    quantization_config = stacked_table.quantization_config
+    quantization_config_tuple = (
+        quantization_config.as_tuple() if quantization_config else None
+    )
     activations[stacked_table.stack_name] = (
         sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_primitive.bind(
             row_pointer,
@@ -521,6 +526,7 @@ def tpu_sparse_dense_matmul(
             max_ids_per_partition=stacked_table.max_ids_per_partition,
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy,
+            quantization_config=quantization_config_tuple,
         )
     )
 
