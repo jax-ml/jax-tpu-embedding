@@ -21,7 +21,6 @@ from absl import logging
 from flax import struct
 import jax
 from jax.experimental import shard_map
-from jax.experimental.layout import DeviceLocalLayout as DLL
 from jax.experimental.layout import Format
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
@@ -33,6 +32,10 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import tree
 
+if jax.__version_info__ >= (0, 6, 3):
+  from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
+else:
+  from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top
 
 ArrayLike = jnp.ndarray | np.ndarray
 

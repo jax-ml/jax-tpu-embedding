@@ -27,7 +27,6 @@ from clu import parameter_overview
 import flax
 from flax import linen as nn
 import jax
-from jax.experimental.layout import DeviceLocalLayout as DLL
 from jax.experimental.layout import Format
 from jax.experimental.shard_map import shard_map
 import jax.numpy as jnp
@@ -49,6 +48,11 @@ import tree
 
 np.set_printoptions(threshold=np.inf)
 Nested = embedding.Nested
+
+if jax.__version_info__ >= (0, 6, 3):
+  from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
+else:
+  from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top
 
 
 @flax.struct.dataclass
