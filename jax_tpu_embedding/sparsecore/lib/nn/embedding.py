@@ -35,7 +35,7 @@ import tree
 if jax.__version_info__ >= (0, 6, 3):
   from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
 else:
-  from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top
+  from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top  # type: ignore
 
 ArrayLike = jnp.ndarray | np.ndarray
 
