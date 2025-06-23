@@ -237,16 +237,22 @@ int ComputeCooBufferSizePerDevice(
   const int64_t theoretical_max =
       max_ids_rounded_up * num_scs_per_device * num_scs;
   const std::string& stacked_table_name = stacked_table_metadata[0].name;
-  LOG_EVERY_POW_2(INFO) << "Theoretical Max for table " << stacked_table_name
-                        << ": " << theoretical_max
-                        << "( max_ids_rounded_up: " << max_ids_rounded_up
-                        << " num_scs_per_device: " << num_scs_per_device
-                        << " num_scs: " << num_scs << ")";
+  // Without unrolling the loop across threads and stacked tables, we need to
+  // only log once per table (across epochs). This function would be called for
+  // every epoch and every stacked table.We use a static limit of 20 stacked
+  // tables. There might be a few repeated logs, if we don't have as many
+  // tables.
+  static constexpr int kStackedTableLogCountLimit = 20;
+  LOG_FIRST_N(INFO, kStackedTableLogCountLimit)
+      << "Theoretical Max for table " << stacked_table_name << ": "
+      << theoretical_max << "( max_ids_rounded_up: " << max_ids_rounded_up
+      << " num_scs_per_device: " << num_scs_per_device
+      << " num_scs: " << num_scs << ")";
   int64_t result = theoretical_max;
   if (suggested_coo_buffer_size.has_value()) {
-    LOG_EVERY_POW_2(INFO) << "Suggested Coo Buffer Size for table "
-                          << stacked_table_name << ": "
-                          << suggested_coo_buffer_size.value();
+    LOG_FIRST_N(INFO, kStackedTableLogCountLimit)
+        << "Suggested Coo Buffer Size for table " << stacked_table_name << ": "
+        << suggested_coo_buffer_size.value();
     // Since the suggested size corresponds to only current device (local SCs),
     // Buffer for each SC should be properly aligned, hence ALIGNMENT *
     // num_scs_per_device
@@ -255,15 +261,16 @@ int ComputeCooBufferSizePerDevice(
                     suggested_coo_buffer_size.value(),
                     TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device));
   } else {
-    LOG_EVERY_POW_2(WARNING)
+    LOG_FIRST_N(WARNING, kStackedTableLogCountLimit)
         << "No Coo Buffer Size provided for table " << stacked_table_name
         << ", the default value (" << theoretical_max
         << ") may be too "
            "large and can cause OOM. Utilize the stats returned from "
            "the sparse dense matmul preprocessing API.";
   }
-  LOG_EVERY_POW_2(INFO) << "Computed Coo Buffer Size for table "
-                        << stacked_table_name << ": " << result;
+  LOG_FIRST_N(INFO, kStackedTableLogCountLimit)
+      << "Computed Coo Buffer Size for table " << stacked_table_name << ": "
+      << result;
   // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
   CHECK(result > 0 && result < INT_MAX);
