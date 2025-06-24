@@ -15,6 +15,7 @@
 
 import collections
 import functools
+import hashlib
 from typing import Callable, Dict, Mapping, Sequence, TypeAlias, TypeVar
 
 from absl import logging
@@ -387,6 +388,41 @@ def _stack_feature_specs(
     _update_feature(feature)
 
 
+def _get_stack_name(
+    table_names: Sequence[str],
+    use_short_stack_names: bool = True,
+    max_original_display_length: int = 50,
+    hash_length: int = 12,
+) -> str:
+  """Returns the stack name for the given table names.
+
+  Args:
+    table_names: A list of table names to be stacked.
+    use_short_stack_names: If `True`, a hash will be appended to the stack name
+      to avoid long names. Otherwise, the stack name will be the concatenation
+      of the table names.
+    max_original_display_length: The maximum length of the original table names
+      to display in the stack name.
+    hash_length: The length of the hash to append to the stack name.
+
+  Returns:
+    The stack name.
+  """
+  stack_name = "_".join(table_names)
+  if not use_short_stack_names:
+    return stack_name
+  shortened_name = stack_name[:max_original_display_length]
+  if len(stack_name) > max_original_display_length:
+    shortened_name += "..."
+    shortened_name += hashlib.sha256(stack_name.encode("utf-8")).hexdigest()[
+        :hash_length
+    ]
+  logging.info(
+      "Creating short name %s for stack %s", shortened_name, stack_name
+  )
+  return shortened_name
+
+
 def stack_tables(
     features: Nested[embedding_spec.FeatureSpec],
     table_names: Sequence[str],
@@ -422,9 +458,8 @@ def stack_tables(
       dimensions of the tables to stack would lead to excessive padding (i.e. do
       not match when rounded up to the nearest multiple of 8 values).
   """
-  if stack_name is None:
-    # TODO(b/355289256): Consider better name for the stack.
-    stack_name = "_".join(table_names)
+  if not stack_name:
+    stack_name = _get_stack_name(table_names)
   flatten_features = tree.flatten(features)
   tables_in_group = {
       feature.table_spec.name: feature.table_spec
@@ -494,6 +529,7 @@ def auto_stack_tables(
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     *,
+    use_short_stack_names: bool = True,
     activation_mem_bytes_limit=2048 * 1024,
 ) -> None:
   """Creates new feature specs based on auto stacking logic.
@@ -508,15 +544,17 @@ def auto_stack_tables(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     num_sc_per_device: The number of sparsecores per device.
-    rotation: The shard rotation factor for each stacked table.  If None,
-      sets to num_sc_per_device.  Default: None.
+    rotation: The shard rotation factor for each stacked table.  If None, sets
+      to num_sc_per_device.  Default: None.
     stack_to_max_ids_per_partition: Override the max_ids_per_partition for each
       stack.
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
-    activation_mem_bytes_limit: If the activation memory
-      usage is larger than this limit, the table will not be stacked. Default
-      is 2MB.
+    use_short_stack_names: If `True`, a hash will be appended to the stack name
+      to avoid long names. Otherwise, the stack name will be the concatenation
+      of the table names.
+    activation_mem_bytes_limit: If the activation memory usage is larger than
+      this limit, the table will not be stacked. Default is 2MB.
   """
   flatten_features = tree.flatten(features)
   flatten_tables = {
@@ -541,7 +579,8 @@ def auto_stack_tables(
         rotation=rotation,
         stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
         stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
-        fail_on_excess_padding=False  # Guaranteed to be satisfied.
+        fail_on_excess_padding=False,  # Guaranteed to be satisfied.
+        stack_name=_get_stack_name(group, use_short_stack_names),
     )
 
 

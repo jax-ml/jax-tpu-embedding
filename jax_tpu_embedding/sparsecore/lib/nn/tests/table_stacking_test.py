@@ -174,6 +174,77 @@ class TableStackingTest(parameterized.TestCase):
     )
 
   @parameterized.parameters(
+      dict(use_short_stack_names=True),
+      dict(use_short_stack_names=False),
+  )
+  def test_auto_stack_two_tables_with_short_stack_names(
+      self, use_short_stack_names: bool
+  ):
+    device_count = 1
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=128,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_foo_bar_transaction_history_log',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=128,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_foo_bar_customer_profile_data',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_a,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_a.embedding_dim,
+            ),
+            name='feature_spec_a',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(
+                16,
+                table_spec_b.embedding_dim,
+            ),
+            name='feature_spec_b',
+        ),
+    ]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=device_count,
+        num_sc_per_device=self.num_sc_per_device,
+        use_short_stack_names=use_short_stack_names,
+    )
+    self.assertLen(feature_specs, 2)
+    feature_a, feature_b = feature_specs
+    if use_short_stack_names:
+      self.assertEqual(
+          feature_a.table_spec.setting_in_stack.stack_name,
+          'table_foo_bar_transaction_history_log_table_foo_ba...0618d69c6704',
+      )
+    else:
+      self.assertEqual(
+          feature_a.table_spec.setting_in_stack.stack_name,
+          'table_foo_bar_transaction_history_log_table_foo_bar_customer_profile_data',
+      )
+    self.assertEqual(
+        feature_b.table_spec.setting_in_stack.stack_name,
+        feature_a.table_spec.setting_in_stack.stack_name,
+    )
+
+  @parameterized.parameters(
       dict(mem_limit=128, expected_num_stacked_tables=2),
       dict(mem_limit=1024, expected_num_stacked_tables=1),
   )
