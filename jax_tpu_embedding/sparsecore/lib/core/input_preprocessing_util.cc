@@ -256,10 +256,9 @@ int ComputeCooBufferSizePerDevice(
     // Since the suggested size corresponds to only current device (local SCs),
     // Buffer for each SC should be properly aligned, hence ALIGNMENT *
     // num_scs_per_device
-    result = std::min<int64_t>(
-        result, RoundUpTo<int64_t>(
-                    suggested_coo_buffer_size.value(),
-                    TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device));
+    result = RoundUpTo<int64_t>(
+        suggested_coo_buffer_size.value(),
+        TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
   } else {
     LOG_FIRST_N(WARNING, kStackedTableLogCountLimit)
         << "No Coo Buffer Size provided for table " << stacked_table_name

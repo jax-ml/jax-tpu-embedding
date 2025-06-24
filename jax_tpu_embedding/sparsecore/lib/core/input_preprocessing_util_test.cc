@@ -104,13 +104,6 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
                                           /*num_scs_per_device=*/4,
                                           stacked_table_metadata),
             96);
-
-  stacked_table_metadata[0].suggested_coo_buffer_size = 99999;
-  // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
-  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
-                                          /*num_scs_per_device=*/4,
-                                          stacked_table_metadata),
-            16 * 4 * 4);
 }
 
 TEST(InputPreprocessingUtilTest, IncrementScId) {
