@@ -549,7 +549,7 @@ def run_model():
 
     if (step + 1) % _LOSS_RESET_FREQUENCY.value == 0:
       train_metrics = None
-      max_ids_per_partition, max_unique_ids_per_partition = fdo_client.load()
+      max_ids_per_partition, max_unique_ids_per_partition, _ = fdo_client.load()
       # NOTE: we do not write required buffer size to disk, so it is not part of
       #   `load()` function yet.
       max_required_buffer_size_per_sc = jax.tree.map(

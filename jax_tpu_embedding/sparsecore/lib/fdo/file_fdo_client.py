@@ -32,6 +32,7 @@ _FILE_NAME = 'fdo_stats'
 _FILE_EXTENSION = 'npz'
 _MAX_ID_STATS_SUFFIX = '_max_ids'
 _MAX_UNIQUE_ID_STATS_SUFFIX = '_max_unique_ids'
+_REQUIRED_BUFFER_SIZE_STATS_SUFFIX = '_required_buffer_size'
 
 
 class NPZFileFDOClient(fdo_client.FDOClient):
@@ -96,6 +97,12 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         )
     used_coo_buffer_size = data.required_buffer_size_per_sc
     for table_name, stats in used_coo_buffer_size.items():
+      logging.vlog(
+          2,
+          'Recording observed used coo buffer size for table: %s -> %s',
+          table_name,
+          stats,
+      )
       if table_name not in self._required_coo_buffer_size_per_sc:
         self._required_coo_buffer_size_per_sc[table_name] = stats
       else:
@@ -161,6 +168,10 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         f'{table_name}{_MAX_UNIQUE_ID_STATS_SUFFIX}': stats
         for table_name, stats in self._max_unique_ids_per_partition.items()
     })
+    merged_stats.update({
+        f'{name}{_REQUIRED_BUFFER_SIZE_STATS_SUFFIX}': stats
+        for name, stats in self._required_coo_buffer_size_per_sc.items()
+    })
     self._write_to_file(merged_stats)
 
   def _read_from_file(self, files_glob: str) -> Mapping[str, np.ndarray]:
@@ -182,7 +193,11 @@ class NPZFileFDOClient(fdo_client.FDOClient):
 
   def load(
       self,
-  ) -> tuple[Mapping[str, np.ndarray], Mapping[str, np.ndarray]]:
+  ) -> tuple[
+      Mapping[str, np.ndarray],
+      Mapping[str, np.ndarray],
+      Mapping[str, np.ndarray],
+  ]:
     """Loads state of local FDO client from disk.
 
     Reads all files in the base_dir and aggregates stats.
@@ -199,7 +214,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         self._base_dir, '{}*.{}'.format(_FILE_NAME, _FILE_EXTENSION)
     )
     stats = self._read_from_file(files_glob)
-    max_id_stats, max_unique_id_stats = {}, {}
+    max_id_stats, max_unique_id_stats, required_buffer_size_stats = {}, {}, {}
     for table_name, stats in stats.items():
       if table_name.endswith(f'{_MAX_ID_STATS_SUFFIX}'):
         max_id_stats[table_name[: -len(_MAX_ID_STATS_SUFFIX)]] = stats
@@ -207,6 +222,10 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         max_unique_id_stats[table_name[: -len(_MAX_UNIQUE_ID_STATS_SUFFIX)]] = (
             stats
         )
+      elif table_name.endswith(f'{_REQUIRED_BUFFER_SIZE_STATS_SUFFIX}'):
+        required_buffer_size_stats[
+            table_name[: -len(_REQUIRED_BUFFER_SIZE_STATS_SUFFIX)]
+        ] = stats
       else:
         raise ValueError(
             f'Unexpected table name and stats key: {table_name}, expected to'
@@ -214,7 +233,8 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         )
     self._max_ids_per_partition = max_id_stats
     self._max_unique_ids_per_partition = max_unique_id_stats
-    return (max_id_stats, max_unique_id_stats)
+    self._required_coo_buffer_size_per_sc = required_buffer_size_stats
+    return (max_id_stats, max_unique_id_stats, required_buffer_size_stats)
 
   def get_required_buffer_size_per_sc(self) -> Mapping[str, np.ndarray]:
     return dict(self._required_coo_buffer_size_per_sc)

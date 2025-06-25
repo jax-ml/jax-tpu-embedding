@@ -44,23 +44,24 @@ class NpzFdoClientTest(absltest.TestCase):
     )
     fdo_client.record(stats)
     fdo_client.publish()
-    loaded_max_ids, loaded_max_uniques = fdo_client.load()
+    loaded_max_ids, loaded_max_uniques, loaded_buffers = fdo_client.load()
     self._assert_stats_equal(loaded_max_ids, stats.max_ids_per_partition)
     self._assert_stats_equal(
         loaded_max_uniques, stats.max_unique_ids_per_partition
     )
+    self._assert_stats_equal(loaded_buffers, stats.required_buffer_size_per_sc)
 
   def test_multiple_record(self):
     fdo_client = file_fdo_client.NPZFileFDOClient(self.base_dir)
     stats = embedding.SparseDenseMatmulInputStats(
         max_ids_per_partition={"tab_one": np.array([10, 20, 30, 40])},
         max_unique_ids_per_partition={"tab_one": np.array([1, 2, 3, 4])},
-        required_buffer_size_per_sc={},
+        required_buffer_size_per_sc={"tab_one": np.array([256])},
     )
     fdo_client.record(stats)
     fdo_client.record(stats)
     fdo_client.publish()
-    loaded_max_ids, loaded_max_uniques = fdo_client.load()
+    loaded_max_ids, loaded_max_uniques, loaded_buffers = fdo_client.load()
 
     self._assert_stats_equal(
         loaded_max_ids,
@@ -69,6 +70,9 @@ class NpzFdoClientTest(absltest.TestCase):
     self._assert_stats_equal(
         loaded_max_uniques,
         {"tab_one": np.array([[1, 2, 3, 4], [1, 2, 3, 4]])},
+    )
+    self._assert_stats_equal(
+        loaded_buffers, {"tab_one": np.array([[256], [256]])}
     )
 
   def test_load_multiple_files(self):
@@ -80,6 +84,8 @@ class NpzFdoClientTest(absltest.TestCase):
             "t_two_max_ids": np.array([50, 60, 70, 80]),
             "t_one_max_unique_ids": np.array([1, 2, 3, 4]),
             "t_two_max_unique_ids": np.array([5, 6, 7, 8]),
+            "t_one_required_buffer_size": np.array([64]),
+            "t_two_required_buffer_size": np.array([128]),
         },
     )
     np.savez(
@@ -89,11 +95,13 @@ class NpzFdoClientTest(absltest.TestCase):
             "t_two_max_ids": np.array([60, 60, 80, 70]),
             "t_one_max_unique_ids": np.array([2, 1, 4, 3]),
             "t_two_max_unique_ids": np.array([6, 5, 8, 7]),
+            "t_one_required_buffer_size": np.array([128]),
+            "t_two_required_buffer_size": np.array([256]),
         },
     )
 
     fdo_client = file_fdo_client.NPZFileFDOClient(base_dir)
-    loaded_max_ids, loaded_max_uniques = fdo_client.load()
+    loaded_max_ids, loaded_max_uniques, loaded_buffers = fdo_client.load()
     self._assert_stats_equal(
         loaded_max_ids,
         {
@@ -108,11 +116,15 @@ class NpzFdoClientTest(absltest.TestCase):
             "t_two": np.array([6, 6, 8, 8]),
         },
     )
+    self._assert_stats_equal(
+        loaded_buffers,
+        {"t_one": np.array([128]), "t_two": np.array([256])},
+    )
 
   def test_files_not_found(self):
     fdo_client = file_fdo_client.NPZFileFDOClient(self.base_dir)
     with self.assertRaises(FileNotFoundError):
-      _, _ = fdo_client.load()
+      _, _, _ = fdo_client.load()
 
   def test_latest_files_by_process(self):
     files = [

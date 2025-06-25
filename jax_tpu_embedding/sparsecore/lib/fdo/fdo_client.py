@@ -67,7 +67,11 @@ class FDOClient(abc.ABC):
   @abc.abstractmethod
   def load(
       self,
-  ) -> tuple[Mapping[str, np.ndarray], Mapping[str, np.ndarray]]:
+  ) -> tuple[
+      Mapping[str, np.ndarray],
+      Mapping[str, np.ndarray],
+      Mapping[str, np.ndarray],
+  ]:
     """Loads state of local FDO client and returns the aggregated stats.
 
     An implementation of this method defines how the stats are aggregated across
@@ -75,8 +79,10 @@ class FDOClient(abc.ABC):
     files written by `publish` or a database and then aggregating them.
 
     Returns:
-      A tuple of (max_ids, max_uniques) where max_ids is a mapping of table name
-      to max ids per partition and max_uniques is a mapping of table name to
-      max unique ids per partition.
+      A tuple of (max_ids, max_uniques, required_buffer_size) where max_ids
+      is a mapping of table name to max ids per partition, max_uniques is a
+      mapping of table name to max unique ids per partition, and
+      required_buffer_sizes is a mapping of table name to required buffer size
+      per sparsecore.
     """
     raise NotImplementedError
