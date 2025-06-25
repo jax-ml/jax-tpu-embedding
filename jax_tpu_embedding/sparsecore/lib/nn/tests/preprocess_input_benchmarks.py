@@ -67,8 +67,8 @@ def generate_feature_specs(num_features):
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
-        input_shape=[],
-        output_shape=[],
+        input_shape=[16000, 16],
+        output_shape=[16000, 16],
         name="feature_spec_{}".format(i),
     )
     feature_specs.append(feature_spec)
