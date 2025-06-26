@@ -77,6 +77,7 @@ pybind_library(
     hdrs = ["numpy_input_batch.h"],
     deps = [
         ":abstract_input_batch",
+        ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_absl//absl/log:check",
         "@tsl//tsl/profiler/lib:traceme",
@@ -89,9 +90,11 @@ pybind_library(
     hdrs = ["sparse_coo_input_batch.h"],
     deps = [
         ":abstract_input_batch",
+        ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/types:span",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -237,5 +240,25 @@ pytype_strict_library(
         ":input_preprocessing",  # buildcleaner: keep
         ":pybind_input_preprocessing",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
+    ],
+)
+
+cc_library(
+    name = "ragged_tensor_input_batch",
+    hdrs = ["ragged_tensor_input_batch.h"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_core",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
+    ],
+)
+
+cc_test(
+    name = "ragged_tensor_input_batch_test",
+    srcs = ["ragged_tensor_input_batch_test.cc"],
+    deps = [
+        ":ragged_tensor_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
+        "@com_google_googletest//:gtest_main",
     ],
 )
