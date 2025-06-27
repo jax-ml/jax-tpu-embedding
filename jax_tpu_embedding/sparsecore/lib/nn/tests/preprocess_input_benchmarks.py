@@ -30,7 +30,7 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
 
 
-def generate_feature_specs(num_features):
+def generate_feature_specs(num_features, num_samples):
   """Generates feature specs for the given number of features."""
   feature_specs = []
   for i in range(num_features):
@@ -60,15 +60,15 @@ def generate_feature_specs(num_features):
                 learning_rate=0.001,
             ),
             combiner="sum",
-            total_sample_count=16000,
+            total_sample_count=num_samples,
             max_ids_per_partition=1024,
             max_unique_ids_per_partition=1024,
         ),
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
-        input_shape=[16000, 16],
-        output_shape=[16000, 16],
+        input_shape=[num_samples, 1],
+        output_shape=[num_samples, 16],
         name="feature_spec_{}".format(i),
     )
     feature_specs.append(feature_spec)
@@ -109,7 +109,7 @@ def generate_samples_for_feature_spec(feature_specs, num_samples, ragged=False):
   return all_features, all_feature_weights
 
 # Total local batch size that is measured is 16000x100 = 1,600,000.
-_GLOBAL_SPECS = generate_feature_specs(num_features=100)
+_GLOBAL_SPECS = generate_feature_specs(num_features=100, num_samples=16000)
 _GLOBAL_RAGGED_FEATURES, _GLOBAL_RAGGED_FEATURE_WEIGHTS = (
     generate_samples_for_feature_spec(
         _GLOBAL_SPECS, num_samples=16000, ragged=True

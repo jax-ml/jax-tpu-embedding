@@ -61,7 +61,7 @@ def generate_feature_specs(num_features, num_samples):
                 learning_rate=0.001,
             ),
             combiner="sum",
-            total_sample_count=16000,
+            total_sample_count=num_samples,
             max_ids_per_partition=1024,
             max_unique_ids_per_partition=1024,
         ),

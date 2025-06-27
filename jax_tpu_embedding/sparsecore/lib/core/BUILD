@@ -77,7 +77,6 @@ pybind_library(
     hdrs = ["numpy_input_batch.h"],
     deps = [
         ":abstract_input_batch",
-        ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_absl//absl/log:check",
         "@tsl//tsl/profiler/lib:traceme",

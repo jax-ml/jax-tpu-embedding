@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
-#define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
+#ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_BATCH_H_
+#define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_BATCH_H_
+
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
@@ -55,4 +56,4 @@ class NumpySparseInputBatch : public AbstractInputBatch {
 
 }  // namespace jax_sc_embedding
 
-#endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_WRAPPER_H_
+#endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_BATCH_H_
