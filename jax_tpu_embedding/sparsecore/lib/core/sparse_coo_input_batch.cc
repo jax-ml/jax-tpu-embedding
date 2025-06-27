@@ -15,30 +15,18 @@
 
 #include <Python.h>
 
-#include <cmath>
 #include <vector>
 
 #include "absl/base/call_once.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/pybind11.h"  // from @pybind11
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
-
-namespace {
-float ComputeGain(RowCombiner combiner, int elements_in_row) {
-  switch (combiner) {
-    case RowCombiner::kSum:
-      return 1.0f;
-    case RowCombiner::kMean:
-      return 1.0f / elements_in_row;
-    case RowCombiner::kSqrtn:
-      return 1.0f / std::sqrt(static_cast<float>(elements_in_row));
-  }
-}
-}  // namespace
 
 void PySparseCooInputBatch::ConstructRowPointers() {
   if (!row_pointers_.empty()) {
@@ -94,31 +82,15 @@ void PySparseCooInputBatch::ExtractCooTensors(
   DCHECK(!PyGILState_Check());  // Does not require external GIL.
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
 
-  CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
-  DCHECK_GT(global_device_count, 0);
-
   ConstructRowPointersIfRequired();
 
-  const int num_scs_bit = std::log2(num_scs);
-  const int num_scs_mod = (1 << num_scs_bit) - 1;
-  const int num_scs_mod_inv = ~num_scs_mod;
-  const int row_offset_per_device = row_offset / global_device_count;
-  auto values_array = values_.unchecked<1>();
-  for (int row_id = row_start; row_id < row_end; ++row_id) {
-    const int adjusted_row = row_id - row_start + row_offset_per_device;
-    const int elements_in_row =
-        row_pointers_[row_id + 1] - row_pointers_[row_id];
-    const float gain = ComputeGain(combiner, elements_in_row);
-    for (int i = row_pointers_[row_id]; i < row_pointers_[row_id + 1]; ++i) {
-      const int col_id = values_array(i);
-      DCHECK(col_id >= 0 && col_id <= max_vocab_id_)
-          << "Invalid col id: " << col_id
-          << " for table vocabulary size: " << max_vocab_id_;
-      coo_tensors.emplace_back(
-          adjusted_row,
-          GetColId(col_id, col_shift, col_offset, num_scs_mod, num_scs_mod_inv),
-          gain);
-    }
-  }
+  SparseCsrInputBatchStream values_stream(values_.unchecked<1>(),
+                                          absl::MakeConstSpan(row_pointers_),
+                                          row_start, row_end, max_vocab_id_);
+  UnityWeightsStream weights_stream(values_stream);
+
+  ProcessCooTensors(row_start, row_end, row_offset, col_offset, col_shift,
+                    num_scs, global_device_count, combiner, values_stream,
+                    weights_stream, coo_tensors);
 }
 }  // namespace jax_sc_embedding
