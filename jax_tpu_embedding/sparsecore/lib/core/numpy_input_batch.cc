@@ -52,14 +52,15 @@ class NumpyDenseInputBatchStream {
   int size() const { return size_; }
 
   int cols() const { return cols_; }
-  void nextRow() {
+
+  void next_row() {
     ++curr_row_;
     curr_col_ = 0;
   }
 
-  void nextCol() { ++curr_col_; }
+  void next_col() { ++curr_col_; }
 
-  void seekCol(int col) { curr_col_ = col; }
+  void seek_col(int col) { curr_col_ = col; }
 
   int row() const { return curr_row_; }
 
@@ -101,7 +102,7 @@ class NumpyRaggedInputBatchStream {
 
   int cols() const { return row_ref_->shape(0); }
 
-  void nextRow() {
+  void next_row() {
     ++curr_row_;
     curr_col_ = 0;
     if (curr_row_ < row_end_) {
@@ -110,9 +111,9 @@ class NumpyRaggedInputBatchStream {
     }
   }
 
-  void nextCol() { ++curr_col_; }
+  void next_col() { ++curr_col_; }
 
-  void seekCol(int col) { curr_col_ = col; }
+  void seek_col(int col) { curr_col_ = col; }
 
   int row() const { return curr_row_; }
 
@@ -144,7 +145,7 @@ float ComputeWeightDivisor(RowCombiner combiner,
       // Sum of elements.
       float sum = 0.0f;
       for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.nextCol()) {
+           weights_stream.next_col()) {
         sum += weights_stream.get();
       }
       return sum;
@@ -153,7 +154,7 @@ float ComputeWeightDivisor(RowCombiner combiner,
       // Sqrt of sum of squares.
       float sum = 0.0f;
       for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.nextCol()) {
+           weights_stream.next_col()) {
         sum += std::pow(weights_stream.get(), 2);
       }
       return std::sqrt(sum);
@@ -182,7 +183,7 @@ void ProcessCooTensors(int start_index, int end_index, int row_offset,
   DCHECK_EQ(values_stream.size(), weights_stream.size());
 
   for (; values_stream.row() < end_index && weights_stream.row() < end_index;
-       values_stream.nextRow(), weights_stream.nextRow()) {
+       values_stream.next_row(), weights_stream.next_row()) {
     DCHECK_EQ(values_stream.cols(), weights_stream.cols());
     DCHECK_EQ(values_stream.row(), weights_stream.row());
     DCHECK_EQ(values_stream.col(), weights_stream.col());
@@ -192,8 +193,8 @@ void ProcessCooTensors(int start_index, int end_index, int row_offset,
         values_stream.row() - start_index + row_offset_per_device;
     const float divisor = ComputeWeightDivisor(combiner, weights_stream);
 
-    for (weights_stream.seekCol(0); values_stream.col() < values_stream.cols();
-         values_stream.nextCol(), weights_stream.nextCol()) {
+    for (weights_stream.seek_col(0); values_stream.col() < values_stream.cols();
+         values_stream.next_col(), weights_stream.next_col()) {
       const int embedding_id = values_stream.get();
       const float gain = weights_stream.get() / divisor;
       DCHECK_GE(embedding_id, 0);
