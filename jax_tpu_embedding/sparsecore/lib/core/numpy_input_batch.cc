@@ -13,11 +13,11 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
 
-#include <cmath>
 #include <memory>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
@@ -134,78 +134,6 @@ class NumpyRaggedInputBatchStream {
   int size_;
   int row_end_;
 };
-
-template <typename WeightsStreamT>
-float ComputeWeightDivisor(RowCombiner combiner,
-                           WeightsStreamT& weights_stream) {
-  switch (combiner) {
-    case RowCombiner::kSum:
-      return 1.0f;
-    case RowCombiner::kMean: {
-      // Sum of elements.
-      float sum = 0.0f;
-      for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.next_col()) {
-        sum += weights_stream.get();
-      }
-      return sum;
-    }
-    case RowCombiner::kSqrtn: {
-      // Sqrt of sum of squares.
-      float sum = 0.0f;
-      for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.next_col()) {
-        sum += std::pow(weights_stream.get(), 2);
-      }
-      return std::sqrt(sum);
-    }
-  }
-}
-
-// This might be moved to
-// third_party/py/jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.cc
-template <typename ValuesStreamT, typename WeightsStreamT>
-void ProcessCooTensors(int start_index, int end_index, int row_offset,
-                       int col_offset, int col_shift, int num_scs,
-                       int global_device_count, RowCombiner combiner,
-                       ValuesStreamT& values_stream,
-                       WeightsStreamT& weights_stream,
-                       std::vector<CooFormat>& coo_tensors) {
-  CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
-  const int num_scs_bit = std::log2(num_scs);
-  const int num_scs_mod = (1 << num_scs_bit) - 1;
-  const int num_scs_mod_inv = ~num_scs_mod;
-
-  coo_tensors.reserve(values_stream.size());
-
-  const int row_offset_per_device = row_offset / global_device_count;
-
-  DCHECK_EQ(values_stream.size(), weights_stream.size());
-
-  for (; values_stream.row() < end_index && weights_stream.row() < end_index;
-       values_stream.next_row(), weights_stream.next_row()) {
-    DCHECK_EQ(values_stream.cols(), weights_stream.cols());
-    DCHECK_EQ(values_stream.row(), weights_stream.row());
-    DCHECK_EQ(values_stream.col(), weights_stream.col());
-    DCHECK_EQ(values_stream.col(), 0);
-
-    const int sample_id =
-        values_stream.row() - start_index + row_offset_per_device;
-    const float divisor = ComputeWeightDivisor(combiner, weights_stream);
-
-    for (weights_stream.seek_col(0); values_stream.col() < values_stream.cols();
-         values_stream.next_col(), weights_stream.next_col()) {
-      const int embedding_id = values_stream.get();
-      const float gain = weights_stream.get() / divisor;
-      DCHECK_GE(embedding_id, 0);
-
-      coo_tensors.emplace_back(sample_id,
-                               GetColId(embedding_id, col_shift, col_offset,
-                                        num_scs_mod, num_scs_mod_inv),
-                               gain);
-    }
-  }
-}
 
 }  // namespace
 
