@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
-#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
@@ -33,7 +33,8 @@ namespace {
 // Example:
 //   arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32)
 template <typename T>
-class NumpyDenseInputBatchStream {
+class NumpyDenseInputBatchStream
+    : public AbstractInputBatchStream<T, NumpyDenseInputBatchStream<T>> {
  public:
   explicit NumpyDenseInputBatchStream(const py::array_t<T>& matrix,
                                       int row_start, int row_end)
@@ -86,7 +87,8 @@ class NumpyDenseInputBatchStream {
 // Example:
 //   arr = np.array([np.array([1, 2, 3]), np.array([4, 5])], dtype=object)
 template <typename T>
-class NumpyRaggedInputBatchStream {
+class NumpyRaggedInputBatchStream
+    : public AbstractInputBatchStream<T, NumpyRaggedInputBatchStream<T>> {
  public:
   NumpyRaggedInputBatchStream(const py::array& rows, int row_start, int row_end)
       : rows_ref_(rows.template unchecked<py::array_t<T>, 1>()),
