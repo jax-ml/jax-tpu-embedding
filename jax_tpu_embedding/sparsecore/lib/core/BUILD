@@ -242,3 +242,23 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
     ],
 )
+
+cc_library(
+    name = "ragged_tensor_input_batch",
+    hdrs = ["ragged_tensor_input_batch.h"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_core",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
+    ],
+)
+
+cc_test(
+    name = "ragged_tensor_input_batch_test",
+    srcs = ["ragged_tensor_input_batch_test.cc"],
+    deps = [
+        ":ragged_tensor_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
