@@ -14,6 +14,8 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,80 +65,6 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options);
-
-// Template instantiation and linkage require us to define the following in this
-// file (Template definition not visible at point of instantiation).
-
-template <typename WeightsStreamT>
-float ComputeWeightDivisor(RowCombiner combiner,
-                           WeightsStreamT& weights_stream) {
-  switch (combiner) {
-    case RowCombiner::kSum:
-      return 1.0f;
-    case RowCombiner::kMean: {
-      // Sum of elements.
-      float sum = 0.0f;
-      for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.next_col()) {
-        sum += weights_stream.get();
-      }
-      return sum;
-    }
-    case RowCombiner::kSqrtn: {
-      // Sqrt of sum of squares.
-      float sum = 0.0f;
-      for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.next_col()) {
-        sum += std::pow(weights_stream.get(), 2);
-      }
-      return std::sqrt(sum);
-    }
-  }
-}
-
-template <typename ValuesStreamT, typename WeightsStreamT>
-void ProcessCooTensors(int start_index, int end_index, int row_offset,
-                       int col_offset, int col_shift, int num_scs,
-                       int global_device_count, RowCombiner combiner,
-                       ValuesStreamT& values_stream,
-                       WeightsStreamT& weights_stream,
-                       std::vector<CooFormat>& coo_tensors) {
-  CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
-  DCHECK_GT(global_device_count, 0);
-  const int num_scs_bit = std::log2(num_scs);
-  const int num_scs_mod = (1 << num_scs_bit) - 1;
-  const int num_scs_mod_inv = ~num_scs_mod;
-
-  coo_tensors.reserve(values_stream.size());
-
-  const int row_offset_per_device = row_offset / global_device_count;
-
-  DCHECK_EQ(values_stream.size(), weights_stream.size());
-
-  for (; values_stream.row() < end_index && weights_stream.row() < end_index;
-       values_stream.next_row(), weights_stream.next_row()) {
-    DCHECK_EQ(values_stream.cols(), weights_stream.cols());
-    DCHECK_EQ(values_stream.row(), weights_stream.row());
-    DCHECK_EQ(values_stream.col(), weights_stream.col());
-    DCHECK_EQ(values_stream.col(), 0);
-
-    const int sample_id =
-        values_stream.row() - start_index + row_offset_per_device;
-    const float divisor = ComputeWeightDivisor(combiner, weights_stream);
-
-    for (weights_stream.seek_col(0); values_stream.col() < values_stream.cols();
-         values_stream.next_col(), weights_stream.next_col()) {
-      const int embedding_id = values_stream.get();
-      const float gain = weights_stream.get() / divisor;
-      DCHECK_GE(embedding_id, 0);
-
-      coo_tensors.emplace_back(sample_id,
-                               GetColId(embedding_id, col_shift, col_offset,
-                                        num_scs_mod, num_scs_mod_inv),
-                               gain);
-    }
-  }
-}
 
 }  // namespace jax_sc_embedding
 

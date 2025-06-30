@@ -1,0 +1,97 @@
+// Copyright 2024 The JAX SC Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+#ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SPARSE_CSR_INPUT_BATCH_STREAM_H_
+#define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SPARSE_CSR_INPUT_BATCH_STREAM_H_
+#include <stdint.h>
+
+#include <limits>
+
+#include "absl/log/check.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
+
+namespace jax_sc_embedding {
+
+// Class to iterate over a sparse CSR array.
+// Example:
+//   values = [1, 2, 3, 4, 5, 6]
+//   row_pointers = [0, 2, 5, 6]
+//   This represents a sparse matrix with 3 rows:
+//     Row 0: [1, 2]
+//     Row 1: [3, 4, 5]
+//     Row 2: [6]
+template <typename T, typename ValuesView, typename RowPointersView>
+class SparseCsrInputBatchStream
+    : public AbstractInputBatchStream<
+          T, SparseCsrInputBatchStream<T, ValuesView, RowPointersView>> {
+ public:
+  SparseCsrInputBatchStream(ValuesView values, RowPointersView row_pointers,
+                            int row_start, int row_end,
+                            T max_vocab_id = std::numeric_limits<T>::max())
+      : values_ref_(values),
+        row_pointers_(row_pointers),
+        curr_row_(row_start),
+        row_end_(row_end),
+        curr_idx_(row_pointers[row_start]),
+        max_vocab_id_(max_vocab_id) {}
+
+  int size() const { return row_pointers_[row_end_] - row_pointers_[0]; }
+
+  int cols() const {
+    return row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
+  }
+
+  void next_row() {
+    ++curr_row_;
+    if (curr_row_ < row_end_) {
+      curr_idx_ = row_pointers_[curr_row_];
+    }
+  }
+
+  void next_col() { ++curr_idx_; }
+
+  void seek_col(int col) { curr_idx_ = row_pointers_[curr_row_] + col; }
+
+  int row() const { return curr_row_; }
+
+  int col() const { return curr_idx_ - row_pointers_[curr_row_]; }
+
+  T get() const {
+    DCHECK_LT(curr_idx_, row_pointers_[curr_row_ + 1]);
+    T embedding_id = values_ref_[curr_idx_];
+    DCHECK(embedding_id >= 0 && embedding_id <= max_vocab_id_)
+        << "Invalid vocabulary id: " << embedding_id
+        << " for table vocabulary size: " << max_vocab_id_;
+    return embedding_id;
+  }
+
+ private:
+  ValuesView values_ref_;
+  RowPointersView row_pointers_;
+  int curr_row_;
+  int row_end_;
+  int curr_idx_;
+  T max_vocab_id_;
+};
+
+template <typename T, typename U1, typename U2>
+SparseCsrInputBatchStream(U1, U2, int, int, T)
+    -> SparseCsrInputBatchStream<T, U1, U2>;
+
+template <typename U1, typename U2>
+SparseCsrInputBatchStream(U1, U2, int, int)
+    -> SparseCsrInputBatchStream<int64_t, U1, U2>;
+
+}  // namespace jax_sc_embedding
+
+#endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SPARSE_CSR_INPUT_BATCH_STREAM_H_

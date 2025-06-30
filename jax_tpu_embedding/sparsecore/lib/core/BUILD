@@ -68,6 +68,7 @@ cc_library(
     hdrs = ["abstract_input_batch.h"],
     deps = [
         ":input_preprocessing_util",
+        "@com_google_absl//absl/log:check",
     ],
 )
 
@@ -92,6 +93,8 @@ pybind_library(
         ":abstract_input_batch",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":sparse_csr_input_batch_stream",
+        ":unity_weights_stream",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:span",
@@ -240,5 +243,43 @@ pytype_strict_library(
         ":input_preprocessing",  # buildcleaner: keep
         ":pybind_input_preprocessing",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
+    ],
+)
+
+cc_library(
+    name = "ragged_tensor_input_batch",
+    hdrs = ["ragged_tensor_input_batch.h"],
+    deps = [
+        ":abstract_input_batch",
+        ":input_preprocessing_util",
+        ":sparse_csr_input_batch_stream",
+        ":unity_weights_stream",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "sparse_csr_input_batch_stream",
+    hdrs = ["sparse_csr_input_batch_stream.h"],
+    deps = [
+        ":abstract_input_batch",
+        "@com_google_absl//absl/log:check",
+    ],
+)
+
+cc_library(
+    name = "unity_weights_stream",
+    hdrs = ["unity_weights_stream.h"],
+    deps = [":abstract_input_batch"],
+)
+
+cc_test(
+    name = "ragged_tensor_input_batch_test",
+    srcs = ["ragged_tensor_input_batch_test.cc"],
+    deps = [
+        ":input_preprocessing_util",
+        ":ragged_tensor_input_batch",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
     ],
 )
