@@ -15,7 +15,6 @@
 
 #include <Python.h>
 
-#include <limits>
 #include <vector>
 
 #include "absl/base/call_once.h"  // from @com_google_absl
@@ -28,110 +27,6 @@
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
-
-namespace {
-
-// Class to iterate over a sparse CSR array.
-// Example:
-//   values = [1, 2, 3, 4, 5, 6]
-//   row_pointers = [0, 2, 5, 6]
-//   This represents a sparse matrix with 3 rows:
-//     Row 0: [1, 2]
-//     Row 1: [3, 4, 5]
-//     Row 2: [6]
-template <typename T, typename ValuesView, typename RowPointersView>
-class SparseCsrInputBatchStream {
- public:
-  SparseCsrInputBatchStream(ValuesView values,
-                            RowPointersView row_pointers, int row_start,
-                            int row_end,
-                            T max_vocab_id = std::numeric_limits<T>::max())
-      : values_ref_(values),
-        row_pointers_(row_pointers),
-        curr_row_(row_start),
-        row_end_(row_end),
-        curr_idx_(row_pointers[row_start]),
-        max_vocab_id_(max_vocab_id) {}
-
-  int size() const { return row_pointers_[row_end_] - row_pointers_[0]; }
-
-  int cols() const {
-    return row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
-  }
-  void next_row() {
-    ++curr_row_;
-    if (curr_row_ < row_end_) {
-      curr_idx_ = row_pointers_[curr_row_];
-    }
-  }
-
-  void next_col() { ++curr_idx_; }
-
-  void seek_col(int col) { curr_idx_ = row_pointers_[curr_row_] + col; }
-
-  int row() const { return curr_row_; }
-
-  int col() const { return curr_idx_ - row_pointers_[curr_row_]; }
-
-  T get() const {
-    DCHECK_LT(curr_idx_, row_pointers_[curr_row_ + 1]);
-    T embedding_id = values_ref_[curr_idx_];
-    DCHECK(embedding_id >= 0 && embedding_id <= max_vocab_id_)
-        << "Invalid vocabulary id: " << embedding_id
-        << " for table vocabulary size: " << max_vocab_id_;
-    return embedding_id;
-  }
-
- private:
-  ValuesView values_ref_;
-  RowPointersView row_pointers_;
-  int curr_row_;
-  int row_end_;
-  int curr_idx_;
-  T max_vocab_id_;
-};
-
-template <typename T, typename U1, typename U2>
-SparseCsrInputBatchStream(U1, U2, int, int, T)
-    -> SparseCsrInputBatchStream<T, U1, U2>;
-
-// Class to iterate over a sparse CSR array, providing unity weights for each
-// value. This class takes an existing `ValuesStream` (e.g.,
-// `SparseCsrInputBatchStream`) and provides an interface to iterate over the
-// same structure, but returning a weight of 1.0 for each value instead of the
-// actual value. This is useful when the input does not have associated weights
-// but the processing logic expects a weight stream.
-template <typename ValuesStream>
-class UnityWeightsStream {
- public:
-  UnityWeightsStream(const ValuesStream& value_stream)
-      : value_stream_(value_stream), curr_col_(0) {}
-
-  int size() const { return value_stream_.size(); }
-
-  int cols() const { return value_stream_.cols(); }
-
-  void next_row() { curr_col_ = 0; }
-
-  void next_col() { ++curr_col_; }
-
-  void seek_col(int col) { curr_col_ = 0; }
-
-  int row() const { return value_stream_.row(); }
-
-  int col() const { return curr_col_; }
-
-  float get() const { return 1.0f; }
-
- private:
-  const ValuesStream& value_stream_;
-  int curr_col_;
-};
-
-template <typename T>
-UnityWeightsStream(T) -> UnityWeightsStream<T>;
-
-}  // namespace
 
 void PySparseCooInputBatch::ConstructRowPointers() {
   if (!row_pointers_.empty()) {

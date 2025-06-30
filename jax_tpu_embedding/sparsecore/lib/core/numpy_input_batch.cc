@@ -53,14 +53,14 @@ class NumpyDenseInputBatchStream {
 
   int cols() const { return cols_; }
 
-  void next_row() {
+  void NextRow() {
     ++curr_row_;
     curr_col_ = 0;
   }
 
-  void next_col() { ++curr_col_; }
+  void NextCol() { ++curr_col_; }
 
-  void seek_col(int col) { curr_col_ = col; }
+  void SeekCol(int col) { curr_col_ = col; }
 
   int row() const { return curr_row_; }
 
@@ -102,7 +102,7 @@ class NumpyRaggedInputBatchStream {
 
   int cols() const { return row_ref_->shape(0); }
 
-  void next_row() {
+  void NextRow() {
     ++curr_row_;
     curr_col_ = 0;
     if (curr_row_ < row_end_) {
@@ -111,9 +111,9 @@ class NumpyRaggedInputBatchStream {
     }
   }
 
-  void next_col() { ++curr_col_; }
+  void NextCol() { ++curr_col_; }
 
-  void seek_col(int col) { curr_col_ = col; }
+  void SeekCol(int col) { curr_col_ = col; }
 
   int row() const { return curr_row_; }
 
