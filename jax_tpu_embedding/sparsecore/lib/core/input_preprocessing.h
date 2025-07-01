@@ -28,16 +28,6 @@
 
 namespace jax_sc_embedding {
 
-struct PreprocessSparseDenseMatmulInputOptions {
-  int local_device_count;
-  int global_device_count;
-  int num_sc_per_device;
-  int sharding_strategy = 1;
-  bool allow_id_dropping = true;
-
-  int GetNumScs() const { return num_sc_per_device * global_device_count; }
-};
-
 template <typename T>
 using StackedTableMap = absl::flat_hash_map<std::string, T>;
 
@@ -45,11 +35,6 @@ struct SparseDenseMatmulInputStats {
   StackedTableMap<RowVectorXi> max_ids_per_partition;
   StackedTableMap<RowVectorXi> max_unique_ids_per_partition;
   StackedTableMap<RowVectorXi> required_buffer_sizes;
-};
-
-struct ExtractedCooTensors {
-  std::vector<CooFormat> coo_tensors;
-  int batch_size_for_device = 0;
 };
 
 struct PreprocessSparseDenseMatmulOutput {
