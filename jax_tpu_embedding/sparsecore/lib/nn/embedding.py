@@ -37,7 +37,7 @@ if jax.__version_info__ >= (0, 6, 3):
 else:
   from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top  # type: ignore
 
-ArrayLike = jnp.ndarray | np.ndarray
+ArrayLike = jnp.ndarray | np.typing.ArrayLike
 
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = Union[T, Sequence[T], Mapping[str, T]]
@@ -380,6 +380,80 @@ def preprocess_sparse_dense_matmul_input(
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
           tree.flatten(features),
           tree.flatten(features_weights),
+          tree.flatten(feature_specs),
+          local_device_count,
+          global_device_count,
+          num_sc_per_device,
+          sharding_strategy_to_enum(sharding_strategy),
+          has_leading_dimension,
+          allow_id_dropping=allow_id_dropping,
+      )
+  )
+
+  return SparseDenseMatmulInput(
+      *preprocessed_inputs
+  ), SparseDenseMatmulInputStats.from_cc(stats)
+
+
+def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
+    indices: Nested[ArrayLike],
+    values: Nested[ArrayLike],
+    dense_shapes: Nested[ArrayLike],
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    local_device_count: int,
+    global_device_count: int,
+    num_sc_per_device: int,
+    sharding_strategy: str = "MOD",
+    has_leading_dimension: bool = False,
+    allow_id_dropping: bool = False,
+) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
+  """Preprocesses the input for sparse dense matmul.
+
+  Args:
+    indices: A nested structure of 2-D int64 tensors, where each tensor has
+      shape [N, ndims]. It represents the indices of non-zero elements in a
+      sparse tensor, with elements being zero-indexed. For instance,
+      `indices=[[1,3], [2,4]]` indicates that elements at [1,3] and [2,4] have
+      non-zero values.
+    values: A nested structure of 1-D tensors, each with shape [N], representing
+      the values of non-zero elements corresponding to `indices`. For example,
+      with `indices=[[1,3], [2,4]]`, `values=[18, 3.6]` means the element at
+      [1,3] is 18 and at [2,4] is 3.6.
+    dense_shapes: A nested structure of 1-D int64 tensors, each with shape
+      [ndims], defining the dense shape of the sparse tensor. It specifies the
+      number of elements in each dimension. For example, `dense_shape=[3,6]`
+      represents a 3x6 tensor, `dense_shape=[2,3,4]` a 2x3x4 tensor, and
+      `dense_shape=[9]` a 9-element 1-D tensor.
+    feature_specs: The feature specs. This needs to have the same structure as
+      indices, values and dense_shapes (e.g., if one of them is a mapping then
+      all of them are).
+    local_device_count: The number of local devices (chips). Typically
+      `mesh.local_mesh.size`.
+    global_device_count: The number of global devices (chips). Typically
+      `mesh.size`.
+    num_sc_per_device: The number of sparse cores per device.
+    sharding_strategy: The sharding strategy (e.g., MOD)
+    has_leading_dimension: If set to True, then the first dimension of the
+      output will be the number of local devices. This is useful when using the
+      output in jax.pmap. If set to False, then the first dimension of the
+      output will be the number of local devices * the static buffer size. This
+      is useful when using the output in jax.jit. In conclusion, Set it to True
+      if using jax.pmap and set it to False if using jax.jit.
+    allow_id_dropping: If set to True, then ids will be dropped if they exceed
+      the max_ids_per_partition or max_unique_ids_per_partition limits.
+
+  Returns:
+    A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
+  """
+  tree.assert_same_structure(indices, feature_specs)
+  tree.assert_same_structure(values, feature_specs)
+  tree.assert_same_structure(dense_shapes, feature_specs)
+
+  *preprocessed_inputs, stats = (
+      pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+          tree.flatten(indices),
+          tree.flatten(values),
+          tree.flatten(dense_shapes),
           tree.flatten(feature_specs),
           local_device_count,
           global_device_count,
