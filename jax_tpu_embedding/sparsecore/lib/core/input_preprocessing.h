@@ -28,11 +28,13 @@
 
 namespace jax_sc_embedding {
 
+enum ShardingStrategy { kMod = 1 };
+
 struct PreprocessSparseDenseMatmulInputOptions {
   int local_device_count;
   int global_device_count;
   int num_sc_per_device;
-  int sharding_strategy = 1;
+  ShardingStrategy sharding_strategy = kMod;
   bool allow_id_dropping = true;
 
   int GetNumScs() const { return num_sc_per_device * global_device_count; }

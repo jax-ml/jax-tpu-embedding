@@ -109,8 +109,8 @@ GetStackedTableMetadata(py::list& feature_specs) {
 py::tuple PyPreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     py::list feature_specs, int local_device_count, int global_device_count,
-    int num_sc_per_device, int sharding_strategy, bool has_leading_dimension,
-    bool allow_id_dropping) {
+    int num_sc_per_device, ShardingStrategy sharding_strategy,
+    bool has_leading_dimension, bool allow_id_dropping) {
   CHECK_EQ(input_batches.size(), feature_specs.size());
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = local_device_count,
@@ -156,7 +156,8 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
 py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     py::list features, py::list feature_weights, py::list feature_specs,
     int local_device_count, int global_device_count, int num_sc_per_device,
-    int sharding_strategy, bool has_leading_dimension, bool allow_id_dropping) {
+    ShardingStrategy sharding_strategy, bool has_leading_dimension,
+    bool allow_id_dropping) {
   CHECK_EQ(features.size(), feature_weights.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.reserve(features.size());
@@ -173,8 +174,8 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
 py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     py::list indices, py::list values, py::list dense_shapes,
     py::list feature_specs, int local_device_count, int global_device_count,
-    int num_sc_per_device, int sharding_strategy, bool has_leading_dimension,
-    bool allow_id_dropping) {
+    int num_sc_per_device, ShardingStrategy sharding_strategy,
+    bool has_leading_dimension, bool allow_id_dropping) {
   CHECK(indices.size() == values.size());
   CHECK(indices.size() == dense_shapes.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches(
@@ -220,5 +221,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
                     &SparseDenseMatmulInputStats::max_unique_ids_per_partition)
       .def_readonly("required_buffer_sizes",
                     &SparseDenseMatmulInputStats::required_buffer_sizes);
+  py::enum_<ShardingStrategy>(m, "ShardingStrategy")
+      .value("Mod", ShardingStrategy::kMod)
+      .export_values();
 }
 }  // namespace jax_sc_embedding
