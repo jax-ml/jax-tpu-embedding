@@ -22,6 +22,7 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
@@ -37,40 +38,91 @@
 namespace jax_sc_embedding {
 
 namespace {
+
+// Extract the COO tensors for a single feature.
+void ExtractCooTensorsForSingleFeatureAndSc(
+    const StackedTableMetadata& metadata,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    const int local_device_id, const int sc_id,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    const int batch_size_per_sc, std::vector<CooFormat>& coo_tensors) {
+  const int feature_index = metadata.feature_index;
+  const std::unique_ptr<AbstractInputBatch>& curr_batch =
+      input_batches[feature_index];
+  const int num_samples = curr_batch->size();
+
+  const int row_offset = metadata.row_offset / options.num_sc_per_device +
+                         sc_id * batch_size_per_sc;
+  const int col_offset = metadata.col_offset;
+  const int col_shift = metadata.col_shift;
+
+  const int num_samples_per_split =
+      num_samples / (options.local_device_count * options.num_sc_per_device);
+  const int start_index =
+      (local_device_id * options.num_sc_per_device + sc_id) *
+      num_samples_per_split;
+  int end_index = std::min(num_samples, start_index + num_samples_per_split);
+
+  // In the case of feature stacking, we need to group all the COO tensors
+  // at this stage (i.e., before the sorting later on).
+  curr_batch->ExtractCooTensors(start_index, end_index, row_offset, col_offset,
+                                col_shift, options.GetNumScs(),
+                                options.global_device_count,
+                                metadata.row_combiner, coo_tensors);
+}
+
 // Extract the COO tensors for all features.
-ExtractedCooTensors ExtractCooTensorsForAllFeatures(
+ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    const int local_device_id, const int local_device_count, const int num_scs,
-    const int num_global_devices) {
+    const int local_device_id,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
   ExtractedCooTensors extracted_coo_tensors;
-  for (int i = 0; i < stacked_table_metadata.size(); ++i) {
-    const StackedTableMetadata& metadata = stacked_table_metadata[i];
-    const int feature_index = metadata.feature_index;
-    const int row_offset = metadata.row_offset;
-    const int col_offset = metadata.col_offset;
-    const int col_shift = metadata.col_shift;
-    const std::unique_ptr<AbstractInputBatch>& curr_batch =
-        input_batches[feature_index];
-
-    const int num_samples = curr_batch->size();
-    const int num_samples_per_split = num_samples / local_device_count;
-    const int start_index = local_device_id * num_samples_per_split;
-    int end_index = (local_device_id + 1) * num_samples_per_split;
-    if (local_device_id == local_device_count - 1) {
-      // Just in case the last split is not a full batch.
-      end_index = num_samples;
-    }
-    extracted_coo_tensors.batch_size_for_device += end_index - start_index;
-
-    // In the case of feature stacking, we need to group all the COO tensors
-    // at this stage (i.e., before the sorting later on).
-    curr_batch->ExtractCooTensors(start_index, end_index, row_offset,
-                                  col_offset, col_shift, num_scs,
-                                  num_global_devices, metadata.row_combiner,
-                                  extracted_coo_tensors.coo_tensors);
+  extracted_coo_tensors.batch_size_for_device = 0;
+  for (const auto& feature_metadata : stacked_table_metadata) {
+    extracted_coo_tensors.batch_size_for_device +=
+        input_batches[feature_metadata.feature_index]->size() /
+        options.local_device_count;
   }
-  return extracted_coo_tensors;
+  const int batch_size_per_sc = CeilOfRatio(
+      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
+  switch (options.feature_stacking_strategy) {
+    case kFeatureFirst:
+      for (int feature_id = 0; feature_id < stacked_table_metadata.size();
+           ++feature_id) {
+        const StackedTableMetadata& metadata =
+            stacked_table_metadata[feature_id];
+        // This combines all SCs for a feature into one, resulting in: F1, F2,
+        // ...
+        PreprocessSparseDenseMatmulInputOptions options_for_feature = options;
+        options_for_feature.num_sc_per_device = 1;
+        ExtractCooTensorsForSingleFeatureAndSc(
+            metadata, input_batches, local_device_id, /* sc_id= */ 0,
+            options_for_feature, batch_size_per_sc,
+            extracted_coo_tensors.coo_tensors);
+      }
+      return extracted_coo_tensors;
+    case kScFirst:
+      // This slices each feature into `num_sc_per_device` partitions and then
+      // interleaves them:
+      //  F1_1, F2_1, ... Fn_1,            // <- batch_size_per_sc
+      //  F1_2, F2_2, ... Fn_2,            // <- batch_size_per_sc
+      //  ...                              // <- batch_size_per_sc
+      //  Fn_1,..., Fn_{num_sc_per_device} // <- batch_size_per_sc
+      // TODO b/418040797 - This still needs special unstacking logic in
+      // embedding.py
+      for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
+        for (int feature_id = 0; feature_id < stacked_table_metadata.size();
+             ++feature_id) {
+          const StackedTableMetadata& metadata =
+              stacked_table_metadata[feature_id];
+          ExtractCooTensorsForSingleFeatureAndSc(
+              metadata, input_batches, local_device_id, sc_id, options,
+              batch_size_per_sc, extracted_coo_tensors.coo_tensors);
+        }
+      }
+      return extracted_coo_tensors;
+  }
 }
 
 // Preprocess inputs for a single table. Stacked table here refers to a
@@ -99,9 +151,9 @@ void PreprocessInputForStackedTablePerLocalDevice(
   // Note that the stacked_table_metadata list is sorted by row offsets of the
   // features.
 
-  ExtractedCooTensors extracted_coo_tensors = ExtractCooTensorsForAllFeatures(
-      stacked_table_metadata, input_batches, local_device_id,
-      options.local_device_count, num_scs, options.global_device_count);
+  ExtractedCooTensors extracted_coo_tensors =
+      ExtractCooTensorsForAllFeaturesPerDevice(
+          stacked_table_metadata, input_batches, local_device_id, options);
 
   int total_num_coo_tensors = extracted_coo_tensors.coo_tensors.size();
 
