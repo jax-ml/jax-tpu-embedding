@@ -28,12 +28,15 @@
 
 namespace jax_sc_embedding {
 
+enum FeatureStackingStrategy { kFeatureFirst = 0, kScFirst = 1 };
+
 struct PreprocessSparseDenseMatmulInputOptions {
   int local_device_count;
   int global_device_count;
   int num_sc_per_device;
   int sharding_strategy = 1;
   bool allow_id_dropping = true;
+  FeatureStackingStrategy feature_stacking_strategy = kFeatureFirst;
 
   int GetNumScs() const { return num_sc_per_device * global_device_count; }
 };

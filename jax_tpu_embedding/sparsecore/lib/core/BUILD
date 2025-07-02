@@ -119,6 +119,7 @@ cc_library(
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
