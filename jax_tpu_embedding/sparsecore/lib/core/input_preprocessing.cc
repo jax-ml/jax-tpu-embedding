@@ -14,6 +14,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <string>
@@ -22,6 +23,7 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
@@ -136,6 +138,20 @@ void PreprocessInputForStackedTablePerLocalDevice(
       batch_size_per_sc, num_scs, options.num_sc_per_device, row_pointer_buffer,
       embedding_id_buffer, sample_id_buffer, gain_buffer);
 }
+
+void _CheckBufferUsage(int required_buffer_size, int coo_buffer_size,
+                       absl::string_view stacked_table_name) {
+  const float usage_ratio = static_cast<float>(required_buffer_size) /
+                            static_cast<float>(coo_buffer_size);
+  static constexpr float kUsageDivergence = 0.2;
+  if (std::abs(usage_ratio - 1.0) >= kUsageDivergence) {
+    LOG(WARNING) << "Actual Usage " << usage_ratio << " for stacked table "
+                 << stacked_table_name << ", computed/given buffer size"
+                 << coo_buffer_size << ", required buffer size "
+                 << required_buffer_size;
+  }
+}
+
 }  // namespace
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
@@ -234,6 +250,9 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
               max_unique_ids_per_partition_per_sc_buffer,
               required_buffer_size_per_sc_buffer);
         }
+        _CheckBufferUsage(required_buffer_size_per_sc.maxCoeff(),
+                          coo_buffer_size_per_device, stacked_table_name);
+
         max_ids_per_partition_per_sc.resize(
             1, max_ids_per_partition_per_sc.size());
         max_unique_ids_per_partition_per_sc.resize(
