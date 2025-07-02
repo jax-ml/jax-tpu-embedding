@@ -473,6 +473,7 @@ def _get_activation_for_feature(
     feature: embedding_spec.FeatureSpec,
     activations: dict[str, jax.Array],
     global_device_count: int,
+    num_sc_per_device: int,
 ) -> jax.Array:
   """Gets the activation slice for a given feature."""
   assert feature.table_spec.stacked_table_spec is not None
@@ -481,38 +482,58 @@ def _get_activation_for_feature(
         "FeatureIdTransformation cannot be None. It is None for"
         f" {feature.name}",
     )
-  per_device_offset = (
-      feature.id_transformation.row_offset // global_device_count
-  )
   if feature.output_shape[-1] > feature.table_spec.embedding_dim:
     raise ValueError(
         f"Feature {feature.name} has output shape {feature.output_shape} and"
         f" embedding dim {feature.table_spec.embedding_dim}. The output shape"
         " must be at least same as the (original, unpadded)embedding dim."
     )
-  return jax.lax.slice(
-      activations[feature.table_spec.stacked_table_spec.stack_name],
-      (per_device_offset, 0),
-      (
-          per_device_offset + feature.output_shape[0] // global_device_count,
-          feature.output_shape[-1],
-      ),
+  act = activations[feature.table_spec.stacked_table_spec.stack_name]
+  per_sc_offset = feature.id_transformation.row_offset // (
+      global_device_count * num_sc_per_device
   )
+  per_sc_output_feature_batch_size = feature.output_shape[0] // (
+      global_device_count * num_sc_per_device
+  )
+  # Split so that first dim refers to SC index.
+  act_per_sc = act.reshape(num_sc_per_device, -1, *act.shape[1:])
+  # For each SC, take the subslice corresponding to the current feature.
+  feature_slice = act_per_sc[
+      :,
+      per_sc_offset : per_sc_offset + per_sc_output_feature_batch_size,
+      0 : feature.output_shape[-1],
+  ]
+  # Merge SC outputs.
+  return feature_slice.reshape(-1, feature.output_shape[-1])
+
+
+StackingStrategy = pybind_input_preprocessing.FeatureStackingStrategy
 
 
 def _unstack_embedding_activations(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.FeatureFirst,
 ) -> Nested[jax.Array]:
   """Unstacks the activations to match the feature specs."""
+
+  match feature_stacking_strategy:
+    case StackingStrategy.FeatureFirst:
+      num_sc_per_device = 1  # Treat each device to have only 1 SC.
+    case StackingStrategy.ScFirst:
+      num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
+    case _:
+      raise ValueError(
+          f"Unsupported feature stacking strategy: {feature_stacking_strategy}"
+      )
 
   get_activation_for = functools.partial(
       _get_activation_for_feature,
       activations=activations,
       global_device_count=global_device_count,
+      num_sc_per_device=num_sc_per_device,
   )
-
   return jax.tree_util.tree_map(get_activation_for, feature_specs)
 
 
