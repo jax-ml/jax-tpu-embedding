@@ -220,5 +220,9 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
                     &SparseDenseMatmulInputStats::max_unique_ids_per_partition)
       .def_readonly("required_buffer_sizes",
                     &SparseDenseMatmulInputStats::required_buffer_sizes);
+  py::enum_<FeatureStackingStrategy>(m, "FeatureStackingStrategy")
+      .value("FeatureFirst", FeatureStackingStrategy::kFeatureFirst)
+      .value("ScFirst", FeatureStackingStrategy::kScFirst)
+      .export_values();
 }
 }  // namespace jax_sc_embedding
