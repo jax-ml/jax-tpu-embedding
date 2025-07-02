@@ -23,6 +23,7 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -40,6 +41,14 @@ struct SparseDenseMatmulInputStats {
   // Merge another SparseDenseMatmulInputStats object into the current one.
   void merge(const SparseDenseMatmulInputStats& other);
 };
+
+namespace internal {
+ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
+    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    int local_device_id,
+    const PreprocessSparseDenseMatmulInputOptions& options);
+}  // namespace internal
 
 struct PreprocessSparseDenseMatmulOutput {
   StackedTableMap<MatrixXi> lhs_row_pointers;
@@ -93,14 +102,11 @@ void ProcessCooTensors(int start_index, int end_index, int row_offset,
                        WeightsStreamT& weights_stream,
                        std::vector<CooFormat>& coo_tensors) {
   CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
-  DCHECK_GT(global_device_count, 0);
   const int num_scs_bit = std::log2(num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
   const int num_scs_mod_inv = ~num_scs_mod;
 
   coo_tensors.reserve(values_stream.size());
-
-  const int row_offset_per_device = row_offset / global_device_count;
 
   DCHECK_EQ(values_stream.size(), weights_stream.size());
 
@@ -111,8 +117,7 @@ void ProcessCooTensors(int start_index, int end_index, int row_offset,
     DCHECK_EQ(values_stream.col(), weights_stream.col());
     DCHECK_EQ(values_stream.col(), 0);
 
-    const int sample_id =
-        values_stream.row() - start_index + row_offset_per_device;
+    const int sample_id = values_stream.row() - start_index + row_offset;
     const float divisor = ComputeWeightDivisor(combiner, weights_stream);
 
     for (weights_stream.SeekCol(0); values_stream.col() < values_stream.cols();
@@ -120,7 +125,6 @@ void ProcessCooTensors(int start_index, int end_index, int row_offset,
       const int embedding_id = values_stream.get();
       const float gain = weights_stream.get() / divisor;
       DCHECK_GE(embedding_id, 0);
-
       coo_tensors.emplace_back(sample_id,
                                GetColId(embedding_id, col_shift, col_offset,
                                         num_scs_mod, num_scs_mod_inv),
