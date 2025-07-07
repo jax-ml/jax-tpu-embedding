@@ -24,6 +24,11 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_csr.py",
     ],
+    visibility = [
+        # TODO(b/402421151): Migrate Adbrain to public APIs and remove this.
+        "//smartass/brain/configure/jax/python/lib:__pkg__",
+        "//jax_tpu_embedding/sparsecore:internal",
+    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
