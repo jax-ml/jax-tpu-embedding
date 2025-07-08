@@ -14,6 +14,7 @@
 """List of functions for embedding lookup."""
 
 import collections
+import dataclasses
 import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
 
@@ -31,6 +32,7 @@ from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import tree
+
 
 if jax.__version_info__ >= (0, 6, 3):
   from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
@@ -66,11 +68,21 @@ class SparseDenseMatmulInput(NamedTuple):
 
 @struct.dataclass
 class SparseDenseMatmulInputStats:
-  """The stats of preprocessing sparse dense matmul input."""
+  """The stats of preprocessing sparse dense matmul input.
 
-  max_ids_per_partition: Mapping[str, np.ndarray]
-  max_unique_ids_per_partition: Mapping[str, np.ndarray]
-  required_buffer_size_per_sc: Mapping[str, np.ndarray]
+  Multiple value indicate per partition or per sparsecore values, whereas a
+  single value could also be used in cases where maximum is required.
+  """
+
+  max_ids_per_partition: dict[str, np.typing.ArrayLike] = dataclasses.field(
+      metadata={"suffix": "_max_ids"}
+  )
+  max_unique_ids_per_partition: dict[str, np.typing.ArrayLike] = (
+      dataclasses.field(metadata={"suffix": "_max_unique_ids"})
+  )
+  required_buffer_size_per_sc: dict[str, np.typing.ArrayLike] = (
+      dataclasses.field(metadata={"suffix": "_required_buffer_size"})
+  )
 
   @classmethod
   def from_cc(
@@ -80,16 +92,6 @@ class SparseDenseMatmulInputStats:
         max_ids_per_partition=stats.max_ids_per_partition,
         max_unique_ids_per_partition=stats.max_unique_ids_per_partition,
         required_buffer_size_per_sc=stats.required_buffer_sizes,
-    )
-
-  @classmethod
-  def from_dict(
-      cls, stats: Mapping[str, Mapping[str, np.ndarray]]
-  ) -> "SparseDenseMatmulInputStats":
-    return cls(
-        max_ids_per_partition=stats["max_ids"],
-        max_unique_ids_per_partition=stats["max_unique_ids"],
-        required_buffer_size_per_sc=stats["required_buffer_size"],
     )
 
 
@@ -1080,3 +1082,59 @@ def create_proto_from_feature_specs(
   return embedding_spec_pb2.EmbeddingSpecProto(
       stacked_table_specs=stacked_table_specs.values()
   )
+
+
+def update_preprocessing_parameters(
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    updated_params: SparseDenseMatmulInputStats,
+    num_sc_per_device: int,
+) -> None:
+  """Updates the preprocessing parameters in the feature specs.
+
+  This function updates the max_ids_per_partition, max_unique_ids_per_partition
+  and suggested_coo_buffer_size in the feature specs based on the updated
+  parameters.
+
+  Args:
+    feature_specs: A Nested (e.g., list, dict etc.) of FeatureSpec.
+    updated_params: The updated preprocessing parameters.
+    num_sc_per_device: The number of sparsecores per device.
+
+  Returns:
+    None. The feature specs are updated in place.
+
+  Raises:
+    ValueError: If stacked_table_spec is None in any of the feature specs.
+  """
+  def _update_feature_spec_limits(feature: embedding_spec.FeatureSpec) -> None:
+    stacked_table_spec = feature.table_spec.stacked_table_spec
+
+    if stacked_table_spec is None:
+      raise ValueError(f"stacked_table_spec is None for feature {feature.name}")
+
+    stack_name = stacked_table_spec.stack_name
+
+    max_ids_per_partition = updated_params.max_ids_per_partition.get(
+        stack_name, stacked_table_spec.max_ids_per_partition
+    )
+    max_unique_ids_per_partition = (
+        updated_params.max_unique_ids_per_partition.get(
+            stack_name, stacked_table_spec.max_unique_ids_per_partition
+        )
+    )
+    if stack_name in updated_params.required_buffer_size_per_sc:
+      new_buffer_size_per_device = int(
+          np.max(updated_params.required_buffer_size_per_sc[stack_name])
+          * num_sc_per_device
+      )
+    else:
+      new_buffer_size_per_device = stacked_table_spec.suggested_coo_buffer_size
+
+    feature.table_spec.stacked_table_spec = dataclasses.replace(
+        stacked_table_spec,
+        max_ids_per_partition=int(np.max(max_ids_per_partition)),
+        max_unique_ids_per_partition=int(np.max(max_unique_ids_per_partition)),
+        suggested_coo_buffer_size=new_buffer_size_per_device,
+    )
+
+  jax.tree_util.tree_map(_update_feature_spec_limits, feature_specs)

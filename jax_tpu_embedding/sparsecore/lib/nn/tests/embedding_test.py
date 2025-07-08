@@ -44,7 +44,7 @@ class EmbeddingTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
+    self.num_sc_per_device = utils.num_sparsecores_per_device()
 
   def assert_all_shards_shape(self, shards, expected_shape):
     for shard in shards:
@@ -1076,6 +1076,135 @@ class EmbeddingTest(parameterized.TestCase):
     self.assertEqual(
         text_format.MessageToString(expected_proto),
         text_format.MessageToString(actual),
+    )
+
+
+class UpdatePreprocessingParametersTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.table_spec_ab = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=12,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_ab",
+        max_ids_per_partition=150,
+        max_unique_ids_per_partition=250,
+        suggested_coo_buffer_size=20,
+    )
+    self.table_spec_c = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=12,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_c",
+        max_ids_per_partition=250,
+        max_unique_ids_per_partition=350,
+        suggested_coo_buffer_size=None,
+    )
+
+    self.feature_spec_a = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_ab,
+        input_shape=[16, 1],
+        output_shape=[16, 16],
+        name="feature_a",
+    )
+    self.feature_spec_b = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_ab,
+        input_shape=[16, 1],
+        output_shape=[16, 16],
+        name="feature_b",
+    )
+    self.feature_spec_c = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_c,
+        input_shape=[16, 1],
+        output_shape=[16, 16],
+        name="feature_c",
+    )
+
+    self.feature_specs = [
+        self.feature_spec_a,
+        self.feature_spec_b,
+        self.feature_spec_c,
+    ]
+
+    embedding.prepare_feature_specs_for_training(
+        self.feature_specs,
+        global_device_count=jax.device_count(),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+  def test_update_preprocessing_parameters(self):
+
+    stack_name = self.table_spec_ab.stacked_table_spec.stack_name
+
+    embedding.update_preprocessing_parameters(
+        self.feature_specs,
+        embedding.SparseDenseMatmulInputStats(
+            max_ids_per_partition={stack_name: [200, 210, 220, 230]},
+            max_unique_ids_per_partition={stack_name: 300},
+            required_buffer_size_per_sc={stack_name: [[10, 20], [30, 40]]},
+        ),
+        self.num_sc_per_device,
+    )
+
+    stacked_table_spec = self.table_spec_ab.stacked_table_spec
+
+    self.assertEqual(stacked_table_spec.max_ids_per_partition, 230)
+    self.assertEqual(
+        stacked_table_spec.max_unique_ids_per_partition,
+        300,
+    )
+    self.assertEqual(
+        stacked_table_spec.suggested_coo_buffer_size,
+        40 * self.num_sc_per_device,
+    )
+
+  def test_empty_update_preprocessing_parameters(self):
+    embedding.update_preprocessing_parameters(
+        self.feature_specs,
+        embedding.SparseDenseMatmulInputStats(
+            max_ids_per_partition={},
+            max_unique_ids_per_partition={},
+            required_buffer_size_per_sc={},
+        ),
+        self.num_sc_per_device,
+    )
+    stacked_table_spec = self.table_spec_ab.stacked_table_spec
+    self.assertEqual(stacked_table_spec.max_ids_per_partition, 150)
+    self.assertEqual(
+        stacked_table_spec.max_unique_ids_per_partition,
+        250,
+    )
+    self.assertEqual(
+        stacked_table_spec.suggested_coo_buffer_size,
+        20,
+    )
+
+  def test_update_preprocessing_parameters_with_no_required_buffer_size(self):
+    stack_name = self.table_spec_c.stacked_table_spec.stack_name
+    embedding.update_preprocessing_parameters(
+        self.feature_specs,
+        embedding.SparseDenseMatmulInputStats(
+            max_ids_per_partition={},
+            max_unique_ids_per_partition={},
+            required_buffer_size_per_sc={stack_name: [1, 2, 3, 4]},
+        ),
+        self.num_sc_per_device,
+    )
+    stacked_table_spec = self.table_spec_c.stacked_table_spec
+    self.assertEqual(stacked_table_spec.max_ids_per_partition, 250)
+    self.assertEqual(
+        stacked_table_spec.max_unique_ids_per_partition,
+        350,
+    )
+    self.assertEqual(
+        stacked_table_spec.suggested_coo_buffer_size,
+        4 * self.num_sc_per_device,
     )
 
 
