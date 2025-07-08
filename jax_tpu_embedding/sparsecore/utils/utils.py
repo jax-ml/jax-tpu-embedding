@@ -29,6 +29,12 @@ NUM_SC_PER_DEVICE_MAP = {
     'TPU v6 lite': 2,
 }
 
+# Conservative limits assuming feature_width=1 and only a single table.
+MAX_UNIQUE_IDS_LIMIT_MAP = {
+    'TPU v5': 13900,  # 512 KB
+    'TPU v6 lite': 7600,  # 256 KB
+}
+
 
 def num_sparsecores_per_device(device: jax.Device | None = None):
   """Determine the number of sparsecores available on a device.
@@ -53,6 +59,28 @@ def num_sparsecores_per_device(device: jax.Device | None = None):
     raise ValueError(f'Unknown sparsecore count for device kind: {device_kind}')
 
   return NUM_SC_PER_DEVICE_MAP[device_kind]
+
+
+def max_unique_ids_limit(device: jax.Device | None = None):
+  """Determine the maximum number of unique ids limit on a device.
+
+  Args:
+    device: JAX device to check.  If None, queries the first device in
+      jax.devices().
+
+  Returns:
+    Maximum number of unique ids limit.
+
+  Raises:
+    ValueError: if the maximum number of unique ids limit cannot be determined.
+  """
+  device = device or jax.devices()[0]
+  device_kind = device.device_kind
+  if device_kind not in MAX_UNIQUE_IDS_LIMIT_MAP:
+    raise ValueError(
+        f'Unknown max unique ids limit for device kind: {device_kind}'
+    )
+  return MAX_UNIQUE_IDS_LIMIT_MAP[device_kind]
 
 
 def jit_with_dump(fn, name=None, source_info=None, *jit_args, **jit_kwargs):
