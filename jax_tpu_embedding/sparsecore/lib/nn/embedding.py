@@ -375,6 +375,7 @@ def preprocess_sparse_dense_matmul_input(
   """
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
+  _validate_feature_specs(feature_specs)
 
   *preprocessed_inputs, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
@@ -448,6 +449,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   tree.assert_same_structure(indices, feature_specs)
   tree.assert_same_structure(values, feature_specs)
   tree.assert_same_structure(dense_shapes, feature_specs)
+  _validate_feature_specs(feature_specs)
 
   *preprocessed_inputs, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
@@ -1080,3 +1082,31 @@ def create_proto_from_feature_specs(
   return embedding_spec_pb2.EmbeddingSpecProto(
       stacked_table_specs=stacked_table_specs.values()
   )
+
+
+_FIXED_ALLOCATION_PER_UNIQUE_ID = 36
+_FIXED_ALLOCATION_CONSTANT = 1024
+_ROW_DEP_ALLOCATION_MULTIPLIER = 1.5
+_MAX_TOTAL_PREDICTED_MEMORY = 500_000
+
+
+def _validate_feature_specs(feature_specs: Nested[embedding_spec.FeatureSpec]):
+  """Validates the feature specs to ensure that the predicted memory is within limits.
+
+  Args:
+    feature_specs: A Nested (e.g., list, dict etc.) of FeatureSpec.
+
+  Raises:
+    ValueError: If the max_unique_ids_per_partition exceeds the limit.
+  """
+  for name, stacked_table in get_stacked_table_specs(feature_specs).items():
+    if (
+        stacked_table.max_unique_ids_per_partition
+        >= utils.max_unique_ids_limit()
+    ):
+      raise ValueError(
+          "The max_unique_ids_per_partition"
+          f" {stacked_table.max_unique_ids_per_partition} for stack"
+          f" {name} exceeds the maximum allowed value"
+          f" {utils.max_unique_ids_limit()}."
+      )

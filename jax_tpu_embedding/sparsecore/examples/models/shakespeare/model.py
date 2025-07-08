@@ -56,8 +56,8 @@ class Model(nn.Module):
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name=self.table_name,
-        max_ids_per_partition=64,
-        max_unique_ids_per_partition=64,
+        max_ids_per_partition=5000,
+        max_unique_ids_per_partition=5000,
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
