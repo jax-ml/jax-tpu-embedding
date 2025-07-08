@@ -41,6 +41,32 @@ tpu_py_strict_test(
 )
 
 pytype_strict_contrib_test(
+    name = "local_sparse_dense_matmul_csr_test",
+    srcs = ["local_sparse_dense_matmul_csr_test.py"],
+    args = [
+        # TPU chip configuration,
+        "--logtostderr",
+        "--xla_tpu_enable_offloading_gather_to_sparsecore=true",
+        "--xla_tpu_enable_offloading_scatter_to_sparsecore=true",
+    ],
+    env = {
+        "XLA_FLAGS": "--xla_dump_to=sponge",
+    },
+    tags = [
+        "exclusive-if-local",
+        "requires-tpu",
+    ],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:local_sparse_dense_matmul_csr",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_contrib_test(
     name = "sparse_dense_matmul_csr_with_mini_batching_test",
     srcs = [
         "sparse_dense_matmul_csr_with_mini_batching_test.py",

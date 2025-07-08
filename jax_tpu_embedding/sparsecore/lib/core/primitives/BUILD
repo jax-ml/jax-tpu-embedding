@@ -39,6 +39,17 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "local_sparse_dense_matmul_csr",
+    srcs = ["local_sparse_dense_matmul_csr.py"],
+    deps = [
+        pypi_requirement("jax"),
+        pypi_requirement("jax/_src/lib"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
     name = "sparse_dense_matmul_csr_with_mini_batching",
     srcs = [
         "sparse_dense_matmul_csr_with_mini_batching.py",
@@ -178,7 +189,6 @@ pytype_strict_library(
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
-        pypi_requirement("numpy"),
     ],
 )
 
