@@ -52,7 +52,7 @@ def generate_feature_specs(num_features, num_samples):
             row_offset_in_shard=0,
             shard_rotation=0,
         ),
-        stacked_table_spec=embedding_spec.StackedTableSpec(
+        _stacked_table_spec=embedding_spec.StackedTableSpec(
             stack_name="table_{}".format(i),
             stack_vocab_size=1024,
             stack_embedding_dim=16,
