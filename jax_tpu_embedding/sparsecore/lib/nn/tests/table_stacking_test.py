@@ -578,7 +578,6 @@ class TableStackingTest(parameterized.TestCase):
         updated_feature_b.table_spec.setting_in_stack.shard_rotation,
         self.num_sc_per_device % total_sc_in_test,
     )
-    assert updated_feature_b.table_spec.stacked_table_spec is not None
     self.assertEqual(
         updated_feature_b.table_spec.stacked_table_spec.max_ids_per_partition,
         25,

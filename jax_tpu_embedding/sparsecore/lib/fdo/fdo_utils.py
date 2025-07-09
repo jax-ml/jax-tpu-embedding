@@ -32,7 +32,7 @@ def _update_feature_spec_limits(
     max_required_buffer_size_per_sc: Mapping[str, np.ndarray],
     current_buffer_size: Mapping[str, np.ndarray],
     num_sc_per_device: int,
-) -> embedding_spec.FeatureSpec:
+):
   """Updates the feature spec limits based on the provided mappings.
 
   Args:
@@ -44,9 +44,6 @@ def _update_feature_spec_limits(
       max_required_buffer_size.
     current_buffer_size: A mapping of table names to current buffer size.
     num_sc_per_device: The number of sparse cores per device.
-
-  Returns:
-    The updated feature spec.
   """
   stacked_table_spec = f.table_spec.stacked_table_spec
   if stacked_table_spec is None:
@@ -93,10 +90,7 @@ def _update_feature_spec_limits(
       max_unique_ids_per_partition=max_unique_id,
       suggested_coo_buffer_size=new_buffer_size_per_device,
   )
-  new_table_spec = dataclasses.replace(
-      f.table_spec, stacked_table_spec=new_stacked_spec
-  )
-  return dataclasses.replace(f, table_spec=new_table_spec)
+  f.table_spec.stacked_table_spec = new_stacked_spec
 
 
 def maybe_perform_fdo_update(
@@ -106,7 +100,7 @@ def maybe_perform_fdo_update(
     feature_specs: embedding.Nested[embedding_spec.FeatureSpec],
     preprocessed_inputs: embedding.SparseDenseMatmulInput,
     num_sc_per_device: int,
-) -> embedding.Nested[embedding_spec.FeatureSpec]:
+):
   """Updates feature specs based on FDO data.
 
   Args:
@@ -119,9 +113,6 @@ def maybe_perform_fdo_update(
     preprocessed_inputs: The current preprocessed inputs. Only used for
       calculating buffer size.
     num_sc_per_device: The number of sparse cores per device.
-
-  Returns:
-    The updated feature specs.
   """
   current_buffer_size = jax.tree.map(
       lambda x: jnp.shape(x)[0], preprocessed_inputs.lhs_embedding_ids
@@ -134,7 +125,7 @@ def maybe_perform_fdo_update(
       current_buffer_size=current_buffer_size,
       num_sc_per_device=num_sc_per_device,
   )
-  return jax.tree_util.tree_map(
+  jax.tree_util.tree_map(
       maybe_update_limits,
       feature_specs,
   )

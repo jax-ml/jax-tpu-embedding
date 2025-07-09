@@ -49,7 +49,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
           row_offset_in_shard=0,
           shard_rotation=0,
       ),
-      stacked_table_spec=embedding_spec.StackedTableSpec(
+      _stacked_table_spec=embedding_spec.StackedTableSpec(
           stack_name=stacked_name,
           stack_vocab_size=512,
           stack_embedding_dim=8,
@@ -278,7 +278,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
           row_offset_in_shard=0,
           shard_rotation=0,
       ),
-      stacked_table_spec=embedding_spec.StackedTableSpec(
+      _stacked_table_spec=embedding_spec.StackedTableSpec(
           stack_name="one_table_to_rule_them_all",
           stack_vocab_size=48,
           stack_embedding_dim=8,
@@ -472,7 +472,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
           row_offset_in_shard=0,
           shard_rotation=0,
       ),
-      stacked_table_spec=embedding_spec.StackedTableSpec(
+      _stacked_table_spec=embedding_spec.StackedTableSpec(
           stack_name="one_table_to_rule_them_all",
           stack_vocab_size=48,
           stack_embedding_dim=8,
@@ -503,7 +503,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
           row_offset_in_shard=0,
           shard_rotation=0,
       ),
-      stacked_table_spec=embedding_spec.StackedTableSpec(
+      _stacked_table_spec=embedding_spec.StackedTableSpec(
           stack_name="one_table_to_rule_them_all",
           stack_vocab_size=48,
           stack_embedding_dim=8,
@@ -1173,7 +1173,7 @@ class MeanCombinerTest(parameterized.TestCase):
           row_offset_in_shard=0,
           shard_rotation=0,
       ),
-      stacked_table_spec=embedding_spec.StackedTableSpec(
+      _stacked_table_spec=embedding_spec.StackedTableSpec(
           stack_name=stacked_name,
           stack_vocab_size=512,
           stack_embedding_dim=8,

@@ -45,7 +45,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
             row_offset_in_shard=0,
             shard_rotation=0,
         ),
-        stacked_table_spec=embedding_spec.StackedTableSpec(
+        _stacked_table_spec=embedding_spec.StackedTableSpec(
             stack_name="table_a",
             stack_vocab_size=48,
             stack_embedding_dim=8,
@@ -76,7 +76,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
             row_offset_in_shard=0,
             shard_rotation=0,
         ),
-        stacked_table_spec=embedding_spec.StackedTableSpec(
+        _stacked_table_spec=embedding_spec.StackedTableSpec(
             stack_name="table_b",
             stack_vocab_size=48,
             stack_embedding_dim=8,

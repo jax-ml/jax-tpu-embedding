@@ -555,7 +555,7 @@ def run_model():
       max_required_buffer_size_per_sc = jax.tree.map(
           jnp.max, fdo_client.get_required_buffer_size_per_sc()
       )
-      feature_specs = fdo_utils.maybe_perform_fdo_update(
+      fdo_utils.maybe_perform_fdo_update(
           max_ids_per_partition,
           max_unique_ids_per_partition,
           max_required_buffer_size_per_sc,

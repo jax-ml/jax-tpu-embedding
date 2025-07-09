@@ -161,15 +161,17 @@ def get_stacked_table_specs(
     ValueError: if there is duplicate table/feature name.
   """
   _verify_feature_specs(feature_specs)
+  if any(
+      not feature_spec.table_spec.is_stacked()
+      for feature_spec in tree.flatten(feature_specs)
+  ):
+    raise ValueError(
+        "embedding.prepare_feature_specs_for_training was not called"
+    )
   stacked_table_specs: list[embedding_spec.StackedTableSpec] = [
       feature_spec.table_spec.stacked_table_spec
       for feature_spec in tree.flatten(feature_specs)
   ]
-  if any(s is None for s in stacked_table_specs):
-    raise ValueError(
-        "Looks like embedding.prepare_feature_specs_for_training was not"
-        " called."
-    )
   return {
       stacked_table_specs.stack_name: stacked_table_specs
       for stacked_table_specs in stacked_table_specs  # pytype: disable=annotation-type-mismatch
@@ -202,7 +204,7 @@ def prepare_feature_specs_for_training(
   not_stacked = [
       feature
       for feature in tree.flatten(feature_specs)
-      if feature.table_spec.stacked_table_spec is None
+      if not feature.table_spec.is_stacked()
   ]
   # Amongst the not explicitly stacked features, collect the ones that point
   # to same table.
@@ -240,7 +242,8 @@ def prepare_feature_specs_for_training(
       raise ValueError(
           f"Invalid stacking. Table {feature.table_spec.name} does not have"
           " StackedTableSpec populated, but"
-          " feature.table_spec.setting_in_stack.stack_name is not"
+          " feature.table_spec.setting_in_stack.stack_name"
+          f" ({feature.table_spec.setting_in_stack.stack_name}) is not"
           f" {feature.table_spec.name}."
       )
     table_to_padded_dim, tables_to_padded_vocab_size = (
@@ -475,7 +478,6 @@ def _get_activation_for_feature(
     global_device_count: int,
 ) -> jax.Array:
   """Gets the activation slice for a given feature."""
-  assert feature.table_spec.stacked_table_spec is not None
   if feature.id_transformation is None:
     raise ValueError(
         "FeatureIdTransformation cannot be None. It is None for"
@@ -624,7 +626,6 @@ def _stack_embedding_gradients(
   for gradient, feature in zip(
       tree.flatten(activation_gradients), tree.flatten(feature_specs)
   ):
-    assert feature.table_spec.stacked_table_spec is not None
     if feature.id_transformation is None:
       raise ValueError(
           "FeatureIdTransformation cannot be None here. It is None for"
@@ -1037,7 +1038,6 @@ def create_proto_from_feature_specs(
   ] = collections.defaultdict(dict)
   # Traverse the feature specs and create the StackedTableSpecProto.
   for feature in tree.flatten(feature_specs):
-    assert feature.table_spec.stacked_table_spec is not None
     current_stack_name = feature.table_spec.stacked_table_spec.stack_name
     current_table_name = feature.table_spec.name
     if current_stack_name not in stacked_table_specs:

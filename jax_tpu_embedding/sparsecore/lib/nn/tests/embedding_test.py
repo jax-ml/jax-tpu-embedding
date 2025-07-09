@@ -112,7 +112,7 @@ class EmbeddingTest(parameterized.TestCase):
                     row_offset_in_shard=0,
                     shard_rotation=0,
                 ),
-                stacked_table_spec=expected_stacked_table_spec,
+                _stacked_table_spec=expected_stacked_table_spec,
             )
         },
     )
@@ -307,7 +307,7 @@ class EmbeddingTest(parameterized.TestCase):
             row_offset_in_shard=0,  # first table in stack
             shard_rotation=1,  # rotation of 1
         ),
-        stacked_table_spec=stack_table_spec,
+        _stacked_table_spec=stack_table_spec,
     )
     table_spec2 = embedding_spec.TableSpec(
         vocabulary_size=42,
@@ -325,7 +325,7 @@ class EmbeddingTest(parameterized.TestCase):
             row_offset_in_shard=8,  # second table in stack
             shard_rotation=2,  # rotation of 2
         ),
-        stacked_table_spec=stack_table_spec,
+        _stacked_table_spec=stack_table_spec,
     )
     feature_spec1 = embedding_spec.FeatureSpec(
         table_spec=table_spec1,
@@ -868,7 +868,6 @@ class EmbeddingTest(parameterized.TestCase):
     )
 
     table_spec = updated_table_specs[0]
-    assert table_spec.stacked_table_spec is not None
     self.assertEqual(
         embedding_variables["table_a_table_b"][0].shape,
         (
@@ -949,7 +948,6 @@ class EmbeddingTest(parameterized.TestCase):
     )
 
     table_spec = updated_table_specs[0]
-    assert table_spec.stacked_table_spec is not None
     self.assertEqual(
         embedding_variables["table_a_table_b"][0].shape,
         (

@@ -633,7 +633,7 @@ class TableSpec:
 
   # This points to the stacked table spec which this table belongs to.
   # If this is None, this table is the top-most table.
-  stacked_table_spec: StackedTableSpec | None = dataclasses.field(
+  _stacked_table_spec: StackedTableSpec | None = dataclasses.field(
       default=None, compare=False
   )
   # How this table is placed in the stack. By default, it is the top-most table
@@ -647,9 +647,23 @@ class TableSpec:
     assert self._setting_in_stack is not None
     return self._setting_in_stack
 
+  @property
+  def stacked_table_spec(self) -> StackedTableSpec:
+    assert (
+        self._stacked_table_spec is not None
+    ), f"Table {self.name} is not stacked."
+    return self._stacked_table_spec
+
   @setting_in_stack.setter
   def setting_in_stack(self, setting_in_stack: TableSettingInStack) -> None:
     self._setting_in_stack = setting_in_stack
+
+  @stacked_table_spec.setter
+  def stacked_table_spec(self, stacked_table_spec: StackedTableSpec) -> None:
+    self._stacked_table_spec = stacked_table_spec
+
+  def is_stacked(self) -> bool:
+    return self._stacked_table_spec is not None
 
   def __post_init__(
       self,
