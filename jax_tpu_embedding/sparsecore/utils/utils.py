@@ -26,6 +26,7 @@ _DUMP_DIR = flags.DEFINE_string(
 
 NUM_SC_PER_DEVICE_MAP = {
     'TPU v5': 4,
+    'TPU v5 lite': 4,
     'TPU v6 lite': 2,
 }
 
