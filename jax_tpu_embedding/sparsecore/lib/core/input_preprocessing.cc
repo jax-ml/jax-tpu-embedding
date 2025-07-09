@@ -14,6 +14,8 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -22,7 +24,9 @@
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
+#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
@@ -136,6 +140,46 @@ void PreprocessInputForStackedTablePerLocalDevice(
       batch_size_per_sc, num_scs, options.num_sc_per_device, row_pointer_buffer,
       embedding_id_buffer, sample_id_buffer, gain_buffer);
 }
+
+// Check the buffer usage ratio and log a warning if it exceeds a certain
+// threshold.
+// `max_required_buffer_size_per_device`: The maximum buffer size required by
+// the input for a single device.
+// `coo_buffer_size_per_device`: The allocated buffer size per device.
+// `stacked_table_name`: The name of the stacked table.
+void CheckBufferUsage(int max_required_buffer_size_per_device,
+                      int coo_buffer_size_per_device,
+                      absl::string_view stacked_table_name) {
+  CHECK_GT(coo_buffer_size_per_device, 0);
+  const double usage_ratio =
+      static_cast<double>(max_required_buffer_size_per_device) /
+      static_cast<double>(coo_buffer_size_per_device);
+  static constexpr double kUsageDivergence = 0.2;
+  if (std::abs(usage_ratio - 1.0) >= kUsageDivergence) {
+    // The size of one element in the COO buffer, which consists of an embedding
+    // ID (int), a sample ID (int), and a gain value (float).
+    static constexpr int kElementSize =
+        sizeof(int) + sizeof(int) + sizeof(float);
+
+    const int64_t required_buffer_bytes =
+        int64_t{max_required_buffer_size_per_device} * kElementSize;
+    const int64_t coo_buffer_bytes =
+        int64_t{coo_buffer_size_per_device} * kElementSize;
+
+    const int64_t wasted_space =
+        std::max(int64_t{0}, coo_buffer_bytes - required_buffer_bytes);
+    const int64_t buffer_shortfall =
+        std::max(int64_t{0}, required_buffer_bytes - coo_buffer_bytes);
+
+    LOG(WARNING) << absl::StrFormat(
+        "Required usage %.2f%% (%d bytes) of computed/given buffer size "
+        "(%d bytes) for stacked table %s (Wasted space: %d bytes, "
+        "Buffer shortfall: %d bytes)",
+        usage_ratio * 100.0f, required_buffer_bytes, coo_buffer_bytes,
+        stacked_table_name, wasted_space, buffer_shortfall);
+  }
+}
+
 }  // namespace
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
@@ -234,6 +278,11 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
               max_unique_ids_per_partition_per_sc_buffer,
               required_buffer_size_per_sc_buffer);
         }
+        CheckBufferUsage(
+            /* max_required_buffer_size_per_device= */
+            required_buffer_size_per_sc.maxCoeff() * options.num_sc_per_device,
+            coo_buffer_size_per_device, stacked_table_name);
+
         max_ids_per_partition_per_sc.resize(
             1, max_ids_per_partition_per_sc.size());
         max_unique_ids_per_partition_per_sc.resize(
