@@ -131,18 +131,18 @@ tpu_sparse_dense_matmul_grad_with_laprop_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    embedding_table: np.ndarray,
-    mu: np.ndarray,
-    nu: np.ndarray,
-    activations_grad: np.ndarray,
-    learning_rate: np.ndarray,
-    b1: np.ndarray,
-    decay_rate: np.ndarray,
-    eps: np.ndarray,
+    lhs_row_pointers: mlir.ir.BlockArgument,
+    lhs_local_embedding_ids: mlir.ir.BlockArgument,
+    lhs_local_sample_ids: mlir.ir.BlockArgument,
+    lhs_gains: mlir.ir.BlockArgument,
+    embedding_table: mlir.ir.BlockArgument,
+    mu: mlir.ir.BlockArgument,
+    nu: mlir.ir.BlockArgument,
+    activations_grad: mlir.ir.BlockArgument,
+    learning_rate: mlir.ir.BlockArgument,
+    b1: mlir.ir.BlockArgument,
+    decay_rate: mlir.ir.BlockArgument,
+    eps: mlir.ir.BlockArgument,
     *_,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -156,6 +156,8 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
+      "num_slot_variables": 2,
+      "num_hyperparameters": 4,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
@@ -190,7 +192,9 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  embedding_table_dim_size = embedding_table.type.get_dim_size(1)
+  embedding_table_dim_size = embedding_table.type.maybe_downcast().get_dim_size(
+      1
+  )
   hlo_f32 = functools.partial(_hlo_f32, emb_dim=embedding_table_dim_size)
 
   optimizer_update = func_dialect.FuncOp(
@@ -198,35 +202,35 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
       (
           [
               ir.RankedTensorType.get(  # grad
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # embedding_table
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # mu
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # nu
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # learning_rate
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # b1
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # decay_rate
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # eps
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [1, embedding_table.type.maybe_downcast().get_dim_size(1)],
                   ir.F32Type.get(),
               ),
           ],
@@ -311,11 +315,6 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     # return the updated embedding table, mu, nu
     func_dialect.ReturnOp([updated_tables])
 
-  table_tuple_op = hlo.TupleOp([embedding_table, mu, nu])
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  hyperparams_tuple_op = hlo.TupleOp([learning_rate, b1, decay_rate, eps])
-  hyperparams_tuple_op = _annotate_sparse_compute_type(hyperparams_tuple_op)
-
   op = mlir.custom_call(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
@@ -327,8 +326,15 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
           lhs_local_sample_ids,
           lhs_gains,
           activations_grad,
-          table_tuple_op.result,
-          hyperparams_tuple_op.result,
+          embedding_table,
+          # slot variables
+          mu,
+          nu,
+          # hyperparameters
+          learning_rate,
+          b1,
+          decay_rate,
+          eps,
       ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],

@@ -34,6 +34,7 @@ from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
 
+
 tpu_sparse_dense_matmul_grad_with_adagrad_primitive = jex.core.Primitive(
     "sparse_dense_matmul_grad_with_adagrad_primitive",
 )
@@ -104,14 +105,14 @@ tpu_sparse_dense_matmul_grad_with_adagrad_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    activations_grad: np.ndarray,
-    learning_rate: np.ndarray,
+    lhs_row_pointers: mlir.ir.BlockArgument,
+    lhs_local_embedding_ids: mlir.ir.BlockArgument,
+    lhs_local_sample_ids: mlir.ir.BlockArgument,
+    lhs_gains: mlir.ir.BlockArgument,
+    embedding_table: mlir.ir.BlockArgument,
+    accumulator: mlir.ir.BlockArgument,
+    activations_grad: mlir.ir.BlockArgument,
+    learning_rate: mlir.ir.BlockArgument,
     *,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -124,6 +125,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
+      "num_slot_variables": 1,
+      "num_hyperparameters": 1,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
@@ -132,7 +135,9 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_dim_size = embedding_table.type.get_dim_size(1)  # pylint: disable=attribute-error
+  embedding_table_dim_size = embedding_table.type.maybe_downcast().get_dim_size(
+      1
+  )
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
@@ -198,15 +203,10 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     )
     func_dialect.ReturnOp([updated_embedding_tables])
 
-  table_tuple_op = hlo.TupleOp([embedding_table, accumulator])
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  hyperparams_tuple_op = hlo.TupleOp([learning_rate])
-  hyperparams_tuple_op = _annotate_sparse_compute_type(hyperparams_tuple_op)
-
   op = mlir.custom_call(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
-          ir.TupleType.get_tuple([embedding_table.type, accumulator.type])  # pylint: disable=attribute-error
+          ir.TupleType.get_tuple([embedding_table.type, accumulator.type])
       ],
       operands=[
           lhs_row_pointers,
@@ -214,8 +214,11 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
           lhs_local_sample_ids,
           lhs_gains,
           activations_grad,
-          table_tuple_op.result,
-          hyperparams_tuple_op.result,
+          embedding_table,
+          # slot variables
+          accumulator,
+          # hyperparameters
+          learning_rate,
       ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],

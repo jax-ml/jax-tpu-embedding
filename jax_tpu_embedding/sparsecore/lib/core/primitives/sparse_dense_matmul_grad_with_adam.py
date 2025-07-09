@@ -157,6 +157,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
+      "num_slot_variables": 2,
+      "num_hyperparameters": 4,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_adam_config,
@@ -309,11 +311,6 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
     # return the updated embedding table, mu, nu
     func_dialect.ReturnOp([updated_tables])
 
-  table_tuple_op = hlo.TupleOp([embedding_table, momentum, velocity])
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  hyperparams_tuple_op = hlo.TupleOp([alpha_t, beta_1, beta_2, epsilon_hat])
-  hyperparams_tuple_op = _annotate_sparse_compute_type(hyperparams_tuple_op)
-
   op = mlir.custom_call(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
@@ -327,8 +324,15 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
           lhs_local_sample_ids,
           lhs_gains,
           activations_grad,
-          table_tuple_op.result,
-          hyperparams_tuple_op.result,
+          embedding_table,
+          # slot variables
+          momentum,
+          velocity,
+          # hyperparameters
+          alpha_t,
+          beta_1,
+          beta_2,
+          epsilon_hat,
       ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
