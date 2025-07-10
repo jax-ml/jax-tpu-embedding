@@ -44,7 +44,7 @@ class EmbeddingTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
+    self.num_sc_per_device = utils.num_sparsecores_per_device()
 
   def assert_all_shards_shape(self, shards, expected_shape):
     for shard in shards:
@@ -1076,6 +1076,166 @@ class EmbeddingTest(parameterized.TestCase):
     self.assertEqual(
         text_format.MessageToString(expected_proto),
         text_format.MessageToString(actual),
+    )
+
+
+class UpdatePreprocessingParametersTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.table_spec_ab = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=12,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_ab",
+        max_ids_per_partition=150,
+        max_unique_ids_per_partition=250,
+        suggested_coo_buffer_size=20,
+    )
+    self.table_spec_c = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=12,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_c",
+        max_ids_per_partition=250,
+        max_unique_ids_per_partition=350,
+        suggested_coo_buffer_size=None,
+    )
+
+    self.feature_spec_a = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_ab,
+        input_shape=[16, 1],
+        output_shape=[16, 16],
+        name="feature_a",
+    )
+    self.feature_spec_b = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_ab,
+        input_shape=[16, 1],
+        output_shape=[16, 16],
+        name="feature_b",
+    )
+    self.feature_spec_c = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_c,
+        input_shape=[16, 1],
+        output_shape=[16, 16],
+        name="feature_c",
+    )
+
+    self.feature_specs = [
+        self.feature_spec_a,
+        self.feature_spec_b,
+        self.feature_spec_c,
+    ]
+
+    embedding.prepare_feature_specs_for_training(
+        self.feature_specs,
+        global_device_count=jax.device_count(),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="update_all_parameters",
+          max_ids_per_partition={
+              "table_ab": [200, 210, 220, 230],
+              "table_c": [100, 110, 120, 130],
+          },
+          max_unique_ids_per_partition={"table_ab": 300, "table_c": 200},
+          required_buffer_size_per_sc={
+              "table_ab": [[10, 20], [30, 40]],
+              "table_c": [1, 2, 3, 4],
+          },
+          expected_max_ids_per_partition={"table_ab": 230, "table_c": 130},
+          expected_max_unique_ids_per_partition={
+              "table_ab": 300,
+              "table_c": 200,
+          },
+          expected_suggested_coo_buffer_size={
+              "table_ab": 40 * 4,
+              "table_c": 4 * 4,
+          },
+      ),
+      dict(
+          testcase_name="empty_update",
+          max_ids_per_partition={},
+          max_unique_ids_per_partition={},
+          required_buffer_size_per_sc={},
+          expected_max_ids_per_partition={"table_ab": 150, "table_c": 250},
+          expected_max_unique_ids_per_partition={
+              "table_ab": 250,
+              "table_c": 350,
+          },
+          expected_suggested_coo_buffer_size={"table_ab": 20, "table_c": None},
+      ),
+      dict(
+          testcase_name="update_with_no_required_buffer_size",
+          max_ids_per_partition={},
+          max_unique_ids_per_partition={},
+          required_buffer_size_per_sc={"table_c": [1, 2, 3, 4]},
+          expected_max_ids_per_partition={"table_ab": 150, "table_c": 250},
+          expected_max_unique_ids_per_partition={
+              "table_ab": 250,
+              "table_c": 350,
+          },
+          expected_suggested_coo_buffer_size={
+              "table_ab": 20,
+              "table_c": 4 * 4,
+          },
+      ),
+  )
+  def test_update_preprocessing_parameters(
+      self,
+      max_ids_per_partition,
+      max_unique_ids_per_partition,
+      required_buffer_size_per_sc,
+      expected_max_ids_per_partition,
+      expected_max_unique_ids_per_partition,
+      expected_suggested_coo_buffer_size,
+  ):
+    stack_name = self.table_spec_ab.stacked_table_spec.stack_name
+    stack_name_c = self.table_spec_c.stacked_table_spec.stack_name
+
+    embedding.update_preprocessing_parameters(
+        self.feature_specs,
+        embedding.SparseDenseMatmulInputStats(
+            max_ids_per_partition,
+            max_unique_ids_per_partition,
+            required_buffer_size_per_sc,
+        ),
+        4,
+    )
+
+    stacked_table_spec_ab = self.table_spec_ab.stacked_table_spec
+    stacked_table_spec_c = self.table_spec_c.stacked_table_spec
+
+    self.assertEqual(
+        stacked_table_spec_ab.max_ids_per_partition,
+        expected_max_ids_per_partition.get(stack_name),
+    )
+    self.assertEqual(
+        stacked_table_spec_ab.max_unique_ids_per_partition,
+        expected_max_unique_ids_per_partition.get(stack_name),
+    )
+    self.assertEqual(
+        stacked_table_spec_ab.suggested_coo_buffer_size,
+        expected_suggested_coo_buffer_size.get(stack_name),
+    )
+    self.assertEqual(
+        stacked_table_spec_c.max_ids_per_partition,
+        expected_max_ids_per_partition.get(stack_name_c),
+    )
+    self.assertEqual(
+        stacked_table_spec_c.max_unique_ids_per_partition,
+        expected_max_unique_ids_per_partition.get(stack_name_c),
+    )
+    self.assertEqual(
+        stacked_table_spec_c.suggested_coo_buffer_size,
+        expected_suggested_coo_buffer_size.get(stack_name_c),
     )
 
 
