@@ -87,7 +87,6 @@ void PreprocessInputForStackedTablePerLocalDevice(
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options,
     const int coo_buffer_size, const int row_pointers_size_per_sc,
-    const absl::string_view stacked_table_name,
     Eigen::Ref<RowVectorXi> row_pointer_buffer,
     Eigen::Ref<RowVectorXi> embedding_id_buffer,
     Eigen::Ref<RowVectorXi> sample_id_buffer,
@@ -107,32 +106,23 @@ void PreprocessInputForStackedTablePerLocalDevice(
       stacked_table_metadata, input_batches, local_device_id,
       options.local_device_count, num_scs, options.global_device_count);
 
-  int total_num_coo_tensors = extracted_coo_tensors.coo_tensors.size();
-
   row_pointer_buffer.setConstant(coo_buffer_size);
 
   //
   // Step 2: Sort the COO tensors and group them by SC.
   //
-  const int batch_size_per_sc = CeilOfRatio(
-      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
 
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors.coo_tensors, batch_size_per_sc, num_scs,
-          extracted_coo_tensors.batch_size_for_device,
-          stacked_table_metadata[0].max_ids_per_partition,
-          stacked_table_metadata[0].max_unique_ids_per_partition,
-          stacked_table_name, options.allow_id_dropping,
-          options.num_sc_per_device, total_num_coo_tensors, max_ids_buffer,
-          max_unique_ids_buffer, required_buffer_size_per_sc_buffer);
-  for (int i = 0; i < options.num_sc_per_device; ++i) {
-    coo_tensors_by_id[i].emplace_back(batch_size_per_sc * (i + 1), 0, 0.0);
-    required_buffer_size_per_sc_buffer[i]++;
-  }
+          extracted_coo_tensors, stacked_table_metadata[0], options,
+          max_ids_buffer, max_unique_ids_buffer,
+          required_buffer_size_per_sc_buffer);
+
   //
   // Step 3: Compute the row pointers for each group of IDs.
   //
+  const int batch_size_per_sc = CeilOfRatio(
+      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
   const int coo_buffer_size_per_sc =
       coo_buffer_size / options.num_sc_per_device;
   FillRowPointersPerLocalDevice(
@@ -272,9 +262,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
           PreprocessInputForStackedTablePerLocalDevice(
               stacked_table_metadata, input_batches, local_device, options,
               coo_buffer_size_per_device, row_pointers_size_per_sc,
-              stacked_table_name, row_pointer_buffer, embedding_id_buffer,
-              sample_id_buffer, gain_buffer,
-              max_ids_per_partition_per_sc_buffer,
+              row_pointer_buffer, embedding_id_buffer, sample_id_buffer,
+              gain_buffer, max_ids_per_partition_per_sc_buffer,
               max_unique_ids_per_partition_per_sc_buffer,
               required_buffer_size_per_sc_buffer);
         }

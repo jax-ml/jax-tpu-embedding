@@ -44,6 +44,16 @@ using MatrixXf =
 using RowVectorXi = Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>;
 using RowVectorXf = Eigen::Matrix<float, 1, Eigen::Dynamic, Eigen::RowMajor>;
 
+struct PreprocessSparseDenseMatmulInputOptions {
+  int local_device_count;
+  int global_device_count;
+  int num_sc_per_device;
+  int sharding_strategy = 1;
+  bool allow_id_dropping = true;
+
+  int GetNumScs() const { return num_sc_per_device * global_device_count; }
+};
+
 // Different combiners that are supported for samples with multiple ids.
 // By default, we use kSum (add the embeddings for all ids in the sample).
 enum class RowCombiner {
@@ -79,6 +89,12 @@ struct CooFormat {
     return row_id == other.row_id && col_id == other.col_id &&
            gain == other.gain;
   }
+};
+
+struct ExtractedCooTensors {
+  std::vector<CooFormat> coo_tensors;
+  // Number of samples these coo_tensors are extracted from.
+  int batch_size_for_device = 0;
 };
 
 // Get adjusted col_id based on shift and offset.
@@ -147,12 +163,9 @@ struct StackedTableMetadata {
 };
 
 std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
-    absl::Span<const CooFormat> coo_tensors, int batch_size_per_sc,
-    int global_sc_count,
-    int32_t batch_size_for_device,  // Batch size for the local device.
-    int32_t max_ids_per_partition, int32_t max_unique_ids_per_partition,
-    absl::string_view stacked_table_name, bool allow_id_dropping,
-    int num_sc_per_device, int total_num_coo_tensors,
+    const ExtractedCooTensors& extracted_coo_tensors,
+    const StackedTableMetadata& stacked_table_metadata,
+    const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> max_ids_per_sc,
     Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
     Eigen::Ref<RowVectorXi> required_buffer_size_per_sc);

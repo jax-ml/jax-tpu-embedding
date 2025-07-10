@@ -101,22 +101,33 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
   return RowCombiner::kSum;
 }
 
+// We use output buffers `max_ids_per_sc`, `max_unique_ids_per_sc`, and
+// `required_buffer_size_per_sc` because we fill values in a loop to a bigger
+// array.
 std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
-    absl::Span<const CooFormat> coo_tensors, const int batch_size_per_sc,
-    const int global_sc_count, const int32_t batch_size_for_device,
-    const int32_t max_ids_per_partition,
-    const int32_t max_unique_ids_per_partition,
-    const absl::string_view stacked_table_name, const bool allow_id_dropping,
-    const int num_sc_per_device, const int total_num_coo_tensors,
+    const ExtractedCooTensors& extracted_coo_tensors,
+    const StackedTableMetadata& stacked_table_metadata,
+    const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> max_ids_per_sc,
     Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
     Eigen::Ref<RowVectorXi> required_buffer_size_per_sc) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
-  const int local_sc_count = batch_size_for_device / batch_size_per_sc;
+  const std::vector<CooFormat>& coo_tensors = extracted_coo_tensors.coo_tensors;
+  const int num_sc_per_device = options.num_sc_per_device;
+  bool allow_id_dropping = options.allow_id_dropping;
+  const int batch_size_per_sc = CeilOfRatio(
+      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
+  const int global_sc_count = options.GetNumScs();
+  const int max_ids_per_partition =
+      stacked_table_metadata.max_ids_per_partition;
+  const int max_unique_ids_per_partition =
+      stacked_table_metadata.max_unique_ids_per_partition;
+  const absl::string_view stacked_table_name = stacked_table_metadata.name;
+
   std::vector<std::vector<CooFormat>> coo_tensors_by_id;
   coo_tensors_by_id.resize(num_sc_per_device);
   const int approximate_num_coo_tensors_per_sc =
-      total_num_coo_tensors / num_sc_per_device + 1;
+      coo_tensors.size() / num_sc_per_device + 1;
   for (int i = 0; i < num_sc_per_device; ++i) {
     // Roughly estimate the number of COO tensors for each SC.
     coo_tensors_by_id[i].reserve(approximate_num_coo_tensors_per_sc);
@@ -129,7 +140,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
   max_unique_ids_per_sc.fill(0);
   required_buffer_size_per_sc.fill(0);
   // Loop over scs for this device.
-  for (int32_t local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
+  for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
+       ++local_sc_id) {
     std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
     std::vector<uint64_t> keys;
@@ -183,6 +195,9 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
       prev_col_id = col_id;
       prev_row_id = row_id;
     }
+    coo_tensors_by_id[local_sc_id].emplace_back(
+        batch_size_per_sc * (local_sc_id + 1), 0, 0.0);
+    required_buffer_size_per_sc[local_sc_id]++;
 
     // Update global max using this device's values.
     for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
@@ -303,6 +318,8 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
   return suggested_coo_buffer_size;
 }
 
+// We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
+// `gains` because we fill values in a loop to a bigger array.
 void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
