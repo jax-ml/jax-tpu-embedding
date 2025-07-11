@@ -28,9 +28,11 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
   // This class represents a batch of input data encoded using row offsets,
   // similar to how RaggedTensor uses row offsets as described in
   // https://www.tensorflow.org/guide/ragged_tensor#tfraggedtensorfrom_row_splits.
-  RaggedTensorInputBatch(EmbeddingIdsView embedding_ids,
+  RaggedTensorInputBatch(int batch_number, EmbeddingIdsView embedding_ids,
                          RowOffsetsView row_offsets)
-      : embedding_ids_(embedding_ids), row_offsets_(row_offsets) {}
+      : AbstractInputBatch(batch_number),
+        embedding_ids_(embedding_ids),
+        row_offsets_(row_offsets) {}
 
   int64_t size() const override { return row_offsets_.size() - 1; }
   void ExtractCooTensors(int row_start, int row_end, int row_offset,

@@ -154,7 +154,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
 }
 
 py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
-    py::list features, py::list feature_weights, py::list feature_specs,
+    int batch_number, py::list features, py::list feature_weights, py::list feature_specs,
     int local_device_count, int global_device_count, int num_sc_per_device,
     ShardingStrategy sharding_strategy, bool has_leading_dimension,
     bool allow_id_dropping) {
@@ -163,7 +163,7 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
   input_batches.reserve(features.size());
   for (int i = 0; i < features.size(); ++i) {
     input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
-        features[i], feature_weights[i]));
+        batch_number, features[i], feature_weights[i]));
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
@@ -172,7 +172,7 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
 }
 
 py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
-    py::list indices, py::list values, py::list dense_shapes,
+    int batch_number, py::list indices, py::list values, py::list dense_shapes,
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping) {
@@ -185,7 +185,7 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     const int64_t max_vocab_id =
         feature_specs[i].attr("table_spec").attr("vocabulary_size").cast<int>();
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
-        indices[i].cast<py::array_t<int64_t>>(),
+        batch_number, indices[i].cast<py::array_t<int64_t>>(),
         values[i].cast<py::array_t<int32_t>>(),
         dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id);
   }
@@ -198,15 +198,16 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
   m.def("PreprocessSparseDenseMatmulInput",
-        &PyNumpyPreprocessSparseDenseMatmulInput, pybind11::arg("features"),
-        pybind11::arg("feature_weights"), pybind11::arg("feature_specs"),
-        pybind11::arg("local_device_count"),
+        &PyNumpyPreprocessSparseDenseMatmulInput, pybind11::arg("batch_number"),
+        pybind11::arg("features"), pybind11::arg("feature_weights"),
+        pybind11::arg("feature_specs"), pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),
         pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
         pybind11::arg("has_leading_dimension"),
         pybind11::arg("allow_id_dropping"));
   m.def("PreprocessSparseDenseMatmulSparseCooInput",
-        &PySparseCooPreprocessSparseDenseMatmulInput, pybind11::arg("indices"),
+        &PySparseCooPreprocessSparseDenseMatmulInput,
+        pybind11::arg("batch_number"), pybind11::arg("indices"),
         pybind11::arg("values"), pybind11::arg("dense_shapes"),
         pybind11::arg("feature_specs"), pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),

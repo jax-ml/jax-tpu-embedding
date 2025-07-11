@@ -40,11 +40,13 @@ namespace py = ::pybind11;
 //   with the corresponding (row_id, col_id) pair in `indices`.
 class PySparseCooInputBatch : public AbstractInputBatch {
  public:
-  PySparseCooInputBatch(const py::array_t<int64_t>& indices,
+  PySparseCooInputBatch(const int batch_number,
+                        const py::array_t<int64_t>& indices,
                         const py::array_t<int32_t>& values,
                         const py::array_t<int64_t>& dense_shape,
                         const int64_t max_vocab_id)
-      : indices_(indices),
+      : AbstractInputBatch(batch_number),
+        indices_(indices),
         values_(values),
         max_vocab_id_(max_vocab_id),
         batch_size_(dense_shape.at(0)) {
