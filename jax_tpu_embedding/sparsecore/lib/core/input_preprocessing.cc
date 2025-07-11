@@ -181,8 +181,9 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     return absl::StrCat("input_preprocessing_cc-", options.local_device_count,
                         "/", options.global_device_count);
   });
-  // Only mod sharding is supported for now.
-  CHECK_EQ(options.sharding_strategy, 1);
+  if (options.sharding_strategy != ShardingStrategy::kMod) {
+    LOG(FATAL) << "Only mod sharding is supported for now.";
+  }
   CHECK_GT(options.local_device_count, 0);
 
   absl::Mutex mutex;

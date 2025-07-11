@@ -324,10 +324,12 @@ def auto_stack_tables(
   )
 
 
-def sharding_strategy_to_enum(sharding_strategy: str) -> int:
+def sharding_strategy_to_enum(
+    sharding_strategy: str,
+) -> pybind_input_preprocessing.ShardingStrategy:
   """Converts the sharding strategy string to the enum."""
   if sharding_strategy.upper() == "MOD":
-    return 1
+    return pybind_input_preprocessing.ShardingStrategy.Mod
   else:
     raise ValueError(
         f"Unsupported sharding strategy: {sharding_strategy}. Only MOD is"
@@ -582,7 +584,8 @@ def tpu_sparse_dense_matmul(
   stacked_table_specs = get_stacked_table_specs(feature_specs)
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
-  sharding_strategy = sharding_strategy_to_enum(sharding_strategy)
+  # Casting to int since primitives requires JSON serializable value.
+  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))
 
   activations = {}
   for stacked_table_name in stacked_table_specs:
@@ -723,7 +726,8 @@ def tpu_sparse_dense_matmul_grad(
   gradients = _stack_embedding_gradients(activation_gradients, feature_specs)
   assert lhs_row_pointers.keys() == gradients.keys()
 
-  sharding_strategy = sharding_strategy_to_enum(sharding_strategy)
+  # Casting to int since primitives requires JSON serializable value.
+  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))
 
   updated_embedding_variables = {}
   for stacked_table_name in stacked_table_specs:

@@ -18,6 +18,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
+from jax_tpu_embedding.sparsecore.lib.core.pybind_input_preprocessing import ShardingStrategy
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -115,7 +116,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             local_device_count=self.local_device_count,
             global_device_count=self.global_device_count,
             num_sc_per_device=self.num_sc_per_device,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -154,7 +155,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             local_device_count=self.local_device_count,
             global_device_count=self.global_device_count,
             num_sc_per_device=self.num_sc_per_device,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -348,7 +349,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=2,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -754,7 +755,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=2,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -911,7 +912,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=4,
-        sharding_strategy=1,
+        sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
     )
@@ -925,7 +926,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -945,7 +946,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -1048,7 +1049,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -1068,7 +1069,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             local_device_count=2,
             global_device_count=2,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -1654,7 +1655,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
         )
@@ -1812,7 +1813,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -2076,7 +2077,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
         )
@@ -2159,7 +2160,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             local_device_count=2,
             global_device_count=4,
             num_sc_per_device=4,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=True,
             allow_id_dropping=False,
         )
@@ -2187,7 +2188,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         local_device_count=2,
         global_device_count=4,
         num_sc_per_device=4,
-        sharding_strategy=1,
+        sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=False,
         allow_id_dropping=False,
     )
@@ -2788,7 +2789,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=1,
-            sharding_strategy=1,
+            sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
         )
@@ -2816,7 +2817,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=1,
-        sharding_strategy=1,
+        sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=False,
         allow_id_dropping=False,
     )
