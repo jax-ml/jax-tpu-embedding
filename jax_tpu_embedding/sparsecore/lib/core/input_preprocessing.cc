@@ -170,7 +170,28 @@ void CheckBufferUsage(int max_required_buffer_size_per_device,
   }
 }
 
+void MergeStats(
+    absl::flat_hash_map<std::string, Eigen::RowVectorXi>& current_stats,
+    const absl::flat_hash_map<std::string, Eigen::RowVectorXi>& other_stats) {
+  for (const auto& [table_name, other_values] : other_stats) {
+    auto it = current_stats.find(table_name);
+    if (it == current_stats.end()) {
+      current_stats[table_name] = other_values;
+    } else {
+      CHECK_EQ(it->second.size(), other_values.size());
+      it->second = it->second.cwiseMax(other_values);
+    }
+  }
+}
+
 }  // namespace
+
+void SparseDenseMatmulInputStats::merge(
+    const SparseDenseMatmulInputStats& other) {
+  MergeStats(max_ids_per_partition, other.max_ids_per_partition);
+  MergeStats(max_unique_ids_per_partition, other.max_unique_ids_per_partition);
+  MergeStats(required_buffer_sizes, other.required_buffer_sizes);
+}
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
