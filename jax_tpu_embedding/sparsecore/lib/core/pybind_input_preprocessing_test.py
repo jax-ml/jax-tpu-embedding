@@ -2752,7 +2752,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_spec,
         global_device_count=1,
-        num_sc_per_device=1,
+        num_sc_per_device=4,
     )
 
     # Generate random samples.
@@ -2788,7 +2788,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             [feature_spec],
             local_device_count=1,
             global_device_count=1,
-            num_sc_per_device=1,
+            num_sc_per_device=4,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
@@ -2801,7 +2801,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_spec,
         global_device_count=1,
-        num_sc_per_device=1,
+        num_sc_per_device=4,
     )
     input_weights = self._compute_gains(input_weights, combiner)
     (
@@ -2816,7 +2816,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         [feature_spec],
         local_device_count=1,
         global_device_count=1,
-        num_sc_per_device=1,
+        num_sc_per_device=4,
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=False,
         allow_id_dropping=False,
