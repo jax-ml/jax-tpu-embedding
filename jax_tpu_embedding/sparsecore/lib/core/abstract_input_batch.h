@@ -24,8 +24,13 @@ namespace jax_sc_embedding {
 // we define a read-only wrapper to abstract the input data.
 class AbstractInputBatch {
  public:
+  explicit AbstractInputBatch(int batch_number) : batch_number_(batch_number) {}
+
   // Return the batch size or the number of samples in this input batch.
   virtual ssize_t size() const = 0;
+
+  // Return the batch number.
+  int batch_number() const { return batch_number_; }
 
   // Extract COO Tensors between given row indexes (slice). The flow should
   // mostly be similar and we could make this thinner, operating on lower level
@@ -36,6 +41,14 @@ class AbstractInputBatch {
                                  std::vector<CooFormat>& coo_tensors) = 0;
 
   virtual ~AbstractInputBatch() = default;
+
+  private:
+   // The batch number should be a sequential counter that is unique for each
+   // batch. It is safe to reset this counter to 0 on restart. The number should
+   // be unique to identify the batch for collective operations during
+   // mini-batching. The number should be sequential to help limit logging
+   // (e.g., LOG_IF(INFO, batch_number_ % 100 == 0)).
+   const int batch_number_;
 };
 
 }  // namespace jax_sc_embedding

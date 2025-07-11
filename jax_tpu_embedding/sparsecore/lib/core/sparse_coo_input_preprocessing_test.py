@@ -100,6 +100,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     values_tensor = [sparse_tensor.values]
     dense_shape_tensor = [sparse_tensor.dense_shape]
     self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    batch_number = 42
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -107,6 +108,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -145,8 +147,10 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
       )
 
     self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [numpy_features],
             [numpy_weights],
             [self.feature_spec],
@@ -199,6 +203,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         suggested_coo_buffer_size=1000,
         max_ids_per_partition=150,
     )
+    batch_number = 42
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -206,6 +211,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -231,8 +237,10 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     numpy_weights = np.array(numpy_weights, dtype=object)
 
     self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [numpy_features],
             [numpy_weights],
             [self.feature_spec],
@@ -409,8 +417,10 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
 
   @parameterized.parameters(False, True)
   def test_transformation_with_col_transformations(self, has_leading_dimension):
+    batch_number = 42
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
@@ -429,6 +439,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     indices_tensor = [self.input_features_sparse.indices]
     values_tensor = [self.input_features_sparse.values]
     dense_shape_tensor = [self.input_features_sparse.dense_shape]
+    batch_number = 42
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -436,6 +447,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -914,8 +926,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     )
 
     # Preprocess inputs for the stacked features.
+    batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [self.input_features_a, input_features_a2],
             [self.input_weights_a, input_weights_a2],
             [self.feature_spec_a, feature_spec_a2],
@@ -942,6 +956,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         self.input_features_sparse_a.dense_shape,
         input_features_sparse_a2.dense_shape,
     ]
+    batch_number += 1
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -949,6 +964,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices,
         values,
         dense_shapes,
@@ -967,8 +983,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
 
   @parameterized.parameters(False, True)
   def test_table_stacking_single_chip(self, has_leading_dimension):
+    batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -995,6 +1013,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         self.input_features_sparse_a.dense_shape,
         self.input_features_sparse_b.dense_shape,
     ]
+    batch_number += 1
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -1002,6 +1021,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices,
         values,
         dense_shapes,
@@ -1049,8 +1069,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             col_shift=0,
         ),
     )
+    batch_number = 42
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [feature_spec_1, feature_spec_2],
@@ -1062,6 +1084,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             allow_id_dropping=False,
         )
     )
+    batch_number += 1
     sparse_tensor_input_preprocessing = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput
     )
@@ -1084,6 +1107,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices,
         values,
         dense_shapes,
@@ -1102,8 +1126,10 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
 
   @parameterized.parameters(False, True)
   def test_table_stacking_multi_chip(self, has_leading_dimension):
+    batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -1130,6 +1156,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         self.input_features_sparse_a.dense_shape,
         self.input_features_sparse_b.dense_shape,
     ]
+    batch_number += 1
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -1137,6 +1164,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices,
         values,
         dense_shapes,
@@ -1224,6 +1252,7 @@ class MeanCombinerTest(parameterized.TestCase):
     values_tensor = [sparse_tensor.values]
     dense_shape_tensor = [sparse_tensor.dense_shape]
     self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    batch_number = 42
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -1231,6 +1260,7 @@ class MeanCombinerTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
+        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -1268,8 +1298,10 @@ class MeanCombinerTest(parameterized.TestCase):
           dtype=np.int32,
       )
     self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            batch_number,
             [numpy_features],
             [numpy_weights],
             [self.feature_spec],
