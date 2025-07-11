@@ -104,7 +104,6 @@ cc_test(
     srcs = ["input_preprocessing_util_test.cc"],
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
-        ":input_preprocessing_util",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
     ],
@@ -129,6 +128,14 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+cc_test(
+    name = "input_preprocessing_test_cc",
+    srcs = ["input_preprocessing_test.cc"],
+    deps = [
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

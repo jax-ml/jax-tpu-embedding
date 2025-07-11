@@ -13,6 +13,7 @@
 // limitations under the License.
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -35,6 +36,9 @@ struct SparseDenseMatmulInputStats {
   StackedTableMap<RowVectorXi> max_ids_per_partition;
   StackedTableMap<RowVectorXi> max_unique_ids_per_partition;
   StackedTableMap<RowVectorXi> required_buffer_sizes;
+
+  // Merge another SparseDenseMatmulInputStats object into the current one.
+  void merge(const SparseDenseMatmulInputStats& other);
 };
 
 struct PreprocessSparseDenseMatmulOutput {
