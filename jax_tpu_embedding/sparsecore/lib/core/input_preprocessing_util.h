@@ -17,10 +17,12 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -44,6 +46,8 @@ using MatrixXf =
 using RowVectorXi = Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>;
 using RowVectorXf = Eigen::Matrix<float, 1, Eigen::Dynamic, Eigen::RowMajor>;
 
+enum class FeatureStackingStrategy { kFeatureFirst = 0, kScFirst = 1 };
+
 enum class ShardingStrategy : int { kMod = 1 };
 
 struct PreprocessSparseDenseMatmulInputOptions {
@@ -52,6 +56,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   int num_sc_per_device;
   ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   bool allow_id_dropping = true;
+  FeatureStackingStrategy feature_stacking_strategy =
+      FeatureStackingStrategy::kFeatureFirst;
 
   int GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
@@ -90,6 +96,11 @@ struct CooFormat {
   bool operator==(const CooFormat& other) const {
     return row_id == other.row_id && col_id == other.col_id &&
            gain == other.gain;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const CooFormat& coo) {
+    os << absl::StrFormat("(%d, %d, %2.2f)", coo.row_id, coo.col_id, coo.gain);
+    return os;
   }
 };
 

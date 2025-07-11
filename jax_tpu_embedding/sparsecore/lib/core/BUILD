@@ -55,6 +55,7 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
@@ -137,8 +138,11 @@ cc_test(
     name = "input_preprocessing_test_cc",
     srcs = ["input_preprocessing_test.cc"],
     deps = [
+        ":abstract_input_batch",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":ragged_tensor_input_batch",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )

@@ -439,14 +439,14 @@ class EmbeddingLayerTest(absltest.TestCase):
 
   def test_forward_and_backward_with_table_stacking(self):
     devices = jax.devices()
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device()
     sharding_axis = 'x'
     mesh = jax.sharding.Mesh(devices, sharding_axis)
     feature_specs = (self.feature_spec_a, self.feature_spec_c)
     embedding.auto_stack_tables(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=utils.num_sparsecores_per_device(devices[0]),
+        num_sc_per_device=num_sc_per_device,
     )
     sc_module = embed.SparseCoreEmbed(
         feature_specs=feature_specs,
