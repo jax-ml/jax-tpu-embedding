@@ -32,12 +32,16 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import tree
 
+
 if jax.__version_info__ >= (0, 6, 3):
   from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
 else:
   from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top  # type: ignore
 
 ArrayLike = jnp.ndarray | np.typing.ArrayLike
+
+
+FeatureStackingStrategy = pybind_input_preprocessing.FeatureStackingStrategy
 
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = Union[T, Sequence[T], Mapping[str, T]]
@@ -371,6 +375,7 @@ def preprocess_sparse_dense_matmul_input(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
+    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.STACK_THEN_SPLIT,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -399,6 +404,7 @@ def preprocess_sparse_dense_matmul_input(
       if using jax.pmap and set it to False if using jax.jit.
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
+    feature_stacking_strategy: The feature stacking strategy.
 
   Returns:
     A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
@@ -418,6 +424,7 @@ def preprocess_sparse_dense_matmul_input(
           sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
+          feature_stacking_strategy=feature_stacking_strategy,
       )
   )
 
@@ -437,6 +444,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
+    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.STACK_THEN_SPLIT,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -473,6 +481,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       if using jax.pmap and set it to False if using jax.jit.
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
+    feature_stacking_strategy: The feature stacking strategy.
 
   Returns:
     A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
@@ -494,6 +503,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
+          feature_stacking_strategy=feature_stacking_strategy,
       )
   )
 

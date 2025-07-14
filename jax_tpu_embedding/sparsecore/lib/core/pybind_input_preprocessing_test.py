@@ -25,6 +25,9 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
 
 
+FeatureStackingStrategy = embedding.FeatureStackingStrategy
+
+
 @dataclasses.dataclass(frozen=True)
 class MockDevice:
   id: int
@@ -2021,9 +2024,7 @@ class InputPreprocessingTest(parameterized.TestCase):
       np.testing.assert_equal(gains[self.table_spec.name], expected_lhs_gains)
 
   @parameterized.parameters(False, True)
-  def test_mean_combiner(
-      self, has_leading_dimension
-  ):
+  def test_mean_combiner(self, has_leading_dimension):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=16,
         embedding_dim=8,

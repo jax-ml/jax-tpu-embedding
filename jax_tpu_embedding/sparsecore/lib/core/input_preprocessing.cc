@@ -41,41 +41,103 @@
 namespace jax_sc_embedding {
 
 namespace {
+
+// Extract the COO tensors for a single feature slice.
+void ExtractCooTensorsForSingleFeatureSlice(
+    const StackedTableMetadata& metadata,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    const int local_device_id, const int feature_slice_id,
+    const int feature_slices_per_device,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    const int batch_size_per_slice, std::vector<CooFormat>& coo_tensors) {
+  const int feature_index = metadata.feature_index;
+  const std::unique_ptr<AbstractInputBatch>& curr_batch =
+      input_batches[feature_index];
+  const int num_samples = curr_batch->size();
+
+  CHECK_GT(feature_slices_per_device, 0);
+  CHECK_GT(options.global_device_count, 0);
+  CHECK_GT(options.local_device_count, 0);
+
+  const int row_offset_per_slice =
+      metadata.row_offset /
+      (options.global_device_count * feature_slices_per_device);
+  const int row_offset =
+      feature_slice_id * batch_size_per_slice + row_offset_per_slice;
+  const int col_offset = metadata.col_offset;
+  const int col_shift = metadata.col_shift;
+
+  const int num_samples_per_split =
+      num_samples / (options.local_device_count * feature_slices_per_device);
+  const int start_index =
+      (local_device_id * feature_slices_per_device + feature_slice_id) *
+      num_samples_per_split;
+  int end_index = std::min(num_samples, start_index + num_samples_per_split);
+
+  // In the case of feature stacking, we need to group all the COO tensors
+  // at this stage (i.e., before the sorting later on).
+  curr_batch->ExtractCooTensors(start_index, end_index, row_offset, col_offset,
+                                col_shift, options.GetNumScs(),
+                                options.global_device_count,
+                                metadata.row_combiner, coo_tensors);
+}
+}  // namespace
+
+namespace internal {
+
 // Extract the COO tensors for all features.
-ExtractedCooTensors ExtractCooTensorsForAllFeatures(
+ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    const int local_device_id, const int local_device_count, const int num_scs,
-    const int num_global_devices) {
+    const int local_device_id,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
   ExtractedCooTensors extracted_coo_tensors;
-  for (int i = 0; i < stacked_table_metadata.size(); ++i) {
-    const StackedTableMetadata& metadata = stacked_table_metadata[i];
-    const int feature_index = metadata.feature_index;
-    const int row_offset = metadata.row_offset;
-    const int col_offset = metadata.col_offset;
-    const int col_shift = metadata.col_shift;
-    const std::unique_ptr<AbstractInputBatch>& curr_batch =
-        input_batches[feature_index];
 
-    const int num_samples = curr_batch->size();
-    const int num_samples_per_split = num_samples / local_device_count;
-    const int start_index = local_device_id * num_samples_per_split;
-    int end_index = (local_device_id + 1) * num_samples_per_split;
-    if (local_device_id == local_device_count - 1) {
-      // Just in case the last split is not a full batch.
-      end_index = num_samples;
+  extracted_coo_tensors.batch_size_for_device = 0;
+  for (const auto& feature_metadata : stacked_table_metadata) {
+    extracted_coo_tensors.batch_size_for_device +=
+        input_batches[feature_metadata.feature_index]->size() /
+        options.local_device_count;
+  }
+
+  int feature_slices_per_device;
+  switch (options.feature_stacking_strategy) {
+    case FeatureStackingStrategy::kStackThenSplit:
+      feature_slices_per_device = 1;
+      break;
+    case FeatureStackingStrategy::kSplitThenStack:
+      feature_slices_per_device = options.num_sc_per_device;
+      break;
+    default:
+      LOG(FATAL) << "Unsupported feature stacking strategy: "
+                 << static_cast<int>(options.feature_stacking_strategy);
+      break;
+  }
+
+  const int batch_size_per_slice = CeilOfRatio(
+      extracted_coo_tensors.batch_size_for_device, feature_slices_per_device);
+
+  // This slices each feature into `feature_slices` partitions and then
+  // interleaves them: (k=num_sc_per_device-1). For stacking strategy
+  //   SC0: F1_1, F2_1, ... Fn_1,  // <- batch_size_per_slice
+  //   SC1: F1_2, F2_2, ... Fn_2,  // <- batch_size_per_slice
+  //   ...                         // <- batch_size_per_slice
+  //   SCk: F1_k, F2_k, ..., Fn_k  // <- batch_size_per_slice
+  for (int feature_slice_id = 0; feature_slice_id < feature_slices_per_device;
+       ++feature_slice_id) {
+    for (const auto& feature_metadata : stacked_table_metadata) {
+      ExtractCooTensorsForSingleFeatureSlice(
+          feature_metadata, input_batches, local_device_id, feature_slice_id,
+          feature_slices_per_device, options, batch_size_per_slice,
+          extracted_coo_tensors.coo_tensors);
     }
-    extracted_coo_tensors.batch_size_for_device += end_index - start_index;
-
-    // In the case of feature stacking, we need to group all the COO tensors
-    // at this stage (i.e., before the sorting later on).
-    curr_batch->ExtractCooTensors(start_index, end_index, row_offset,
-                                  col_offset, col_shift, num_scs,
-                                  num_global_devices, metadata.row_combiner,
-                                  extracted_coo_tensors.coo_tensors);
   }
   return extracted_coo_tensors;
 }
+
+}  // namespace internal
+
+namespace {
 
 // Preprocess inputs for a single table. Stacked table here refers to a
 // a table that has no parent in the table stacking hierarchy. So in the case
@@ -102,9 +164,9 @@ void PreprocessInputForStackedTablePerLocalDevice(
   // Note that the stacked_table_metadata list is sorted by row offsets of the
   // features.
 
-  ExtractedCooTensors extracted_coo_tensors = ExtractCooTensorsForAllFeatures(
-      stacked_table_metadata, input_batches, local_device_id,
-      options.local_device_count, num_scs, options.global_device_count);
+  ExtractedCooTensors extracted_coo_tensors =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+          stacked_table_metadata, input_batches, local_device_id, options);
 
   row_pointer_buffer.setConstant(coo_buffer_size);
 
