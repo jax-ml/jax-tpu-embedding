@@ -179,13 +179,13 @@ tpu_sparse_dense_matmul_optimizer_grad_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    embedding_variables: np.ndarray,
-    activations_grad: np.ndarray,
-    hyperparameters: np.ndarray,
+    lhs_row_pointers: mlir.ir.BlockArgument,
+    lhs_local_embedding_ids: mlir.ir.BlockArgument,
+    lhs_local_sample_ids: mlir.ir.BlockArgument,
+    lhs_gains: mlir.ir.BlockArgument,
+    embedding_variables: mlir.ir.BlockArgument,
+    activations_grad: mlir.ir.BlockArgument,
+    hyperparameters: mlir.ir.BlockArgument,
     *,
     optimizer_generator: Callable[[mlir.LoweringRuleContext, str, int], None],
     max_ids_per_partition: int,
@@ -194,11 +194,17 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     sharding_strategy: int = 1,
 ) -> Tuple[np.ndarray, ...]:
   """Lowering for sparse_dense_matmul_optimizer_grad."""
+  num_slot_variables = (
+      embedding_variables.type.maybe_downcast().get_dim_size(0) - 1
+  )
+  num_hyperparameters = hyperparameters.type.maybe_downcast().get_dim_size(0)
   sdmm_sgd_config = {
       "max_ids_per_partition": max_ids_per_partition,
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
+      "num_slot_variables": num_slot_variables,
+      "num_hyperparameters": num_hyperparameters,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
@@ -212,20 +218,19 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   # must be kept intact.
   tables = []
   table_shape = (
-      embedding_variables.type.get_dim_size(0),  # pylint: disable=attribute-error
-      embedding_variables.type.get_dim_size(1),  # pylint: disable=attribute-error
-      embedding_variables.type.get_dim_size(2),  # pylint: disable=attribute-error
+      embedding_variables.type.maybe_downcast().get_dim_size(1),
+      embedding_variables.type.maybe_downcast().get_dim_size(2),
   )
-  for i in range(table_shape[0]):
+  for i in range(num_slot_variables + 1):
     sliced = hlo.slice(
         embedding_variables,
         mlir.dense_int_array([i, 0, 0]),
-        mlir.dense_int_array([i + 1, table_shape[1], table_shape[2]]),
+        mlir.dense_int_array([i + 1, table_shape[0], table_shape[1]]),
         mlir.dense_int_array([1, 1, 1]),
     )
     sliced = hlo.reshape(
         ir.RankedTensorType.get(
-            [table_shape[1], table_shape[2]],
+            [table_shape[0], table_shape[1]],
             ir.F32Type.get(),
         ),
         sliced,
@@ -234,11 +239,11 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   optimizer_generator(
       ctx,
       optimizer_update_computation_name,
-      tables[0].type.get_dim_size(1),
+      tables[0].type.maybe_downcast().get_dim_size(1),
   )
   hyperparams = []
   f32type = mlir.aval_to_ir_type(core.ShapedArray((), np.float32))
-  for i in range(hyperparameters.type.get_dim_size(0)):  # pylint: disable=attribute-error
+  for i in range(num_hyperparameters):
     sliced_param = hlo.slice(
         hyperparameters,
         mlir.dense_int_array([i]),
@@ -251,15 +256,6 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     )
     hyperparams.append(sliced_param)
 
-  table_tuple_op = hlo.TupleOp(tables)
-  table_tuple_op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-  hyperparams_tuple_op = hlo.TupleOp(hyperparams)
-  hyperparams_tuple_op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-
   op = mlir.custom_call(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
@@ -271,9 +267,9 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
           lhs_local_sample_ids,
           lhs_gains,
           activations_grad,
-          table_tuple_op.result,
-          hyperparams_tuple_op.result,
-      ],
+      ]
+      + tables
+      + hyperparams,
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
   )

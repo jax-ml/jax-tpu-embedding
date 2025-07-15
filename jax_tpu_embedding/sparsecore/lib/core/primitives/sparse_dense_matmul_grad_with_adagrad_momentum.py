@@ -131,20 +131,20 @@ tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    momentum: np.ndarray,
-    activations_grad: np.ndarray,
-    learning_rate: np.ndarray,
-    momentum_param: np.ndarray,
-    beta2: np.ndarray,
-    epsilon: np.ndarray,
-    exponent: np.ndarray,
-    use_nesterov: np.ndarray,
+    lhs_row_pointers: mlir.ir.BlockArgument,
+    lhs_local_embedding_ids: mlir.ir.BlockArgument,
+    lhs_local_sample_ids: mlir.ir.BlockArgument,
+    lhs_gains: mlir.ir.BlockArgument,
+    embedding_table: mlir.ir.BlockArgument,
+    accumulator: mlir.ir.BlockArgument,
+    momentum: mlir.ir.BlockArgument,
+    activations_grad: mlir.ir.BlockArgument,
+    learning_rate: mlir.ir.BlockArgument,
+    momentum_param: mlir.ir.BlockArgument,
+    beta2: mlir.ir.BlockArgument,
+    epsilon: mlir.ir.BlockArgument,
+    exponent: mlir.ir.BlockArgument,
+    use_nesterov: mlir.ir.BlockArgument,
     *,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -157,6 +157,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
+      "num_slot_variables": 2,
+      "num_hyperparameters": 6,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_config,
@@ -287,21 +289,6 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     out_tuple = hlo.tuple([w_new_, accum_new_, m_new_])
     func_dialect.ReturnOp([out_tuple])
 
-  table_tuple_op = _annotate_sparse_compute_type(
-      hlo.TupleOp([embedding_table, accumulator, momentum])
-  )
-
-  hyperparams_tuple_op = _annotate_sparse_compute_type(
-      hlo.TupleOp([
-          learning_rate,
-          momentum_param,
-          beta2,
-          epsilon,
-          exponent,
-          use_nesterov,
-      ])
-  )
-
   custom_call_op = mlir.custom_call(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
@@ -317,8 +304,17 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
           lhs_local_sample_ids,
           lhs_gains,
           activations_grad,
-          table_tuple_op.result,
-          hyperparams_tuple_op.result,
+          embedding_table,
+          # slot variables
+          accumulator,
+          momentum,
+          # hyperparameters
+          learning_rate,
+          momentum_param,
+          beta2,
+          epsilon,
+          exponent,
+          use_nesterov,
       ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],

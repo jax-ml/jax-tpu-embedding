@@ -109,15 +109,15 @@ tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_primitive.def_abstr
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
+    lhs_row_pointers: mlir.ir.BlockArgument,
+    lhs_local_embedding_ids: mlir.ir.BlockArgument,
+    lhs_local_sample_ids: mlir.ir.BlockArgument,
+    lhs_gains: mlir.ir.BlockArgument,
     num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    activations_grad: np.ndarray,
-    learning_rate: np.ndarray,
+    embedding_table: mlir.ir.BlockArgument,
+    accumulator: mlir.ir.BlockArgument,
+    activations_grad: mlir.ir.BlockArgument,
+    learning_rate: mlir.ir.BlockArgument,
     *,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -130,6 +130,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_lowering(
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
+      "num_slot_variables": 1,
+      "num_hyperparameters": 1,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
@@ -138,7 +140,9 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_dim_size = embedding_table.type.get_dim_size(1)  # pylint: disable=attribute-error
+  embedding_table_dim_size = embedding_table.type.maybe_downcast().get_dim_size(
+      1
+  )
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
@@ -204,11 +208,6 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_lowering(
     )
     func_dialect.ReturnOp([updated_embedding_tables])
 
-  table_tuple_op = hlo.TupleOp([embedding_table, accumulator])
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  hyperparams_tuple_op = hlo.TupleOp([learning_rate])
-  hyperparams_tuple_op = _annotate_sparse_compute_type(hyperparams_tuple_op)
-
   op = mlir.custom_call(
       "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp",
       result_types=[
@@ -220,9 +219,13 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_lowering(
           lhs_local_sample_ids,
           lhs_gains,
           num_minibatches_per_physical_sparse_core,
-          table_tuple_op.result,
+          embedding_table,
+          # slot variables
+          accumulator,
+          # activations grad
           activations_grad,
-          hyperparams_tuple_op.result,
+          # hyperparameters
+          learning_rate,
       ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
