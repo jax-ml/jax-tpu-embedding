@@ -76,10 +76,14 @@ void ExtractCooTensorsForSingleFeatureSlice(
 
   // In the case of feature stacking, we need to group all the COO tensors
   // at this stage (i.e., before the sorting later on).
-  curr_batch->ExtractCooTensors(start_index, end_index, row_offset, col_offset,
-                                col_shift, options.GetNumScs(),
-                                options.global_device_count,
-                                metadata.row_combiner, coo_tensors);
+  curr_batch->ExtractCooTensors({.slice_start = start_index,
+                                 .slice_end = end_index,
+                                 .row_offset = row_offset,
+                                 .col_offset = col_offset,
+                                 .col_shift = col_shift,
+                                 .num_scs = options.GetNumScs(),
+                                 .combiner = metadata.row_combiner},
+                                coo_tensors);
 }
 }  // namespace
 

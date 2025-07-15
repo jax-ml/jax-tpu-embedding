@@ -33,17 +33,13 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
       : embedding_ids_(embedding_ids), row_offsets_(row_offsets) {}
 
   int64_t size() const override { return row_offsets_.size() - 1; }
-  void ExtractCooTensors(int row_start, int row_end, int row_offset,
-                         int col_offset, int col_shift, int num_scs,
-                         int global_device_count, RowCombiner combiner,
+  void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          std::vector<CooFormat>& coo_tensors) override {
-    SparseCsrInputBatchStream values_stream(embedding_ids_, row_offsets_,
-                                            row_start, row_end);
+    SparseCsrInputBatchStream values_stream(
+        embedding_ids_, row_offsets_, options.slice_start, options.slice_end);
     UnityWeightsStream weights_stream(values_stream);
 
-    ProcessCooTensors(row_start, row_end, row_offset, col_offset, col_shift,
-                      num_scs, global_device_count, combiner, values_stream,
-                      weights_stream, coo_tensors);
+    ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
   }
 
  private:

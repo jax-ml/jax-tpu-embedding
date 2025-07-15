@@ -95,14 +95,12 @@ float ComputeWeightDivisor(RowCombiner combiner,
 }
 
 template <typename ValuesStreamT, typename WeightsStreamT>
-void ProcessCooTensors(int start_index, int end_index, int row_offset,
-                       int col_offset, int col_shift, int num_scs,
-                       int global_device_count, RowCombiner combiner,
-                       ValuesStreamT& values_stream,
-                       WeightsStreamT& weights_stream,
-                       std::vector<CooFormat>& coo_tensors) {
-  CHECK(num_scs > 0 && (num_scs & (num_scs - 1)) == 0);
-  const int num_scs_bit = std::log2(num_scs);
+void ProcessCooTensors(
+    const AbstractInputBatch::ExtractCooTensorsOptions& options,
+    ValuesStreamT& values_stream, WeightsStreamT& weights_stream,
+    std::vector<CooFormat>& coo_tensors) {
+  CHECK(options.num_scs > 0 && (options.num_scs & (options.num_scs - 1)) == 0);
+  const int num_scs_bit = std::log2(options.num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
   const int num_scs_mod_inv = ~num_scs_mod;
 
@@ -110,25 +108,29 @@ void ProcessCooTensors(int start_index, int end_index, int row_offset,
 
   DCHECK_EQ(values_stream.size(), weights_stream.size());
 
-  for (; values_stream.row() < end_index && weights_stream.row() < end_index;
+  for (; values_stream.row() < options.slice_end &&
+         weights_stream.row() < options.slice_end;
        values_stream.NextRow(), weights_stream.NextRow()) {
     DCHECK_EQ(values_stream.cols(), weights_stream.cols());
     DCHECK_EQ(values_stream.row(), weights_stream.row());
     DCHECK_EQ(values_stream.col(), weights_stream.col());
     DCHECK_EQ(values_stream.col(), 0);
 
-    const int sample_id = values_stream.row() - start_index + row_offset;
-    const float divisor = ComputeWeightDivisor(combiner, weights_stream);
+    const int sample_id =
+        values_stream.row() - options.slice_start + options.row_offset;
+    const float divisor =
+        ComputeWeightDivisor(options.combiner, weights_stream);
 
     for (weights_stream.SeekCol(0); values_stream.col() < values_stream.cols();
          values_stream.NextCol(), weights_stream.NextCol()) {
       const int embedding_id = values_stream.get();
       const float gain = weights_stream.get() / divisor;
       DCHECK_GE(embedding_id, 0);
-      coo_tensors.emplace_back(sample_id,
-                               GetColId(embedding_id, col_shift, col_offset,
-                                        num_scs_mod, num_scs_mod_inv),
-                               gain);
+      coo_tensors.emplace_back(
+          sample_id,
+          GetColId(embedding_id, options.col_shift, options.col_offset,
+                   num_scs_mod, num_scs_mod_inv),
+          gain);
     }
   }
 }

@@ -138,8 +138,7 @@ class NumpyRaggedInputBatchStream {
 }  // namespace
 
 void NumpySparseInputBatch::ExtractCooTensors(
-    int start_index, int end_index, int row_offset, int col_offset,
-    int col_shift, int num_scs, int global_device_count, RowCombiner combiner,
+    const ExtractCooTensorsOptions& options,
     std::vector<CooFormat>& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
@@ -151,21 +150,17 @@ void NumpySparseInputBatch::ExtractCooTensors(
     auto feature_array = feature_.cast<py::array_t<int>>();
     auto weights_array = weights_.cast<py::array_t<float>>();
     py::gil_scoped_release __;
-    NumpyDenseInputBatchStream<int> values_stream(feature_array, start_index,
-                                                  end_index);
-    NumpyDenseInputBatchStream<float> weights_stream(weights_array, start_index,
-                                                     end_index);
-    ProcessCooTensors(start_index, end_index, row_offset, col_offset, col_shift,
-                      num_scs, global_device_count, combiner, values_stream,
-                      weights_stream, coo_tensors);
+    NumpyDenseInputBatchStream<int> values_stream(
+        feature_array, options.slice_start, options.slice_end);
+    NumpyDenseInputBatchStream<float> weights_stream(
+        weights_array, options.slice_start, options.slice_end);
+    ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
   } else {
-    NumpyRaggedInputBatchStream<int> values_stream(feature_, start_index,
-                                                   end_index);
-    NumpyRaggedInputBatchStream<float> weights_stream(weights_, start_index,
-                                                      end_index);
-    ProcessCooTensors(start_index, end_index, row_offset, col_offset, col_shift,
-                      num_scs, global_device_count, combiner, values_stream,
-                      weights_stream, coo_tensors);
+    NumpyRaggedInputBatchStream<int> values_stream(
+        feature_, options.slice_start, options.slice_end);
+    NumpyRaggedInputBatchStream<float> weights_stream(
+        weights_, options.slice_start, options.slice_end);
+    ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
   }
 }
 

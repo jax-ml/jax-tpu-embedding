@@ -13,6 +13,7 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -37,7 +38,7 @@ class RaggedTensorInputBatchTest : public ::testing::Test {
   std::vector<int32_t> embedding_splits_;
 };
 
-TEST_F(RaggedTensorInputBatchTest, SliceTest) {
+TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
   RaggedTensorInputBatch ragged_tensor_input_batch(embedding_ids_,
                                                    embedding_splits_);
 
@@ -46,17 +47,38 @@ TEST_F(RaggedTensorInputBatchTest, SliceTest) {
   std::vector<CooFormat> coo_formats_3;
 
   ragged_tensor_input_batch.ExtractCooTensors(
-      /*row_start=*/0, /*row_end=*/4, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*num_scs=*/4, /*global_device_count=*/1,
-      RowCombiner::kSum, coo_formats_1);
+      {
+          .slice_start = 0,
+          .slice_end = 4,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSum,
+      },
+      coo_formats_1);
   ragged_tensor_input_batch.ExtractCooTensors(
-      /*row_start=*/1, /*row_end=*/3, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*num_scs=*/4, /*global_device_count=*/1,
-      RowCombiner::kSum, coo_formats_2);
+      {
+          .slice_start = 1,
+          .slice_end = 3,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSum,
+      },
+      coo_formats_2);
   ragged_tensor_input_batch.ExtractCooTensors(
-      /*row_start=*/2, /*row_end=*/4, /*row_offset=*/16, /*col_offset=*/8,
-      /*col_shift=*/0, /*num_scs=*/4, /*global_device_count=*/1,
-      RowCombiner::kSum, coo_formats_3);
+      {
+          .slice_start = 2,
+          .slice_end = 4,
+          .row_offset = 16,
+          .col_offset = 8,
+          .col_shift = 0,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSum,
+      },
+      coo_formats_3);
 
   EXPECT_THAT(coo_formats_1,
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),
@@ -69,20 +91,50 @@ TEST_F(RaggedTensorInputBatchTest, SliceTest) {
                                          CooFormat(17, 2 + 8, 1.0)));
 }
 
-TEST_F(RaggedTensorInputBatchTest, TestWithMeanCombiner) {
+TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
   RaggedTensorInputBatch ragged_tensor_input_batch(embedding_ids_,
                                                    embedding_splits_);
 
   std::vector<CooFormat> coo_formats;
   ragged_tensor_input_batch.ExtractCooTensors(
-      /*row_start=*/0, /*row_end=*/4, /*row_offset=*/0,
-      /*col_offset=*/0,
-      /*col_shift=*/0, /*num_scs=*/4, /*global_device_count=*/1,
-      RowCombiner::kMean, coo_formats);
+      {
+          .slice_start = 0,
+          .slice_end = 4,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_scs = 4,
+          .combiner = RowCombiner::kMean,
+      },
+      coo_formats);
   EXPECT_THAT(coo_formats,
               ElementsAre(CooFormat(0, 0, 1.0 / 3), CooFormat(0, 1, 1.0 / 3),
                           CooFormat(0, 2, 1.0 / 3), CooFormat(1, 0, 1.0),
                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
+}
+
+TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
+  RaggedTensorInputBatch ragged_tensor_input_batch(embedding_ids_,
+                                                   embedding_splits_);
+
+  std::vector<CooFormat> coo_formats;
+  ragged_tensor_input_batch.ExtractCooTensors(
+      {
+          .slice_start = 0,
+          .slice_end = 4,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSqrtn,
+      },
+      coo_formats);
+  EXPECT_THAT(coo_formats,
+              ElementsAre(CooFormat(0, 0, 1.0 / std::sqrt(3)),
+                          CooFormat(0, 1, 1.0 / std::sqrt(3)),
+                          CooFormat(0, 2, 1.0 / std::sqrt(3)),
+                          CooFormat(1, 0, 1.0), CooFormat(2, 0, 1.0),
+                          CooFormat(3, 2, 1.0)));
 }
 
 }  // namespace

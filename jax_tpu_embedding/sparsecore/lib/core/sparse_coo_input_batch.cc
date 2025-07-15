@@ -76,21 +76,18 @@ void PySparseCooInputBatch::ConstructRowPointersIfRequired() {
 }
 
 void PySparseCooInputBatch::ExtractCooTensors(
-    int row_start, int row_end, int row_offset, int col_offset, int col_shift,
-    int num_scs, int global_device_count, RowCombiner combiner,
+    const ExtractCooTensorsOptions& options,
     std::vector<CooFormat>& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL.
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
 
   ConstructRowPointersIfRequired();
 
-  SparseCsrInputBatchStream values_stream(values_.unchecked<1>(),
-                                          absl::MakeConstSpan(row_pointers_),
-                                          row_start, row_end, max_vocab_id_);
+  SparseCsrInputBatchStream values_stream(
+      values_.unchecked<1>(), absl::MakeConstSpan(row_pointers_),
+      options.slice_start, options.slice_end, max_vocab_id_);
   UnityWeightsStream weights_stream(values_stream);
 
-  ProcessCooTensors(row_start, row_end, row_offset, col_offset, col_shift,
-                    num_scs, global_device_count, combiner, values_stream,
-                    weights_stream, coo_tensors);
+  ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
 }
 }  // namespace jax_sc_embedding

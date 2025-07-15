@@ -11,8 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_FEATURE_INPUT_WRAPPER_H_
-#define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_FEATURE_INPUT_WRAPPER_H_
+#ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_ABSTRACT_INPUT_BATCH_H_
+#define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_ABSTRACT_INPUT_BATCH_H_
 #include <sys/types.h>
 
 #include <vector>
@@ -24,15 +24,28 @@ namespace jax_sc_embedding {
 // we define a read-only wrapper to abstract the input data.
 class AbstractInputBatch {
  public:
+  struct ExtractCooTensorsOptions {
+    // Start index of the slice to be processed.
+    int slice_start;
+    // End index of the slice to be processed.
+    int slice_end;
+    // Row offset to be added to the sample id.
+    int row_offset;
+    // Column offset to be added to the embedding id.
+    int col_offset;
+    // Number of bits to shift the embedding id.
+    int col_shift;
+    // Number of sparse cores.
+    int num_scs;
+    // Combiner to be used for the row.
+    RowCombiner combiner;
+  };
+
   // Return the batch size or the number of samples in this input batch.
   virtual ssize_t size() const = 0;
 
-  // Extract COO Tensors between given row indexes (slice). The flow should
-  // mostly be similar and we could make this thinner, operating on lower level
-  // abstraction for inputs. coo_tensors accumulates the extracted tensors.
-  virtual void ExtractCooTensors(int slice_start, int slice_end, int row_offset,
-                                 int col_offset, int col_shift, int num_scs,
-                                 int global_device_count, RowCombiner combiner,
+  // Extract COO Tensors.
+  virtual void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                                  std::vector<CooFormat>& coo_tensors) = 0;
 
   virtual ~AbstractInputBatch() = default;
@@ -40,4 +53,4 @@ class AbstractInputBatch {
 
 }  // namespace jax_sc_embedding
 
-#endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_FEATURE_INPUT_WRAPPER_H_
+#endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_ABSTRACT_INPUT_BATCH_H_
