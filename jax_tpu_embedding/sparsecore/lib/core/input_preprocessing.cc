@@ -160,8 +160,6 @@ void PreprocessInputForStackedTablePerLocalDevice(
     Eigen::Ref<RowVectorXf> gain_buffer, Eigen::Ref<RowVectorXi> max_ids_buffer,
     Eigen::Ref<RowVectorXi> max_unique_ids_buffer,
     Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer) {
-  const int num_scs = options.GetNumScs();
-
   //
   // Step 1: Extract the COO tensors for each feature.
   //
@@ -194,8 +192,8 @@ void PreprocessInputForStackedTablePerLocalDevice(
       coo_buffer_size / options.num_sc_per_device;
   FillRowPointersPerLocalDevice(
       coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
-      batch_size_per_sc, num_scs, options.num_sc_per_device, row_pointer_buffer,
-      embedding_id_buffer, sample_id_buffer, gain_buffer);
+      batch_size_per_sc, options, row_pointer_buffer, embedding_id_buffer,
+      sample_id_buffer, gain_buffer);
 }
 
 // Check the buffer usage ratio and log a warning if it exceeds a certain

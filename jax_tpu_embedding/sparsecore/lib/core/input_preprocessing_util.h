@@ -67,6 +67,7 @@ struct PreprocessSparseDenseMatmulInputOptions {
   bool allow_id_dropping = true;
   FeatureStackingStrategy feature_stacking_strategy =
       FeatureStackingStrategy::kStackThenSplit;
+  bool enable_minibatching = false;
 
   int GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
@@ -208,7 +209,8 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 void FillRowPointersPerLocalDevice(
     absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
-    int batch_size_per_sc, int num_scs, int num_sc_per_device,
+    int batch_size_per_sc,
+    const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
     Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains);
 

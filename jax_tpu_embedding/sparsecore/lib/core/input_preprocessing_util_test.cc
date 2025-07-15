@@ -659,9 +659,8 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
   FillRowPointersPerLocalDevice(coo_tensors_by_id,
                                 /*row_pointers_size_per_sc=*/8,
                                 /*coo_buffer_size_per_sc=*/32,
-                                /*batch_size_per_sc=*/2,
-                                /*num_scs=*/4, /*num_sc_per_device=*/4,
-                                row_pointers, embedding_ids, sample_ids, gains);
+                                /*batch_size_per_sc=*/2, options, row_pointers,
+                                embedding_ids, sample_ids, gains);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32, 2, 10, 18, 26, 32, 32, 32, 32,
