@@ -35,7 +35,6 @@ from jax.sharding import NamedSharding
 from jax.sharding import PartitionSpec as P
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as shakespeare_data
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import model as shakespeare_model
-from jax_tpu_embedding.sparsecore.lib.fdo import fdo_utils
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -549,18 +548,18 @@ def run_model():
 
     if (step + 1) % _LOSS_RESET_FREQUENCY.value == 0:
       train_metrics = None
-      max_ids_per_partition, max_unique_ids_per_partition, _ = fdo_client.load()
-      # NOTE: we do not write required buffer size to disk, so it is not part of
-      #   `load()` function yet.
-      max_required_buffer_size_per_sc = jax.tree.map(
-          jnp.max, fdo_client.get_required_buffer_size_per_sc()
-      )
-      fdo_utils.maybe_perform_fdo_update(
+      (
           max_ids_per_partition,
           max_unique_ids_per_partition,
-          max_required_buffer_size_per_sc,
+          required_buffer_size_per_sc,
+      ) = fdo_client.load()
+      embedding.update_preprocessing_parameters(
           feature_specs,
-          preprocessed_inputs,
+          embedding.SparseDenseMatmulInputStats(
+              max_ids_per_partition=max_ids_per_partition,
+              max_unique_ids_per_partition=max_unique_ids_per_partition,
+              required_buffer_size_per_sc=required_buffer_size_per_sc,
+          ),
           num_sc_per_device,
       )
     if chkpt_mgr:
