@@ -200,6 +200,9 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
 }  // namespace
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
+  py::enum_<ShardingStrategy>(m, "ShardingStrategy")
+      .value("Mod", ShardingStrategy::kMod)
+      .export_values();
   py::enum_<FeatureStackingStrategy>(m, "FeatureStackingStrategy")
       .value("STACK_THEN_SPLIT", FeatureStackingStrategy::kStackThenSplit)
       .value("SPLIT_THEN_STACK", FeatureStackingStrategy::kSplitThenStack)
@@ -209,7 +212,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         pybind11::arg("feature_weights"), pybind11::arg("feature_specs"),
         pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),
-        pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
+        pybind11::arg("num_sc_per_device"),
+        pybind11::arg("sharding_strategy") = ShardingStrategy::kMod,
         pybind11::arg("has_leading_dimension") = false,
         pybind11::arg("allow_id_dropping") = false,
         pybind11::arg("feature_stacking_strategy") =
@@ -219,7 +223,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         pybind11::arg("values"), pybind11::arg("dense_shapes"),
         pybind11::arg("feature_specs"), pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),
-        pybind11::arg("num_sc_per_device"), pybind11::arg("sharding_strategy"),
+        pybind11::arg("num_sc_per_device"),
+        pybind11::arg("sharding_strategy") = ShardingStrategy::kMod,
         pybind11::arg("has_leading_dimension") = false,
         pybind11::arg("allow_id_dropping") = false,
         pybind11::arg("feature_stacking_strategy") =
@@ -232,8 +237,5 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
                     &SparseDenseMatmulInputStats::max_unique_ids_per_partition)
       .def_readonly("required_buffer_sizes",
                     &SparseDenseMatmulInputStats::required_buffer_sizes);
-  py::enum_<ShardingStrategy>(m, "ShardingStrategy")
-      .value("Mod", ShardingStrategy::kMod)
-      .export_values();
 }
 }  // namespace jax_sc_embedding

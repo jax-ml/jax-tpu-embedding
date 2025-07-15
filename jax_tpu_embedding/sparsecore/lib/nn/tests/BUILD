@@ -11,10 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary", "pytype_strict_contrib_test", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -37,23 +36,14 @@ pytype_strict_contrib_test(
     ],
 )
 
-py_binary(
+pytype_strict_binary(
     name = "preprocess_input_benchmarks",
     srcs = ["preprocess_input_benchmarks.py"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("google_benchmark"),
-        pypi_requirement("numpy"),
-    ],
-)
-
-py_binary(
-    name = "sparse_coo_input_preprocessing_benchmarks",
-    srcs = ["sparse_coo_input_preprocessing_benchmarks.py"],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("absl:app"),
+        pypi_requirement("absl/flags"),
         pypi_requirement("google_benchmark"),
         pypi_requirement("numpy"),
     ],
