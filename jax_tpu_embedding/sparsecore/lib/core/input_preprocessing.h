@@ -24,6 +24,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -148,13 +149,15 @@ class SparseCsrInputBatchStream {
  public:
   SparseCsrInputBatchStream(ValuesView values, RowPointersView row_pointers,
                             int row_start, int row_end,
+                            absl::string_view table_name,
                             T max_vocab_id = std::numeric_limits<T>::max())
       : values_ref_(values),
         row_pointers_(row_pointers),
         curr_row_(row_start),
         row_end_(row_end),
         curr_idx_(row_pointers[row_start]),
-        max_vocab_id_(max_vocab_id) {}
+        max_vocab_id_(max_vocab_id),
+        table_name_(table_name) {}
 
   int size() const { return row_pointers_[row_end_] - row_pointers_[0]; }
 
@@ -182,7 +185,8 @@ class SparseCsrInputBatchStream {
     T embedding_id = values_ref_[curr_idx_];
     CHECK(embedding_id >= 0 && embedding_id <= max_vocab_id_)
         << "Invalid vocabulary id: " << embedding_id
-        << " for table vocabulary size: " << max_vocab_id_;
+        << " for table: " << table_name_
+        << " with vocabulary size: " << max_vocab_id_;
     return embedding_id;
   }
 
@@ -193,14 +197,15 @@ class SparseCsrInputBatchStream {
   int row_end_;
   int curr_idx_;
   T max_vocab_id_;
+  absl::string_view table_name_;
 };
 
 template <typename T, typename U1, typename U2>
-SparseCsrInputBatchStream(U1, U2, int, int, T)
+SparseCsrInputBatchStream(U1, U2, int, int, absl::string_view, T)
     -> SparseCsrInputBatchStream<T, U1, U2>;
 
 template <typename U1, typename U2>
-SparseCsrInputBatchStream(U1, U2, int, int)
+SparseCsrInputBatchStream(U1, U2, int, int, absl::string_view)
     -> SparseCsrInputBatchStream<int64_t, U1, U2>;
 
 // Class to iterate over a sparse CSR array, providing unity weights for each

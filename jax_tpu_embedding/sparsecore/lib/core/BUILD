@@ -69,6 +69,7 @@ cc_library(
     hdrs = ["abstract_input_batch.h"],
     deps = [
         ":input_preprocessing_util",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 

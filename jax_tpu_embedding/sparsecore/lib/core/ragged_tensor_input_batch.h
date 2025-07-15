@@ -36,7 +36,8 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          std::vector<CooFormat>& coo_tensors) override {
     SparseCsrInputBatchStream values_stream(
-        embedding_ids_, row_offsets_, options.slice_start, options.slice_end);
+        embedding_ids_, row_offsets_, options.slice_start, options.slice_end,
+        options.table_name);
     UnityWeightsStream weights_stream(values_stream);
 
     ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
