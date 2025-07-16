@@ -516,6 +516,7 @@ def run_model():
         global_device_count=global_mesh.size,
         num_sc_per_device=num_sc_per_device,
         sharding_strategy='MOD',
+        batch_number=step,
     )
     preprocessed_inputs = make_global_view(preprocessed_inputs)
     fdo_client.record(stats)

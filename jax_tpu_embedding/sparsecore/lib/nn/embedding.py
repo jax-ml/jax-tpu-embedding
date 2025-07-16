@@ -381,6 +381,7 @@ def preprocess_sparse_dense_matmul_input(
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.STACK_THEN_SPLIT,
+    batch_number: int = 0,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -410,6 +411,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     feature_stacking_strategy: The feature stacking strategy.
+    batch_number: The batch number.
 
   Returns:
     A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
@@ -420,6 +422,7 @@ def preprocess_sparse_dense_matmul_input(
 
   *preprocessed_inputs, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+          batch_number,
           tree.flatten(features),
           tree.flatten(features_weights),
           tree.flatten(feature_specs),
@@ -450,6 +453,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.STACK_THEN_SPLIT,
+    batch_number: int = 0,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -487,6 +491,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     feature_stacking_strategy: The feature stacking strategy.
+    batch_number: The batch number.
 
   Returns:
     A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
@@ -498,6 +503,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
 
   *preprocessed_inputs, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+          batch_number,
           tree.flatten(indices),
           tree.flatten(values),
           tree.flatten(dense_shapes),

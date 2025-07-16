@@ -30,8 +30,9 @@ namespace py = ::pybind11;
 
 class NumpySparseInputBatch : public AbstractInputBatch {
  public:
-  NumpySparseInputBatch(const py::array& feature, const py::array& weights)
-      : feature_(feature), weights_(weights) {
+  NumpySparseInputBatch(const int& batch_number, const py::array& feature,
+                        const py::array& weights)
+      : batch_number_(batch_number), feature_(feature), weights_(weights) {
     DCHECK(PyGILState_Check())
         << "Need GIL to create references to features and weights.";
     CHECK_EQ(feature_.shape(0), weights_.shape(0))
@@ -47,7 +48,10 @@ class NumpySparseInputBatch : public AbstractInputBatch {
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          std::vector<CooFormat>& coo_tensors) override;
 
+  virtual int batch_number() const override { return batch_number_; }
+
  private:
+  int batch_number_;
   const py::array feature_;
   const py::array weights_;
 };

@@ -47,6 +47,14 @@ class AbstractInputBatch {
   // Return the batch size or the number of samples in this input batch.
   virtual ssize_t size() const = 0;
 
+  // Return the batch number.
+  // The batch number should be a sequential counter that is unique for each
+  // batch. It is safe to reset this counter to 0 on restart. The number should
+  // be unique to identify the batch for collective operations during
+  // mini-batching. The number should be sequential to help limit logging
+  // (e.g., LOG_IF(INFO, batch_number_ % 100 == 0)).
+  virtual int batch_number() const = 0;
+
   // Extract COO Tensors.
   virtual void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                                  std::vector<CooFormat>& coo_tensors) = 0;

@@ -276,20 +276,19 @@ class ShakespeareTest(absltest.TestCase):
       features = np.reshape(features, (-1, 1))
 
       # SC input processing
-      preprocessed_inputs, _ = (
-          embedding.preprocess_sparse_dense_matmul_input(
-              {self.shakespeare_feature.name: features},
-              {
-                  self.shakespeare_feature.name: np.ones_like(
-                      features, dtype=jnp.float32
-                  )
-              },
-              {self.shakespeare_feature.name: self.shakespeare_feature},
-              local_device_count=self.mesh.local_mesh.size,
-              global_device_count=self.mesh.size,
-              num_sc_per_device=self.num_sc_per_device,
-              sharding_strategy='MOD',
-          )
+      preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+          {self.shakespeare_feature.name: features},
+          {
+              self.shakespeare_feature.name: np.ones_like(
+                  features, dtype=jnp.float32
+              )
+          },
+          {self.shakespeare_feature.name: self.shakespeare_feature},
+          local_device_count=self.mesh.local_mesh.size,
+          global_device_count=self.mesh.size,
+          num_sc_per_device=self.num_sc_per_device,
+          sharding_strategy='MOD',
+          batch_number=step,
       )
       self.params, self.opt_state, loss_val, self.embedding_variables = jax.jit(
           train_step

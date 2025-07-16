@@ -39,8 +39,8 @@ class RaggedTensorInputBatchTest : public ::testing::Test {
 };
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
-  RaggedTensorInputBatch ragged_tensor_input_batch(embedding_ids_,
-                                                   embedding_splits_);
+  RaggedTensorInputBatch ragged_tensor_input_batch(
+      /*batch_number=*/13, embedding_ids_, embedding_splits_);
 
   std::vector<CooFormat> coo_formats_1;
   std::vector<CooFormat> coo_formats_2;
@@ -92,8 +92,8 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
 }
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
-  RaggedTensorInputBatch ragged_tensor_input_batch(embedding_ids_,
-                                                   embedding_splits_);
+  RaggedTensorInputBatch ragged_tensor_input_batch(
+      /*batch_number=*/42, embedding_ids_, embedding_splits_);
 
   std::vector<CooFormat> coo_formats;
   ragged_tensor_input_batch.ExtractCooTensors(
@@ -114,8 +114,8 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
 }
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
-  RaggedTensorInputBatch ragged_tensor_input_batch(embedding_ids_,
-                                                   embedding_splits_);
+  RaggedTensorInputBatch ragged_tensor_input_batch(
+      /*batch_number=*/123, embedding_ids_, embedding_splits_);
 
   std::vector<CooFormat> coo_formats;
   ragged_tensor_input_batch.ExtractCooTensors(

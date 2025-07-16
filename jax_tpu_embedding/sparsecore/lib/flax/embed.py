@@ -125,6 +125,7 @@ class SparseCoreEmbed(nn.Module):
 
   def preprocess_inputs(
       self,
+      step: int,
       features: Nested[np.ndarray],
       features_weights: Nested[np.ndarray],
   ) -> EmbeddingLookupInput:
@@ -133,6 +134,7 @@ class SparseCoreEmbed(nn.Module):
     This method do not need to be invoked with module.apply().
 
     Args:
+      step: The current step
       features: The input features for the current process. The features are
         expected to be Nested type (defined above). Concretely each leaf node
         should be either a 2D numpy array or a 1D list or numpy array of numpy
@@ -151,6 +153,7 @@ class SparseCoreEmbed(nn.Module):
         self.mesh.size,
         num_sc_per_device=self.num_sc_per_device,
         sharding_strategy=self.table_sharding_strategy,
+        batch_number=step,
     )[0]
 
   def __call__(

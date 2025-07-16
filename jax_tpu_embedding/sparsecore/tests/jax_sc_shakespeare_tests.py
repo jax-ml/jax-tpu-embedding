@@ -200,16 +200,15 @@ class ShakespeareTest(absltest.TestCase):
           feature_structure, [feature_weights]
       )
 
-      preprocessed_inputs, _ = (
-          embedding.preprocess_sparse_dense_matmul_input(
-              features,
-              feature_weights,
-              feature_specs,
-              local_device_count=mesh.local_mesh.size,
-              global_device_count=mesh.size,
-              num_sc_per_device=num_sc_per_device,
-              sharding_strategy='MOD',
-          )
+      preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+          features,
+          feature_weights,
+          feature_specs,
+          local_device_count=mesh.local_mesh.size,
+          global_device_count=mesh.size,
+          num_sc_per_device=num_sc_per_device,
+          sharding_strategy='MOD',
+          batch_number=step,
       )
 
       # --------------------------------------------------------------------------

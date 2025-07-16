@@ -129,7 +129,7 @@ class ShakespeareTest(absltest.TestCase):
     )
 
     # Initialize the model.
-    def process_inputs(feature_batch):
+    def process_inputs(batch_number, feature_batch):
       features = np.reshape(feature_batch, (-1, 1))
       feature_weights = np.ones(features.shape, dtype=np.float32)
 
@@ -149,10 +149,11 @@ class ShakespeareTest(absltest.TestCase):
               mesh.size,
               num_sc_per_device=num_sc_per_device,
               sharding_strategy='MOD',
+              batch_number=batch_number,
           )[0]
       )
 
-    first_model_input = process_inputs(feature_batches[0])
+    first_model_input = process_inputs(-1, feature_batches[0])
     params = model.init(jax.random.key(42), first_model_input)
 
     # Create optimizer.
@@ -204,7 +205,7 @@ class ShakespeareTest(absltest.TestCase):
       # ------------------------------------------------------------------------
       # Step 1: SC input processing.
       # ------------------------------------------------------------------------
-      processed_input_tensor = process_inputs(features)
+      processed_input_tensor = process_inputs(step, features)
 
       # ------------------------------------------------------------------------
       # Step 2: run model.

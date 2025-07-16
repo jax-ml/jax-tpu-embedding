@@ -194,6 +194,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         sharding_strategy="MOD",
+        batch_number=42,
     )
     self.assertLen(preprocessed_input.lhs_row_pointers, 1)
     self.assertLen(preprocessed_input.lhs_embedding_ids, 1)
@@ -229,6 +230,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         sharding_strategy="MOD",
+        batch_number=42,
     )
     self.assertLen(preprocessed_input.lhs_row_pointers, 1)
     self.assertLen(preprocessed_input.lhs_embedding_ids, 1)
@@ -287,6 +289,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         global_device_count=2,
         num_sc_per_device=4,
         sharding_strategy="MOD",
+        batch_number=42,
     )
     self.assertLen(preprocessed_input.lhs_row_pointers, 2)
     self.assertLen(preprocessed_input.lhs_embedding_ids, 2)
@@ -404,6 +407,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         num_sc_per_device=4,
         sharding_strategy="MOD",
         has_leading_dimension=True,
+        batch_number=42,
     )
 
     self.assertLen(preprocessed_input.lhs_row_pointers, 2)

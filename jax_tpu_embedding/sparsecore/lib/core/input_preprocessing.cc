@@ -202,9 +202,10 @@ void PreprocessInputForStackedTablePerLocalDevice(
 // the input for a single device.
 // `coo_buffer_size_per_device`: The allocated buffer size per device.
 // `stacked_table_name`: The name of the stacked table.
+// `batch_number`: The current batch number, used for conditional logging.
 void CheckBufferUsage(int max_required_buffer_size_per_device,
                       int coo_buffer_size_per_device,
-                      absl::string_view stacked_table_name) {
+                      absl::string_view stacked_table_name, int batch_number) {
   CHECK_GT(coo_buffer_size_per_device, 0);
   const double usage_ratio =
       static_cast<double>(max_required_buffer_size_per_device) /
@@ -226,7 +227,7 @@ void CheckBufferUsage(int max_required_buffer_size_per_device,
     const int64_t buffer_shortfall =
         std::max(int64_t{0}, required_buffer_bytes - coo_buffer_bytes);
 
-    LOG(WARNING) << absl::StrFormat(
+    LOG_IF(WARNING, batch_number % 100 == 0) << absl::StrFormat(
         "Required usage %.2f%% (%d bytes) of computed/given buffer size "
         "(%d bytes) for stacked table %s (Wasted space: %d bytes, "
         "Buffer shortfall: %d bytes)",
@@ -271,6 +272,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     LOG(FATAL) << "Only mod sharding is supported for now.";
   }
   CHECK_GT(options.local_device_count, 0);
+  CHECK(!input_batches.empty()) << "input_batches cannot be empty.";
 
   absl::Mutex mutex;
   PreprocessSparseDenseMatmulOutput out;
@@ -357,7 +359,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         CheckBufferUsage(
             /* max_required_buffer_size_per_device= */
             required_buffer_size_per_sc.maxCoeff() * options.num_sc_per_device,
-            coo_buffer_size_per_device, stacked_table_name);
+            coo_buffer_size_per_device, stacked_table_name,
+            input_batches[0]->batch_number());
 
         max_ids_per_partition_per_sc.resize(
             1, max_ids_per_partition_per_sc.size());

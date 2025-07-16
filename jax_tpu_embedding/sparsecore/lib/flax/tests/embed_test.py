@@ -217,8 +217,9 @@ class EmbeddingLayerTest(absltest.TestCase):
         num_sc_per_device=num_sc_per_device,
     )
     sc_module = embed.SparseCoreEmbed(feature_specs=feature_specs)
-
+    step = 42
     embedding_lookups = sc_module.preprocess_inputs(
+        step,
         (self.input_tensor, self.input_tensor_table_b),
         (self.input_weights, self.input_weights_table_b),
     )
@@ -453,8 +454,9 @@ class EmbeddingLayerTest(absltest.TestCase):
         mesh=mesh,
         sharding_axis=sharding_axis,
     )
-
+    step = 42
     embedding_lookups = sc_module.preprocess_inputs(
+        step,
         (self.input_tensor, self.input_tensor),
         (self.input_weights, self.input_weights),
     )

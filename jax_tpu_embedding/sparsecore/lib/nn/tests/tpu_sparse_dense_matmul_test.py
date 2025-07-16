@@ -140,6 +140,7 @@ class ErrorHandlingTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,
     )
+    batch_number = 42
     preprocessed_inputs, stats = embedding.preprocess_sparse_dense_matmul_input(
         {
             "feature": long_feature,
@@ -152,6 +153,7 @@ class ErrorHandlingTest(absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         sharding_strategy="MOD",
+        batch_number=batch_number,
     )
     np.testing.assert_array_less(
         64, stats.required_buffer_size_per_sc["table"]
@@ -370,23 +372,23 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {
-                "feature_spec_a": self.input_tensor,
-                "feature_spec_aa": self.input_tensor,
-            },
-            {
-                "feature_spec_a": self.input_weights,
-                "feature_spec_aa": self.input_weights,
-            },
-            feature_specs,
-            local_device_count=2,
-            global_device_count=2,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy="MOD",
-            has_leading_dimension=using_pmap,
-        )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_aa": self.input_tensor,
+        },
+        {
+            "feature_spec_a": self.input_weights,
+            "feature_spec_aa": self.input_weights,
+        },
+        feature_specs,
+        local_device_count=2,
+        global_device_count=2,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        has_leading_dimension=using_pmap,
+        batch_number=batch_number,
     )
     embedding_variables = {}
     if using_pmap:
@@ -486,23 +488,23 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
     )
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {
-                "feature_spec_a": self.input_tensor,
-                "feature_spec_aa": self.input_tensor,
-            },
-            {
-                "feature_spec_a": self.input_weights,
-                "feature_spec_aa": self.input_weights,
-            },
-            feature_specs,
-            local_device_count=2,
-            global_device_count=2,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy="MOD",
-            has_leading_dimension=using_pmap,
-        )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_aa": self.input_tensor,
+        },
+        {
+            "feature_spec_a": self.input_weights,
+            "feature_spec_aa": self.input_weights,
+        },
+        feature_specs,
+        local_device_count=2,
+        global_device_count=2,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        has_leading_dimension=using_pmap,
+        batch_number=batch_number,
     )
     embedding_variables = {}
     if using_pmap:
@@ -627,23 +629,23 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,
     )
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {
-                "feature_spec_a": self.input_tensor,
-                "feature_spec_b": self.input_tensor_table_b,
-            },
-            {
-                "feature_spec_a": self.input_weights,
-                "feature_spec_b": self.input_weights_table_b,
-            },
-            feature_specs,
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
-            sharding_strategy="MOD",
-            has_leading_dimension=using_pmap,
-        )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_b": self.input_tensor_table_b,
+        },
+        {
+            "feature_spec_a": self.input_weights,
+            "feature_spec_b": self.input_weights_table_b,
+        },
+        feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+        has_leading_dimension=using_pmap,
+        batch_number=batch_number,
     )
     embedding_variables = {}
 
@@ -729,23 +731,23 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         num_sc_per_device=num_sc_per_device,
     )
     # Add another table.
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {
-                "feature_spec_a": self.input_tensor,
-                "feature_spec_b": self.input_tensor_table_b,
-            },
-            {
-                "feature_spec_a": self.input_weights,
-                "feature_spec_b": self.input_weights_table_b,
-            },
-            feature_specs,
-            local_device_count=2,
-            global_device_count=2,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy="MOD",
-            has_leading_dimension=using_pmap,
-        )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_b": self.input_tensor_table_b,
+        },
+        {
+            "feature_spec_a": self.input_weights,
+            "feature_spec_b": self.input_weights_table_b,
+        },
+        feature_specs,
+        local_device_count=2,
+        global_device_count=2,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        has_leading_dimension=using_pmap,
+        batch_number=batch_number,
     )
     embedding_variables = {}
     if using_pmap:
@@ -1245,25 +1247,25 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         ],
         dtype=object,
     )
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {
-                "country": input_tensor,
-                "language": input_tensor,
-                "related_item": input_tensor,
-            },
-            {
-                "country": input_weights,
-                "language": input_weights,
-                "related_item": input_weights,
-            },
-            feature_specs,
-            local_device_count=mesh.local_mesh.size,
-            global_device_count=mesh.size,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy="MOD",
-            has_leading_dimension=using_pmap,
-        )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "country": input_tensor,
+            "language": input_tensor,
+            "related_item": input_tensor,
+        },
+        {
+            "country": input_weights,
+            "language": input_weights,
+            "related_item": input_weights,
+        },
+        feature_specs,
+        local_device_count=mesh.local_mesh.size,
+        global_device_count=mesh.size,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        has_leading_dimension=using_pmap,
+        batch_number=batch_number,
     )
     embedding_variables = {}
     if using_pmap:

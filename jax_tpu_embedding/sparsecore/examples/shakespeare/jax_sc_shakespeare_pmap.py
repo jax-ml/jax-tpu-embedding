@@ -385,6 +385,7 @@ def run_model():
         num_sc_per_device=num_sc_per_device,
         sharding_strategy='MOD',
         has_leading_dimension=True,
+        batch_number=step,
     )
 
     # TODO(patn): This (local_slice)will go away once the input processor is
