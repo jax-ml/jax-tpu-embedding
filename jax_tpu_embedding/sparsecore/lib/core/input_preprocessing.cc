@@ -76,6 +76,12 @@ void ExtractCooTensorsForSingleFeatureSlice(
 
   // In the case of feature stacking, we need to group all the COO tensors
   // at this stage (i.e., before the sorting later on).
+  VLOG(2) << absl::StrFormat(
+      "Extracting COO Tensor from feature #%d from row %d to %d "
+      "(local_device_id = %d, feature_slice_id = %d, row_offset = %d, "
+      "batch_size_per_slice = %d)",
+      feature_index, start_index, end_index, local_device_id, feature_slice_id,
+      row_offset, batch_size_per_slice);
   curr_batch->ExtractCooTensors({.slice_start = start_index,
                                  .slice_end = end_index,
                                  .row_offset = row_offset,

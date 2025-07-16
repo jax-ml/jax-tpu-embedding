@@ -19,6 +19,7 @@ import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
 
 from absl import logging
+import einops
 from flax import struct
 import jax
 from jax.experimental import shard_map
@@ -527,45 +528,72 @@ def _get_activation_for_feature(
     feature: embedding_spec.FeatureSpec,
     activations: dict[str, jax.Array],
     global_device_count: int,
+    num_feature_slices_per_device: int = 1,
 ) -> jax.Array:
   """Gets the activation slice for a given feature."""
-  if feature.id_transformation is None:
-    raise ValueError(
-        "FeatureIdTransformation cannot be None. It is None for"
-        f" {feature.name}",
-    )
-  per_device_offset = (
-      feature.id_transformation.row_offset // global_device_count
-  )
   if feature.output_shape[-1] > feature.table_spec.embedding_dim:
     raise ValueError(
         f"Feature {feature.name} has output shape {feature.output_shape} and"
         f" embedding dim {feature.table_spec.embedding_dim}. The output shape"
         " must be at least same as the (original, unpadded)embedding dim."
     )
-  return jax.lax.slice(
-      activations[feature.table_spec.stacked_table_spec.stack_name],
-      (per_device_offset, 0),
-      (
-          per_device_offset + feature.output_shape[0] // global_device_count,
-          feature.output_shape[-1],
-      ),
+  stacked_table_activation = activations[
+      feature.table_spec.stacked_table_spec.stack_name
+  ]
+  row_offset_per_stacked_feature_slice = (
+      feature.id_transformation.row_offset
+      // (global_device_count * num_feature_slices_per_device)
   )
+  per_feature_slice_batch_size = feature.output_shape[0] // (
+      global_device_count * num_feature_slices_per_device
+  )
+  # d: padded embedding_dim
+  # b: padded global (stacked-feature)-slice batch-size
+  activation_per_slice = einops.rearrange(
+      stacked_table_activation,
+      "(f b) d -> f b d",
+      f=num_feature_slices_per_device,
+  )
+  # For each SC, take the subslice corresponding to the current feature.
+  feature_slice = activation_per_slice[
+      :,
+      row_offset_per_stacked_feature_slice : row_offset_per_stacked_feature_slice
+      + per_feature_slice_batch_size,
+      0 : feature.output_shape[-1],
+  ]
+  # Merge SC outputs.
+  # b1: padded global (per-feature)-slice batch-size
+  return einops.rearrange(feature_slice, "f b1 d -> (f b1) d")
+
+
+StackingStrategy = pybind_input_preprocessing.FeatureStackingStrategy
 
 
 def _unstack_embedding_activations(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
+    num_sc_per_device: int,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
 ) -> Nested[jax.Array]:
   """Unstacks the activations to match the feature specs."""
+
+  match feature_stacking_strategy:
+    case StackingStrategy.STACK_THEN_SPLIT:
+      num_feature_slices_per_device = 1
+    case StackingStrategy.SPLIT_THEN_STACK:
+      num_feature_slices_per_device = num_sc_per_device
+    case _:
+      raise ValueError(
+          f"Unsupported feature stacking strategy: {feature_stacking_strategy}"
+      )
 
   get_activation_for = functools.partial(
       _get_activation_for_feature,
       activations=activations,
       global_device_count=global_device_count,
+      num_feature_slices_per_device=num_feature_slices_per_device,
   )
-
   return jax.tree_util.tree_map(get_activation_for, feature_specs)
 
 
@@ -576,6 +604,8 @@ def tpu_sparse_dense_matmul(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     sharding_strategy: str = "MOD",
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
+    num_sc_per_device: int | None = None,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -589,6 +619,7 @@ def tpu_sparse_dense_matmul(
       global_device_count=mesh.size,
       feature_specs=feature_specs,
       sharding_strategy="MOD",
+      feature_stacking_strategy=StackingStrategy.STACK_THEN_SPLIT,
   )
   sparse_matmul = shard_map.shard_map(
       sparse_matmul,
@@ -615,6 +646,9 @@ def tpu_sparse_dense_matmul(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     sharding_strategy: The sharding strategy (e.g., MOD)
+    feature_stacking_strategy: The feature stacking strategy.
+    num_sc_per_device: The number of sparse cores per device. If `None`, it will
+      be set to the number of sparse cores on the current host machine.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -627,6 +661,8 @@ def tpu_sparse_dense_matmul(
   lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
   lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
   lhs_gains = preprocessed_inputs.lhs_gains
+
+  num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
 
   assert lhs_row_pointers.keys() == embedding_variables.keys()
 
@@ -665,16 +701,24 @@ def tpu_sparse_dense_matmul(
     )
 
   return _unstack_embedding_activations(
-      activations, feature_specs, global_device_count
+      activations,
+      feature_specs,
+      global_device_count,
+      num_sc_per_device,
+      feature_stacking_strategy,
   )
 
 
 def _stack_embedding_gradients(
     activation_gradients: Nested[jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
+    num_sc_per_device: int,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
 ) -> Mapping[str, jax.Array]:
   """Stacks the gradients for update to embedding variables."""
-  stacked_table_to_features = collections.defaultdict(list)
+  stacked_table_to_features: dict[
+      str, list[tuple[embedding_spec.FeatureSpec, jax.Array]]
+  ] = collections.defaultdict(list)
   for gradient, feature in zip(
       tree.flatten(activation_gradients), tree.flatten(feature_specs)
   ):
@@ -687,24 +731,44 @@ def _stack_embedding_gradients(
         feature.table_spec.stacked_table_spec.stack_name
     ].append((feature, gradient))
   stacked_table_to_gradients = collections.defaultdict(list)
+
+  if feature_stacking_strategy == StackingStrategy.STACK_THEN_SPLIT:
+    feature_slice_per_device = 1
+  else:
+    feature_slice_per_device = num_sc_per_device
+
+  result: dict[str, jax.Array] = {}
+
   for stacked_table_name, stacked_features in stacked_table_to_features.items():
     stacked_features.sort(key=lambda x: x[0].id_transformation.row_offset)
-    for f, g in stacked_features:
+    for feature, gradient in stacked_features:
       # feature.table_spec.embedding_dim is the original table dim, before
       # padding
-      gradient = g.reshape([-1, f.table_spec.embedding_dim])
+      gradient = gradient.reshape([-1, feature.table_spec.embedding_dim])
       # Add padding for extra cols
       extra_cols = (
-          f.table_spec.setting_in_stack.padded_embedding_dim
-          - f.table_spec.embedding_dim
+          feature.table_spec.setting_in_stack.padded_embedding_dim
+          - feature.table_spec.embedding_dim
       )
       if extra_cols != 0:
         gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
+      # Slice the feature.
+      # b: batch size per slice, d: padded embedding dim
+      gradient = einops.rearrange(
+          gradient, "(f b) d -> f b d", f=feature_slice_per_device
+      )
       stacked_table_to_gradients[stacked_table_name].append(gradient)
-  return {
-      t: jax.lax.concatenate(grads, dimension=0)
-      for t, grads in stacked_table_to_gradients.items()
-  }
+
+    # Concatenate along batch dimension.
+    result[stacked_table_name] = jax.lax.concatenate(
+        stacked_table_to_gradients[stacked_table_name], dimension=1
+    )
+    # Merge the feature slice dimension with the batch dimension.
+    result[stacked_table_name] = einops.rearrange(
+        result[stacked_table_name], "f b d -> (f b) d"
+    )
+
+  return result
 
 
 @jax.named_call
@@ -714,8 +778,10 @@ def tpu_sparse_dense_matmul_grad(
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     sharding_strategy: str = "MOD",
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
     label: str = "",
     step: jax.Array | int | None = None,
+    num_sc_per_device: int | None = None,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -753,8 +819,11 @@ def tpu_sparse_dense_matmul_grad(
       variables. The tree structure must be identical to the lhs_row_pointers.
     feature_specs: The input features for the current process.
     sharding_strategy: The sharding strategy (e.g., MOD)
+    feature_stacking_strategy: The feature stacking strategy.
     label: The label for the optimizer computation.
     step: The current step number.
+    num_sc_per_device: The number of sparse cores per device. If `None`, it will
+      be set to the number of sparse cores on the current host machine.
 
   Returns:
     The updated activation embedding variables.
@@ -772,7 +841,13 @@ def tpu_sparse_dense_matmul_grad(
   stacked_table_specs = get_stacked_table_specs(feature_specs)
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
-  gradients = _stack_embedding_gradients(activation_gradients, feature_specs)
+  num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  gradients = _stack_embedding_gradients(
+      activation_gradients,
+      feature_specs,
+      num_sc_per_device,
+      feature_stacking_strategy,
+  )
   assert lhs_row_pointers.keys() == gradients.keys()
 
   # Casting to int since primitives requires JSON serializable value.

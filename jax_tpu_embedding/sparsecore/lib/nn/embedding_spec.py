@@ -696,7 +696,7 @@ class FeatureSpec:
 
   @property
   def id_transformation(self) -> FeatureIdTransformation:
-    assert self._id_transformation is not None
+    assert self._id_transformation is not None, self.name
     return self._id_transformation
 
   @id_transformation.setter
