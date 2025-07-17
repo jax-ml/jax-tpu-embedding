@@ -22,10 +22,7 @@ package(
 pytype_strict_library(
     name = "fdo_client",
     srcs = ["fdo_client.py"],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        pypi_requirement("numpy"),
-    ],
+    deps = ["//jax_tpu_embedding/sparsecore/lib/nn:embedding"],
 )
 
 pytype_strict_library(

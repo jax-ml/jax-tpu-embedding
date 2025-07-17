@@ -14,12 +14,13 @@
 """An FDO client implementation that uses CSV files as storage."""
 
 import collections
-from collections.abc import Mapping
+import dataclasses
 import glob
 import itertools
 import os
 import re
 import time
+from typing import Mapping
 
 from absl import logging
 import jax
@@ -30,9 +31,7 @@ import numpy as np
 
 _FILE_NAME = 'fdo_stats'
 _FILE_EXTENSION = 'npz'
-_MAX_ID_STATS_SUFFIX = '_max_ids'
-_MAX_UNIQUE_ID_STATS_SUFFIX = '_max_unique_ids'
-_REQUIRED_BUFFER_SIZE_STATS_SUFFIX = '_required_buffer_size'
+_PARAM_FIELDS = dataclasses.fields(embedding.SparseDenseMatmulInputStats)
 
 
 class NPZFileFDOClient(fdo_client.FDOClient):
@@ -43,22 +42,25 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     client = NPZFileFDOClient(base_dir='/path/to/base/dir')
 
     # Record observed stats from sparse input processing
-    max_ids_per_process, max_uniques_per_process =
-      embedding.preprocess_sparse_dense_matmul_input(...)
-    client.record(max_ids_per_process, max_uniques_per_process)
+    _, stats = embedding.preprocess_sparse_dense_matmul_input(...)
+    client.record(stats)
 
     # Publish process local stats to a file.
     client.publish()
 
     # Load stats from all files in the base_dir.
-    max_ids_per_process, max_uniques_per_process = client.load()
+    stats = client.load()
   """
 
   def __init__(self, base_dir: str):
     self._base_dir = base_dir
-    self._max_ids_per_partition = collections.defaultdict(np.ndarray)
-    self._max_unique_ids_per_partition = collections.defaultdict(np.ndarray)
-    self._required_coo_buffer_size_per_sc = collections.defaultdict(np.ndarray)
+    # We store the params in a dict for easy updation and as an intermediate
+    # format between SparseDenseMatmulInputStats and separate files.
+    # param_name -> table_name -> stats
+    self._params: dict[str, dict[str, np.ndarray]] = {
+        field.name: collections.defaultdict(np.ndarray)
+        for field in _PARAM_FIELDS
+    }
 
   def record(self, data: embedding.SparseDenseMatmulInputStats) -> None:
     """Records stats per process.
@@ -70,45 +72,25 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     Args:
       data: A mapping representing data to be recorded.
     """
-    max_ids_per_process = data.max_ids_per_partition
-    for table_name, stats in max_ids_per_process.items():
-      logging.vlog(
-          2, 'Recording observed max ids for table: %s -> %s', table_name, stats
-      )
-      if table_name not in self._max_ids_per_partition:
-        self._max_ids_per_partition[table_name] = stats
-      else:
-        self._max_ids_per_partition[table_name] = np.vstack(
-            (self._max_ids_per_partition[table_name], stats)
+    # We convert the dataclass to dict for easy traversal.
+    for param_name, param_value in dataclasses.asdict(data).items():
+      if param_name not in self._params:
+        logging.warning('Unsupported FDO stats: %s', param_name)
+        continue
+      for table_name, stats in param_value.items():
+        logging.vlog(
+            2,
+            'Recording observed %s for table: %s -> %s',
+            param_name,
+            table_name,
+            stats,
         )
-    max_uniques_per_process = data.max_unique_ids_per_partition
-    for table_name, stats in max_uniques_per_process.items():
-      logging.vlog(
-          2,
-          'Recording observed max unique ids for table: %s -> %s',
-          table_name,
-          stats,
-      )
-      if table_name not in self._max_unique_ids_per_partition:
-        self._max_unique_ids_per_partition[table_name] = stats
-      else:
-        self._max_unique_ids_per_partition[table_name] = np.vstack(
-            (self._max_unique_ids_per_partition[table_name], stats)
-        )
-    used_coo_buffer_size = data.required_buffer_size_per_sc
-    for table_name, stats in used_coo_buffer_size.items():
-      logging.vlog(
-          2,
-          'Recording observed used coo buffer size for table: %s -> %s',
-          table_name,
-          stats,
-      )
-      if table_name not in self._required_coo_buffer_size_per_sc:
-        self._required_coo_buffer_size_per_sc[table_name] = stats
-      else:
-        self._required_coo_buffer_size_per_sc[table_name] = np.vstack(
-            (self._required_coo_buffer_size_per_sc[table_name], stats)
-        )
+        if table_name not in self._params[param_name]:
+          self._params[param_name][table_name] = stats
+        else:
+          self._params[param_name][table_name] = np.vstack(
+              (self._params[param_name][table_name], stats)
+          )
 
   # LINT.IfChange(generate_file_name)
   def _generate_file_name(self) -> str:
@@ -160,18 +142,10 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     Publish is called by each process there by collecting stats from all
     processes.
     """
-    merged_stats = {
-        f'{table_name}{_MAX_ID_STATS_SUFFIX}': stats
-        for table_name, stats in self._max_ids_per_partition.items()
-    }
-    merged_stats.update({
-        f'{table_name}{_MAX_UNIQUE_ID_STATS_SUFFIX}': stats
-        for table_name, stats in self._max_unique_ids_per_partition.items()
-    })
-    merged_stats.update({
-        f'{name}{_REQUIRED_BUFFER_SIZE_STATS_SUFFIX}': stats
-        for name, stats in self._required_coo_buffer_size_per_sc.items()
-    })
+    merged_stats = {}
+    for field in _PARAM_FIELDS:
+      for table_name, stats in self._params[field.name].items():
+        merged_stats[f'{table_name}{field.metadata["suffix"]}'] = stats
     self._write_to_file(merged_stats)
 
   def _read_from_file(self, files_glob: str) -> Mapping[str, np.ndarray]:
@@ -191,13 +165,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
           stats[key] = np.max(np.vstack((stats[key], value)), axis=0)
     return stats
 
-  def load(
-      self,
-  ) -> tuple[
-      Mapping[str, np.ndarray],
-      Mapping[str, np.ndarray],
-      Mapping[str, np.ndarray],
-  ]:
+  def load(self) -> embedding.SparseDenseMatmulInputStats:
     """Loads state of local FDO client from disk.
 
     Reads all files in the base_dir and aggregates stats.
@@ -214,27 +182,24 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         self._base_dir, '{}*.{}'.format(_FILE_NAME, _FILE_EXTENSION)
     )
     stats = self._read_from_file(files_glob)
-    max_id_stats, max_unique_id_stats, required_buffer_size_stats = {}, {}, {}
-    for table_name, stats in stats.items():
-      if table_name.endswith(f'{_MAX_ID_STATS_SUFFIX}'):
-        max_id_stats[table_name[: -len(_MAX_ID_STATS_SUFFIX)]] = stats
-      elif table_name.endswith(f'{_MAX_UNIQUE_ID_STATS_SUFFIX}'):
-        max_unique_id_stats[table_name[: -len(_MAX_UNIQUE_ID_STATS_SUFFIX)]] = (
-            stats
-        )
-      elif table_name.endswith(f'{_REQUIRED_BUFFER_SIZE_STATS_SUFFIX}'):
-        required_buffer_size_stats[
-            table_name[: -len(_REQUIRED_BUFFER_SIZE_STATS_SUFFIX)]
-        ] = stats
-      else:
+    # We convert the files back to intermediate dict and return the
+    # SparseDenseMatmulInputStats.
+    result: dict[str, dict[str, np.ndarray]] = {
+        field.name: {} for field in _PARAM_FIELDS
+    }
+    for file_name, stats in stats.items():
+      valid_file_name = False
+      for field in _PARAM_FIELDS:
+        if file_name.endswith(field.metadata['suffix']):
+          table_name = file_name[: -len(field.metadata['suffix'])]
+          result[field.name][table_name] = stats
+          valid_file_name = True
+          break
+      if not valid_file_name:
         raise ValueError(
-            f'Unexpected table name and stats key: {table_name}, expected to'
-            f' end with {_MAX_ID_STATS_SUFFIX} or {_MAX_UNIQUE_ID_STATS_SUFFIX}'
+            f'Unexpected file name: {file_name}, expected to'
+            ' end with'
+            f' {[field.metadata["suffix"] for field in _PARAM_FIELDS]}'
         )
-    self._max_ids_per_partition = max_id_stats
-    self._max_unique_ids_per_partition = max_unique_id_stats
-    self._required_coo_buffer_size_per_sc = required_buffer_size_stats
-    return (max_id_stats, max_unique_id_stats, required_buffer_size_stats)
-
-  def get_required_buffer_size_per_sc(self) -> Mapping[str, np.ndarray]:
-    return dict(self._required_coo_buffer_size_per_sc)
+    self._params = result
+    return embedding.SparseDenseMatmulInputStats(**result)  # pytype:disable=missing-parameter

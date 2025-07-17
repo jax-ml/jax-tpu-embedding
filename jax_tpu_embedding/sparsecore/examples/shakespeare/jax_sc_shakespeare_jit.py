@@ -549,19 +549,9 @@ def run_model():
 
     if (step + 1) % _LOSS_RESET_FREQUENCY.value == 0:
       train_metrics = None
-      (
-          max_ids_per_partition,
-          max_unique_ids_per_partition,
-          required_buffer_size_per_sc,
-      ) = fdo_client.load()
+      loaded_stats = fdo_client.load()
       embedding.update_preprocessing_parameters(
-          feature_specs,
-          embedding.SparseDenseMatmulInputStats(
-              max_ids_per_partition=max_ids_per_partition,
-              max_unique_ids_per_partition=max_unique_ids_per_partition,
-              required_buffer_size_per_sc=required_buffer_size_per_sc,
-          ),
-          num_sc_per_device,
+          feature_specs, loaded_stats, num_sc_per_device
       )
     if chkpt_mgr:
       chkpt_mgr.save(

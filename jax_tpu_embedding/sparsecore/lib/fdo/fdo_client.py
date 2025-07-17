@@ -14,10 +14,8 @@
 """Abstract interface for FDO client."""
 
 import abc
-from collections.abc import Mapping
 
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
-import numpy as np
 
 
 class FDOClient(abc.ABC):
@@ -67,11 +65,7 @@ class FDOClient(abc.ABC):
   @abc.abstractmethod
   def load(
       self,
-  ) -> tuple[
-      Mapping[str, np.ndarray],
-      Mapping[str, np.ndarray],
-      Mapping[str, np.ndarray],
-  ]:
+  ) -> embedding.SparseDenseMatmulInputStats:
     """Loads state of local FDO client and returns the aggregated stats.
 
     An implementation of this method defines how the stats are aggregated across

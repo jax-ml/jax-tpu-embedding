@@ -78,9 +78,15 @@ class SparseDenseMatmulInputStats:
   single value could also be used in cases where maximum is required.
   """
 
-  max_ids_per_partition: Mapping[str, np.ndarray]
-  max_unique_ids_per_partition: Mapping[str, np.ndarray]
-  required_buffer_size_per_sc: Mapping[str, np.ndarray]
+  max_ids_per_partition: dict[str, np.ndarray] = dataclasses.field(
+      metadata={"suffix": "_max_ids"}
+  )
+  max_unique_ids_per_partition: dict[str, np.ndarray] = dataclasses.field(
+      metadata={"suffix": "_max_unique_ids"}
+  )
+  required_buffer_size_per_sc: dict[str, np.ndarray] = dataclasses.field(
+      metadata={"suffix": "_required_buffer_size"}
+  )
 
   @classmethod
   def from_cc(
@@ -90,16 +96,6 @@ class SparseDenseMatmulInputStats:
         max_ids_per_partition=stats.max_ids_per_partition,
         max_unique_ids_per_partition=stats.max_unique_ids_per_partition,
         required_buffer_size_per_sc=stats.required_buffer_sizes,
-    )
-
-  @classmethod
-  def from_dict(
-      cls, stats: Mapping[str, Mapping[str, np.ndarray]]
-  ) -> "SparseDenseMatmulInputStats":
-    return cls(
-        max_ids_per_partition=stats["max_ids"],
-        max_unique_ids_per_partition=stats["max_unique_ids"],
-        required_buffer_size_per_sc=stats["required_buffer_size"],
     )
 
 
