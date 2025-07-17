@@ -27,6 +27,7 @@ import functools
 import json
 from typing import Tuple
 
+import jax
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import func as func_dialect
 from jax._src.lib.mlir.dialects import hlo
@@ -334,34 +335,36 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
 
     func_dialect.ReturnOp([hlo.tuple([w_new, accumulator_new_, linear_new_])])
 
-  custom_call_op = mlir.custom_call(
+    operands = [
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        activations_grad,
+        embedding_table,
+        # slot variables
+        accumulator,
+        linear,
+        # hyperparameters
+        learning_rate_,
+        learning_rate_power_,
+        l1_regularization_strength_,
+        l2_regularization_strength_,
+        beta_,
+        multiply_linear_by_learning_rate_,
+    ]
+  custom_call_op = jax.ffi.ffi_lowering(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
           ir.TupleType.get_tuple(
               [embedding_table.type, accumulator.type, linear.type]
           )
       ],
-      operands=[
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
-          activations_grad,
-          embedding_table,
-          # slot variables
-          accumulator,
-          linear,
-          # hyperparameters
-          learning_rate_,
-          learning_rate_power_,
-          l1_regularization_strength_,
-          l2_regularization_strength_,
-          beta_,
-          multiply_linear_by_learning_rate_,
-      ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
-  )
+      skip_ffi_layout_processing=True,
+      api_version=1,
+  )(ctx, *operands)
 
   updated_table_op = _annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op, 0)

@@ -16,6 +16,7 @@
 import functools
 import json
 
+import jax
 from jax import core
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import hlo
@@ -199,13 +200,13 @@ def _tpu_sparse_dense_matmul_csr_lowering(
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
-  op = mlir.custom_call(
+  return jax.ffi.ffi_lowering(
       "SparseDenseMatmulOp",
       result_types=[mlir.aval_to_ir_type(out_aval)],
-      operands=[tuple_op.result, embedding_table, activation_init],
+      api_version=1,
       backend_config=backend_config,
-  )
-  return op.results
+      skip_ffi_layout_processing=True,
+  )(ctx, tuple_op.result, embedding_table, activation_init)  # type: ignore
 
 
 mlir.register_lowering(
