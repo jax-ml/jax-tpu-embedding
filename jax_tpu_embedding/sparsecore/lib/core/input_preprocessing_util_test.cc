@@ -653,77 +653,225 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
           max_unique_id_per_sc, required_buffer_sizes_per_sc);
 
   Eigen::VectorXi row_pointers(8 * 4);
-  Eigen::VectorXi embedding_ids(32 * 4);
-  Eigen::VectorXi sample_ids(32 * 4);
-  Eigen::VectorXf gains(32 * 4);
+  Eigen::VectorXi embedding_ids(40 * 4);
+  Eigen::VectorXi sample_ids(40 * 4);
+  Eigen::VectorXf gains(40 * 4);
   FillRowPointersPerLocalDevice(coo_tensors_by_id,
                                 /*row_pointers_size_per_sc=*/8,
-                                /*coo_buffer_size_per_sc=*/32,
+                                /*coo_buffer_size_per_sc=*/40,
                                 /*batch_size_per_sc=*/2, options, row_pointers,
                                 embedding_ids, sample_ids, gains);
 
   std::array<int, 32> expected_row_pointers = {
-      2, 10, 18, 26, 32, 32, 32, 32, 2, 10, 18, 26, 32, 32, 32, 32,
-      2, 10, 18, 26, 32, 32, 32, 32, 2, 10, 18, 26, 32, 32, 32, 32};
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+  };
   EXPECT_THAT(row_pointers, ElementsAreArray(expected_row_pointers));
 
-  std::array<int, 128> expected_embedding_ids = {
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX};
+  std::array<int, 4 * 40> expected_embedding_ids = {
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+  };
 
   EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
 
-  std::array<int, 128> expected_sample_ids = {
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+  std::array<int, 4 * 40> expected_sample_ids = {
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
   };
   EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
 
-  EXPECT_THAT(
-      gains,
-      ElementsAre(
-          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), 1, 1,
-          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), 1, 1, IsNan(),
-          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(),
-          IsNan(), IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(),
-          IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(),
-          IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-          IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), 1, 1,
-          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), 1, 1, IsNan(),
-          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(),
-          IsNan(), IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(),
-          IsNan(), IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(),
-          IsNan(), IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-          IsNan(), 1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan()));
+  auto expected_gains = ElementsAre(
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan(),                                                     //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan(),                                                     //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan(),                                                     //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan()  //
+  );
+  EXPECT_THAT(gains, expected_gains);
+}
+
+TEST(InputPreprocessingUtilTest, FillRowPointersMinibatching) {
+  std::vector<CooFormat> coo_formats;
+
+  for (int row = 0; row < 8; ++row) {
+    coo_formats.push_back(CooFormat(row, 0, 1.0));
+    coo_formats.push_back(CooFormat(row, 1, 1.0));
+    coo_formats.push_back(CooFormat(row, 2, 1.0));
+    coo_formats.push_back(CooFormat(row, 3, 1.0));
+  }
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
+  ExtractedCooTensors extracted_coo_tensors;
+  extracted_coo_tensors.coo_tensors = coo_formats;
+  extracted_coo_tensors.batch_size_for_device = 8;
+  StackedTableMetadata stacked_table_metadata(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
+      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+  PreprocessSparseDenseMatmulInputOptions options;
+  options.local_device_count = 4;
+  options.global_device_count = 1;
+  options.num_sc_per_device = 4;
+  options.allow_id_dropping = false;
+  options.enable_minibatching = true;
+  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+
+  Eigen::VectorXi row_pointers(8 * 4);
+  Eigen::VectorXi embedding_ids(40 * 4);
+  Eigen::VectorXi sample_ids(40 * 4);
+  Eigen::VectorXf gains(40 * 4);
+  FillRowPointersPerLocalDevice(coo_tensors_by_id,
+                                /*row_pointers_size_per_sc=*/8,
+                                /*coo_buffer_size_per_sc=*/40,
+                                /*batch_size_per_sc=*/2, options, row_pointers,
+                                embedding_ids, sample_ids, gains);
+
+  std::array<int, 32> expected_row_pointers = {
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+  };
+  EXPECT_THAT(row_pointers, ElementsAreArray(expected_row_pointers));
+
+  std::array<int, 4 * 40> expected_embedding_ids = {
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+  };
+
+  EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
+
+  std::array<int, 4 * 40> expected_sample_ids = {
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+  };
+  EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
+
+  auto expected_gains = ElementsAre(
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan(),  //
+      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+      IsNan()  //
+  );
+  EXPECT_THAT(gains, expected_gains);
 }
 
 }  // namespace

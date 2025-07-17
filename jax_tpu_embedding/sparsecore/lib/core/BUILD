@@ -51,6 +51,7 @@ cc_library(
     hdrs = ["input_preprocessing_util.h"],
     deps = [
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
@@ -106,7 +107,6 @@ cc_test(
     srcs = ["input_preprocessing_util_test.cc"],
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
-        ":input_preprocessing_core",
         ":input_preprocessing_util",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",

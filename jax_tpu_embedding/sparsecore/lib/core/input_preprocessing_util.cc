@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
@@ -79,17 +80,33 @@ void ValidateMaxIdsOrDie(const int32_t observed_max_ids_per_partition,
   }
 }
 
+struct FillRowPointersPerSparseCoreOptions {
+  int local_sc_id;
+  absl::Span<const CooFormat> coo_tensors;
+
+  int lhs_row_begin;
+  int lhs_row_end;
+
+  int coo_begin;
+  int coo_end;
+
+  int batch_size_per_sc;
+  int num_sc_per_device;
+  int num_scs;
+  int coo_buffer_size;
+};
+
 // Check if the current indexes are valid within the buffer sizes.
-bool ValidIndices(int row_index, int coo_offset, int row_end, int coo_end,
-                  int local_sc_id, int total_coos, int coo_buffer_size,
-                  int processed) {
-  if (row_index >= row_end || coo_offset >= coo_end) {
+bool ValidIndices(int row_index, int coo_offset, int processed,
+                  const FillRowPointersPerSparseCoreOptions& options) {
+  if (row_index >= options.lhs_row_end || coo_offset >= options.coo_end) {
     LOG(ERROR) << "Static buffer size maybe too small for current "
                   "batch. IDs may be dropped! Static buffer size: "
-               << coo_buffer_size
+               << options.coo_buffer_size
                << ". Halting row pointer filling at while processing for local "
                   "sparsecore ID "
-               << local_sc_id << ". Total COOs: " << total_coos
+               << options.local_sc_id
+               << ". Total COOs: " << options.coo_tensors.size()
                << ", while currently processed only: " << processed - 1;
     return false;
   }
@@ -97,10 +114,10 @@ bool ValidIndices(int row_index, int coo_offset, int row_end, int coo_end,
 }
 
 // Pad the row pointers buffer to the end of the buffer.
-void PadRowPointersBuffer(int& lhs_row_index, int coo_offset, int row_end,
+void PadRowPointersBuffer(int& lhs_row_offset, int padding, int row_end,
                           Eigen::Ref<RowVectorXi> row_pointers) {
-  while (lhs_row_index < row_end) {
-    row_pointers[lhs_row_index++] = coo_offset;
+  while (lhs_row_offset < row_end) {
+    row_pointers[lhs_row_offset++] = padding;
   }
 }
 
@@ -122,56 +139,52 @@ void PadSparseCoreBuffer(int& coo_index, int coo_end, bool pad_to_end,
 }
 
 // Fill the row pointers buffer for a single sparse core from `lhs_row_begin` to
-// `lhs_row_end` and coo buffer from `coo_begin` to `coo_end`.
-void FillRowPointersPerSparseCore(
-    const int local_sc_id, absl::Span<const CooFormat> coo_tensors,
-    const int lhs_row_begin, const int lhs_row_end, const int coo_begin,
-    const int coo_end, const int batch_size_per_sc, const int num_sc_per_device,
-    const int num_scs, const int coo_buffer_size,
+// `lhs_row_end` and coo buffer from `coo_begin` to `coo_end`. Returns the
+// `coo_index` from where next the buffer can be filled.
+int FillRowPointersPerSparseCore(
+    const FillRowPointersPerSparseCoreOptions& options,
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
     Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains) {
-  int lhs_row_index = lhs_row_begin;
-  int coo_index = coo_begin;
-  auto last_sc_id = std::make_pair(local_sc_id, 0);
+  int lhs_row_index = options.lhs_row_begin;
+  int coo_index = options.coo_begin;
+  auto last_sc_id = std::make_pair(options.local_sc_id, 0);
 
-  const int total_coos = coo_tensors.size();
   int processed = 0;
-  for (const CooFormat& coo_tensor : coo_tensors) {
+  for (const CooFormat& coo_tensor : options.coo_tensors) {
     ++processed;
-    const auto sc_id = std::make_pair(coo_tensor.row_id / batch_size_per_sc,
-                                      coo_tensor.col_id % num_scs);
+    const auto sc_id =
+        std::make_pair(coo_tensor.row_id / options.batch_size_per_sc,
+                       coo_tensor.col_id % options.num_scs);
     while (last_sc_id < sc_id) {
-      if (!ValidIndices(lhs_row_index, coo_index, lhs_row_end, coo_end,
-                        local_sc_id, total_coos, coo_buffer_size, processed)) {
+      if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
         break;
       }
-      row_pointers[lhs_row_index++] = coo_index - coo_begin;
-      PadSparseCoreBuffer(coo_index, coo_end,
+      row_pointers[lhs_row_index++] = coo_index - options.coo_begin;
+      // Align partition.
+      PadSparseCoreBuffer(coo_index, options.coo_end,
                           /*pad_to_end=*/false, embedding_ids, sample_ids,
                           gains);
-      IncrementScId(last_sc_id, num_scs, num_sc_per_device);
+      IncrementScId(last_sc_id, options.num_scs, options.num_sc_per_device);
     }
     // Terminate at the sentinel node.
-    if (coo_tensor.row_id == batch_size_per_sc * (local_sc_id + 1)) {
+    if (coo_tensor.row_id ==
+        options.batch_size_per_sc * (options.local_sc_id + 1)) {
       DCHECK_EQ(coo_tensor.gain, 0);
       break;
     }
-    if (!ValidIndices(lhs_row_index, coo_index, lhs_row_end, coo_end,
-                      local_sc_id, total_coos, coo_buffer_size, processed)) {
+    if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
       break;
     }
 
-    embedding_ids[coo_index] = coo_tensor.col_id / num_scs;
-    sample_ids[coo_index] = coo_tensor.row_id % batch_size_per_sc;
+    embedding_ids[coo_index] = coo_tensor.col_id / options.num_scs;
+    sample_ids[coo_index] = coo_tensor.row_id % options.batch_size_per_sc;
     gains[coo_index] = coo_tensor.gain;
     ++coo_index;
   }
 
-  // TODO: b/428790659 - only enable for non-minibatching.
-  PadRowPointersBuffer(lhs_row_index, /*coo_offset=*/coo_index - coo_begin,
-                       lhs_row_end, row_pointers);
-  PadSparseCoreBuffer(coo_index, coo_end,
-                      /*pad_to_end=*/true, embedding_ids, sample_ids, gains);
+  PadRowPointersBuffer(lhs_row_index, /*padding=*/coo_index - options.coo_begin,
+                       options.lhs_row_end, row_pointers);
+  return coo_index;
 }
 
 }  // namespace
@@ -428,18 +441,41 @@ void FillRowPointersPerLocalDevice(
   const int num_scs = options.GetNumScs();
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
   DCHECK_GT(batch_size_per_sc, 0);
+  int coo_begin = 0;
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
     const int lhs_row_begin = local_sc_id * row_pointers_size_per_sc;
     const int lhs_row_end = lhs_row_begin + row_pointers_size_per_sc;
-    const int coo_begin = local_sc_id * coo_buffer_size_per_sc;
-    const int coo_end = coo_begin + coo_buffer_size_per_sc;
-    // TODO: b/428790659 - set end index as buffer end instead for minibatching.
-    FillRowPointersPerSparseCore(
-        local_sc_id, coo_tensors_by_id[local_sc_id], lhs_row_begin, lhs_row_end,
-        coo_begin, coo_end, batch_size_per_sc, num_sc_per_device, num_scs,
-        coo_buffer_size, row_pointers, embedding_ids, sample_ids, gains);
+    const int coo_end =
+        options.enable_minibatching
+            ? coo_buffer_size                      // use whole buffer
+            : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
+    // TODO: b/428790659 - Loop over minibatches here.
+    int coo_index = FillRowPointersPerSparseCore(
+        {
+            .local_sc_id = local_sc_id,
+            .coo_tensors = coo_tensors_by_id[local_sc_id],
+            .lhs_row_begin = lhs_row_begin,
+            .lhs_row_end = lhs_row_end,
+            .coo_begin = coo_begin,
+            .coo_end = coo_end,
+            .batch_size_per_sc = batch_size_per_sc,
+            .num_sc_per_device = num_sc_per_device,
+            .num_scs = num_scs,
+            .coo_buffer_size = coo_buffer_size,
+        },
+        row_pointers, embedding_ids, sample_ids, gains);
+
+    // Only pad (to end of COO buffer) between SparseCores for
+    // non-minibatching. Always pad after the last SparseCore. The end could be
+    // different per SparseCore for non-minibatching.
+    if (!options.enable_minibatching || local_sc_id == num_sc_per_device - 1) {
+      PadSparseCoreBuffer(coo_index, coo_end,
+                          /*pad_to_end=*/true, embedding_ids, sample_ids,
+                          gains);
+      CHECK_EQ(coo_index, coo_end);
+    }
+    coo_begin = coo_index;
   }
-  // TODO: b/428790659 - pad row pointers & coo here, for minibatching case.
 }
 
 }  // namespace jax_sc_embedding
