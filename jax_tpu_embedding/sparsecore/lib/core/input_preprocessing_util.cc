@@ -54,13 +54,22 @@ void ValidateMaxIdsOrDie(const int32_t observed_max_ids_per_partition,
                    << " observed max ids per partition: "
                    << observed_max_ids_per_partition
                    << " is greater than the set max ids per partition: "
-                   << max_ids_per_partition;
+                   << max_ids_per_partition << ". See "
+                   << "g3doc/third_party/py/jax_tpu_embedding/sparsecore/g3doc/"
+                      "sc_input_parameters#choosing-a-value-for-the-parameters "
+                      "for more details.";
     } else {
       LOG(FATAL) << "Observed max ids per partition: "
                  << observed_max_ids_per_partition
                  << " for table: " << stacked_table_name
                  << " is greater than the set max ids per partition: "
-                 << max_ids_per_partition;
+                 << max_ids_per_partition
+                 << ". Use `allow_id_dropping` or increase the "
+                    "`max_ids_per_partition`. You could also try to reduce the "
+                    "batch size. See "
+                    "g3doc/third_party/py/jax_tpu_embedding/sparsecore/g3doc/"
+                    "sc_input_parameters#choosing-a-value-for-the-parameters "
+                    "for more details.";
     }
   }
   if (observed_max_unique_ids_per_partition > max_unique_ids_per_partition) {
@@ -69,13 +78,23 @@ void ValidateMaxIdsOrDie(const int32_t observed_max_ids_per_partition,
                    << " observed max unique ids per partition: "
                    << observed_max_unique_ids_per_partition
                    << " is greater than the set max unique ids per partition: "
-                   << max_unique_ids_per_partition;
+                   << max_unique_ids_per_partition << ". See "
+                   << "g3doc/third_party/py/jax_tpu_embedding/sparsecore/g3doc/"
+                      "sc_input_parameters#choosing-a-value-for-the-parameters "
+                      "for more details.";
+      ;
     } else {
       LOG(FATAL) << "Observed max unique ids per partition: "
                  << observed_max_unique_ids_per_partition
                  << " for table: " << stacked_table_name
                  << " is greater than the set max unique ids per partition: "
-                 << max_unique_ids_per_partition;
+                 << max_unique_ids_per_partition
+                 << ". Use `allow_id_dropping` or increase the "
+                    "`max_ids_per_partition`. You could also try to reduce the "
+                    "batch size. See "
+                    "g3doc/third_party/py/jax_tpu_embedding/sparsecore/g3doc/"
+                    "sc_input_parameters#choosing-a-value-for-the-parameters "
+                    "for more details.";
     }
   }
 }
