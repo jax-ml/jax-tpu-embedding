@@ -15,6 +15,7 @@
 
 #include <Python.h>
 
+#include <cstdint>
 #include <vector>
 
 #include "absl/base/call_once.h"  // from @com_google_absl
@@ -83,10 +84,12 @@ void PySparseCooInputBatch::ExtractCooTensors(
 
   ConstructRowPointersIfRequired();
 
-  SparseCsrInputBatchStream values_stream(
-      values_.unchecked<1>(), absl::MakeConstSpan(row_pointers_),
-      options.slice_start, options.slice_end, options.table_name,
-      max_vocab_id_);
+  SparseCsrInputBatchStream<int64_t,
+                            pybind11::detail::unchecked_reference<int, 1>,
+                            absl::Span<const int64_t>>
+      values_stream(values_.unchecked<1>(), absl::MakeConstSpan(row_pointers_),
+                    options.slice_start, options.slice_end, table_name_,
+                    max_vocab_id_);
   UnityWeightsStream weights_stream(values_stream);
 
   ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);

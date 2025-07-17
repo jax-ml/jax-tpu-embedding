@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -149,7 +150,7 @@ class SparseCsrInputBatchStream {
  public:
   SparseCsrInputBatchStream(ValuesView values, RowPointersView row_pointers,
                             int row_start, int row_end,
-                            absl::string_view table_name,
+                            absl::string_view table_name = "unknown_table_name",
                             T max_vocab_id = std::numeric_limits<T>::max())
       : values_ref_(values),
         row_pointers_(row_pointers),
@@ -184,9 +185,8 @@ class SparseCsrInputBatchStream {
     DCHECK_LT(curr_idx_, row_pointers_[curr_row_ + 1]);
     T embedding_id = values_ref_[curr_idx_];
     CHECK(embedding_id >= 0 && embedding_id <= max_vocab_id_)
-        << "Invalid vocabulary id: " << embedding_id
-        << " for table: " << table_name_
-        << " with vocabulary size: " << max_vocab_id_;
+        << "Invalid vocabulary id: " << embedding_id << " for table "
+        << table_name_ << " with vocabulary size: " << max_vocab_id_;
     return embedding_id;
   }
 
@@ -199,14 +199,6 @@ class SparseCsrInputBatchStream {
   T max_vocab_id_;
   absl::string_view table_name_;
 };
-
-template <typename T, typename U1, typename U2>
-SparseCsrInputBatchStream(U1, U2, int, int, absl::string_view, T)
-    -> SparseCsrInputBatchStream<T, U1, U2>;
-
-template <typename U1, typename U2>
-SparseCsrInputBatchStream(U1, U2, int, int, absl::string_view)
-    -> SparseCsrInputBatchStream<int64_t, U1, U2>;
 
 // Class to iterate over a sparse CSR array, providing unity weights for each
 // value. This class takes an existing `ValuesStream` (e.g.,

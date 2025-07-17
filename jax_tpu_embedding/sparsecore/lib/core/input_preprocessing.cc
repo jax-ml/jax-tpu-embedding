@@ -88,8 +88,7 @@ void ExtractCooTensorsForSingleFeatureSlice(
                                  .col_offset = col_offset,
                                  .col_shift = col_shift,
                                  .num_scs = options.GetNumScs(),
-                                 .combiner = metadata.row_combiner,
-                                 .table_name = metadata.name},
+                                 .combiner = metadata.row_combiner},
                                 coo_tensors);
 }
 }  // namespace

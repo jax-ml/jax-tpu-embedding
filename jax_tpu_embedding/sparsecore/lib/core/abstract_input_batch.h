@@ -17,7 +17,6 @@
 
 #include <vector>
 
-#include "absl/strings/string_view.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
@@ -40,8 +39,6 @@ class AbstractInputBatch {
     int num_scs;
     // Combiner to be used for the row.
     RowCombiner combiner;
-    // Table name for debug logging.
-    absl::string_view table_name;
   };
 
   // Return the batch size or the number of samples in this input batch.

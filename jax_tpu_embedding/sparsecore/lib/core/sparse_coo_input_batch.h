@@ -17,6 +17,8 @@
 #include <Python.h>
 
 #include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/base/call_once.h"  // from @com_google_absl
@@ -44,12 +46,14 @@ class PySparseCooInputBatch : public AbstractInputBatch {
                         const py::array_t<int64_t>& indices,
                         const py::array_t<int32_t>& values,
                         const py::array_t<int64_t>& dense_shape,
-                        const int64_t max_vocab_id)
+                        const int64_t max_vocab_id,
+                        const std::string table_name)
       : batch_number_(batch_number),
         indices_(indices),
         values_(values),
         max_vocab_id_(max_vocab_id),
-        batch_size_(dense_shape.at(0)) {
+        batch_size_(dense_shape.at(0)),
+        table_name_(std::move(table_name)) {
     DCHECK(PyGILState_Check())
         << "Need GIL to create references to indices and values.";
   }
@@ -69,8 +73,10 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   const py::array_t<int64_t> indices_;
   const py::array_t<int32_t> values_;
   const int64_t max_vocab_id_;
-  std::vector<int64_t> row_pointers_;
   const int64_t batch_size_;
+  const std::string table_name_;
+
+  std::vector<int64_t> row_pointers_;
   absl::once_flag row_pointer_construction_flag_;
 
   // Converts this to a CSR format. A refactor could return an object of type
