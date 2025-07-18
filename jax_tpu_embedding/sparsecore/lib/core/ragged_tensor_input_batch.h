@@ -17,8 +17,10 @@
 #include <vector>
 
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/sparse_csr_input_stream_impl.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/unity_weights_stream_impl.h"
 
 namespace jax_sc_embedding {
 
