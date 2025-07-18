@@ -13,12 +13,14 @@
 # limitations under the License.
 """List of functions for embedding lookup."""
 
+import abc
 import collections
 import dataclasses
 import functools
 from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
 
 from absl import logging
+import deprecated
 import einops
 from flax import struct
 import jax
@@ -367,38 +369,52 @@ def sharding_strategy_to_enum(
     )
 
 
-def preprocess_sparse_dense_matmul_input(
-    features: Nested[ArrayLike],
-    features_weights: Nested[ArrayLike],
-    feature_specs: Nested[embedding_spec.FeatureSpec],
-    local_device_count: int,
-    global_device_count: int,
-    num_sc_per_device: int | None = None,
-    sharding_strategy: str = "MOD",
-    has_leading_dimension: bool = False,
-    allow_id_dropping: bool = False,
-    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
-    batch_number: int = 0,
-) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
-  """Preprocesses the input for sparse dense matmul.
+# Once preprocess_sparse_dense_matmul_input* is removed, we can make this
+# frozen.
+@dataclasses.dataclass
+class SDMMConfig:
+  """Common Config for preprocessing sparse dense matmul input, matmul and grad.
 
-  Args:
-    features: The input features for the current process. The features are
-      expected to be Nested type (defined above). Concretely each leaf node
-      should be either a 2D numpy array or a 1D list or numpy array of numpy
-      arrays with dtype object (in the ragged tensor case).
-    features_weights: The input feature weights. The structure must be identical
-      to the features.
-    feature_specs: The feature specs. This needs to have the same structure as
-      features and features_weights (e.g., if one of them is a mapping then all
-      of them are).
+  Attributes:
     local_device_count: The number of local devices (chips). Typically
       `mesh.local_mesh.size`.
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
+    feature_specs: The feature specs. This needs to have the same structure as
+      features and features_weights (e.g., if one of them is a mapping then all
+      of them are).
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
     sharding_strategy: The sharding strategy (e.g., MOD)
+    feature_stacking_strategy: The feature stacking strategy.
+  """
+
+  local_device_count: int
+  global_device_count: int
+  feature_specs: Nested[embedding_spec.FeatureSpec]
+  num_sc_per_device: int | None = None
+  sharding_strategy: str = "MOD"
+  feature_stacking_strategy: FeatureStackingStrategy = (
+      FeatureStackingStrategy.SPLIT_THEN_STACK
+  )
+
+  def __post_init__(self):
+    if self.num_sc_per_device is None:
+      self.num_sc_per_device = _get_num_sc_per_device(self.num_sc_per_device)
+    # kwargs.get(...) can result in None.
+    if self.sharding_strategy is None:
+      self.sharding_strategy = "MOD"
+    if self.feature_stacking_strategy is None:
+      self.feature_stacking_strategy = FeatureStackingStrategy.SPLIT_THEN_STACK
+
+
+# Once preprocess_sparse_dense_matmul_input* is removed, we can make this
+# frozen.
+@dataclasses.dataclass
+class PreprocessConfig:
+  """Config for preprocessing sparse dense matmul input.
+
+  Attributes:
     has_leading_dimension: If set to True, then the first dimension of the
       output will be the number of local devices. This is useful when using the
       output in jax.pmap. If set to False, then the first dimension of the
@@ -407,54 +423,80 @@ def preprocess_sparse_dense_matmul_input(
       if using jax.pmap and set it to False if using jax.jit.
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
-    feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
-
-  Returns:
-    A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
   """
-  num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
-  tree.assert_same_structure(features, feature_specs)
-  tree.assert_same_structure(features_weights, feature_specs)
 
-  *preprocessed_inputs, stats = (
-      pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-          batch_number,
-          tree.flatten(features),
-          tree.flatten(features_weights),
-          tree.flatten(feature_specs),
-          local_device_count,
-          global_device_count,
-          num_sc_per_device,
-          sharding_strategy_to_enum(sharding_strategy),
-          has_leading_dimension,
-          allow_id_dropping=allow_id_dropping,
-          feature_stacking_strategy=feature_stacking_strategy,
-      )
-  )
+  has_leading_dimension: bool = False
+  allow_id_dropping: bool = False
+  batch_number: int = 0
 
-  return SparseDenseMatmulInput(
-      *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_cc(stats)
+  def __post_init__(self):
+    # kwargs.get(...) can result in None.
+    if self.has_leading_dimension is None:
+      self.has_leading_dimension = False
+    if self.allow_id_dropping is None:
+      self.allow_id_dropping = False
+    if self.batch_number is None:
+      self.batch_number = 0
 
 
-def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
-    indices: Nested[ArrayLike],
-    values: Nested[ArrayLike],
-    dense_shapes: Nested[ArrayLike],
-    feature_specs: Nested[embedding_spec.FeatureSpec],
-    local_device_count: int,
-    global_device_count: int,
-    num_sc_per_device: int | None = None,
-    sharding_strategy: str = "MOD",
-    has_leading_dimension: bool = False,
-    allow_id_dropping: bool = False,
-    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
-    batch_number: int = 0,
-) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
-  """Preprocesses the input for sparse dense matmul.
+class SparseInput(abc.ABC):
+  """Abstract base class for sparse input data structures."""
 
-  Args:
+  @property
+  @abc.abstractmethod
+  def preprocess_fn(self):
+    """Returns the preprocessing function for this input type."""
+    pass
+
+  @property
+  @abc.abstractmethod
+  def input_arrays(self) -> list[Nested[ArrayLike]]:
+    """Returns the input arrays for the preprocessing function."""
+    pass
+
+  @abc.abstractmethod
+  def validate(self, feature_specs: Nested[embedding_spec.FeatureSpec]) -> None:
+    """Validates the input against the feature specs."""
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class ListInput(SparseInput):
+  """Input data structure using list of ids and weights.
+
+  Attributes:
+    features: The input features for the current process. The features are
+      expected to be Nested type (defined above). Concretely each leaf node
+      should be either a 2D numpy array or a 1D list or numpy array of numpy
+      arrays with dtype object (in the ragged tensor case).
+    features_weights: The input feature weights. The structure must be identical
+      to the features.
+  """
+
+  features: Nested[ArrayLike]
+  features_weights: Nested[ArrayLike]
+
+  @property
+  def preprocess_fn(self):
+    """Returns the preprocessing function for this input type."""
+    return pybind_input_preprocessing.PreprocessSparseDenseMatmulInput
+
+  @property
+  def input_arrays(self) -> list[Nested[ArrayLike]]:
+    """Returns the input arrays for the preprocessing function."""
+    return [tree.flatten(self.features), tree.flatten(self.features_weights)]
+
+  def validate(self, feature_specs: Nested[embedding_spec.FeatureSpec]) -> None:
+    tree.assert_same_structure(self.features, feature_specs)
+    tree.assert_same_structure(self.features_weights, feature_specs)
+
+
+@dataclasses.dataclass(frozen=True)
+class SparseCooInput(SparseInput):
+  """Input data structure using sparse COO representation.
+
+  Attributes:
     indices: A nested structure of 2-D int64 tensors, where each tensor has
       shape [N, ndims]. It represents the indices of non-zero elements in a
       sparse tensor, with elements being zero-indexed. For instance,
@@ -469,55 +511,144 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       number of elements in each dimension. For example, `dense_shape=[3,6]`
       represents a 3x6 tensor, `dense_shape=[2,3,4]` a 2x3x4 tensor, and
       `dense_shape=[9]` a 9-element 1-D tensor.
-    feature_specs: The feature specs. This needs to have the same structure as
-      indices, values and dense_shapes (e.g., if one of them is a mapping then
-      all of them are).
-    local_device_count: The number of local devices (chips). Typically
-      `mesh.local_mesh.size`.
-    global_device_count: The number of global devices (chips). Typically
-      `mesh.size`.
-    num_sc_per_device: The number of sparse cores per device. If `None`, it will
-      be set to the number of sparse cores on the current host machine.
-    sharding_strategy: The sharding strategy (e.g., MOD)
-    has_leading_dimension: If set to True, then the first dimension of the
-      output will be the number of local devices. This is useful when using the
-      output in jax.pmap. If set to False, then the first dimension of the
-      output will be the number of local devices * the static buffer size. This
-      is useful when using the output in jax.jit. In conclusion, Set it to True
-      if using jax.pmap and set it to False if using jax.jit.
-    allow_id_dropping: If set to True, then ids will be dropped if they exceed
-      the max_ids_per_partition or max_unique_ids_per_partition limits.
-    feature_stacking_strategy: The feature stacking strategy.
-    batch_number: The batch number.
-
-  Returns:
-    A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
   """
-  num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
-  tree.assert_same_structure(indices, feature_specs)
-  tree.assert_same_structure(values, feature_specs)
-  tree.assert_same_structure(dense_shapes, feature_specs)
 
-  *preprocessed_inputs, stats = (
-      pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
-          batch_number,
-          tree.flatten(indices),
-          tree.flatten(values),
-          tree.flatten(dense_shapes),
-          tree.flatten(feature_specs),
-          local_device_count,
-          global_device_count,
-          num_sc_per_device,
-          sharding_strategy_to_enum(sharding_strategy),
-          has_leading_dimension,
-          allow_id_dropping=allow_id_dropping,
-          feature_stacking_strategy=feature_stacking_strategy,
-      )
+  indices: Nested[ArrayLike]
+  values: Nested[ArrayLike]
+  dense_shapes: Nested[ArrayLike]
+
+  @property
+  def preprocess_fn(self):
+    """Returns the preprocessing function for this input type."""
+    return pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput
+
+  @property
+  def input_arrays(self) -> list[Nested[ArrayLike]]:
+    """Returns the input arrays for the preprocessing function."""
+    return [
+        tree.flatten(self.indices),
+        tree.flatten(self.values),
+        tree.flatten(self.dense_shapes),
+    ]
+
+  def validate(self, feature_specs: Nested[embedding_spec.FeatureSpec]) -> None:
+    tree.assert_same_structure(self.indices, feature_specs)
+    tree.assert_same_structure(self.values, feature_specs)
+    tree.assert_same_structure(self.dense_shapes, feature_specs)
+
+
+def preprocess_input(
+    sparse_input: SparseInput,
+    sdmm_config: SDMMConfig,
+    preprocess_config: PreprocessConfig,
+) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
+  """Preprocesses the input for sparse dense matmul."""
+
+  sparse_input.validate(sdmm_config.feature_specs)
+
+  *preprocessed_inputs, stats = sparse_input.preprocess_fn(
+      preprocess_config.batch_number,
+      *sparse_input.input_arrays,
+      tree.flatten(sdmm_config.feature_specs),
+      sdmm_config.local_device_count,
+      sdmm_config.global_device_count,
+      sdmm_config.num_sc_per_device,
+      sharding_strategy_to_enum(sdmm_config.sharding_strategy),
+      preprocess_config.has_leading_dimension,
+      allow_id_dropping=preprocess_config.allow_id_dropping,
+      feature_stacking_strategy=sdmm_config.feature_stacking_strategy,
   )
 
   return SparseDenseMatmulInput(
       *preprocessed_inputs
   ), SparseDenseMatmulInputStats.from_cc(stats)
+
+
+@deprecated.deprecated(reason="Use 'preprocess_input' instead.")
+def preprocess_sparse_dense_matmul_input(
+    features: Nested[ArrayLike],
+    features_weights: Nested[ArrayLike],
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    **kwargs,
+) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
+  """Preprocesses the input for sparse dense matmul.
+
+  Args:
+    features: The input features for the current process. The features are
+      expected to be Nested type (defined above). Concretely each leaf node
+      should be either a 2D numpy array or a 1D list or numpy array of numpy
+      arrays with dtype object (in the ragged tensor case).
+    features_weights: The input feature weights. The structure must be identical
+      to the features.
+    feature_specs: The feature specs. This needs to have the same structure as
+      features and features_weights (e.g., if one of them is a mapping then all
+      of them are).
+    **kwargs: Additional arguments to pass to the SDMMConfig and
+      PreprocessConfig classes.
+
+  Returns:
+    A tuple of (SparseDenseMatmulInput, SparseDenseMatmulInputStats).
+  """
+  return preprocess_input(
+      ListInput(features, features_weights),
+      SDMMConfig(
+          local_device_count=kwargs.get("local_device_count"),
+          global_device_count=kwargs.get("global_device_count"),
+          num_sc_per_device=kwargs.get("num_sc_per_device"),
+          sharding_strategy=kwargs.get("sharding_strategy"),
+          feature_stacking_strategy=kwargs.get("feature_stacking_strategy"),
+          feature_specs=feature_specs,
+      ),
+      PreprocessConfig(
+          has_leading_dimension=kwargs.get("has_leading_dimension"),
+          allow_id_dropping=kwargs.get("allow_id_dropping"),
+          batch_number=kwargs.get("batch_number"),
+      ),
+  )
+
+
+@deprecated.deprecated(reason="Use 'preprocess_input' instead.")
+def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
+    indices: Nested[ArrayLike],
+    values: Nested[ArrayLike],
+    dense_shapes: Nested[ArrayLike],
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    **kwargs,
+) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
+  """Preprocesses the input for sparse dense matmul from sparse tensor.
+
+  Args:
+    indices: A nested structure of 2-D int64 tensors, where each tensor has
+      shape [N, ndims].
+    values: A nested structure of 1-D tensors, each with shape [N], representing
+      the values of non-zero elements corresponding to `indices`.
+    dense_shapes: A nested structure of 1-D int64 tensors, each with shape
+      [ndims], defining the dense shape of the sparse tensor.
+    feature_specs: The feature specs. This needs to have the same structure as
+      features and features_weights (e.g., if one of them is a mapping then all
+      of them are).
+    **kwargs: Additional arguments to pass to the SDMMConfig and
+      PreprocessConfig classes.
+
+  Returns:
+    A tuple of (SparseDenseMatmulInput, SparseDenseMatmulInputStats).
+  """
+  return preprocess_input(
+      SparseCooInput(indices, values, dense_shapes),
+      SDMMConfig(
+          local_device_count=kwargs.get("local_device_count"),
+          global_device_count=kwargs.get("global_device_count"),
+          num_sc_per_device=kwargs.get("num_sc_per_device"),
+          sharding_strategy=kwargs.get("sharding_strategy"),
+          feature_stacking_strategy=kwargs.get("feature_stacking_strategy"),
+          feature_specs=feature_specs,
+      ),
+      PreprocessConfig(
+          has_leading_dimension=kwargs.get("has_leading_dimension"),
+          allow_id_dropping=kwargs.get("allow_id_dropping"),
+          batch_number=kwargs.get("batch_number"),
+      ),
+  )
 
 
 def _get_activation_for_feature(

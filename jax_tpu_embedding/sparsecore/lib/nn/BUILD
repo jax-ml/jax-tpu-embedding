@@ -48,6 +48,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
         "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("absl/logging"),
+        pypi_requirement("deprecated"),
         pypi_requirement("einops"),
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
