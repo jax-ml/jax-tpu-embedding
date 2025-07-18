@@ -464,11 +464,10 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       the values of non-zero elements corresponding to `indices`. For example,
       with `indices=[[1,3], [2,4]]`, `values=[18, 3.6]` means the element at
       [1,3] is 18 and at [2,4] is 3.6.
-    dense_shapes: A nested structure of 1-D int64 tensors, each with shape
-      [ndims], defining the dense shape of the sparse tensor. It specifies the
-      number of elements in each dimension. For example, `dense_shape=[3,6]`
-      represents a 3x6 tensor, `dense_shape=[2,3,4]` a 2x3x4 tensor, and
-      `dense_shape=[9]` a 9-element 1-D tensor.
+    dense_shapes: A nested structure of 2-element 1-D int64 tensors, defining
+      the dense shape of the sparse tensor. It specifies the number of elements
+      in each dimension. For example, `dense_shape=[3,6]` represents a 3x6
+      tensor.
     feature_specs: The feature specs. This needs to have the same structure as
       indices, values and dense_shapes (e.g., if one of them is a mapping then
       all of them are).
