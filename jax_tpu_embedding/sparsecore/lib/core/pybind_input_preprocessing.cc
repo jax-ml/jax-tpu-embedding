@@ -220,7 +220,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         pybind11::arg("has_leading_dimension") = false,
         pybind11::arg("allow_id_dropping") = false,
         pybind11::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kStackThenSplit);
+            FeatureStackingStrategy::kSplitThenStack);
   m.def("PreprocessSparseDenseMatmulSparseCooInput",
         &PySparseCooPreprocessSparseDenseMatmulInput,
         pybind11::arg("batch_number"), pybind11::arg("indices"),
@@ -232,7 +232,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         pybind11::arg("has_leading_dimension") = false,
         pybind11::arg("allow_id_dropping") = false,
         pybind11::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kStackThenSplit);
+            FeatureStackingStrategy::kSplitThenStack);
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())
       .def_readonly("max_ids_per_partition",
