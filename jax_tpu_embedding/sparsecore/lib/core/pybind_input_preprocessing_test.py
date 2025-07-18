@@ -361,6 +361,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
     with self.subTest("row_pointers"):
@@ -757,19 +758,18 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     out_path = self.create_tempdir().full_path
     fdo_client = file_fdo_client.NPZFileFDOClient(out_path)
     batch_number = 42
-    (_, _, _, _, stats) = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
-            [self.input_features_a, self.input_features_b],
-            [self.input_weights_a, self.input_weights_b],
-            [feature_spec_1, feature_spec_2],
-            local_device_count=1,
-            global_device_count=2,
-            num_sc_per_device=4,
-            sharding_strategy=ShardingStrategy.Mod,
-            has_leading_dimension=has_leading_dimension,
-            allow_id_dropping=False,
-        )
+    *_, stats = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        batch_number,
+        [self.input_features_a, self.input_features_b],
+        [self.input_weights_a, self.input_weights_b],
+        [feature_spec_1, feature_spec_2],
+        local_device_count=1,
+        global_device_count=2,
+        num_sc_per_device=4,
+        sharding_strategy=ShardingStrategy.Mod,
+        has_leading_dimension=has_leading_dimension,
+        allow_id_dropping=False,
+        feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
     )
     stats = embedding.SparseDenseMatmulInputStats.from_cc(stats)
     fdo_client.record(stats)
@@ -928,6 +928,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
     )
 
     # Preprocess inputs for the stacked features.
@@ -944,6 +945,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
     np.testing.assert_equal(row_pointers, stacked_row_pointers)
@@ -966,6 +968,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
     # Create a fake table/feature spec to test the assertion against the stacked
@@ -1071,6 +1074,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
     np.testing.assert_equal(row_pointers, s_row_pointers)
@@ -1093,6 +1097,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
     # For 2 chips, we expect the batches for each feature to be split into 2
