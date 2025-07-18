@@ -25,9 +25,9 @@ namespace jax_sc_embedding {
 class AbstractInputBatch {
  public:
   struct ExtractCooTensorsOptions {
-    // Start index of the slice to be processed.
+    // Start index of the slice to be processed (inclusive).
     int slice_start;
-    // End index of the slice to be processed.
+    // End index of the slice to be processed (exclusive).
     int slice_end;
     // Row offset to be added to the sample id.
     int row_offset;

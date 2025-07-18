@@ -145,6 +145,10 @@ void ProcessCooTensors(
 //     Row 0: [1, 2]
 //     Row 1: [3, 4, 5]
 //     Row 2: [6]
+// ValuesView and RowPointersView are template parameters that represent
+// a view into the underlying data. This allows the class to be used with
+// different types of data sources, such as vectors, arrays, or other data
+// structures that support operator[] operation.
 template <typename T, typename ValuesView, typename RowPointersView>
 class SparseCsrInputBatchStream {
  public:
