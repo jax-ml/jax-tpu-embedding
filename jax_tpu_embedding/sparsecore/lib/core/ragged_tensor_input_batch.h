@@ -22,6 +22,26 @@
 
 namespace jax_sc_embedding {
 
+// Valency: Dimension along which Embeddings for an input are added up.
+
+// This struct represents row offsets for a fixed valency input batch.
+// It calculates the offset for a given row index based on the batch size and
+// valency.
+// For example, if batch_size = 4 and valency = 2, the offsets would be
+// [0,2,4,6,8]
+struct FixedValencyRowOffsets {
+  FixedValencyRowOffsets(int batch_size, int valency)
+      : batch_size_(batch_size), valency_(valency) {}
+  int operator[](int index) const { return index * valency_; }
+  int size() const { return batch_size_ + 1; }
+  int batch_size_;
+  int valency_;
+};
+
+// EmbeddingIdsView and RowOffsetsView are template parameters that represent a
+// view into the underlying data. This allows the class to be used with
+// different types of data sources, such as vectors, arrays, or other data
+// structures that support `operator[]` and `size() const` operation.
 template <typename EmbeddingIdsView, typename RowOffsetsView>
 class RaggedTensorInputBatch : public AbstractInputBatch {
  public:
