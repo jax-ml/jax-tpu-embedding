@@ -66,7 +66,7 @@ struct PreprocessSparseDenseMatmulInputOptions {
   ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   bool allow_id_dropping = true;
   FeatureStackingStrategy feature_stacking_strategy =
-      FeatureStackingStrategy::kStackThenSplit;
+      FeatureStackingStrategy::kSplitThenStack;
   bool enable_minibatching = false;
 
   int GetNumScs() const { return num_sc_per_device * global_device_count; }

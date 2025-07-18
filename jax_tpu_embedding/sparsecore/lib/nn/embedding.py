@@ -377,7 +377,7 @@ def preprocess_sparse_dense_matmul_input(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
-    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.STACK_THEN_SPLIT,
+    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
@@ -449,7 +449,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
-    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.STACK_THEN_SPLIT,
+    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
 ) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
@@ -570,7 +570,7 @@ def _unstack_embedding_activations(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
 ) -> Nested[jax.Array]:
   """Unstacks the activations to match the feature specs."""
 
@@ -600,7 +600,7 @@ def tpu_sparse_dense_matmul(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     sharding_strategy: str = "MOD",
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
     num_sc_per_device: int | None = None,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
@@ -615,7 +615,7 @@ def tpu_sparse_dense_matmul(
       global_device_count=mesh.size,
       feature_specs=feature_specs,
       sharding_strategy="MOD",
-      feature_stacking_strategy=StackingStrategy.STACK_THEN_SPLIT,
+      feature_stacking_strategy=StackingStrategy.SPLIT_THEN_STACK,
   )
   sparse_matmul = shard_map.shard_map(
       sparse_matmul,
@@ -709,7 +709,7 @@ def _stack_embedding_gradients(
     activation_gradients: Nested[jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     num_sc_per_device: int,
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
 ) -> Mapping[str, jax.Array]:
   """Stacks the gradients for update to embedding variables."""
   stacked_table_to_features: dict[
@@ -774,7 +774,7 @@ def tpu_sparse_dense_matmul_grad(
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     sharding_strategy: str = "MOD",
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.STACK_THEN_SPLIT,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
     label: str = "",
     step: jax.Array | int | None = None,
     num_sc_per_device: int | None = None,

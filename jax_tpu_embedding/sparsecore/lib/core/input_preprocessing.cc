@@ -126,6 +126,9 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
 
   const int batch_size_per_slice = CeilOfRatio(
       extracted_coo_tensors.batch_size_for_device, feature_slices_per_device);
+  CHECK_GE(batch_size_per_slice, stacked_table_metadata.size())
+      << "Batch size per slice must be greater or equal to the number of "
+         "features stacked together.";
 
   // This slices each feature into `feature_slices` partitions and then
   // interleaves them: (k=num_sc_per_device-1). For stacking strategy
