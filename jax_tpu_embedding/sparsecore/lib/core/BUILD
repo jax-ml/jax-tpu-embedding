@@ -107,6 +107,7 @@ cc_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":input_preprocessing_util",
+        "@com_google_fuzztest//fuzztest",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
     ],

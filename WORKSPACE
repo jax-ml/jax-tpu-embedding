@@ -29,6 +29,13 @@ http_archive(
     strip_prefix = "highway-{version}".format(version = HIGHWAY_VERSION),
     urls = [HIGHWAY_ARCHIVE],
 )
+FUZZTEST_COMMIT = "0f82dad406f431ca5e8607626825be15423ba339"
+
+http_archive(
+    name = "com_google_fuzztest",
+    strip_prefix = "fuzztest-" + FUZZTEST_COMMIT,
+    url = "https://github.com/google/fuzztest/archive/" + FUZZTEST_COMMIT + ".zip",
+)
 
 # rules_license come _before_ XLA, since highway requires a newer version.
 maybe(
