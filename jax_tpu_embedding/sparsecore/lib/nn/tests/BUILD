@@ -49,6 +49,29 @@ pytype_strict_binary(
     ],
 )
 
+# Verify that the benchmarks run for small values of (#features, #samples).
+# This can also be used with benchy:
+# benchy //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks_test
+# (Uses default value for num_features and num_samples ignoring the args below.
+pytype_strict_contrib_test(
+    name = "preprocess_input_benchmarks_test",
+    srcs = ["preprocess_input_benchmarks.py"],
+    args = [
+        "--num_features=5",
+        "--num_samples=16",
+    ],
+    env = {"JAX_PLATFORMS": "cpu"},
+    main = "preprocess_input_benchmarks.py",
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("absl:app"),
+        pypi_requirement("absl/flags"),
+        pypi_requirement("google_benchmark"),
+        pypi_requirement("numpy"),
+    ],
+)
+
 pytype_strict_library(
     name = "test_utils",
     testonly = 1,

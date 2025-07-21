@@ -114,7 +114,6 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
@@ -124,6 +123,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     # Construct a feature spec without any col transformation.
@@ -155,7 +155,6 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [input_features_shifted],
             [self.input_weights],
             [feature_spec_no_col_shift],
@@ -165,6 +164,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
 
@@ -351,7 +351,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [feature_spec_1, feature_spec_2],
@@ -361,6 +360,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
             feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
@@ -759,7 +759,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     fdo_client = file_fdo_client.NPZFileFDOClient(out_path)
     batch_number = 42
     *_, stats = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-        batch_number,
         [self.input_features_a, self.input_features_b],
         [self.input_weights_a, self.input_weights_b],
         [feature_spec_1, feature_spec_2],
@@ -770,6 +769,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
         feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
+        batch_number=batch_number,
     )
     stats = embedding.SparseDenseMatmulInputStats.from_cc(stats)
     fdo_client.record(stats)
@@ -918,7 +918,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         stacked_gains,
         _,
     ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-        batch_number,
         [feature_stacked_inputs],
         [feature_stacked_weights],
         [feature_spec_for_feature_stacking_expectation],
@@ -928,6 +927,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
         feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
     )
 
@@ -935,7 +935,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number += 1
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, input_features_a2],
             [self.input_weights_a, input_weights_a2],
             [self.feature_spec_a, feature_spec_a2],
@@ -945,6 +944,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
             feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
@@ -958,7 +958,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -968,6 +967,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
             feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
@@ -1064,7 +1064,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     s_row_pointers, s_embedding_ids, s_sample_ids, s_gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [all_samples],
             [all_weights],
             [expected_merged_feature_spec],
@@ -1074,6 +1073,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
             feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
@@ -1087,7 +1087,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -1097,6 +1096,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
             feature_stacking_strategy=FeatureStackingStrategy.STACK_THEN_SPLIT,
         )
     )
@@ -1676,7 +1676,6 @@ class InputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.singleton_input_features],
             [self.singleton_input_weights],
             [self.singleton_input_feature_spec],
@@ -1686,6 +1685,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     # Prepare expected outputs.
@@ -1836,7 +1836,6 @@ class InputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
@@ -1846,6 +1845,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     with self.subTest(name="RowPointerEquality"):
@@ -2100,7 +2100,6 @@ class InputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     _, _, _, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features],
             [self.input_weights],
             [feature_spec],
@@ -2110,6 +2109,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
 
@@ -2176,7 +2176,6 @@ class InputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [
                 self.singleton_input_features,
                 self.ragged_input_features,
@@ -2195,6 +2194,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=True,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     # outputs without leading dimension (jit)
@@ -2206,7 +2206,6 @@ class InputPreprocessingTest(parameterized.TestCase):
         gains_flattened,
         _,
     ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-        batch_number,
         [
             self.singleton_input_features,
             self.ragged_input_features,
@@ -2225,6 +2224,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=False,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
     with self.subTest(name="RowPointerEquality"):
       self.assertLen(row_pointers, 2)
@@ -2818,7 +2818,6 @@ class InputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [input_features],
             [input_weights],
             [feature_spec],
@@ -2828,6 +2827,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
 
@@ -2848,7 +2848,6 @@ class InputPreprocessingTest(parameterized.TestCase):
         expected_gains,
         _,
     ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-        batch_number,
         [input_features],
         [input_weights],
         [feature_spec],
@@ -2858,6 +2857,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=False,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
 
     np.testing.assert_array_equal(

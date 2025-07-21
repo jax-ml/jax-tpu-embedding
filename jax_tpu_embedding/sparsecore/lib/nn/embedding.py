@@ -419,7 +419,6 @@ def preprocess_sparse_dense_matmul_input(
 
   *preprocessed_inputs, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-          batch_number,
           tree.flatten(features),
           tree.flatten(features_weights),
           tree.flatten(feature_specs),
@@ -430,6 +429,7 @@ def preprocess_sparse_dense_matmul_input(
           has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
           feature_stacking_strategy=feature_stacking_strategy,
+          batch_number=batch_number,
       )
   )
 
@@ -499,7 +499,6 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
 
   *preprocessed_inputs, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
-          batch_number,
           tree.flatten(indices),
           tree.flatten(values),
           tree.flatten(dense_shapes),
@@ -511,6 +510,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
           feature_stacking_strategy=feature_stacking_strategy,
+          batch_number=batch_number,
       )
   )
 

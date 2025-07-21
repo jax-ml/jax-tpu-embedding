@@ -156,11 +156,11 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
 }
 
 py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
-    int batch_number, py::list features, py::list feature_weights,
-    py::list feature_specs, int local_device_count, int global_device_count,
-    int num_sc_per_device, ShardingStrategy sharding_strategy,
-    bool has_leading_dimension, bool allow_id_dropping,
-    FeatureStackingStrategy feature_stacking_strategy) {
+    py::list features, py::list feature_weights, py::list feature_specs,
+    int local_device_count, int global_device_count, int num_sc_per_device,
+    ShardingStrategy sharding_strategy, bool has_leading_dimension,
+    bool allow_id_dropping, FeatureStackingStrategy feature_stacking_strategy,
+    int batch_number) {
   CHECK_EQ(features.size(), feature_weights.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.reserve(features.size());
@@ -175,11 +175,11 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
 }
 
 py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
-    int batch_number, py::list indices, py::list values, py::list dense_shapes,
+    py::list indices, py::list values, py::list dense_shapes,
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping,
-    FeatureStackingStrategy feature_stacking_strategy) {
+    FeatureStackingStrategy feature_stacking_strategy, int batch_number) {
   CHECK(indices.size() == values.size());
   CHECK(indices.size() == dense_shapes.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches(
@@ -211,19 +211,19 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
       .value("SPLIT_THEN_STACK", FeatureStackingStrategy::kSplitThenStack)
       .export_values();
   m.def("PreprocessSparseDenseMatmulInput",
-        &PyNumpyPreprocessSparseDenseMatmulInput, pybind11::arg("batch_number"),
-        pybind11::arg("features"), pybind11::arg("feature_weights"),
-        pybind11::arg("feature_specs"), pybind11::arg("local_device_count"),
+        &PyNumpyPreprocessSparseDenseMatmulInput, pybind11::arg("features"),
+        pybind11::arg("feature_weights"), pybind11::arg("feature_specs"),
+        pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),
         pybind11::arg("num_sc_per_device"),
         pybind11::arg("sharding_strategy") = ShardingStrategy::kMod,
         pybind11::arg("has_leading_dimension") = false,
         pybind11::arg("allow_id_dropping") = false,
         pybind11::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kSplitThenStack);
+            FeatureStackingStrategy::kSplitThenStack,
+        pybind11::arg("batch_number") = 0);
   m.def("PreprocessSparseDenseMatmulSparseCooInput",
-        &PySparseCooPreprocessSparseDenseMatmulInput,
-        pybind11::arg("batch_number"), pybind11::arg("indices"),
+        &PySparseCooPreprocessSparseDenseMatmulInput, pybind11::arg("indices"),
         pybind11::arg("values"), pybind11::arg("dense_shapes"),
         pybind11::arg("feature_specs"), pybind11::arg("local_device_count"),
         pybind11::arg("global_device_count"),
@@ -232,7 +232,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         pybind11::arg("has_leading_dimension") = false,
         pybind11::arg("allow_id_dropping") = false,
         pybind11::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kSplitThenStack);
+            FeatureStackingStrategy::kSplitThenStack,
+        pybind11::arg("batch_number") = 0);
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())
       .def_readonly("max_ids_per_partition",

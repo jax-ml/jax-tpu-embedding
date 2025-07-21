@@ -108,7 +108,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -119,6 +118,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
 
     numpy_features = np.zeros((16, 16), dtype=np.int32)
@@ -150,7 +150,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [numpy_features],
             [numpy_weights],
             [self.feature_spec],
@@ -160,6 +159,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     np.testing.assert_equal(
@@ -211,7 +211,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -222,6 +221,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
 
     numpy_features = []
@@ -240,7 +240,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [numpy_features],
             [numpy_weights],
             [self.feature_spec],
@@ -250,6 +249,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     np.testing.assert_equal(
@@ -420,7 +420,6 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
@@ -430,6 +429,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
 
@@ -447,7 +447,6 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -458,6 +457,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
 
     np.testing.assert_equal(row_pointers, row_pointers_sparse)
@@ -929,7 +929,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, input_features_a2],
             [self.input_weights_a, input_weights_a2],
             [self.feature_spec_a, feature_spec_a2],
@@ -939,6 +938,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     sparse_tensor_input_preprocessing = (
@@ -964,7 +964,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices,
         values,
         dense_shapes,
@@ -975,6 +974,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
     np.testing.assert_equal(row_pointers, row_pointers_sparse)
     np.testing.assert_equal(embedding_ids, embedding_ids_sparse)
@@ -986,7 +986,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -996,6 +995,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     sparse_tensor_input_preprocessing = (
@@ -1021,7 +1021,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices,
         values,
         dense_shapes,
@@ -1032,6 +1031,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
 
     np.testing.assert_equal(row_pointers, row_pointers_sparse)
@@ -1072,7 +1072,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [feature_spec_1, feature_spec_2],
@@ -1082,6 +1081,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     batch_number += 1
@@ -1107,7 +1107,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices,
         values,
         dense_shapes,
@@ -1118,6 +1117,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
     np.testing.assert_equal(row_pointers, row_pointers_sparse)
     np.testing.assert_equal(embedding_ids, embedding_ids_sparse)
@@ -1129,7 +1129,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
@@ -1139,6 +1138,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     sparse_tensor_input_preprocessing = (
@@ -1164,7 +1164,6 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices,
         values,
         dense_shapes,
@@ -1175,6 +1174,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
     np.testing.assert_equal(row_pointers, row_pointers_sparse)
     np.testing.assert_equal(embedding_ids, embedding_ids_sparse)
@@ -1260,7 +1260,6 @@ class MeanCombinerTest(parameterized.TestCase):
         gains_sparse,
         _,
     ) = sparse_tensor_input_preprocessing(
-        batch_number,
         indices_tensor,
         values_tensor,
         dense_shape_tensor,
@@ -1271,6 +1270,7 @@ class MeanCombinerTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        batch_number=batch_number,
     )
 
     numpy_features = np.zeros((16, 16), dtype=np.int32)
@@ -1301,7 +1301,6 @@ class MeanCombinerTest(parameterized.TestCase):
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-            batch_number,
             [numpy_features],
             [numpy_weights],
             [self.feature_spec],
@@ -1311,6 +1310,7 @@ class MeanCombinerTest(parameterized.TestCase):
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
+            batch_number=batch_number,
         )
     )
     np.testing.assert_equal(
