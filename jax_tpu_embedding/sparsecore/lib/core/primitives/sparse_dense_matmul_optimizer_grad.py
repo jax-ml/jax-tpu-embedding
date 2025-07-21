@@ -40,6 +40,7 @@ import functools
 import json
 from typing import Callable, Tuple
 
+import jax
 from jax import core
 from jax import numpy as jnp
 from jax._src.lib.mlir import ir
@@ -256,12 +257,8 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     )
     hyperparams.append(sliced_param)
 
-  op = mlir.custom_call(
-      "SparseDenseMatmulGradOpWithOptimizerUpdate",
-      result_types=[
-          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])  # pylint: disable=attribute-error
-      ],
-      operands=[
+  operands = (
+      [
           lhs_row_pointers,
           lhs_local_embedding_ids,
           lhs_local_sample_ids,
@@ -269,10 +266,18 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
           activations_grad,
       ]
       + tables
-      + hyperparams,
+      + hyperparams
+  )
+  op = jax.ffi.ffi_lowering(
+      "SparseDenseMatmulGradOpWithOptimizerUpdate",
+      result_types=[
+          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])  # pylint: disable=attribute-error
+      ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
-  )
+      skip_ffi_layout_processing=True,
+      api_version=1,
+  )(ctx, *operands)
 
   result = []
   for i in range(len(tables)):

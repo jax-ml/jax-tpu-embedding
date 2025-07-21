@@ -15,7 +15,9 @@
 
 import functools
 import json
+from typing import Sequence
 
+import jax
 from jax import core
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import hlo
@@ -145,7 +147,7 @@ def _tpu_sparse_dense_matmul_csr_with_mini_batching_lowering(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
-) -> jnp.ndarray:
+) -> mlir.ir.Value | Sequence[mlir.ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
 
@@ -168,21 +170,22 @@ def _tpu_sparse_dense_matmul_csr_with_mini_batching_lowering(
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
-  op = mlir.custom_call(
+  operands = [
+      lhs_row_pointers,
+      lhs_local_embedding_ids,
+      lhs_local_sample_ids,
+      lhs_gains,
+      num_minibatches_per_physical_sparse_core,
+      embedding_table,
+      activation_init,
+  ]
+  return jax.ffi.ffi_lowering(
       "SparseDenseMatmulWithMinibatchingOp",
       result_types=[mlir.aval_to_ir_type(out_aval)],
-      operands=[
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
-          num_minibatches_per_physical_sparse_core,
-          embedding_table,
-          activation_init,
-      ],
       backend_config=backend_config,
-  )
-  return op.results
+      skip_ffi_layout_processing=True,
+      api_version=1,
+  )(ctx, *operands)
 
 
 mlir.register_lowering(
