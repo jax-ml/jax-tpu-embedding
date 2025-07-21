@@ -110,6 +110,7 @@ cc_test(
         ":coo_format",
         ":input_preprocessing_util",
         ":partitioned_coo_tensors",
+        "@com_google_fuzztest//fuzztest",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
     ],
