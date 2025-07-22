@@ -544,6 +544,11 @@ def _get_activation_for_feature(
   per_feature_slice_batch_size = feature.output_shape[0] // (
       global_device_count * num_feature_slices_per_device
   )
+  _verify_input_batch_size(
+      stacked_table_activation.shape,
+      num_feature_slices_per_device,
+      name=feature.name,
+  )
   # d: padded embedding_dim
   # b: padded global (stacked-feature)-slice batch-size
   activation_per_slice = einops.rearrange(
@@ -706,6 +711,19 @@ def tpu_sparse_dense_matmul(
   )
 
 
+def _verify_input_batch_size(
+    input_shape: tuple[int, ...], feature_slice_per_device: int, name: str
+) -> None:
+  """Verifies that the feature batch size is divisible by the number of feature slices per device."""
+  if input_shape[0] % feature_slice_per_device:
+    raise ValueError(
+        "The input batch size must be divisible by the number of feature"
+        " slices per device. Got input shape"
+        f" {input_shape} and {feature_slice_per_device} feature slices"
+        f" per device for feature {name}."
+    )
+
+
 def _stack_embedding_gradients(
     activation_gradients: Nested[jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
@@ -749,6 +767,9 @@ def _stack_embedding_gradients(
       )
       if extra_cols != 0:
         gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
+      _verify_input_batch_size(
+          gradient.shape, feature_slice_per_device, name=feature.name
+      )
       # Slice the feature.
       # b: batch size per slice, d: padded embedding dim
       gradient = einops.rearrange(
