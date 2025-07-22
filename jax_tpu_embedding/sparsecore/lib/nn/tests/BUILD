@@ -99,8 +99,8 @@ pytype_strict_contrib_test(
     ],
 )
 
-[pytype_strict_contrib_test(
-    name = "tpu_sparse_dense_matmul_test%s" % suffix,
+pytype_strict_contrib_test(
+    name = "tpu_sparse_dense_matmul_test",
     srcs = [
         "tpu_sparse_dense_matmul_test.py",
     ],
@@ -109,7 +109,6 @@ pytype_strict_contrib_test(
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
-        "JAX_USE_SHARDY_PARTITIONER": use_shardy,
     },
     main = "tpu_sparse_dense_matmul_test.py",
     tags = [
@@ -129,22 +128,10 @@ pytype_strict_contrib_test(
         pypi_requirement("numpy"),
         pypi_requirement("tree"),
     ],
-) for [
-    use_shardy,
-    suffix,
-] in [
-    [
-        "False",
-        "",
-    ],
-    [
-        "True",
-        "_shardy",
-    ],
-]]
+)
 
-[pytype_strict_contrib_test(
-    name = "tpu_sparse_dense_matmul_grad_test%s" % suffix,
+pytype_strict_contrib_test(
+    name = "tpu_sparse_dense_matmul_grad_test",
     srcs = [
         "tpu_sparse_dense_matmul_grad_test.py",
     ],
@@ -154,7 +141,6 @@ pytype_strict_contrib_test(
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",
         "JAX_TRACEBACK_FILTERING": "off",
-        "JAX_USE_SHARDY_PARTITIONER": use_shardy,
     },
     main = "tpu_sparse_dense_matmul_grad_test.py",
     tags = [
@@ -174,19 +160,7 @@ pytype_strict_contrib_test(
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],
-) for [
-    use_shardy,
-    suffix,
-] in [
-    [
-        "False",
-        "",
-    ],
-    [
-        "True",
-        "_shardy",
-    ],
-]]
+)
 
 tpu_py_strict_test(
     name = "embedding_test",
