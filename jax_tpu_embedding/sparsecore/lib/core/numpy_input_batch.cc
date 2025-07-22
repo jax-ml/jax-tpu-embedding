@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
-#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
 #include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
 #include "tsl/profiler/lib/traceme.h"

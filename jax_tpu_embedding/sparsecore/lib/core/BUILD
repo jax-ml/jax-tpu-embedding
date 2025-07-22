@@ -80,8 +80,8 @@ pybind_library(
     hdrs = ["numpy_input_batch.h"],
     deps = [
         ":abstract_input_batch",
-        ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":process_coo_tensors",
         "@com_google_absl//absl/log:check",
         "@tsl//tsl/profiler/lib:traceme",
     ],
@@ -93,8 +93,10 @@ pybind_library(
     hdrs = ["sparse_coo_input_batch.h"],
     deps = [
         ":abstract_input_batch",
-        ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":process_coo_tensors",
+        ":sparse_csr_input_stream",
+        ":unity_weights_stream",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:span",
@@ -265,9 +267,32 @@ cc_library(
     name = "ragged_tensor_input_batch",
     hdrs = ["ragged_tensor_input_batch.h"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
-        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_core",
-        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
+        ":abstract_input_batch",
+        ":input_preprocessing_util",
+        ":process_coo_tensors",
+        ":sparse_csr_input_stream",
+        ":unity_weights_stream",
+    ],
+)
+
+cc_library(
+    name = "unity_weights_stream",
+    hdrs = ["unity_weights_stream_impl.h"],
+)
+
+cc_library(
+    name = "sparse_csr_input_stream",
+    hdrs = ["sparse_csr_input_stream_impl.h"],
+    deps = ["@com_google_absl//absl/strings:string_view"],
+)
+
+cc_library(
+    name = "process_coo_tensors",
+    hdrs = ["process_coo_tensors_impl.h"],
+    deps = [
+        ":abstract_input_batch",
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/log:check",
     ],
 )
 
