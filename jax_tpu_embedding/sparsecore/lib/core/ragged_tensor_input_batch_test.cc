@@ -14,6 +14,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -136,6 +137,77 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
                           CooFormat(1, 0, 1.0), CooFormat(2, 0, 1.0),
                           CooFormat(3, 2, 1.0)));
 }
+
+TEST_F(RaggedTensorInputBatchTest,
+       FixedValencyRowOffsetsCooExtractionIsCorrect) {
+  std::vector<int64_t> embedding_ids = {0, 1, 0, 2, 0, 3, 0, 4};
+  int batch_size = 4;
+  int valency = 2;
+  FixedValencyRowOffsets row_offsets(batch_size, valency);
+  RaggedTensorInputBatch ragged_tensor_input_batch(
+      /*batch_number=*/123, embedding_ids, row_offsets);
+
+  std::vector<CooFormat> coo_formats;
+  ragged_tensor_input_batch.ExtractCooTensors(
+      {
+          .slice_start = 0,
+          .slice_end = 4,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSum,
+      },
+      coo_formats);
+  EXPECT_THAT(coo_formats,
+              ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),  // Row 0
+                          CooFormat(1, 0, 1.0), CooFormat(1, 2, 1.0),  // Row 1
+                          CooFormat(2, 0, 1.0), CooFormat(2, 3, 1.0),  // Row 2
+                          CooFormat(3, 0, 1.0), CooFormat(3, 4, 1.0))  // Row 3
+  );
+}
+
+struct FixedValencyRowOffsetsTestCase {
+  int batch_size;
+  int valency;
+  std::vector<int64_t> expected_offsets;
+};
+
+using FixedValencyRowOffsetsTest =
+    testing::TestWithParam<FixedValencyRowOffsetsTestCase>;
+
+TEST_P(FixedValencyRowOffsetsTest, FixedValencyRowOffsetsAreCorrect) {
+  const FixedValencyRowOffsetsTestCase& test_case = GetParam();
+  FixedValencyRowOffsets row_offsets(test_case.batch_size, test_case.valency);
+  ASSERT_EQ(row_offsets.size(), test_case.expected_offsets.size());
+  for (size_t i = 0; i < test_case.expected_offsets.size(); ++i) {
+    EXPECT_EQ(row_offsets[i], test_case.expected_offsets[i]);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(FixedValencyRowOffsetsTests,
+                         FixedValencyRowOffsetsTest,
+                         testing::ValuesIn<FixedValencyRowOffsetsTestCase>(
+                             {{
+                                  .batch_size = 4,
+                                  .valency = 2,
+                                  .expected_offsets = {0, 2, 4, 6, 8},
+                              },
+                              {
+                                  .batch_size = 2,
+                                  .valency = 3,
+                                  .expected_offsets = {0, 3, 6},
+                              },
+                              {
+                                  .batch_size = 5,
+                                  .valency = 1,
+                                  .expected_offsets = {0, 1, 2, 3, 4, 5},
+                              },
+                              {
+                                  .batch_size = 1,
+                                  .valency = 5,
+                                  .expected_offsets = {0, 5},
+                              }}));
 
 }  // namespace
 }  // namespace jax_sc_embedding

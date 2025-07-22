@@ -68,10 +68,7 @@ cc_library(
 cc_library(
     name = "abstract_input_batch",
     hdrs = ["abstract_input_batch.h"],
-    deps = [
-        ":input_preprocessing_util",
-        "@com_google_absl//absl/strings:string_view",
-    ],
+    deps = [":input_preprocessing_util"],
 )
 
 pybind_library(
@@ -272,6 +269,7 @@ cc_library(
         ":process_coo_tensors",
         ":sparse_csr_input_stream",
         ":unity_weights_stream",
+        "@com_google_absl//absl/log:check",
     ],
 )
 
@@ -300,8 +298,8 @@ cc_test(
     name = "ragged_tensor_input_batch_test",
     srcs = ["ragged_tensor_input_batch_test.cc"],
     deps = [
+        ":input_preprocessing_util",
         ":ragged_tensor_input_batch",
-        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
         "@com_google_googletest//:gtest_main",
     ],
 )

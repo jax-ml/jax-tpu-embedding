@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
@@ -24,6 +25,39 @@
 
 namespace jax_sc_embedding {
 
+// Valency: Dimension along which Embeddings for an input are added up.
+
+// This struct represents row offsets for a fixed valency input batch.
+// It calculates the offset for a given row index based on the batch size and
+// valency.
+// For example, if batch_size = 4 and valency = 2, then:
+//   FixedValencyRowOffsets offsets(4, 2);
+//   EXPECT_EQ(offsets[0], 0);
+//   EXPECT_EQ(offsets[1], 2);
+//   EXPECT_EQ(offsets[2], 4);
+//   EXPECT_EQ(offsets[3], 6);
+//   EXPECT_EQ(offsets[4], 8);
+class FixedValencyRowOffsets {
+ public:
+  FixedValencyRowOffsets(int batch_size, int valency)
+      : batch_size_(batch_size), valency_(valency) {
+    CHECK_GT(batch_size, 0);
+    CHECK_GT(valency, 0);
+  }
+  int64_t operator[](int64_t index) const { return index * valency_; }
+  int64_t size() const { return batch_size_ + 1; }
+
+ private:
+  int batch_size_;
+  int valency_;
+};
+
+// EmbeddingIdsView and RowOffsetsView are template parameters that represent a
+// view into the underlying data (or even the actual data itself):
+//   - EmbeddingIdsView is required to support `operator[]`.
+//   - RowOffsetsView is required to support `operator[]` and `size() const`.
+// This allows the class to be used with different types of data sources, such
+// as vectors, arrays, or other data structures.
 template <typename EmbeddingIdsView, typename RowOffsetsView>
 class RaggedTensorInputBatch : public AbstractInputBatch {
  public:
