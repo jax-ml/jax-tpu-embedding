@@ -401,6 +401,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
+        global_device_count=mesh.size,
+    )
     if using_pmap:
       embedding_variables["table_a"] = tuple([
           _create_embedding_variable_for_pmap(
@@ -412,17 +418,13 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
               [VariableInfo((32, 8), 0)], devices, mesh
           )
       ])
-
       activations = jax.pmap(
-          embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[2, 3, 4, 5],
+          tpu_sparse_dense_matmul_fn,
+          static_broadcasted_argnums=[2],
       )(
           preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
-          mesh.size,
-          "MOD",
-          feature_stacking_strategy,
       )
     else:
       embedding_variables["table_a"] = tuple([
@@ -436,11 +438,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       sharded_matmul = functools.partial(
-          embedding.tpu_sparse_dense_matmul,
+          tpu_sparse_dense_matmul_fn,
           feature_specs=tuple(tree.flatten(feature_specs)),
-          global_device_count=mesh.size,
-          sharding_strategy="MOD",
-          feature_stacking_strategy=feature_stacking_strategy,
       )
 
       sharded_matmul = shard_map.shard_map(
@@ -528,6 +527,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
+        global_device_count=mesh.size,
+    )
     if using_pmap:
       embedding_variables["table_a_table_aa"] = tuple([
           _create_embedding_variable_for_pmap(
@@ -540,15 +545,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       activations = jax.pmap(
-          embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[2, 3, 4, 5],
+          tpu_sparse_dense_matmul_fn,
+          static_broadcasted_argnums=[2],
       )(
           preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
-          mesh.size,
-          "MOD",
-          feature_stacking_strategy,
       )
     else:
       embedding_variables["table_a_table_aa"] = tuple([
@@ -562,11 +564,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       sharded_matmul = functools.partial(
-          embedding.tpu_sparse_dense_matmul,
+          tpu_sparse_dense_matmul_fn,
           feature_specs=tuple(tree.flatten(feature_specs)),
-          global_device_count=mesh.size,
-          sharding_strategy="MOD",
-          feature_stacking_strategy=feature_stacking_strategy,
       )
 
       sharded_matmul = shard_map.shard_map(
@@ -681,6 +680,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     )
     embedding_variables = {}
 
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
+        global_device_count=mesh.size,
+    )
     if using_pmap:
       embedding_variables["table_a"] = tuple([
           _create_embedding_variable_for_pmap(
@@ -693,15 +698,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       activations = jax.pmap(
-          embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=[2, 3, 4, 5],
+          tpu_sparse_dense_matmul_fn,
+          static_broadcasted_argnums=[2],
       )(
           preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
-          mesh.size,
-          "MOD",
-          feature_stacking_strategy,
       )
     else:
       embedding_variables["table_a"] = tuple([
@@ -714,16 +716,11 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
               [VariableInfo((64, 16), 0)], devices, mesh
           )
       ])
-      sparse_matmul = jax.jit(
-          embedding.tpu_sparse_dense_matmul, static_argnums=(2, 3, 4, 5)
-      )
+      sparse_matmul = jax.jit(tpu_sparse_dense_matmul_fn, static_argnums=[2])
       activations = sparse_matmul(
           preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
-          mesh.size,
-          "MOD",
-          feature_stacking_strategy,
       )
     expected_emb_activations = np.array(
         [
@@ -793,6 +790,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
+        global_device_count=mesh.size,
+    )
     if using_pmap:
       embedding_variables["table_a"] = tuple([
           _create_embedding_variable_for_pmap(
@@ -805,15 +808,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       activations = jax.pmap(
-          embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=(2, 3, 4, 5),
+          tpu_sparse_dense_matmul_fn,
+          static_broadcasted_argnums=(2),
       )(
           preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
-          mesh.size,
-          "MOD",
-          feature_stacking_strategy,
       )
     else:
       embedding_variables["table_a"] = tuple([
@@ -827,11 +827,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           )
       ])
       sharded_matmul = functools.partial(
-          embedding.tpu_sparse_dense_matmul,
+          tpu_sparse_dense_matmul_fn,
           feature_specs=tuple(tree.flatten(feature_specs)),
-          global_device_count=mesh.size,
-          sharding_strategy="MOD",
-          feature_stacking_strategy=feature_stacking_strategy,
       )
       sharded_matmul = shard_map.shard_map(
           sharded_matmul,
@@ -1322,6 +1319,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
+        global_device_count=mesh.size,
+    )
     if using_pmap:
       embedding_variables["country_table_language_table_related_item_table"] = (
           tuple([
@@ -1339,15 +1342,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           ])
       )
       activations = jax.pmap(
-          embedding.tpu_sparse_dense_matmul,
-          static_broadcasted_argnums=(2, 3, 4, 5),
+          tpu_sparse_dense_matmul_fn,
+          static_broadcasted_argnums=(2,),
       )(
           preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
-          mesh.size,
-          "MOD",
-          feature_stacking_strategy,
       )
     else:
       embedding_variables["country_table_language_table_related_item_table"] = (
@@ -1366,11 +1366,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           ])
       )
       sharded_matmul = functools.partial(
-          embedding.tpu_sparse_dense_matmul,
+          tpu_sparse_dense_matmul_fn,
           feature_specs=tuple(tree.flatten(feature_specs)),
-          global_device_count=mesh.size,
-          sharding_strategy="MOD",
-          feature_stacking_strategy=feature_stacking_strategy,
       )
 
       sharded_matmul = shard_map.shard_map(
