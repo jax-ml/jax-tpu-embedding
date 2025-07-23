@@ -46,7 +46,7 @@ class NumpySparseInputBatch : public AbstractInputBatch {
   py::ssize_t size() const override { return feature_.shape(0); }
 
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         std::vector<CooFormat>& coo_tensors) override;
+                         ExtractedCooTensors& coo_tensors) override;
 
   virtual int batch_number() const override { return batch_number_; }
 

@@ -129,9 +129,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 8;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -211,9 +210,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
   Eigen::VectorXi max_id_per_sc{{0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(2, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 8;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -273,9 +271,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 8;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
@@ -316,9 +313,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 16);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 16;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/4,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
@@ -364,9 +360,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 16);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 16;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/8,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
@@ -413,9 +408,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 128);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 128;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/64,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
@@ -458,9 +452,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 128);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 128;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/128,
       /*max_unique_ids_per_partition=*/4, /*row_offset=*/0, /*col_offset=*/0,
@@ -503,9 +496,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 128);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 128;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -549,9 +541,8 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 16);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 16;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
@@ -635,9 +626,8 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 8;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -760,9 +750,8 @@ TEST(InputPreprocessingUtilTest, FillRowPointersMinibatching) {
   Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
   Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
-  ExtractedCooTensors extracted_coo_tensors;
+  ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
-  extracted_coo_tensors.batch_size_for_device = 8;
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,

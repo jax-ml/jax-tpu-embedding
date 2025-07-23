@@ -43,9 +43,9 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
   RaggedTensorInputBatch ragged_tensor_input_batch(
       /*batch_number=*/13, embedding_ids_, embedding_splits_);
 
-  std::vector<CooFormat> coo_formats_1;
-  std::vector<CooFormat> coo_formats_2;
-  std::vector<CooFormat> coo_formats_3;
+  ExtractedCooTensors extracted_1(4, 4);
+  ExtractedCooTensors extracted_2(4, 4);
+  ExtractedCooTensors extracted_3(4, 20);  // row_offset=16
 
   ragged_tensor_input_batch.ExtractCooTensors(
       {
@@ -54,10 +54,11 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
           .row_offset = 0,
           .col_offset = 0,
           .col_shift = 0,
+          .num_sc_per_device = 4,
           .num_scs = 4,
           .combiner = RowCombiner::kSum,
       },
-      coo_formats_1);
+      extracted_1);
   ragged_tensor_input_batch.ExtractCooTensors(
       {
           .slice_start = 1,
@@ -65,38 +66,42 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
           .row_offset = 0,
           .col_offset = 0,
           .col_shift = 0,
+          .num_sc_per_device = 4,
           .num_scs = 4,
           .combiner = RowCombiner::kSum,
       },
-      coo_formats_2);
+      extracted_2);
   ragged_tensor_input_batch.ExtractCooTensors(
       {
+          // row mapping after offset: (2..3) -> (17..18)
           .slice_start = 2,
           .slice_end = 4,
           .row_offset = 16,
           .col_offset = 8,
           .col_shift = 0,
+          .num_sc_per_device = 4,
           .num_scs = 4,
           .combiner = RowCombiner::kSum,
       },
-      coo_formats_3);
+      extracted_3);
 
-  EXPECT_THAT(coo_formats_1,
+  EXPECT_THAT(extracted_1.coo_tensors,
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),
                           CooFormat(0, 2, 1.0), CooFormat(1, 0, 1.0),
                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
-  EXPECT_THAT(coo_formats_2,
+  EXPECT_THAT(extracted_2.coo_tensors,
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0)));
 
-  EXPECT_THAT(coo_formats_3, ElementsAre(CooFormat(16, 0 + 8, 1.0),
-                                         CooFormat(17, 2 + 8, 1.0)));
+  EXPECT_THAT(
+      extracted_3.coo_tensors,
+      ElementsAre(CooFormat(16, 0 + 8, 1.0), CooFormat(17, 2 + 8, 1.0)));
 }
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
   RaggedTensorInputBatch ragged_tensor_input_batch(
       /*batch_number=*/42, embedding_ids_, embedding_splits_);
 
-  std::vector<CooFormat> coo_formats;
+  ExtractedCooTensors extracted(4, 4);
   ragged_tensor_input_batch.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -104,11 +109,12 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
           .row_offset = 0,
           .col_offset = 0,
           .col_shift = 0,
+          .num_sc_per_device = 4,
           .num_scs = 4,
           .combiner = RowCombiner::kMean,
       },
-      coo_formats);
-  EXPECT_THAT(coo_formats,
+      extracted);
+  EXPECT_THAT(extracted.coo_tensors,
               ElementsAre(CooFormat(0, 0, 1.0 / 3), CooFormat(0, 1, 1.0 / 3),
                           CooFormat(0, 2, 1.0 / 3), CooFormat(1, 0, 1.0),
                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
@@ -118,7 +124,7 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
   RaggedTensorInputBatch ragged_tensor_input_batch(
       /*batch_number=*/123, embedding_ids_, embedding_splits_);
 
-  std::vector<CooFormat> coo_formats;
+  ExtractedCooTensors extracted(4, 4);
   ragged_tensor_input_batch.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -126,16 +132,17 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
           .row_offset = 0,
           .col_offset = 0,
           .col_shift = 0,
+          .num_sc_per_device = 4,
           .num_scs = 4,
           .combiner = RowCombiner::kSqrtn,
       },
-      coo_formats);
-  EXPECT_THAT(coo_formats,
-              ElementsAre(CooFormat(0, 0, 1.0 / std::sqrt(3)),
-                          CooFormat(0, 1, 1.0 / std::sqrt(3)),
-                          CooFormat(0, 2, 1.0 / std::sqrt(3)),
-                          CooFormat(1, 0, 1.0), CooFormat(2, 0, 1.0),
-                          CooFormat(3, 2, 1.0)));
+      extracted);
+  EXPECT_THAT(
+      extracted.coo_tensors,
+      ElementsAre(CooFormat(0, 0, 1.0 / std::sqrt(3)),
+                  CooFormat(0, 1, 1.0 / std::sqrt(3)),
+                  CooFormat(0, 2, 1.0 / std::sqrt(3)), CooFormat(1, 0, 1.0),
+                  CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
 }
 
 TEST_F(RaggedTensorInputBatchTest,
@@ -147,7 +154,7 @@ TEST_F(RaggedTensorInputBatchTest,
   RaggedTensorInputBatch ragged_tensor_input_batch(
       /*batch_number=*/123, embedding_ids, row_offsets);
 
-  std::vector<CooFormat> coo_formats;
+  ExtractedCooTensors extracted(4, 4);
   ragged_tensor_input_batch.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -155,11 +162,12 @@ TEST_F(RaggedTensorInputBatchTest,
           .row_offset = 0,
           .col_offset = 0,
           .col_shift = 0,
+          .num_sc_per_device = 4,
           .num_scs = 4,
           .combiner = RowCombiner::kSum,
       },
-      coo_formats);
-  EXPECT_THAT(coo_formats,
+      extracted);
+  EXPECT_THAT(extracted.coo_tensors,
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),  // Row 0
                           CooFormat(1, 0, 1.0), CooFormat(1, 2, 1.0),  // Row 1
                           CooFormat(2, 0, 1.0), CooFormat(2, 3, 1.0),  // Row 2

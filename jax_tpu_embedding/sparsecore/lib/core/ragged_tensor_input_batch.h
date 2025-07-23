@@ -72,7 +72,7 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
 
   int64_t size() const override { return row_offsets_.size() - 1; }
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         std::vector<CooFormat>& coo_tensors) override {
+                         ExtractedCooTensors& coo_tensors) override {
     SparseCsrInputBatchStream<int64_t, EmbeddingIdsView, RowOffsetsView>
         values_stream(embedding_ids_, row_offsets_, options.slice_start,
                       options.slice_end);

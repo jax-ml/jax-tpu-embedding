@@ -35,10 +35,13 @@ class AbstractInputBatch {
     int col_offset;
     // Number of bits to shift the embedding id.
     int col_shift;
+    // Number of sparse cores per device. Used to compute COO tensor counts per
+    // SC.
+    int num_sc_per_device;
     // Number of sparse cores.
     int num_scs;
     // Combiner to be used for the row.
-    RowCombiner combiner;
+    RowCombiner combiner = RowCombiner::kSum;
   };
 
   // Return the batch size or the number of samples in this input batch.
@@ -53,8 +56,9 @@ class AbstractInputBatch {
   virtual int batch_number() const = 0;
 
   // Extract COO Tensors.
-  virtual void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                                 std::vector<CooFormat>& coo_tensors) = 0;
+  virtual void ExtractCooTensors(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensors& extracted_coo_tensors) = 0;
 
   virtual ~AbstractInputBatch() = default;
 };

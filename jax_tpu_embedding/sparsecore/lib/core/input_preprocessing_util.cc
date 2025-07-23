@@ -238,13 +238,13 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
       stacked_table_metadata.max_unique_ids_per_partition;
   const absl::string_view stacked_table_name = stacked_table_metadata.name;
 
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id;
-  coo_tensors_by_id.resize(num_sc_per_device);
-  const int approximate_num_coo_tensors_per_sc =
-      coo_tensors.size() / num_sc_per_device + 1;
+  // Partition COO tensors among SparseCores for the local device (based on row
+  // id).
+  std::vector<std::vector<CooFormat>> coo_tensors_by_sc_id;
+  coo_tensors_by_sc_id.resize(num_sc_per_device);
   for (int i = 0; i < num_sc_per_device; ++i) {
-    // Roughly estimate the number of COO tensors for each SC.
-    coo_tensors_by_id[i].reserve(approximate_num_coo_tensors_per_sc);
+    coo_tensors_by_sc_id[i].reserve(
+        extracted_coo_tensors.coo_tensors_per_sc[i]);
   }
 
   uint32_t coo_tensor_index = 0;
@@ -259,7 +259,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
     std::vector<uint64_t> keys;
-    keys.reserve(batch_size_per_sc);
+    keys.reserve(extracted_coo_tensors.coo_tensors_per_sc[local_sc_id]);
     // We take the advantage of the fact that the row_ids are already sorted
     // within each batch.
     for (; coo_tensor_index < coo_tensors.size() &&
@@ -295,7 +295,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
       // If the row ids and col ids are both same as the previous one,
       // dedup the id by adding the gains.
       if (col_id == prev_col_id && row_id == prev_row_id) {
-        coo_tensors_by_id[local_sc_id].back().gain += coo_tensor.gain;
+        coo_tensors_by_sc_id[local_sc_id].back().gain += coo_tensor.gain;
       } else {
         ids_per_sc_partition[global_sc_id] += 1;
         // If either max_unique_ids_per_partition or max_ids_per_partition is
@@ -303,14 +303,14 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
         if (unique_ids_per_sc_partition[global_sc_id] <=
                 max_unique_ids_per_partition &&
             ids_per_sc_partition[global_sc_id] <= max_ids_per_partition) {
-          coo_tensors_by_id[local_sc_id].push_back(coo_tensor);
+          coo_tensors_by_sc_id[local_sc_id].push_back(coo_tensor);
         }
       }
       prev_col_id = col_id;
       prev_row_id = row_id;
     }
     // Sentinel node to terminate buffer filling.
-    coo_tensors_by_id[local_sc_id].emplace_back(
+    coo_tensors_by_sc_id[local_sc_id].emplace_back(
         batch_size_per_sc * (local_sc_id + 1), 0, 0.0);
     required_buffer_size_per_sc[local_sc_id]++;
 
@@ -339,7 +339,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
                 << ", after deduplication: "
                 << std::reduce(ids_per_sc_partition.begin(),
                                ids_per_sc_partition.end())
-                << ", after drop id: " << coo_tensors_by_id[local_sc_id].size();
+                << ", after drop id: "
+                << coo_tensors_by_sc_id[local_sc_id].size();
     }
 
     const int32_t observed_max_ids_per_partition =
@@ -352,7 +353,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
                         max_ids_per_partition, max_unique_ids_per_partition,
                         stacked_table_name, allow_id_dropping);
   }
-  return coo_tensors_by_id;
+  return coo_tensors_by_sc_id;
 }
 int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
@@ -472,7 +473,7 @@ void FillRowPointersPerLocalDevice(
         row_pointers, embedding_ids, sample_ids, gains);
 
     // Only pad (to end of COO buffer) between SparseCores for
-    // non-minibatching. Always pad after the last SparseCore. The end could be
+    // non-mini-batching. Always pad after the last SparseCore. The end could be
     // different per SparseCore for non-minibatching.
     if (!options.enable_minibatching || local_sc_id == num_sc_per_device - 1) {
       PadSparseCoreBuffer(coo_index, coo_end,

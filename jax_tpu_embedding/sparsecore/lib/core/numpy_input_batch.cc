@@ -139,7 +139,7 @@ class NumpyRaggedInputBatchStream {
 
 void NumpySparseInputBatch::ExtractCooTensors(
     const ExtractCooTensorsOptions& options,
-    std::vector<CooFormat>& coo_tensors) {
+    ExtractedCooTensors& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
 

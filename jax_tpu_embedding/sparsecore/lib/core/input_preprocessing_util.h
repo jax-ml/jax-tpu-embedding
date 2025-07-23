@@ -14,7 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
-#include <cstdint>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <ostream>
@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -101,6 +102,7 @@ struct CooFormat {
   // This packing allows for efficient storage and extractions using bitwise
   // masks (assuming number of sparsecores (SC) is a power of 2).
   int col_id;
+  // Combiner weight for this COO tensor.
   float gain;
 
   bool operator==(const CooFormat& other) const {
@@ -117,7 +119,14 @@ struct CooFormat {
 struct ExtractedCooTensors {
   std::vector<CooFormat> coo_tensors;
   // Number of samples these coo_tensors are extracted from.
-  int batch_size_for_device = 0;
+  int batch_size_for_device;
+  // Count coo tensors per SC for efficient allocation of vector for sorting and
+  // grouping them.
+  std::vector<int> coo_tensors_per_sc;
+
+  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
+      : batch_size_for_device(batch_size_for_device),
+        coo_tensors_per_sc(num_sc_per_device, 0) {}
 };
 
 // Get adjusted col_id based on shift and offset.

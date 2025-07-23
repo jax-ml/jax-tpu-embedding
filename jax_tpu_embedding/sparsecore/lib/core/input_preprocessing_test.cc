@@ -409,5 +409,26 @@ TEST(InputPreprocessingUtilTest, MergeStats) {
               ElementsAreArray({300, 301, 302, 303}));
 }
 
+TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
+
+  ExtractedCooTensors extracted_coo_tensors =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+          stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
+          /*local_device_id=*/0, options);
+
+  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
+  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
+
+  std::vector<int> expected_coo_tensors_per_sc = {
+      1 + 2 + 9 + 10, 3 + 4 + 11 + 12, 5 + 6 + 13 + 14, 7 + 8 + 15 + 16};
+  EXPECT_EQ(extracted_coo_tensors.coo_tensors_per_sc,
+            expected_coo_tensors_per_sc);
+}
+
 }  // namespace
 }  // namespace jax_sc_embedding

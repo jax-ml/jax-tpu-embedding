@@ -63,7 +63,7 @@ class PySparseCooInputBatch : public AbstractInputBatch {
 
   // Extracts COO tensors for each SparseCore.
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         std::vector<CooFormat>& coo_tensors) override;
+                         ExtractedCooTensors& coo_tensors) override;
 
   virtual int batch_number() const override { return batch_number_; }
 
