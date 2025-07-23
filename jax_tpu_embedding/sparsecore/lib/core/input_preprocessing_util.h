@@ -105,10 +105,7 @@ struct CooFormat {
   // Combiner weight for this COO tensor.
   float gain;
 
-  bool operator==(const CooFormat& other) const {
-    return row_id == other.row_id && col_id == other.col_id &&
-           gain == other.gain;
-  }
+  bool operator==(const CooFormat& other) const = default;
 
   friend std::ostream& operator<<(std::ostream& os, const CooFormat& coo) {
     os << absl::StrFormat("(%d, %d, %2.2f)", coo.row_id, coo.col_id, coo.gain);
