@@ -50,7 +50,7 @@ class WithSparseCoreLayout(nn.Partitioned[A]):
     return Layout(  # pytype: disable=bad-return-type
         DLL(
             major_to_minor=(0, 1),
-            _tiling=((8,),),
+            tiling=((8,),),
         ),
         jax.sharding.NamedSharding(self.mesh, self.get_partition_spec()),
     )

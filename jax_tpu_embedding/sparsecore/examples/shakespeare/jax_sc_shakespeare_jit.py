@@ -358,7 +358,7 @@ def run_model():
   emb_var_outsharding = Format(
       DLL(
           major_to_minor=(0, 1),
-          _tiling=((8,),),
+          tiling=((8,),),
       ),
       global_emb_sharding,
   )
