@@ -14,19 +14,17 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
-#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/log/check.h"  // from @com_google_absl
-#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 
 namespace jax_sc_embedding {
 
@@ -82,36 +80,6 @@ enum class RowCombiner {
 };
 
 RowCombiner GetRowCombiner(absl::string_view combiner);
-
-struct CooFormat {
-  CooFormat(int row_id, int col_id, float gain)
-      : row_id(row_id), col_id(col_id), gain(gain) {}
-  // Defines the Row ID as the sum of the Sample ID and the Row Offset,
-  // where Row Offset accounts for table stacking.
-  //
-  // - Row Offset: Specifies the offset of the sample within the feature input,
-  //               facilitating addressing in stacked tables.
-  int row_id;
-  // Represents a packed structure where a single integer word encodes:
-  // Col ID (Embedding ID), Col Shift, and Col Offset.
-  //
-  // - Col Shift: Defines table rotation.
-  // - Col Offset: Specifies the embedding's offset in a stacked embedding
-  // table.
-  //
-  // This packing allows for efficient storage and extractions using bitwise
-  // masks (assuming number of sparsecores (SC) is a power of 2).
-  int col_id;
-  // Combiner weight for this COO tensor.
-  float gain;
-
-  bool operator==(const CooFormat& other) const = default;
-
-  friend std::ostream& operator<<(std::ostream& os, const CooFormat& coo) {
-    os << absl::StrFormat("(%d, %d, %2.2f)", coo.row_id, coo.col_id, coo.gain);
-    return os;
-  }
-};
 
 struct ExtractedCooTensors {
   std::vector<CooFormat> coo_tensors;
