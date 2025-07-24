@@ -15,7 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_ABSTRACT_INPUT_BATCH_H_
 #include <sys/types.h>
 
-#include <vector>
+#include <cstdint>
 
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
@@ -26,22 +26,22 @@ class AbstractInputBatch {
  public:
   struct ExtractCooTensorsOptions {
     // Start index of the slice to be processed (inclusive).
-    int slice_start;
+    const int slice_start;
     // End index of the slice to be processed (exclusive).
-    int slice_end;
+    const int slice_end;
     // Row offset to be added to the sample id.
-    int row_offset;
+    const int row_offset;
     // Column offset to be added to the embedding id.
-    int col_offset;
+    const int col_offset;
     // Number of bits to shift the embedding id.
-    int col_shift;
+    const int col_shift;
     // Number of sparse cores per device. Used to compute COO tensor counts per
     // SC.
-    int num_sc_per_device;
+    const int num_sc_per_device;
     // Number of sparse cores.
-    int num_scs;
+    const uint32_t num_scs;
     // Combiner to be used for the row.
-    RowCombiner combiner = RowCombiner::kSum;
+    const RowCombiner combiner;
   };
 
   // Return the batch size or the number of samples in this input batch.

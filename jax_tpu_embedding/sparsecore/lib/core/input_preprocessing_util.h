@@ -61,16 +61,16 @@ enum class FeatureStackingStrategy {
 enum class ShardingStrategy : int { kMod = 1 };
 
 struct PreprocessSparseDenseMatmulInputOptions {
-  int local_device_count;
-  int global_device_count;
-  int num_sc_per_device;
-  ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
-  bool allow_id_dropping = true;
+  const int local_device_count;
+  const int global_device_count;
+  const int num_sc_per_device;
+  const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
+  const bool allow_id_dropping = true;
   FeatureStackingStrategy feature_stacking_strategy =
       FeatureStackingStrategy::kSplitThenStack;
-  bool enable_minibatching = false;
+  const bool enable_minibatching = false;
 
-  int GetNumScs() const { return num_sc_per_device * global_device_count; }
+  uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
 
 // Different combiners that are supported for samples with multiple ids.

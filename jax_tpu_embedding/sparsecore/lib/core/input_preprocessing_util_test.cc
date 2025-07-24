@@ -135,11 +135,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -216,11 +217,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 2;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 2;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 2,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -277,11 +279,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -319,11 +322,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/4,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -366,11 +370,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/8,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -414,11 +419,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/64,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -458,11 +464,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/128,
       /*max_unique_ids_per_partition=*/4, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -502,11 +509,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -547,11 +555,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = true;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = true,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -632,11 +641,12 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
@@ -756,12 +766,13 @@ TEST(InputPreprocessingUtilTest, FillRowPointersMinibatching) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options;
-  options.local_device_count = 4;
-  options.global_device_count = 1;
-  options.num_sc_per_device = 4;
-  options.allow_id_dropping = false;
-  options.enable_minibatching = true;
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+      .enable_minibatching = true,
+  };
   std::vector<std::vector<CooFormat>> coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
