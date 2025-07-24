@@ -60,3 +60,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/utils",  # buildcleaner: keep
     ],
 )
+
+# copybara:comment_begin(internal)
+exports_files(srcs = ["METADATA"])
+# copybara:comment_end
