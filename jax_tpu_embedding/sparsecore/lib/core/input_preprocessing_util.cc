@@ -25,10 +25,10 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
-#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
+#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -158,9 +158,9 @@ int FillRowPointersPerSparseCore(
   int processed = 0;
   for (const CooFormat& coo_tensor : options.coo_tensors) {
     ++processed;
-    const auto sc_id =
-        std::make_pair(coo_tensor.row_id / options.batch_size_per_sc,
-                       coo_tensor.col_id % options.num_scs);
+    const auto sc_id = std::make_pair(
+        /* local_sc_id= */ coo_tensor.row_id / options.batch_size_per_sc,
+        /* global_sc_id= */ coo_tensor.col_id % options.num_scs);
     while (last_sc_id < sc_id) {
       if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
         break;
@@ -193,16 +193,17 @@ int FillRowPointersPerSparseCore(
   return coo_index;
 }
 
-}  // namespace
-
-int GetColId(const int col_id, const int col_shift, const int col_offset,
-             const int num_scs_mod, const int num_scs_mod_inv) {
-  // This is equivalent to:
-  // (col_ids + col_shift) % num_sc_shards +
-  //    (col_ids // num_sc_shards * num_sc_shards) + col_offset
-  return ((col_id + col_shift) & num_scs_mod) + (col_id & num_scs_mod_inv) +
-         col_offset;
+void ValidateKeyCapacity(int local_sc_id, size_t capacity) {
+  if (capacity > CooFormat::kIndexMask) {
+    LOG(ERROR) << absl::StrFormat(
+        "Too many tensors for SparseCore #%d: got %d, limit: "
+        "%d. Preprocessed output may not be reliable and cause undefined "
+        "behavior.",
+        local_sc_id, capacity, CooFormat::kIndexMask);
+  }
 }
+
+}  // namespace
 
 RowCombiner GetRowCombiner(absl::string_view combiner) {
   if (combiner == "sum") {
@@ -231,7 +232,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
   bool allow_id_dropping = options.allow_id_dropping;
   const int batch_size_per_sc = CeilOfRatio(
       extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
-  const int global_sc_count = options.GetNumScs();
+  const uint32_t global_sc_count = options.GetNumScs();
+  const int num_sc_bits = absl::bit_width(global_sc_count - 1);
   const int max_ids_per_partition =
       stacked_table_metadata.max_ids_per_partition;
   const int max_unique_ids_per_partition =
@@ -248,7 +250,6 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
   }
 
   uint32_t coo_tensor_index = 0;
-  const int32_t num_scs_bit = std::log2(global_sc_count);
   // Initialize the aggregated max ids and unique ids per SC to 0.
   max_ids_per_sc.fill(0);
   max_unique_ids_per_sc.fill(0);
@@ -260,32 +261,32 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
     std::vector<uint64_t> keys;
     keys.reserve(extracted_coo_tensors.coo_tensors_per_sc[local_sc_id]);
+    ValidateKeyCapacity(local_sc_id, keys.capacity());
     // We take the advantage of the fact that the row_ids are already sorted
     // within each batch.
     for (; coo_tensor_index < coo_tensors.size() &&
            coo_tensors[coo_tensor_index].row_id <
                (local_sc_id + 1) * batch_size_per_sc;
          coo_tensor_index++) {
-      // The key here is [col_ids % num_scs, col_ids / num_scs, index].
-      // Note that this assumes `num_scs` is a power of 2.
-      keys.push_back(
-          (static_cast<uint64_t>(absl::rotr(
-               static_cast<uint32_t>(coo_tensors[coo_tensor_index].col_id),
-               num_scs_bit))
-           << 32) +
-          coo_tensor_index);
+      // The key here is [col_ids % num_scs, col_ids / num_scs, [minibatching
+      // bucket id], index].
+      //  Note that this assumes `num_scs` is a power of 2.
+      keys.push_back(coo_tensors[coo_tensor_index].GetGroupingKey(
+          num_sc_bits, coo_tensor_index, options.enable_minibatching));
     }
     hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
 
     uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
     uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
     for (const uint64_t key : keys) {
-      const uint32_t index = static_cast<uint32_t>(key);
+      uint32_t index = key & CooFormat::kIndexMask;
+
       const CooFormat& coo_tensor = coo_tensors[index];
-      const uint32_t global_sc_id =
-          num_scs_bit > 0 ? static_cast<uint32_t>(key >> (64 - num_scs_bit))
-                          : 0;
-      const uint32_t col_id = static_cast<uint32_t>(key >> 32);
+      const uint32_t col_id = coo_tensor.col_id;
+      const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
+      // TODO: b/428790659 - Use bucket ID.
+      //  const uint32_t bucket_id =
+      //     options.enable_minibatching ? coo_tensor.GetBucketId() : 0;
       const uint32_t row_id = coo_tensor.row_id;
 
       if (col_id != prev_col_id) {
@@ -311,7 +312,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     }
     // Sentinel node to terminate buffer filling.
     coo_tensors_by_sc_id[local_sc_id].emplace_back(
-        batch_size_per_sc * (local_sc_id + 1), 0, 0.0);
+        /* row_id= */ batch_size_per_sc * (local_sc_id + 1), /* col_id= */ 0,
+        /* gain= */ 0.0);
     required_buffer_size_per_sc[local_sc_id]++;
 
     // Update global max using this device's values.
