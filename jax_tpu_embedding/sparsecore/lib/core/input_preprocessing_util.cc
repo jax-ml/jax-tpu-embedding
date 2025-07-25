@@ -25,7 +25,6 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
-#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
@@ -243,8 +242,10 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
   std::vector<std::vector<CooFormat>> coo_tensors_by_sc_id;
   coo_tensors_by_sc_id.resize(num_sc_per_device);
   for (int i = 0; i < num_sc_per_device; ++i) {
+    // An additional capacity for the sentinel node. Might underutilize if
+    // deduplication happens.
     coo_tensors_by_sc_id[i].reserve(
-        extracted_coo_tensors.coo_tensors_per_sc[i]);
+        1 + extracted_coo_tensors.coo_tensors_per_sc[i]);
   }
 
   uint32_t coo_tensor_index = 0;
@@ -259,7 +260,9 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
     std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
     std::vector<uint64_t> keys;
-    keys.reserve(extracted_coo_tensors.coo_tensors_per_sc[local_sc_id]);
+    const int expected_keys_size =
+        extracted_coo_tensors.coo_tensors_per_sc[local_sc_id];
+    keys.reserve(expected_keys_size);
     // We take the advantage of the fact that the row_ids are already sorted
     // within each batch.
     for (; coo_tensor_index < coo_tensors.size() &&
@@ -275,6 +278,9 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
            << 32) +
           coo_tensor_index);
     }
+
+    // The expected allocation size may be uninitialized.
+    DCHECK(expected_keys_size == 0 || keys.size() == expected_keys_size);
     hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
 
     uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
