@@ -44,7 +44,6 @@ pytype_strict_library(
     srcs = ["preprocess.py"],
     deps = [
         ":utils",
-        pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
     ],
 )
