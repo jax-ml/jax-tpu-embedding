@@ -38,6 +38,7 @@ from jax_tpu_embedding.sparsecore.examples.models.shakespeare import model as sh
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
@@ -226,21 +227,24 @@ def _try_restore_latest_checkpoint(
 
   info('Found latest_step = %s', latest_step)
   # load and resume from the latest step
-  chkpt_metadata = chkpt_mgr.item_metadata(latest_step)
+  # Note that the following metadata need to be passed in during restore only
+  # when the topology changes between saved checkpoint and restore.
+  # chkpt_metadata = chkpt_mgr.item_metadata(latest_step)
 
   # Provide a sample target to make sure Orbax able to restore the
   # custom TrainState object instead of raw PyTree
   restore_target = {
-      'train_state': init_train_state,
-      'emb_variables': chkpt_metadata['emb_variables'],
+      'train_state': ocp.args.PyTreeRestore(init_train_state),
+      'emb_variables': ocp.args.PyTreeRestore(),
+      'stacking_proto': ocp.args.ProtoRestore(
+          embedding_spec_pb2.EmbeddingSpecProto
+      ),
   }
 
   # restore from the latest steps
   restored = chkpt_mgr.restore(
       latest_step,
-      args=ocp.args.PyTreeRestore(
-          item=restore_target,
-      ),
+      args=ocp.args.Composite(**restore_target),
   )
 
   info(
@@ -336,7 +340,6 @@ def run_model():
             enable_background_delete=True,
             save_interval_steps=_CHECKPOINT_INTERVAL.value,
         ),
-        item_handlers=ocp.PyTreeCheckpointHandler(),
     )
 
     if _CHECKPOINT_RESUME.value:
@@ -346,7 +349,11 @@ def run_model():
       if latest_step is not None:
         # restore successfully, use the restored train_state and embedding
         train_state = restored['train_state']
-        emb_variables = restored['emb_variables']
+        emb_variables = {}
+        for k, v in restored['emb_variables'].items():
+          emb_variables[k] = embedding.EmbeddingVariables(
+              table=v['table'], slot=v['slot'],
+          )
 
   if emb_variables is None:
     table_specs = {
@@ -550,19 +557,25 @@ def run_model():
     if (step + 1) % _LOSS_RESET_FREQUENCY.value == 0:
       train_metrics = None
       loaded_stats = fdo_client.load()
+      jax.experimental.multihost_utils.sync_global_devices(
+          'FDO_load_barrier'
+      )
+
       embedding.update_preprocessing_parameters(
           feature_specs, loaded_stats, num_sc_per_device
       )
     if chkpt_mgr:
       chkpt_mgr.save(
           step,
-          args=ocp.args.PyTreeSave({
-              'train_state': train_state,
-              'emb_variables': emb_variables,
-              'stacking_proto': embedding.create_proto_from_feature_specs(
-                  feature_specs,
-                  global_device_count=num_global_devices,
-                  num_sparsecore_per_device=num_sc_per_device,
+          args=ocp.args.Composite(**{
+              'train_state': ocp.args.PyTreeSave(train_state),
+              'emb_variables': ocp.args.PyTreeSave(emb_variables),
+              'stacking_proto': ocp.args.ProtoSave(
+                  embedding.create_proto_from_feature_specs(
+                      feature_specs,
+                      global_device_count=num_global_devices,
+                      num_sparsecore_per_device=num_sc_per_device,
+                  )
               ),
           }),
       )
@@ -572,13 +585,15 @@ def run_model():
       # Make sure the latest step is saved before exiting.
       chkpt_mgr.save(  # pytype: disable=attribute-error
           step,
-          args=ocp.args.PyTreeSave({
-              'train_state': train_state,
-              'emb_variables': emb_variables,
-              'stacking_proto': embedding.create_proto_from_feature_specs(
-                  feature_specs,
-                  global_device_count=num_global_devices,
-                  num_sparsecore_per_device=num_sc_per_device,
+          args=ocp.args.Composite(**{
+              'train_state': ocp.args.PyTreeSave(train_state),
+              'emb_variables': ocp.args.PyTreeSave(emb_variables),
+              'stacking_proto': ocp.args.ProtoSave(
+                  embedding.create_proto_from_feature_specs(
+                      feature_specs,
+                      global_device_count=num_global_devices,
+                      num_sparsecore_per_device=num_sc_per_device,
+                  )
               ),
           }),
           force=True,
