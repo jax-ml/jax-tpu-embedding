@@ -614,7 +614,29 @@ class TableSettingInStack:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, order=True)
 class TableSpec:
-  """Spec for one embedding table."""
+  """Specifies one embedding table.
+
+  Attributes:
+    name: Name of the table.
+    vocabulary_size: The total number of unique embedding IDs. This is the
+      number of rows in the embedding table.
+    embedding_dim: The number of columns in the embedding table.
+    initializer: An initializer for the embedding table. See
+      [jax.nn.initializers](https://docs.jax.dev/en/latest/jax.nn.initializers.html)
+      for more details.
+    optimizer: An optimizer for the embedding table.
+    combiner: The aggregation function to compute activations for each sample.
+      For example, sum or mean.
+    max_ids_per_partition: The maximum number of embedding IDs that can be
+      packed into a single partition.
+    max_unique_ids_per_partition: The maximum number of unique embedding IDs
+      that can be packed into a single partition.
+    suggested_coo_buffer_size: The minimum size of the input buffer that the
+      preprocessing should try to create (per device).
+    quantization_config: Quantization config (min, max, num_buckets) which
+      represent the float range and number of discrete integer buckets to use
+      for quantization.
+  """
 
   name: str
   vocabulary_size: int
@@ -644,11 +666,13 @@ class TableSpec:
 
   @property
   def setting_in_stack(self) -> TableSettingInStack:
+    """Returns the setting of this table in the stack."""
     assert self._setting_in_stack is not None
     return self._setting_in_stack
 
   @property
   def stacked_table_spec(self) -> StackedTableSpec:
+    """Returns the stacked table spec which this table belongs to."""
     assert (
         self._stacked_table_spec is not None
     ), f"Table {self.name} is not stacked."
@@ -681,7 +705,16 @@ class TableSpec:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, order=True)
 class FeatureSpec:
-  """Spec for one embedding feature."""
+  """Specification for one embedding feature.
+
+  Attributes:
+    name: Name of the feature.
+    table_spec: The table spec for the feature.
+    input_shape: The shape of the input jax array, this is [batch_size,
+      feature_sequence_len]
+    output_shape: The expected shape of the output activation jax array, this is
+      [batch_size, embedding_dim]
+  """
 
   name: str
   table_spec: TableSpec
@@ -696,6 +729,7 @@ class FeatureSpec:
 
   @property
   def id_transformation(self) -> FeatureIdTransformation:
+    """Returns the transformation to apply to the input feature ids."""
     assert self._id_transformation is not None, self.name
     return self._id_transformation
 
