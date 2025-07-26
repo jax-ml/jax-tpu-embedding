@@ -111,7 +111,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping,
-    FeatureStackingStrategy feature_stacking_strategy) {
+    FeatureStackingStrategy feature_stacking_strategy, int batch_number) {
   CHECK_EQ(input_batches.size(), feature_specs.size());
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = local_device_count,
@@ -120,6 +120,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
       .sharding_strategy = sharding_strategy,
       .allow_id_dropping = allow_id_dropping,
       .feature_stacking_strategy = feature_stacking_strategy,
+      .batch_number = batch_number,
   };
   // Get the stacked table metadata for each top level table.
   // The keys are stacked table names (or the table itself if not stacked) and
@@ -166,12 +167,13 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
   input_batches.reserve(features.size());
   for (int i = 0; i < features.size(); ++i) {
     input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
-        batch_number, features[i], feature_weights[i]));
+        features[i], feature_weights[i]));
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
       global_device_count, num_sc_per_device, sharding_strategy,
-      has_leading_dimension, allow_id_dropping, feature_stacking_strategy);
+      has_leading_dimension, allow_id_dropping, feature_stacking_strategy,
+      batch_number);
 }
 
 py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
@@ -191,14 +193,15 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     const std::string table_name =
         feature_specs[i].attr("table_spec").attr("name").cast<std::string>();
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
-        batch_number, indices[i].cast<py::array_t<int64_t>>(),
+        indices[i].cast<py::array_t<int64_t>>(),
         values[i].cast<py::array_t<int32_t>>(),
         dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id, table_name);
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
       global_device_count, num_sc_per_device, sharding_strategy,
-      has_leading_dimension, allow_id_dropping, feature_stacking_strategy);
+      has_leading_dimension, allow_id_dropping, feature_stacking_strategy,
+      batch_number);
 }
 }  // namespace
 

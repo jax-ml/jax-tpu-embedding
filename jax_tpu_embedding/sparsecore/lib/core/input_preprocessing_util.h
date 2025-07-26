@@ -14,7 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
-#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <ostream>
@@ -22,7 +22,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/log/check.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -69,6 +68,13 @@ struct PreprocessSparseDenseMatmulInputOptions {
   FeatureStackingStrategy feature_stacking_strategy =
       FeatureStackingStrategy::kSplitThenStack;
   const bool enable_minibatching = false;
+
+  // The batch number should be a sequential counter that is unique for each
+  // batch. It is safe to reset this counter to 0 on restart. The number should
+  // be unique to identify the batch for collective operations during
+  // mini-batching. The number should be sequential to help limit logging
+  // (e.g., LOG_IF(INFO, batch_number_ % 100 == 0)).
+  const int batch_number = 0;
 
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
@@ -201,7 +207,8 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    int batch_number = 0);
 
 void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
                    int num_scs_per_device);

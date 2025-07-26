@@ -35,8 +35,7 @@ class TableStackingTest : public ::testing::Test {
       RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
 
  protected:
-  InputBatch input_a_{/*batch_number=*/0,
-                      std::vector<int64_t>{5, 18,  //
+  InputBatch input_a_{std::vector<int64_t>{5, 18,  //
                                            18, 0,  //
                                            0, 20,  //
                                            18, 0,  //
@@ -45,8 +44,7 @@ class TableStackingTest : public ::testing::Test {
                                            5, 18,  //
                                            18, 0},
                       std::vector<int32_t>{0, 2, 4, 6, 8, 10, 12, 14, 16}};
-  InputBatch input_b_{/*batch_number=*/1,
-                      std::vector<int64_t>{2,   //
+  InputBatch input_b_{std::vector<int64_t>{2,   //
                                            10,  //
                                            1,   //
                                            9,   //
@@ -55,8 +53,7 @@ class TableStackingTest : public ::testing::Test {
                                            4,   //
                                            8},
                       std::vector<int32_t>{0, 1, 2, 3, 4, 5, 6, 7, 8}};
-  InputBatch input_c_{/*batch_number=*/2,
-                      std::vector<int64_t>{1,                    //
+  InputBatch input_c_{std::vector<int64_t>{1,                    //
                                            2, 2,                 //
                                            3, 3, 3,              //
                                            4, 4, 4, 4,           //
@@ -66,7 +63,6 @@ class TableStackingTest : public ::testing::Test {
                                            8, 8, 8, 8, 8, 8, 8, 8},
                       std::vector<int32_t>{0, 1, 3, 6, 10, 15, 21, 28, 36}};
   InputBatch input_d_{
-      /*batch_number=*/3,
       std::vector<int64_t>{
           9,  9,  9,  9,  9,  9,  9,  9,  9,                           //
           10, 10, 10, 10, 10, 10, 10, 10, 10, 10,                      //
