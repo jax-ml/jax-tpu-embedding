@@ -40,14 +40,14 @@ class RaggedTensorInputBatchTest : public ::testing::Test {
 };
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
-  RaggedTensorInputBatch ragged_tensor_input_batch(
-      /*batch_number=*/13, embedding_ids_, embedding_splits_);
+  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids_,
+                                                     embedding_splits_);
 
   ExtractedCooTensors extracted_1(4, 4);
   ExtractedCooTensors extracted_2(4, 4);
   ExtractedCooTensors extracted_3(4, 20);  // row_offset=16
 
-  ragged_tensor_input_batch.ExtractCooTensors(
+  ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
           .slice_end = 4,
@@ -59,7 +59,7 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
           .combiner = RowCombiner::kSum,
       },
       extracted_1);
-  ragged_tensor_input_batch.ExtractCooTensors(
+  ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 1,
           .slice_end = 3,
@@ -71,7 +71,7 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
           .combiner = RowCombiner::kSum,
       },
       extracted_2);
-  ragged_tensor_input_batch.ExtractCooTensors(
+  ragged_tensor_feature_input.ExtractCooTensors(
       {
           // row mapping after offset: (2..3) -> (17..18)
           .slice_start = 2,
@@ -98,11 +98,11 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
 }
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
-  RaggedTensorInputBatch ragged_tensor_input_batch(
-      /*batch_number=*/42, embedding_ids_, embedding_splits_);
+  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids_,
+                                                     embedding_splits_);
 
   ExtractedCooTensors extracted(4, 4);
-  ragged_tensor_input_batch.ExtractCooTensors(
+  ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
           .slice_end = 4,
@@ -121,11 +121,11 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
 }
 
 TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
-  RaggedTensorInputBatch ragged_tensor_input_batch(
-      /*batch_number=*/123, embedding_ids_, embedding_splits_);
+  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids_,
+                                                     embedding_splits_);
 
   ExtractedCooTensors extracted(4, 4);
-  ragged_tensor_input_batch.ExtractCooTensors(
+  ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
           .slice_end = 4,
@@ -151,11 +151,11 @@ TEST_F(RaggedTensorInputBatchTest,
   int batch_size = 4;
   int valency = 2;
   FixedValencyRowOffsets row_offsets(batch_size, valency);
-  RaggedTensorInputBatch ragged_tensor_input_batch(
-      /*batch_number=*/123, embedding_ids, row_offsets);
+  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids,
+                                                     row_offsets);
 
   ExtractedCooTensors extracted(4, 4);
-  ragged_tensor_input_batch.ExtractCooTensors(
+  ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
           .slice_end = 4,
