@@ -14,7 +14,6 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_RAGGED_TENSOR_INPUT_BATCH_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_RAGGED_TENSOR_INPUT_BATCH_H_
 #include <cstdint>
-#include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
@@ -64,11 +63,9 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
   // This class represents a batch of input data encoded using row offsets,
   // similar to how RaggedTensor uses row offsets as described in
   // https://www.tensorflow.org/guide/ragged_tensor#tfraggedtensorfrom_row_splits.
-  RaggedTensorInputBatch(int batch_number, EmbeddingIdsView embedding_ids,
+  RaggedTensorInputBatch(EmbeddingIdsView embedding_ids,
                          RowOffsetsView row_offsets)
-      : batch_number_(batch_number),
-        embedding_ids_(embedding_ids),
-        row_offsets_(row_offsets) {}
+      : embedding_ids_(embedding_ids), row_offsets_(row_offsets) {}
 
   int64_t size() const override { return row_offsets_.size() - 1; }
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
@@ -81,10 +78,7 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
     ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
   }
 
-  virtual int batch_number() const override { return batch_number_; }
-
  private:
-  int batch_number_;
   EmbeddingIdsView embedding_ids_;
   RowOffsetsView row_offsets_;
 };

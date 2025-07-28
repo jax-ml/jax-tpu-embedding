@@ -42,14 +42,12 @@ namespace py = ::pybind11;
 //   with the corresponding (row_id, col_id) pair in `indices`.
 class PySparseCooInputBatch : public AbstractInputBatch {
  public:
-  PySparseCooInputBatch(const int batch_number,
-                        const py::array_t<int64_t>& indices,
+  PySparseCooInputBatch(const py::array_t<int64_t>& indices,
                         const py::array_t<int32_t>& values,
                         const py::array_t<int64_t>& dense_shape,
                         const int64_t max_vocab_id,
                         const std::string table_name)
-      : batch_number_(batch_number),
-        indices_(indices),
+      : indices_(indices),
         values_(values),
         max_vocab_id_(max_vocab_id),
         batch_size_(dense_shape.at(0)),
@@ -65,10 +63,7 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          ExtractedCooTensors& coo_tensors) override;
 
-  virtual int batch_number() const override { return batch_number_; }
-
  private:
-  int batch_number_;
   // (N,2) array, sorted by row_id.
   const py::array_t<int64_t> indices_;
   const py::array_t<int32_t> values_;

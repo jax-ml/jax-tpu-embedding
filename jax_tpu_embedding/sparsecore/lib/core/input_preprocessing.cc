@@ -284,7 +284,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     LOG(FATAL) << "Only mod sharding is supported for now.";
   }
   CHECK_GT(options.local_device_count, 0);
-  CHECK(!input_batches.empty()) << "input_batches cannot be empty.";
+  CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
 
   absl::Mutex mutex;
   PreprocessSparseDenseMatmulOutput out;
@@ -316,7 +316,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
             context_id);
         // Allocate the static buffers.
         const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
-            num_scs, options.num_sc_per_device, stacked_table_metadata);
+            num_scs, options.num_sc_per_device, stacked_table_metadata,
+            options.batch_number);
 
         MatrixXi row_pointers_per_device(
             options.local_device_count,
@@ -372,7 +373,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
             /* max_required_buffer_size_per_device= */
             required_buffer_size_per_sc.maxCoeff() * options.num_sc_per_device,
             coo_buffer_size_per_device, stacked_table_name,
-            input_batches[0]->batch_number());
+            options.batch_number);
 
         max_ids_per_partition_per_sc.resize(
             1, max_ids_per_partition_per_sc.size());
