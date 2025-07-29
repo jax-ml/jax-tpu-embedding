@@ -61,7 +61,6 @@ void ProcessCooTensors(
 
   const int num_scs_bit = std::log2(options.num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
-  const int num_scs_mod_inv = ~num_scs_mod;
   const int batch_size_per_sc =
       extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   CHECK_GT(batch_size_per_sc, 0);
@@ -94,10 +93,8 @@ void ProcessCooTensors(
       extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc]++;
 
       extracted_coo_tensors.coo_tensors.emplace_back(
-          sample_id,
-          GetColId(embedding_id, options.col_shift, options.col_offset,
-                   num_scs_mod, num_scs_mod_inv),
-          gain);
+          sample_id, embedding_id, gain, options.col_shift, options.col_offset,
+          num_scs_mod);
     }
   }
 }

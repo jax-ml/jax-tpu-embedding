@@ -13,6 +13,7 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -426,5 +427,83 @@ TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
             expected_coo_tensors_per_sc);
 }
 
+class MinibatchingTest : public testing::TestWithParam<bool> {
+ protected:
+  bool IsMinibatchingEnabled() const { return GetParam(); }
+
+  std::vector<int> GetBucketIds() {
+    return IsMinibatchingEnabled() ? std::vector<int>{0, 1, 2}
+                                   : std::vector<int>{0};
+  }
+
+  // Helper to generate keys in the expected order
+  std::vector<uint64_t> GenerateGroupingKeys() {
+    const int num_scs = 4;
+    const int num_scs_bit = std::log2(num_scs);
+    std::vector<uint64_t> keys;
+    int index = 0;
+
+    for (int bucket_id : GetBucketIds()) {
+      for (int global_sc_id : {0, 1, 2}) {
+        for (int local_embedding_id : {5, 13, 17}) {
+          const int col_shift = global_sc_id;
+          const int col_offset = local_embedding_id * num_scs;
+          CooFormat coo_format(
+              /*sample_id=*/0,
+              /*embedding_id=*/local_embedding_id,  // Use local_embedding_id
+              /*gain=*/1.0,
+              /*col_shift=*/col_shift,
+              /*col_offset=*/col_offset,
+              /*num_scs_mod=*/3);
+
+          const auto hash_fn = [=](int col_id) { return bucket_id; };
+
+          keys.push_back(coo_format.GetGroupingKey(
+              num_scs_bit, index, IsMinibatchingEnabled(), hash_fn));
+          ++index;
+        }
+      }
+    }
+    return keys;
+  }
+};
+
+TEST(CooFormatTest, BucketIdCalculationIsCorrect) {
+  CooFormat coo_format(/*sample_id=*/1, /*embedding_id=*/70, /*gain=*/1.0,
+                       /*col_shift=*/0, /*col_offset=*/0, /*num_scs_mod=*/3);
+  EXPECT_EQ(coo_format.col_id, 70);
+  EXPECT_EQ(coo_format.GetBucketId(), 70 % CooFormat::kMaxMinibatchingBuckets);
+
+  CooFormat coo_format_2(/*sample_id=*/2, /*embedding_id=*/127, /*gain=*/0.5,
+                         /*col_shift=*/1, /*col_offset=*/32, /*num_scs_mod=*/3);
+
+  // 128%4 + 127//4*4 + 32 = 156
+  EXPECT_EQ(coo_format_2.col_id, 156);
+  EXPECT_EQ(coo_format_2.GetBucketId(),
+            156 % CooFormat::kMaxMinibatchingBuckets);
+}
+
+// NOTE: We do not want to test for exact key value, since we only care about
+// the ordering.
+TEST_P(MinibatchingTest, KeysAreSorted) {
+  std::vector<uint64_t> keys = GenerateGroupingKeys();
+
+  for (int i = 0; i + 1 < keys.size(); ++i) {
+    EXPECT_LT(keys[i], keys[i + 1]) << i;
+  }
+}
+
+TEST_P(MinibatchingTest, IndexFromKeyIsCorrect) {
+  std::vector<uint64_t> keys = GenerateGroupingKeys();
+  for (int i = 0; i < keys.size(); ++i) {
+    EXPECT_EQ(keys[i] & CooFormat::kIndexMask, i);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MinibatchingTestGroup, MinibatchingTest, testing::Bool(),
+    [](const testing::TestParamInfo<MinibatchingTest::ParamType>& info) {
+      return info.param ? "MinibatchingEnabled" : "MinibatchingDisabled";
+    });
 }  // namespace
 }  // namespace jax_sc_embedding

@@ -86,14 +86,16 @@ void ExtractCooTensorsForSingleFeatureSlice(
       feature_index, start_index, end_index, local_device_id, feature_slice_id,
       row_offset, batch_size_per_slice);
   curr_batch->ExtractCooTensors(
-      {.slice_start = start_index,
-       .slice_end = end_index,
-       .row_offset = row_offset,
-       .col_offset = col_offset,
-       .col_shift = col_shift,
-       .num_sc_per_device = options.num_sc_per_device,
-       .num_scs = options.GetNumScs(),
-       .combiner = metadata.row_combiner},
+      {
+          .slice_start = start_index,
+          .slice_end = end_index,
+          .row_offset = row_offset,
+          .col_offset = col_offset,
+          .col_shift = col_shift,
+          .num_sc_per_device = options.num_sc_per_device,
+          .num_scs = options.GetNumScs(),
+          .combiner = metadata.row_combiner,
+      },
       extracted_coo_tensors);
 }
 }  // namespace

@@ -33,18 +33,22 @@ using ::testing::Pair;
 TEST(InputPreprocessingUtilTest, ColIds) {
   // int GetColId(int col_id, int col_shift, int col_offset, int num_scs_mod,
   //          int num_scs_mod_inv);
-  EXPECT_EQ(GetColId(/*col_id=*/2, /*col_shift=*/4, /*col_offset=*/32,
-                     /*num_scs_mod=*/3, /*num_scs_mod_inv=*/-4),
-            34);
-  EXPECT_EQ(GetColId(/*col_id=*/38, /*col_shift=*/0, /*col_offset=*/0,
-                     /*num_scs_mod=*/3, /*num_scs_mod_inv=*/-4),
-            38);
-  EXPECT_EQ(GetColId(/*col_id=*/10, /*col_shift=*/0, /*col_offset=*/32,
-                     /*num_scs_mod=*/7, /*num_scs_mod_inv=*/-8),
-            42);
-  EXPECT_EQ(GetColId(/*col_id=*/26, /*col_shift=*/0, /*col_offset=*/0,
-                     /*num_scs_mod=*/3, /*num_scs_mod_inv=*/-4),
-            26);
+  EXPECT_EQ(
+      CooFormat::GetColId(/*col_id=*/2, /*col_shift=*/4, /*col_offset=*/32,
+                          /*num_scs_mod=*/3),
+      34);
+  EXPECT_EQ(
+      CooFormat::GetColId(/*col_id=*/38, /*col_shift=*/0, /*col_offset=*/0,
+                          /*num_scs_mod=*/3),
+      38);
+  EXPECT_EQ(
+      CooFormat::GetColId(/*col_id=*/10, /*col_shift=*/0, /*col_offset=*/32,
+                          /*num_scs_mod=*/7),
+      42);
+  EXPECT_EQ(
+      CooFormat::GetColId(/*col_id=*/26, /*col_shift=*/0, /*col_offset=*/0,
+                          /*num_scs_mod=*/3),
+      26);
 }
 
 TEST(InputPreprocessingUtilTest, CeilOfRatio) {
