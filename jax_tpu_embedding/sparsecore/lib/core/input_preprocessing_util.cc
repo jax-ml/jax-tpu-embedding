@@ -35,6 +35,7 @@
 #include "Eigen/Core"  // from @eigen_archive
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {

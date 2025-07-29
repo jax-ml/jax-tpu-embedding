@@ -50,8 +50,8 @@ cc_library(
     srcs = ["input_preprocessing_util.cc"],
     hdrs = ["input_preprocessing_util.h"],
     deps = [
+        ":coo_format",
         "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
@@ -288,6 +288,20 @@ cc_library(
         ":abstract_input_batch",
         ":input_preprocessing_util",
         "@com_google_absl//absl/log:check",
+    ],
+)
+
+cc_library(
+    name = "coo_format",
+    hdrs = ["coo_format.h"],
+    deps = [
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/numeric:bits",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+        "@eigen_archive//:eigen3",
     ],
 )
 
