@@ -175,10 +175,10 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     # theoretical max = max ids * num_sc_per_device * num_scs = 16 * 4 * 4 = 256
     # This deeply nested setting in unwieldly, but we plan to move these
     # settings out (b/418042262)
-    suggested_coo_buffer_size = 64
+    suggested_coo_buffer_size_per_device = 64
     self.feature_spec_b.table_spec.stacked_table_spec = dataclasses.replace(
         self.feature_spec_b.table_spec.stacked_table_spec,
-        suggested_coo_buffer_size=suggested_coo_buffer_size,
+        suggested_coo_buffer_size_per_device=suggested_coo_buffer_size_per_device,
     )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features={
@@ -204,15 +204,15 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         preprocessed_input.lhs_embedding_ids[
             self.feature_spec_b.table_spec.name
         ],
-        suggested_coo_buffer_size,
+        suggested_coo_buffer_size_per_device,
     )
     self.assertLen(
         preprocessed_input.lhs_sample_ids[self.feature_spec_b.table_spec.name],
-        suggested_coo_buffer_size,
+        suggested_coo_buffer_size_per_device,
     )
     self.assertLen(
         preprocessed_input.lhs_gains[self.feature_spec_b.table_spec.name],
-        suggested_coo_buffer_size,
+        suggested_coo_buffer_size_per_device,
     )
 
   def test_preprocess_for_single_feature_single_device(self):

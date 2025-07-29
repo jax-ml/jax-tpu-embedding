@@ -1093,7 +1093,7 @@ class UpdatePreprocessingParametersTest(absltest.TestCase):
         name="table_ab",
         max_ids_per_partition=150,
         max_unique_ids_per_partition=250,
-        suggested_coo_buffer_size=20,
+        suggested_coo_buffer_size_per_device=20,
     )
     self._table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=32,
@@ -1104,7 +1104,7 @@ class UpdatePreprocessingParametersTest(absltest.TestCase):
         name="table_c",
         max_ids_per_partition=250,
         max_unique_ids_per_partition=350,
-        suggested_coo_buffer_size=None,
+        suggested_coo_buffer_size_per_device=None,
     )
 
     self._feature_spec_a = embedding_spec.FeatureSpec(
@@ -1164,7 +1164,7 @@ class UpdatePreprocessingParametersTest(absltest.TestCase):
     self.assertEqual(stacked_table_spec_ab.max_ids_per_partition, 230)
     self.assertEqual(stacked_table_spec_ab.max_unique_ids_per_partition, 300)
     self.assertEqual(
-        stacked_table_spec_ab.suggested_coo_buffer_size,
+        stacked_table_spec_ab.suggested_coo_buffer_size_per_device,
         40 * self._num_sc_per_device,
     )
 
@@ -1172,7 +1172,7 @@ class UpdatePreprocessingParametersTest(absltest.TestCase):
     self.assertEqual(stacked_table_spec_c.max_ids_per_partition, 130)
     self.assertEqual(stacked_table_spec_c.max_unique_ids_per_partition, 200)
     self.assertEqual(
-        stacked_table_spec_c.suggested_coo_buffer_size,
+        stacked_table_spec_c.suggested_coo_buffer_size_per_device,
         4 * self._num_sc_per_device,
     )
 
@@ -1192,12 +1192,14 @@ class UpdatePreprocessingParametersTest(absltest.TestCase):
     stacked_table_spec_ab = self._table_spec_ab.stacked_table_spec
     self.assertEqual(stacked_table_spec_ab.max_ids_per_partition, 150)
     self.assertEqual(stacked_table_spec_ab.max_unique_ids_per_partition, 250)
-    self.assertEqual(stacked_table_spec_ab.suggested_coo_buffer_size, 20)
+    self.assertEqual(
+        stacked_table_spec_ab.suggested_coo_buffer_size_per_device, 20
+    )
 
     stacked_table_spec_c = self._table_spec_c.stacked_table_spec
     self.assertEqual(stacked_table_spec_c.max_ids_per_partition, 250)
     self.assertEqual(stacked_table_spec_c.max_unique_ids_per_partition, 350)
-    self.assertIsNone(stacked_table_spec_c.suggested_coo_buffer_size)
+    self.assertIsNone(stacked_table_spec_c.suggested_coo_buffer_size_per_device)
 
   def test_update_preprocessing_parameters_with_no_required_buffer_size_updates_only_buffer_size(
       self,
@@ -1215,13 +1217,15 @@ class UpdatePreprocessingParametersTest(absltest.TestCase):
     stacked_table_spec_ab = self._table_spec_ab.stacked_table_spec
     self.assertEqual(stacked_table_spec_ab.max_ids_per_partition, 150)
     self.assertEqual(stacked_table_spec_ab.max_unique_ids_per_partition, 250)
-    self.assertEqual(stacked_table_spec_ab.suggested_coo_buffer_size, 20)
+    self.assertEqual(
+        stacked_table_spec_ab.suggested_coo_buffer_size_per_device, 20
+    )
 
     stacked_table_spec_c = self._table_spec_c.stacked_table_spec
     self.assertEqual(stacked_table_spec_c.max_ids_per_partition, 250)
     self.assertEqual(stacked_table_spec_c.max_unique_ids_per_partition, 350)
     self.assertEqual(
-        stacked_table_spec_c.suggested_coo_buffer_size,
+        stacked_table_spec_c.suggested_coo_buffer_size_per_device,
         4 * self._num_sc_per_device,
     )
 
