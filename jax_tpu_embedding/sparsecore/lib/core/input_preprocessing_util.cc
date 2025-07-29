@@ -14,6 +14,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 #include <algorithm>
+#include <bitset>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -36,6 +37,7 @@
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/minibatching_splits_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "tsl/profiler/lib/traceme.h"
 
@@ -255,11 +257,15 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   max_ids_per_sc.fill(0);
   max_unique_ids_per_sc.fill(0);
   required_buffer_size_per_sc.fill(0);
+
+  std::bitset<CooFormat::kMaxMinibatchingBuckets - 1> minibatching_split = 0;
+
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
        ++local_sc_id) {
     std::vector<int32_t> ids_per_sc_partition(global_sc_count, 0);
     std::vector<int32_t> unique_ids_per_sc_partition(global_sc_count, 0);
+    std::vector<int32_t> unique_ids_per_bucket(bucket_count, 0);
     std::vector<uint64_t> keys;
     const int expected_keys_size =
         extracted_coo_tensors.coo_tensors_per_sc[local_sc_id];
@@ -297,6 +303,8 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
 
       if (col_id != prev_col_id) {
         unique_ids_per_sc_partition[global_sc_id] += 1;
+        // If col id are same, so will be bucket id.
+        unique_ids_per_bucket[bucket_id] += 1;
       }
 
       // If the row ids and col ids are both same as the previous one,
@@ -306,10 +314,11 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       } else {
         ids_per_sc_partition[global_sc_id] += 1;
         // If either max_unique_ids_per_partition or max_ids_per_partition is
-        // exceeded, we drop the id.
-        if (unique_ids_per_sc_partition[global_sc_id] <=
-                max_unique_ids_per_partition &&
-            ids_per_sc_partition[global_sc_id] <= max_ids_per_partition) {
+        // exceeded, we drop the id (only for non-minibatching).
+        if (options.enable_minibatching ||
+            (unique_ids_per_sc_partition[global_sc_id] <=
+                 max_unique_ids_per_partition &&
+             ids_per_sc_partition[global_sc_id] <= max_ids_per_partition)) {
           grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
         }
       }
@@ -325,16 +334,9 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
             /* row_id= */ batch_size_per_sc * (local_sc_id + 1),
             /* col_id= */ 0,
             /* gain= */ 0.0));
+    unique_ids_per_bucket[prev_bucket_id] += 1;
     grouped_coo_tensors.FillRemainingScBuckets();
     required_buffer_size_per_sc[local_sc_id]++;
-
-    // NOTE: For non-minibatching, we can just use the buckets as minibatches
-    // directly as there is only one bucket per SC.
-
-    // TODO: http://b/428790659 - Compute local device minibatching splits by
-    // combining per SC splits.
-    // TODO: http://b/428790659 - Perform an inter-host communication to
-    // finalize device splits.
 
     // Update global max using this device's values.
     for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
@@ -369,11 +371,26 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const int32_t observed_max_unique_ids_per_partition =
         *absl::c_max_element(unique_ids_per_sc_partition);
 
+    if (options.enable_minibatching) {
+      minibatching_split |= internal::ComputeMinibatchingSplit(
+          unique_ids_per_bucket, max_unique_ids_per_partition);
+    }
+
+    // TODO: http://b/428790659 - Perform an inter-host communication to
+    // finalize device splits.
+
     ValidateMaxIdsOrDie(observed_max_ids_per_partition,
                         observed_max_unique_ids_per_partition,
                         max_ids_per_partition, max_unique_ids_per_partition,
                         stacked_table_name, allow_id_dropping);
   }
+
+  // NOTE: For non-minibatching, we can just use the buckets as minibatches
+  // directly as there is only one bucket per SC.
+  if (options.enable_minibatching) {
+    grouped_coo_tensors.Merge(minibatching_split);
+  }
+
   return grouped_coo_tensors;
 }
 int ComputeCooBufferSizePerDevice(
@@ -472,12 +489,13 @@ void FillRowPointersPerLocalDevice(
             ? coo_buffer_size                      // use whole buffer
             : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
     int coo_index = coo_begin;
-    for (int bucket_id = 0; bucket_id < grouped_coo_tensors.GetBucketCount();
-         ++bucket_id) {
+    for (int minibatch_id = 0;
+         minibatch_id < grouped_coo_tensors.GetNumMinibatches();
+         ++minibatch_id) {
       coo_index = FillRowPointersPerSparseCore(
           {
               .local_sc_id = local_sc_id,
-              .coo_tensors = grouped_coo_tensors(local_sc_id, bucket_id),
+              .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
               .lhs_row_begin = lhs_row_begin,
               .lhs_row_end = lhs_row_end,
               .coo_begin = coo_begin,
