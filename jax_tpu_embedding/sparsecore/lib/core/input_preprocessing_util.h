@@ -25,6 +25,7 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 
 namespace jax_sc_embedding {
 
@@ -93,13 +94,14 @@ struct ExtractedCooTensors {
   // Number of samples these coo_tensors are extracted from.
   int batch_size_for_device;
   // Count coo tensors per SC for efficient allocation of vector for sorting and
-  // grouping them.
+  // grouping them. Might be lower after deduplication.
   std::vector<int> coo_tensors_per_sc;
 
   ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
       : batch_size_for_device(batch_size_for_device),
         coo_tensors_per_sc(num_sc_per_device, 0) {}
 };
+
 
 // Rounds up the given value to the next multiple of the given alignment.
 // This is equivalent to ceil(value / align) * align, but implemented in an
@@ -162,7 +164,7 @@ struct StackedTableMetadata {
   int max_col_id;
 };
 
-std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
+PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -185,7 +187,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
 void FillRowPointersPerLocalDevice(
-    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    const PartitionedCooTensors& grouped_coo_tensors,
     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,

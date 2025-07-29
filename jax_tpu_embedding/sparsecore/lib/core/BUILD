@@ -51,6 +51,7 @@ cc_library(
     hdrs = ["input_preprocessing_util.h"],
     deps = [
         ":coo_format",
+        ":partitioned_coo_tensors",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -106,7 +107,9 @@ cc_test(
     srcs = ["input_preprocessing_util_test.cc"],
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
+        ":coo_format",
         ":input_preprocessing_util",
+        ":partitioned_coo_tensors",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
     ],
@@ -120,6 +123,7 @@ cc_library(
         ":abstract_input_batch",
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
+        ":partitioned_coo_tensors",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -292,6 +296,16 @@ cc_library(
 )
 
 cc_library(
+    name = "partitioned_coo_tensors",
+    hdrs = ["partitioned_coo_tensors.h"],
+    deps = [
+        ":coo_format",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
     name = "coo_format",
     hdrs = ["coo_format.h"],
     deps = [
@@ -311,6 +325,16 @@ cc_test(
     deps = [
         ":input_preprocessing_util",
         ":ragged_tensor_input_batch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "partitioned_coo_tensors_test",
+    srcs = ["partitioned_coo_tensors_test.cc"],
+    deps = [
+        ":coo_format",
+        ":partitioned_coo_tensors",
         "@com_google_googletest//:gtest_main",
     ],
 )

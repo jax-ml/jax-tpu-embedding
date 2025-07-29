@@ -36,6 +36,7 @@
 #include "hwy/contrib/sort/order.h"  // from @highway
 #include "hwy/contrib/sort/vqsort.h"  // from @highway
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
@@ -221,7 +222,7 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
 // We use output buffers `max_ids_per_sc`, `max_unique_ids_per_sc`, and
 // `required_buffer_size_per_sc` because we fill values in a loop to a bigger
 // array.
-std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
+PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -244,14 +245,10 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
 
   // Partition COO tensors among SparseCores for the local device (based on row
   // id).
-  std::vector<std::vector<CooFormat>> coo_tensors_by_sc_id;
-  coo_tensors_by_sc_id.resize(num_sc_per_device);
-  for (int i = 0; i < num_sc_per_device; ++i) {
-    // An additional capacity for the sentinel node. Might underutilize if
-    // deduplication happens.
-    coo_tensors_by_sc_id[i].reserve(
-        1 + extracted_coo_tensors.coo_tensors_per_sc[i]);
-  }
+  const int bucket_count =
+      options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+  PartitionedCooTensors grouped_coo_tensors(coo_tensors.size(),
+                                            num_sc_per_device, bucket_count);
 
   uint32_t coo_tensor_index = 0;
   // Initialize the aggregated max ids and unique ids per SC to 0.
@@ -287,15 +284,15 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
 
     uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
     uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
+    uint32_t prev_bucket_id = 0;
     for (const uint64_t key : keys) {
       uint32_t index = key & CooFormat::kIndexMask;
 
       const CooFormat& coo_tensor = coo_tensors[index];
       const uint32_t col_id = coo_tensor.col_id;
       const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
-      // TODO: b/428790659 - Use bucket ID.
-      //  const uint32_t bucket_id =
-      //     options.enable_minibatching ? coo_tensor.GetBucketId() : 0;
+      const uint32_t bucket_id =
+          options.enable_minibatching ? coo_tensor.GetBucketId() : 0;
       const uint32_t row_id = coo_tensor.row_id;
 
       if (col_id != prev_col_id) {
@@ -305,7 +302,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
       // If the row ids and col ids are both same as the previous one,
       // dedup the id by adding the gains.
       if (col_id == prev_col_id && row_id == prev_row_id) {
-        coo_tensors_by_sc_id[local_sc_id].back().gain += coo_tensor.gain;
+        grouped_coo_tensors.MergeLast(coo_tensor);
       } else {
         ids_per_sc_partition[global_sc_id] += 1;
         // If either max_unique_ids_per_partition or max_ids_per_partition is
@@ -313,17 +310,31 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
         if (unique_ids_per_sc_partition[global_sc_id] <=
                 max_unique_ids_per_partition &&
             ids_per_sc_partition[global_sc_id] <= max_ids_per_partition) {
-          coo_tensors_by_sc_id[local_sc_id].push_back(coo_tensor);
+          grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
         }
       }
       prev_col_id = col_id;
       prev_row_id = row_id;
+      prev_bucket_id = bucket_id;
     }
-    // Sentinel node to terminate buffer filling.
-    coo_tensors_by_sc_id[local_sc_id].emplace_back(
-        /* row_id= */ batch_size_per_sc * (local_sc_id + 1), /* col_id= */ 0,
-        /* gain= */ 0.0);
+    // Sentinel node to terminate buffer filling. At least one coo tensor would
+    // exist for the given local_sc_id, we use its bucket id.
+    grouped_coo_tensors.Add(
+        local_sc_id, prev_bucket_id,
+        CooFormat(
+            /* row_id= */ batch_size_per_sc * (local_sc_id + 1),
+            /* col_id= */ 0,
+            /* gain= */ 0.0));
+    grouped_coo_tensors.FillRemainingScBuckets();
     required_buffer_size_per_sc[local_sc_id]++;
+
+    // NOTE: For non-minibatching, we can just use the buckets as minibatches
+    // directly as there is only one bucket per SC.
+
+    // TODO: http://b/428790659 - Compute local device minibatching splits by
+    // combining per SC splits.
+    // TODO: http://b/428790659 - Perform an inter-host communication to
+    // finalize device splits.
 
     // Update global max using this device's values.
     for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
@@ -350,8 +361,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
                 << ", after deduplication: "
                 << std::reduce(ids_per_sc_partition.begin(),
                                ids_per_sc_partition.end())
-                << ", after drop id: "
-                << coo_tensors_by_sc_id[local_sc_id].size();
+                << ", after drop id: " << grouped_coo_tensors.Size(local_sc_id);
     }
 
     const int32_t observed_max_ids_per_partition =
@@ -364,7 +374,7 @@ std::vector<std::vector<CooFormat>> SortAndGroupCooTensorsPerLocalDevice(
                         max_ids_per_partition, max_unique_ids_per_partition,
                         stacked_table_name, allow_id_dropping);
   }
-  return coo_tensors_by_sc_id;
+  return grouped_coo_tensors;
 }
 int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
@@ -442,7 +452,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
 // `gains` because we fill values in a loop to a bigger array.
 void FillRowPointersPerLocalDevice(
-    absl::Span<const std::vector<CooFormat>> coo_tensors_by_id,
+    const PartitionedCooTensors& grouped_coo_tensors,
     const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -461,21 +471,24 @@ void FillRowPointersPerLocalDevice(
         options.enable_minibatching
             ? coo_buffer_size                      // use whole buffer
             : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
-    // TODO: b/428790659 - Loop over minibatches here.
-    int coo_index = FillRowPointersPerSparseCore(
-        {
-            .local_sc_id = local_sc_id,
-            .coo_tensors = coo_tensors_by_id[local_sc_id],
-            .lhs_row_begin = lhs_row_begin,
-            .lhs_row_end = lhs_row_end,
-            .coo_begin = coo_begin,
-            .coo_end = coo_end,
-            .batch_size_per_sc = batch_size_per_sc,
-            .num_sc_per_device = num_sc_per_device,
-            .num_scs = num_scs,
-            .coo_buffer_size = coo_buffer_size,
-        },
-        row_pointers, embedding_ids, sample_ids, gains);
+    int coo_index = coo_begin;
+    for (int bucket_id = 0; bucket_id < grouped_coo_tensors.GetBucketCount();
+         ++bucket_id) {
+      coo_index = FillRowPointersPerSparseCore(
+          {
+              .local_sc_id = local_sc_id,
+              .coo_tensors = grouped_coo_tensors(local_sc_id, bucket_id),
+              .lhs_row_begin = lhs_row_begin,
+              .lhs_row_end = lhs_row_end,
+              .coo_begin = coo_begin,
+              .coo_end = coo_end,
+              .batch_size_per_sc = batch_size_per_sc,
+              .num_sc_per_device = num_sc_per_device,
+              .num_scs = num_scs,
+              .coo_buffer_size = coo_buffer_size,
+          },
+          row_pointers, embedding_ids, sample_ids, gains);
+    }
 
     // Only pad (to end of COO buffer) between SparseCores for
     // non-mini-batching. Always pad after the last SparseCore. The end could be

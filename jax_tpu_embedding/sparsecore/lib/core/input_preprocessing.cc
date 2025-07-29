@@ -35,6 +35,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "tsl/profiler/lib/connected_traceme.h"
 #include "tsl/profiler/lib/traceme.h"
 
@@ -191,7 +192,7 @@ void PreprocessInputForStackedTablePerLocalDevice(
   // Step 2: Sort the COO tensors and group them by SC.
   //
 
-  std::vector<std::vector<CooFormat>> coo_tensors_by_id =
+  const PartitionedCooTensors grouped_coo_tensors =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata[0], options,
           max_ids_buffer, max_unique_ids_buffer,
@@ -205,7 +206,7 @@ void PreprocessInputForStackedTablePerLocalDevice(
   const int coo_buffer_size_per_sc =
       coo_buffer_size / options.num_sc_per_device;
   FillRowPointersPerLocalDevice(
-      coo_tensors_by_id, row_pointers_size_per_sc, coo_buffer_size_per_sc,
+      grouped_coo_tensors, row_pointers_size_per_sc, coo_buffer_size_per_sc,
       batch_size_per_sc, options, row_pointer_buffer, embedding_id_buffer,
       sample_id_buffer, gain_buffer);
 }
