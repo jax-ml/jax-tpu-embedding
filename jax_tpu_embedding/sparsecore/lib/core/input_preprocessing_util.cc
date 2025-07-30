@@ -108,14 +108,16 @@ struct FillRowPointersPerSparseCoreOptions {
 bool ValidIndices(int row_index, int coo_offset, int processed,
                   const FillRowPointersPerSparseCoreOptions& options) {
   if (row_index >= options.lhs_row_end || coo_offset >= options.coo_end) {
-    LOG(ERROR) << "Static buffer size maybe too small for current "
-                  "batch. IDs may be dropped! Static buffer size: "
-               << options.coo_buffer_size
-               << ". Halting row pointer filling at while processing for local "
-                  "sparsecore ID "
-               << options.local_sc_id
-               << ". Total COOs: " << options.coo_tensors.size()
-               << ", while currently processed only: " << processed - 1;
+    LOG(ERROR) << "The static buffer size might be too small for the current "
+                  "batch. IDs may be dropped! "
+               << "Stopping row pointer filling for local SparseCore ID "
+               << options.local_sc_id << " at row index: " << row_index
+               << " and coo offset: " << coo_offset
+               << " because it reached the end of the buffer. "
+               << "The buffer size is: " << options.coo_buffer_size
+               << ". The coo_end is: " << options.coo_end
+               << ". Total number of input COOs: " << options.coo_tensors.size()
+               << ", while currently processed only: " << processed;
     return false;
   }
   return true;
