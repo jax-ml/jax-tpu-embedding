@@ -14,8 +14,8 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_COO_FORMAT_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_COO_FORMAT_H_
 
+#include <bitset>
 #include <cstdint>
-#include <optional>
 #include <ostream>
 
 #include "absl/functional/function_ref.h"  // from @com_google_absl
@@ -27,6 +27,8 @@ namespace jax_sc_embedding {
 
 struct CooFormat {
   // Maximum buckets that can be formed during minibatching.
+  // A value of 64 leaf nodes forms a complete binary tree with 127 nodes which
+  // should fit in uint64_t.
   static constexpr uint32_t kMaxMinibatchingBuckets = 64;
   // Bits taken by minibatching bucket ID.
   static constexpr uint32_t kMinibatchingBucketBits =
