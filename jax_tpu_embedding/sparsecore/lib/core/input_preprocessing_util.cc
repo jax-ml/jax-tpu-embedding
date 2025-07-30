@@ -306,10 +306,16 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       } else {
         ids_per_sc_partition[global_sc_id] += 1;
         // If either max_unique_ids_per_partition or max_ids_per_partition is
-        // exceeded, we drop the id.
-        if (unique_ids_per_sc_partition[global_sc_id] <=
-                max_unique_ids_per_partition &&
-            ids_per_sc_partition[global_sc_id] <= max_ids_per_partition) {
+        // exceeded, we drop the id. We also do not drop ids for minibatching.
+        const bool over_capacity =
+            unique_ids_per_sc_partition[global_sc_id] >
+                max_unique_ids_per_partition ||
+            ids_per_sc_partition[global_sc_id] > max_ids_per_partition;
+        if (!options.enable_minibatching && over_capacity) {
+          // Dropped id. TODO: http://b/428790659 - Handle Id dropping in
+          // minibatching.
+          continue;
+        } else {
           grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
         }
       }
