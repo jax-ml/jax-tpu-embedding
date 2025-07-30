@@ -357,7 +357,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
                 << absl::StrJoin(unique_ids_per_sc_partition, ", ") << "]";
 
       LOG(INFO) << "Total number of ids for table " << stacked_table_name
-                << " on Sparsecore" << local_sc_id << ": " << keys.size()
+                << " on SparseCore" << local_sc_id << ": " << keys.size()
                 << ", after deduplication: "
                 << std::reduce(ids_per_sc_partition.begin(),
                                ids_per_sc_partition.end())

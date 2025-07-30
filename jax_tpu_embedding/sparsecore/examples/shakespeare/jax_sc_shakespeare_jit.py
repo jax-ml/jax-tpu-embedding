@@ -510,7 +510,7 @@ def run_model():
         feature_structure, [feature_weights]
     )
 
-    # Preprocess the inputs and build Jax global views of the data.
+    # Preprocess the inputs and build JAX global views of the data.
     make_global_view = lambda x: jax.tree.map(
         lambda y: jax.make_array_from_process_local_data(global_sharding, y),
         x,

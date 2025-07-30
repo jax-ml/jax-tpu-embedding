@@ -128,7 +128,7 @@ def create_train_state(
 
   Args:
     rng: JAX PRNG Key.
-    global_device_count: The Jax global device count.
+    global_device_count: The JAX global device count.
     num_sc_per_device: The number of sparsecores per device.
     global_batch_size: global batch size.
     vocab_size: embedding vocabulary size.

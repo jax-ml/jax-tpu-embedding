@@ -450,7 +450,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
   std::vector<CooFormat> coo_formats;
 
   // With 128 samples, each sample has 8 ids [0, 4, 8, 16]
-  // Sparsecore 0 alone serves all 4 rows of data [0, 4, 8, 16]
+  // SparseCore 0 alone serves all 4 rows of data [0, 4, 8, 16]
   // Each sparsecore looks up for 32 samples. For each sample, requesting
   // all 4 rows of data from sparsecore 0.
   // [max_ids_per_partition == 128]
@@ -498,7 +498,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   // Every ID is unique, and all IDs come from the same sparsecore.
   //
   // With 128 samples, each sample has 1 id [row * 4]
-  // Sparsecore 0 alone serves all 128 rows of data [0, 4, 8, ...]
+  // SparseCore 0 alone serves all 128 rows of data [0, 4, 8, ...]
   // Each sparsecore looks up for 32 samples. For each sample, requesting
   // the single row of data from sparsecore 0.
   // [max_ids_per_partition == 32]

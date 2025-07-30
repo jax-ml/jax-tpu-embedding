@@ -1,4 +1,4 @@
-# A simple Shakespeare model using the Jax on SC API
+# A simple Shakespeare model using the JAX SparseCore API
 
 ## About
 
