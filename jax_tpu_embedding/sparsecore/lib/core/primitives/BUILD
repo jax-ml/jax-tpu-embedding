@@ -50,20 +50,6 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
-    name = "sparse_dense_matmul_csr_with_mini_batching",
-    srcs = [
-        "sparse_dense_matmul_csr_with_mini_batching.py",
-    ],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/lib/core:constants",
-        pypi_requirement("jax"),
-        pypi_requirement("jax/_src/lib"),
-        pypi_requirement("jax/extend"),
-        pypi_requirement("numpy"),
-    ],
-)
-
-pytype_strict_library(
     name = "sparse_dense_matmul_grad_with_sgd_with_mini_batching",
     srcs = [
         "sparse_dense_matmul_grad_with_sgd_with_mini_batching.py",
@@ -210,7 +196,10 @@ pytype_strict_library(
 pytype_strict_library(
     name = "primitives",
     srcs = ["__init__.py"],
-    visibility = ["//jax_tpu_embedding/sparsecore/lib/core:__pkg__"],
+    visibility = [
+        "//jax_tpu_embedding/sparsecore/lib/core:__pkg__",
+        "//jax_tpu_embedding/sparsecore/lib/nn/google:__pkg__",
+    ],
     deps = [
         ":optimizers_computation",  # buildcleaner: keep
         ":sparse_dense_matmul_csr",  # buildcleaner: keep
