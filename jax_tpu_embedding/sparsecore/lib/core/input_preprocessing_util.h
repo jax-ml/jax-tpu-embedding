@@ -126,14 +126,14 @@ struct StackedTableMetadata {
       std::string_view name, int feature_index, int max_ids_per_partition,
       int max_unique_ids_per_partition, int row_offset, int col_offset,
       int col_shift, int batch_size,
-      std::optional<int> suggested_coo_buffer_size = std::nullopt,
+      std::optional<int> suggested_coo_buffer_size_per_device = std::nullopt,
       RowCombiner row_combiner = RowCombiner::kSum,
       int max_col_id = std::numeric_limits<int>::max())
       : name(name),
         feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
         max_unique_ids_per_partition(max_unique_ids_per_partition),
-        suggested_coo_buffer_size(suggested_coo_buffer_size),
+        suggested_coo_buffer_size_per_device(suggested_coo_buffer_size_per_device),
         row_offset(row_offset),
         col_offset(col_offset),
         col_shift(col_shift),
@@ -149,7 +149,7 @@ struct StackedTableMetadata {
 
   int max_ids_per_partition;
   int max_unique_ids_per_partition;
-  std::optional<int> suggested_coo_buffer_size;
+  std::optional<int> suggested_coo_buffer_size_per_device;
   int row_offset;
   int col_offset;
   int col_shift;

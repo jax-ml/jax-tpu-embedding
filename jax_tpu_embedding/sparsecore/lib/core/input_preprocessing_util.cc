@@ -390,7 +390,7 @@ int ComputeCooBufferSizePerDevice(
     const int batch_number) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
-  const std::optional<int> suggested_coo_buffer_size =
+  const std::optional<int> suggested_coo_buffer_size_per_device =
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
 
   const int64_t max_ids_rounded_up = RoundUpTo<int64_t>(
@@ -404,15 +404,15 @@ int ComputeCooBufferSizePerDevice(
       << " num_scs_per_device: " << num_scs_per_device
       << " num_scs: " << num_scs << ")";
   int64_t result = theoretical_max;
-  if (suggested_coo_buffer_size.has_value()) {
+  if (suggested_coo_buffer_size_per_device.has_value()) {
     LOG_IF(INFO, batch_number % 100 == 0)
         << "Suggested Coo Buffer Size for table " << stacked_table_name << ": "
-        << suggested_coo_buffer_size.value();
+        << suggested_coo_buffer_size_per_device.value();
     // Since the suggested size corresponds to only current device (local SCs),
     // Buffer for each SC should be properly aligned, hence ALIGNMENT *
     // num_scs_per_device
     result = RoundUpTo<int64_t>(
-        suggested_coo_buffer_size.value(),
+        suggested_coo_buffer_size_per_device.value(),
         TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
   } else {
     LOG_IF(WARNING, batch_number % 100 == 0)
@@ -452,9 +452,9 @@ int MaxIdsPerPartitionForStackedTables(
 
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
-  std::optional<int> suggested_coo_buffer_size =
-      stacked_table_metadata[0].suggested_coo_buffer_size;
-  return suggested_coo_buffer_size;
+  std::optional<int> suggested_coo_buffer_size_per_device =
+      stacked_table_metadata[0].suggested_coo_buffer_size_per_device;
+  return suggested_coo_buffer_size_per_device;
 }
 
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and

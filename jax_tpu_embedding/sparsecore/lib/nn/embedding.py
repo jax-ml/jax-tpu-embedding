@@ -301,7 +301,7 @@ def prepare_feature_specs_for_training(
         total_sample_count=total_sample_count,
         max_ids_per_partition=feature.table_spec.max_ids_per_partition,
         max_unique_ids_per_partition=feature.table_spec.max_unique_ids_per_partition,
-        suggested_coo_buffer_size=feature.table_spec.suggested_coo_buffer_size,
+        suggested_coo_buffer_size_per_device=feature.table_spec.suggested_coo_buffer_size_per_device,
         quantization_config=feature.table_spec.quantization_config,
     )
     feature.id_transformation = embedding_spec.FeatureIdTransformation(
@@ -1237,7 +1237,7 @@ def update_preprocessing_parameters(
   All the features/tables must be stacked already.
 
   This function updates the max_ids_per_partition, max_unique_ids_per_partition
-  and suggested_coo_buffer_size in the feature specs based on the updated
+  and suggested_coo_buffer_size_per_device in the feature specs based on the updated
   parameters.
 
   Args:
@@ -1266,13 +1266,15 @@ def update_preprocessing_parameters(
           * num_sc_per_device
       )
     else:
-      new_buffer_size_per_device = stacked_table_spec.suggested_coo_buffer_size
+      new_buffer_size_per_device = (
+          stacked_table_spec.suggested_coo_buffer_size_per_device
+      )
 
     feature.table_spec.stacked_table_spec = dataclasses.replace(
         stacked_table_spec,
         max_ids_per_partition=int(np.max(max_ids_per_partition)),
         max_unique_ids_per_partition=int(np.max(max_unique_ids_per_partition)),
-        suggested_coo_buffer_size=new_buffer_size_per_device,
+        suggested_coo_buffer_size_per_device=new_buffer_size_per_device,
     )
 
   jax.tree_util.tree_map(_update_feature_spec_limits, feature_specs)

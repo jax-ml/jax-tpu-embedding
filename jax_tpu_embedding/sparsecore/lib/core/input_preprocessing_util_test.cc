@@ -98,13 +98,13 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
                                           /*num_scs_per_device=*/4,
                                           stacked_table_metadata),
             16 * 4 * 4);
-  stacked_table_metadata[0].suggested_coo_buffer_size = 48;
+  stacked_table_metadata[0].suggested_coo_buffer_size_per_device = 48;
   EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
                                           /*num_scs_per_device=*/4,
                                           stacked_table_metadata),
             64);
 
-  stacked_table_metadata[0].suggested_coo_buffer_size = 96;
+  stacked_table_metadata[0].suggested_coo_buffer_size_per_device = 96;
   EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
                                           /*num_scs_per_device=*/4,
                                           stacked_table_metadata),
