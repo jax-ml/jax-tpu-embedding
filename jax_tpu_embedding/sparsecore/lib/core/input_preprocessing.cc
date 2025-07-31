@@ -199,16 +199,16 @@ void PreprocessInputForStackedTablePerLocalDevice(
           required_buffer_size_per_sc_buffer);
 
   //
-  // Step 3: Compute the row pointers for each group of IDs.
+  // Step 3: Compute the row pointers and fill device buffer.
   //
   const int batch_size_per_sc = CeilOfRatio(
       extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
   const int coo_buffer_size_per_sc =
       coo_buffer_size / options.num_sc_per_device;
-  FillRowPointersPerLocalDevice(
-      grouped_coo_tensors, row_pointers_size_per_sc, coo_buffer_size_per_sc,
-      batch_size_per_sc, options, row_pointer_buffer, embedding_id_buffer,
-      sample_id_buffer, gain_buffer);
+  FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_sc,
+                        coo_buffer_size_per_sc, batch_size_per_sc, options,
+                        row_pointer_buffer, embedding_id_buffer,
+                        sample_id_buffer, gain_buffer);
 }
 
 // Check the buffer usage ratio and log a warning if it exceeds a certain

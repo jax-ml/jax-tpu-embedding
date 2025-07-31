@@ -186,7 +186,7 @@ int MaxIdsPerPartitionForStackedTables(
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
-void FillRowPointersPerLocalDevice(
+void FillLocalDeviceBuffer(
     const PartitionedCooTensors& grouped_coo_tensors,
     int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
     int batch_size_per_sc,

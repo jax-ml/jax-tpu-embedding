@@ -637,7 +637,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
               ElementsAreArray(expected_sc_3));
 }
 
-TEST(InputPreprocessingUtilTest, FillRowPointers) {
+TEST(InputPreprocessingUtilTest, FillBuffer) {
   std::vector<CooFormat> coo_formats;
 
   for (int row = 0; row < 8; ++row) {
@@ -670,11 +670,11 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
   Eigen::VectorXi embedding_ids(40 * 4);
   Eigen::VectorXi sample_ids(40 * 4);
   Eigen::VectorXf gains(40 * 4);
-  FillRowPointersPerLocalDevice(coo_tensors_by_id,
-                                /*row_pointers_size_per_sc=*/8,
-                                /*coo_buffer_size_per_sc=*/40,
-                                /*batch_size_per_sc=*/2, options, row_pointers,
-                                embedding_ids, sample_ids, gains);
+  FillLocalDeviceBuffer(coo_tensors_by_id,
+                        /*row_pointers_size_per_sc=*/8,
+                        /*coo_buffer_size_per_sc=*/40,
+                        /*batch_size_per_sc=*/2, options, row_pointers,
+                        embedding_ids, sample_ids, gains);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32,  //
@@ -762,7 +762,7 @@ TEST(InputPreprocessingUtilTest, FillRowPointers) {
   EXPECT_THAT(gains, expected_gains);
 }
 
-TEST(InputPreprocessingUtilTest, FillRowPointersMinibatching) {
+TEST(InputPreprocessingUtilTest, FillBufferMinibatching) {
   std::vector<CooFormat> coo_formats;
 
   for (int row = 0; row < 8; ++row) {
@@ -799,11 +799,11 @@ TEST(InputPreprocessingUtilTest, FillRowPointersMinibatching) {
   Eigen::VectorXi embedding_ids(40 * 4);
   Eigen::VectorXi sample_ids(40 * 4);
   Eigen::VectorXf gains(40 * 4);
-  FillRowPointersPerLocalDevice(coo_tensors_by_id,
-                                /*row_pointers_size_per_sc=*/8,
-                                /*coo_buffer_size_per_sc=*/40,
-                                /*batch_size_per_sc=*/2, options, row_pointers,
-                                embedding_ids, sample_ids, gains);
+  FillLocalDeviceBuffer(coo_tensors_by_id,
+                        /*row_pointers_size_per_sc=*/8,
+                        /*coo_buffer_size_per_sc=*/40,
+                        /*batch_size_per_sc=*/2, options, row_pointers,
+                        embedding_ids, sample_ids, gains);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32,  //
