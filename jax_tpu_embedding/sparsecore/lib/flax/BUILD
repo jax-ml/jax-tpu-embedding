@@ -31,7 +31,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
-        pypi_requirement("jax:experimental"),
+        pypi_requirement("jax/experimental:layout"),
         pypi_requirement("numpy"),
     ],
 )
