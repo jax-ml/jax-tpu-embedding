@@ -465,7 +465,9 @@ class OptimizerSpecTest(absltest.TestCase):
 
   def test_table_spec_quantization_config_equality(self):
     """Tables should compare equal only when the quantization config matches."""
-    q_cfg = embedding_spec.QuantizationConfig(0.0, 10.0, 128)
+    q_cfg = embedding_spec.QuantizationConfig(
+        min_value=0.0, max_value=10.0, num_buckets=128
+    )
     initializer = jax.nn.initializers.normal()
     ts1 = embedding_spec.TableSpec(
         vocabulary_size=8,

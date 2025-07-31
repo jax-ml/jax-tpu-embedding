@@ -601,7 +601,7 @@ class FeatureIdTransformation:
   col_shift: int = 0
 
 
-@dataclasses.dataclass(eq=True, frozen=True, order=True)
+@dataclasses.dataclass(eq=True, frozen=True, order=True, kw_only=True)
 class TableSettingInStack:
   """Placement of the table shard relative to the shard of the stack."""
 
@@ -612,7 +612,7 @@ class TableSettingInStack:
   shard_rotation: int = 0
 
 
-@dataclasses.dataclass(eq=True, unsafe_hash=True, order=True)
+@dataclasses.dataclass(eq=True, unsafe_hash=True, order=True, kw_only=True)
 class TableSpec:
   """Specifies one embedding table.
 
@@ -703,7 +703,7 @@ class TableSpec:
       )
 
 
-@dataclasses.dataclass(eq=True, unsafe_hash=True, order=True)
+@dataclasses.dataclass(eq=True, unsafe_hash=True, order=True, kw_only=True)
 class FeatureSpec:
   """Specification for one embedding feature.
 
@@ -740,7 +740,7 @@ class FeatureSpec:
     self._id_transformation = id_transformation
 
 
-@dataclasses.dataclass(eq=True, frozen=True, order=True)
+@dataclasses.dataclass(eq=True, frozen=True, order=True, kw_only=True)
 class StackedTableSpec:
   """Spec for a stacked table that is a combination of multiple tables."""
 
@@ -760,7 +760,7 @@ class StackedTableSpec:
   quantization_config: QuantizationConfig | None = None
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class QuantizationConfig:
   """Per-table quantization parameters (None means disabled)."""
   min_value: float
