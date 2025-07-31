@@ -20,9 +20,12 @@ load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 ##  SparseCore Dependencies
 ###############################################################################
 
-HIGHWAY_VERSION= "1.2.0"
+HIGHWAY_VERSION = "1.2.0"
+
 HIGHWAY_SHA256 = "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343"
+
 HIGHWAY_ARCHIVE = "https://github.com/google/highway/archive/{version}.tar.gz".format(version = HIGHWAY_VERSION)
+
 http_archive(
     name = "highway",
     sha256 = HIGHWAY_SHA256,
@@ -30,14 +33,34 @@ http_archive(
     urls = [HIGHWAY_ARCHIVE],
 )
 
+FUZZTEST_COMMIT = "0f82dad406f431ca5e8607626825be15423ba339"
+
+http_archive(
+    name = "com_google_fuzztest",
+    strip_prefix = "fuzztest-" + FUZZTEST_COMMIT,
+    url = "https://github.com/google/fuzztest/archive/" + FUZZTEST_COMMIT + ".zip",
+)
+
+FLATBUFFERS_VERSION = "24.3.25"
+
+FLATBUFFERS_SHA256 = "4157c5cacdb59737c5d627e47ac26b140e9ee28b1102f812b36068aab728c1ed"
+
+maybe(
+    http_archive,
+    name = "flatbuffers",
+    sha256 = FLATBUFFERS_SHA256,
+    strip_prefix = "flatbuffers-{version}".format(version = FLATBUFFERS_VERSION),
+    urls = ["https://github.com/google/flatbuffers/archive/refs/tags/v{version}.tar.gz".format(version = FLATBUFFERS_VERSION)],
+)
+
 # rules_license come _before_ XLA, since highway requires a newer version.
 maybe(
     http_archive,
     name = "rules_license",
+    sha256 = "4531deccb913639c30e5c7512a054d5d875698daeb75d8cf90f284375fe7c360",
     urls = [
         "https://github.com/bazelbuild/rules_license/releases/download/0.0.7/rules_license-0.0.7.tar.gz",
     ],
-    sha256 = "4531deccb913639c30e5c7512a054d5d875698daeb75d8cf90f284375fe7c360",
 )
 
 ###############################################################################
@@ -47,46 +70,57 @@ maybe(
 
 # The XLA commit is determined by external/xla/workspace.bzl.
 load("//third_party/xla:workspace.bzl", xla_repo = "repo")
+
 xla_repo()
 
 # Initialize hermetic Python
 load("@xla//third_party/py:python_init_rules.bzl", "python_init_rules")
+
 python_init_rules()
 
 load("@xla//third_party/py:python_init_repositories.bzl", "python_init_repositories")
+
 python_init_repositories(
+    default_python_version = "system",
     requirements = {
         "3.10": "//third_party/py:requirements_lock_3_10.txt",
         "3.11": "//third_party/py:requirements_lock_3_11.txt",
         "3.12": "//third_party/py:requirements_lock_3_12.txt",
         "3.13": "//third_party/py:requirements_lock_3_13.txt",
     },
-    default_python_version = "system",
 )
 
 load("@xla//third_party/py:python_init_toolchains.bzl", "python_init_toolchains")
+
 python_init_toolchains()
 
 load("//third_party/bazel/python:python_init_pip.bzl", "python_init_pip")
+
 python_init_pip()
 
 load("@pypi//:requirements.bzl", "install_deps")
+
 install_deps()
 
 # Load all XLA dependencies.
 load("@xla//:workspace4.bzl", "xla_workspace4")
+
 xla_workspace4()
 
 load("@xla//:workspace3.bzl", "xla_workspace3")
+
 xla_workspace3()
 
 load("@xla//:workspace2.bzl", "xla_workspace2")
+
 xla_workspace2()
 
 load("@xla//:workspace1.bzl", "xla_workspace1")
+
 xla_workspace1()
 
 load("@xla//:workspace0.bzl", "xla_workspace0")
+
 xla_workspace0()
 
 # Even though we don't use CUDA, this is required since it is needed
