@@ -267,6 +267,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
           sample_ids,
           embedding_ids,
           gains,
+          1,  # num_minibatches
           embedding_table,
           accumulator,
           activations_grad,
@@ -425,6 +426,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
             lhs_local_embedding_ids,
             lhs_local_sample_ids,
             lhs_gains,
+            1,  # num_minibatches
             emb_table_sharded[0],
             accumulator_init,
             z_grad,

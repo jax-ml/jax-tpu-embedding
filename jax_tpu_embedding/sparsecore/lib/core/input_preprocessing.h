@@ -50,6 +50,7 @@ struct PreprocessSparseDenseMatmulOutput {
   StackedTableMap<MatrixXi> lhs_embedding_ids;
   StackedTableMap<MatrixXi> lhs_sample_ids;
   StackedTableMap<MatrixXf> lhs_gains;
+  StackedTableMap<int> num_minibatches;
   SparseDenseMatmulInputStats stats;
 };
 
