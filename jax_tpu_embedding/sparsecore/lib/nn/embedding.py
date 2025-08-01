@@ -693,6 +693,7 @@ def tpu_sparse_dense_matmul(
             embedding_id,
             sample_id,
             gain,
+            1,  # num_minibatches
             embedding_variable[0],  # [0] is the embedding table
             device_batch_size=stacked_table.total_sample_count
             // global_device_count,
@@ -700,6 +701,7 @@ def tpu_sparse_dense_matmul(
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy,
             quantization_config=quantization_config_tuple,
+            minibatches=False,
         )
     )
 
@@ -898,6 +900,7 @@ def tpu_sparse_dense_matmul_grad(
         embedding_id,
         sample_id,
         gain,
+        1,  # num_minibatches
         *flatten_variables,
         activation_gradient,
         *hyper_params,
@@ -905,6 +908,7 @@ def tpu_sparse_dense_matmul_grad(
         max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
         computation_name=symbol_name,
         sharding_strategy=sharding_strategy,
+        minibatches=False,
     )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(

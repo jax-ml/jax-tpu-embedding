@@ -19,7 +19,7 @@ from absl.testing import parameterized
 import einops
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_with_mini_batching
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
 import numpy as np
 
 
@@ -305,7 +305,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingValidatorTest(
   ):
     num_minibatches_per_physical_sparse_core = 1
     with self.assertRaises(ValueError):
-      sparse_dense_matmul_grad_with_adagrad_with_mini_batching.tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_primitive.bind(
+      sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive.bind(
           row_pointers,
           sample_ids,
           embedding_ids,
@@ -317,6 +317,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingValidatorTest(
           learning_rate,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
+          minibatches=True,
       )
 
 
@@ -360,7 +361,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
     )
 
     self.sparse_dense_matmul_grad_with_adagrad_with_mini_batching = jax.named_call(
-        sparse_dense_matmul_grad_with_adagrad_with_mini_batching.tpu_sparse_dense_matmul_grad_with_adagrad_with_mini_batching_primitive.bind,
+        sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive.bind,
         name="tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching",
     )
 
@@ -480,6 +481,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
+            minibatches=True,
         )
     )
 
