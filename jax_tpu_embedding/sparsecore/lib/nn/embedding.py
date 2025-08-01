@@ -68,6 +68,7 @@ class SparseDenseMatmulInput(NamedTuple):
   lhs_embedding_ids: Mapping[str, np.ndarray]
   lhs_sample_ids: Mapping[str, np.ndarray]
   lhs_gains: Mapping[str, np.ndarray]
+  num_minibatches: Mapping[str, int]
 
 
 @struct.dataclass
@@ -660,10 +661,13 @@ def tpu_sparse_dense_matmul(
     ValueError: The input arrays and tuples are not of the expected structure or
       the sharding strategy is not supported.
   """
-  lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
-  lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
-  lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
-  lhs_gains = preprocessed_inputs.lhs_gains
+  (
+      lhs_row_pointers,
+      lhs_embedding_ids,
+      lhs_sample_ids,
+      lhs_gains,
+      num_minibatches,
+  ) = preprocessed_inputs
 
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
 
@@ -693,6 +697,7 @@ def tpu_sparse_dense_matmul(
             embedding_id,
             sample_id,
             gain,
+            num_minibatches.get(stacked_table_name, 1),
             embedding_variable[0],  # [0] is the embedding table
             device_batch_size=stacked_table.total_sample_count
             // global_device_count,
@@ -700,6 +705,7 @@ def tpu_sparse_dense_matmul(
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy,
             quantization_config=quantization_config_tuple,
+            minibatches=False,
         )
     )
 
@@ -849,10 +855,13 @@ def tpu_sparse_dense_matmul_grad(
     The updated activation embedding variables.
   """
   # Verify the input structures and lengths.
-  lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
-  lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
-  lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
-  lhs_gains = preprocessed_inputs.lhs_gains
+  (
+      lhs_row_pointers,
+      lhs_embedding_ids,
+      lhs_sample_ids,
+      lhs_gains,
+      num_minibatches,
+  ) = preprocessed_inputs
 
   assert lhs_row_pointers.keys() == embedding_variables.keys()
   # Activations match the feature specs structure
@@ -898,6 +907,7 @@ def tpu_sparse_dense_matmul_grad(
         embedding_id,
         sample_id,
         gain,
+        num_minibatches.get(stacked_table_name, 1),
         *flatten_variables,
         activation_gradient,
         *hyper_params,
@@ -905,6 +915,7 @@ def tpu_sparse_dense_matmul_grad(
         max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
         computation_name=symbol_name,
         sharding_strategy=sharding_strategy,
+        minibatches=False,
     )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(

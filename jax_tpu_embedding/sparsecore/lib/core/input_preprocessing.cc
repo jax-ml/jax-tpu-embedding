@@ -385,9 +385,6 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         required_buffer_size_per_sc.resize(1,
                                            required_buffer_size_per_sc.size());
         {
-          // This used to be (unintentionally) synchronized using GIL, but
-          // there's a possible race condition with the threadpool without the
-          // python objects since we don't use the GIL anymore.
           absl::MutexLock lock(&mutex);
           out.lhs_row_pointers[stacked_table_name.c_str()] =
               std::move(row_pointers_per_device);
@@ -397,6 +394,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
               std::move(sample_ids_per_device);
           out.lhs_gains[stacked_table_name.c_str()] =
               std::move(gains_per_device);
+          // TODO: b/428790659 - Populate this value based on computed split.
+          out.num_minibatches[stacked_table_name.c_str()] = 1;
 
           out.stats.max_ids_per_partition[stacked_table_name.c_str()] =
               std::move(max_ids_per_partition_per_sc);

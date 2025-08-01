@@ -120,12 +120,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_local_embedding_ids,
           lhs_local_sample_ids,
           lhs_gains,
+          1,  # num_minibatches
           self.emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
           quantization_config=None,
+          minibatches=False,
       )
 
     with self.subTest("invalid_local_embedding_ids_type"):
@@ -139,12 +141,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           bad_local_embedding_ids,
           lhs_local_sample_ids,
           lhs_gains,
+          1,  # num_minibatches
           self.emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
           quantization_config=None,
+          minibatches=False,
       )
 
     with self.subTest("invalid_local_sample_ids_type"):
@@ -156,12 +160,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_local_embedding_ids,
           bad_local_sample_ids,
           lhs_gains,
+          1,  # num_minibatches
           self.emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
           quantization_config=None,
+          minibatches=False,
       )
 
     with self.subTest("invalid_gains_type"):
@@ -173,12 +179,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_local_embedding_ids,
           lhs_local_sample_ids,
           bad_gains,
+          1,  # num_minibatches
           self.emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
           quantization_config=None,
+          minibatches=False,
       )
 
     with self.subTest("invalid_emb_table_type"):
@@ -190,12 +198,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_local_embedding_ids,
           lhs_local_sample_ids,
           lhs_gains,
+          1,  # num_minibatches
           bad_emb_table,
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
           quantization_config=None,
+          minibatches=False,
       )
 
   def test_sc_emb_forward_pass_invalid_input_shapes(self):
@@ -229,12 +239,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_local_embedding_ids,
           bad_sample_id,
           lhs_gains,
+          1,  # num_minibatches
           self.emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
           quantization_config=None,
+          minibatches=False,
       )
 
   def test_sc_emb_forward_pass_invalid_max_ids_per_partition(self):
@@ -264,12 +276,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
+        1,  # num_minibatches
         self.emb_table_sharded[0],
         device_batch_size=self.batch_size // self.num_chips,
         max_ids_per_partition=0,
         max_unique_ids_per_partition=256,
         sharding_strategy=1,
         quantization_config=None,
+        minibatches=False,
     )
     self.assertRaises(
         ValueError,
@@ -278,12 +292,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
+        1,  # num_minibatches
         self.emb_table_sharded[0],
         device_batch_size=self.batch_size // self.num_chips,
         max_ids_per_partition=256,
         max_unique_ids_per_partition=0,
         sharding_strategy=1,
         quantization_config=None,
+        minibatches=False,
     )
 
   def test_sc_emb_forward_pass_invalid_sharding(self):
@@ -313,12 +329,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
+        1,  # num_minibatches
         self.emb_table_sharded[0],
         device_batch_size=self.batch_size // self.num_chips,
         max_ids_per_partition=256,
         max_unique_ids_per_partition=256,
         sharding_strategy=2,
         quantization_config=None,
+        minibatches=False,
     )
 
   def test_sc_emb_forward_pass(self):
@@ -349,12 +367,14 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
+        1,  # num_minibatches
         self.emb_table_sharded[0],
         device_batch_size=self.batch_size // self.num_chips,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         sharding_strategy=1,
         quantization_config=None,
+        minibatches=False,
     )
 
     # Check the embedding activations.
@@ -407,6 +427,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_ids,
           lhs_sids,
           lhs_gains,
+          1,  # num_minibatches
           emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=16,
@@ -414,6 +435,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           sharding_strategy=1,
           # num_buckets < 2
           quantization_config=(0.0, 1.0, 1),
+          minibatches=False,
       )
 
     # min must be < max
@@ -423,6 +445,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           lhs_ids,
           lhs_sids,
           lhs_gains,
+          1,  # num_minibatches
           emb_table_sharded[0],
           device_batch_size=self.batch_size // self.num_chips,
           max_ids_per_partition=16,
@@ -430,6 +453,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
           sharding_strategy=1,
           # min < max
           quantization_config=(5.0, 5.0, 4),
+          minibatches=False,
       )
 
   def test_sc_emb_forward_pass_with_quantization_enabled(self):
@@ -455,6 +479,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         lhs_ids,
         lhs_sids,
         lhs_gains,
+        1,  # num_minibatches
         emb_table_sharded[0],
         device_batch_size=self.batch_size // self.num_chips,
         max_ids_per_partition=16,
@@ -462,6 +487,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         sharding_strategy=1,
         # valid config
         quantization_config=(0.0, 15.0, 256),
+        minibatches=False,
     )
 
     # Quantization happens on-device, so numerical values stay identical

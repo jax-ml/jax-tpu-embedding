@@ -15,7 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_COO_FORMAT_H_
 
 #include <cstdint>
-#include <optional>
+#include <limits>
 #include <ostream>
 
 #include "absl/functional/function_ref.h"  // from @com_google_absl
@@ -28,6 +28,10 @@ namespace jax_sc_embedding {
 struct CooFormat {
   // Maximum buckets that can be formed during minibatching.
   static constexpr uint32_t kMaxMinibatchingBuckets = 64;
+  // The minibatching split will have `num buckets - 1` split points (bits)
+  // which should fit in uint64_t.
+  static_assert(kMaxMinibatchingBuckets - 1 <=
+                std::numeric_limits<uint64_t>::digits);
   // Bits taken by minibatching bucket ID.
   static constexpr uint32_t kMinibatchingBucketBits =
       absl::bit_width(kMaxMinibatchingBuckets - 1);
