@@ -99,7 +99,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     indices_tensor = [sparse_tensor.indices]
     values_tensor = [sparse_tensor.values]
     dense_shape_tensor = [sparse_tensor.dense_shape]
-    self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (
         row_pointers_sparse,
@@ -146,7 +146,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
           dtype=np.int32,
       )
 
-    self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
@@ -200,7 +200,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     dense_shape_tensor = [sparse_tensor.dense_shape]
     self.feature_spec.table_spec.stacked_table_spec = dataclasses.replace(
         self.feature_spec.table_spec.stacked_table_spec,
-        suggested_coo_buffer_size=1000,
+        suggested_coo_buffer_size_per_device=1000,
         max_ids_per_partition=150,
     )
     batch_number = 42
@@ -236,7 +236,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     numpy_features = np.array(numpy_features, dtype=object)
     numpy_weights = np.array(numpy_weights, dtype=object)
 
-    self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
@@ -1251,7 +1251,7 @@ class MeanCombinerTest(parameterized.TestCase):
     indices_tensor = [sparse_tensor.indices]
     values_tensor = [sparse_tensor.values]
     dense_shape_tensor = [sparse_tensor.dense_shape]
-    self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (
         row_pointers_sparse,
@@ -1297,7 +1297,7 @@ class MeanCombinerTest(parameterized.TestCase):
           ],
           dtype=np.int32,
       )
-    self.feature_spec.table_spec.suggested_coo_buffer_size = 64
+    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(

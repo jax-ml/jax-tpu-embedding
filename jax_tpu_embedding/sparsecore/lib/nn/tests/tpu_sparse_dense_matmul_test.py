@@ -120,7 +120,7 @@ class ErrorHandlingTest(absltest.TestCase):
         name="table",
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
-        suggested_coo_buffer_size=64,
+        suggested_coo_buffer_size_per_device=64,
         quantization_config=None,
     )
     lf_spec = embedding_spec.FeatureSpec(

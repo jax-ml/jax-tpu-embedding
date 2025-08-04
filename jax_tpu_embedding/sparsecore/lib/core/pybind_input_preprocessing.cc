@@ -77,11 +77,12 @@ GetStackedTableMetadata(py::list& feature_specs) {
         py::cast<int>(stacked_table_spec.attr("max_ids_per_partition"));
     const int max_unique_ids_per_partition =
         py::cast<int>(stacked_table_spec.attr("max_unique_ids_per_partition"));
-    std::optional<int> suggested_coo_buffer_size;
-    py::object suggested_coo_buffer_size_attr =
-        stacked_table_spec.attr("suggested_coo_buffer_size");
-    if (!suggested_coo_buffer_size_attr.is_none()) {
-      suggested_coo_buffer_size = py::cast<int>(suggested_coo_buffer_size_attr);
+    std::optional<int> suggested_coo_buffer_size_per_device;
+    py::object suggested_coo_buffer_size_per_device_attr =
+        stacked_table_spec.attr("suggested_coo_buffer_size_per_device");
+    if (!suggested_coo_buffer_size_per_device_attr.is_none()) {
+      suggested_coo_buffer_size_per_device =
+          py::cast<int>(suggested_coo_buffer_size_per_device_attr);
     }
     const std::string row_combiner =
         py::cast<std::string>(stacked_table_spec.attr("combiner"));
@@ -93,7 +94,7 @@ GetStackedTableMetadata(py::list& feature_specs) {
     stacked_table_metadata[stacked_table_name].emplace_back(
         stacked_table_name, i, max_ids_per_partition,
         max_unique_ids_per_partition, row_offset, col_offset, col_shift,
-        /*batch_size=*/batch_size, suggested_coo_buffer_size,
+        /*batch_size=*/batch_size, suggested_coo_buffer_size_per_device,
         GetRowCombiner(row_combiner), max_col_id);
   }
   // Sort the stacked tables by row_offset.

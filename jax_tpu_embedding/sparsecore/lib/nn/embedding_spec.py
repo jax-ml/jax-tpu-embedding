@@ -544,7 +544,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
     decay_rate = (
         self.b2
         * (1.0 - jnp.power(self.b2, step))
-        / ((1.0 - jnp.power(self.b2, step+1.0)))
+        / ((1.0 - jnp.power(self.b2, step + 1.0)))
     )
 
     return jnp.array(decay_rate, dtype=jnp.float32)
@@ -631,8 +631,8 @@ class TableSpec:
       packed into a single partition.
     max_unique_ids_per_partition: The maximum number of unique embedding IDs
       that can be packed into a single partition.
-    suggested_coo_buffer_size: The minimum size of the input buffer that the
-      preprocessing should try to create (per device).
+    suggested_coo_buffer_size_per_device: The minimum size of the input buffer
+      that the preprocessing should try to create.
     quantization_config: Quantization config (min, max, num_buckets) which
       represent the float range and number of discrete integer buckets to use
       for quantization.
@@ -647,8 +647,8 @@ class TableSpec:
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
   # The minimum size of the input buffer that the preprocessing should try to
-  # create (per device).
-  suggested_coo_buffer_size: int | None = None
+  # create.
+  suggested_coo_buffer_size_per_device: int | None = None
   # Quantization config (min, max, num_buckets) which represent the float
   # range and number of discrete integer buckets to use for quantization.
   quantization_config: QuantizationConfig | None = None
@@ -753,8 +753,8 @@ class StackedTableSpec:
   max_ids_per_partition: int = 256
   max_unique_ids_per_partition: int = 256
   # The minimum size of the input buffer that the preprocessing should try to
-  # create (per device).
-  suggested_coo_buffer_size: int | None = None
+  # create.
+  suggested_coo_buffer_size_per_device: int | None = None
   # Quantization config (min, max, num_buckets) which represent the float
   # range and number of discrete integer buckets to use for quantization.
   quantization_config: QuantizationConfig | None = None
@@ -763,6 +763,7 @@ class StackedTableSpec:
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class QuantizationConfig:
   """Per-table quantization parameters (None means disabled)."""
+
   min_value: float
   max_value: float
   num_buckets: int
