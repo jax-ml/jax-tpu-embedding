@@ -16,6 +16,7 @@
 
 #include <bitset>
 #include <cstddef>
+#include <cstdint>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
@@ -58,14 +59,14 @@ namespace internal {
 // propagated up the tree.
 template <size_t N = CooFormat::kMaxMinibatchingBuckets>
 std::bitset<N - 1> ComputeMinibatchingSplit(
-    absl::Span<int> unique_ids_per_bucket, int max_unique_ids_per_partition) {
+    absl::Span<int32_t> unique_ids_per_bucket,
+    int max_unique_ids_per_partition) {
   static_assert(absl::has_single_bit(N));
   DCHECK_EQ(unique_ids_per_bucket.size(), N);
   std::bitset<N - 1> split = 0;
-  const int tree_size = unique_ids_per_bucket.size();
   int split_index = 0;
-  for (int subtree_size = 2; subtree_size <= tree_size; subtree_size *= 2) {
-    for (int i = 0; i < tree_size; i += subtree_size, ++split_index) {
+  for (int subtree_size = 2; subtree_size <= N; subtree_size *= 2) {
+    for (int i = 0; i < N; i += subtree_size, ++split_index) {
       const int val_left = unique_ids_per_bucket[i];
       const int val_right = unique_ids_per_bucket[i + subtree_size / 2];
       if (val_left + val_right > max_unique_ids_per_partition) {

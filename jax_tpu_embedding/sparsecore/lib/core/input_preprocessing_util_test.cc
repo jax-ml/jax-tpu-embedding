@@ -792,8 +792,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
           max_unique_id_per_sc, required_buffer_sizes_per_sc);
 
-  coo_tensors_by_id.MergeAll();  // combine into single minibatch.
-
   Eigen::VectorXi row_pointers(8 * 4);
   Eigen::VectorXi embedding_ids(40 * 4);
   Eigen::VectorXi sample_ids(40 * 4);
