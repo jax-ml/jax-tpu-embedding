@@ -94,9 +94,9 @@ pytype_strict_contrib_test(
 )
 
 pytype_strict_contrib_test(
-    name = "sparse_dense_matmul_grad_with_sgd_with_mini_batching_test",
+    name = "sparse_dense_matmul_grad_with_sgd_minibatching_test",
     srcs = [
-        "sparse_dense_matmul_grad_with_sgd_with_mini_batching_test.py",
+        "sparse_dense_matmul_grad_with_sgd_minibatching_test.py",
     ],
     args = [
         # TPU chip configuration,
@@ -110,7 +110,7 @@ pytype_strict_contrib_test(
         "requires-tpu",
     ],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd_with_mini_batching",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
@@ -121,9 +121,9 @@ pytype_strict_contrib_test(
 )
 
 pytype_strict_contrib_test(
-    name = "sparse_dense_matmul_grad_with_adagrad_with_mini_batching_test",
+    name = "sparse_dense_matmul_grad_with_adagrad_minibatching_test",
     srcs = [
-        "sparse_dense_matmul_grad_with_adagrad_with_mini_batching_test.py",
+        "sparse_dense_matmul_grad_with_adagrad_minibatching_test.py",
     ],
     args = [
         # TPU chip configuration,
@@ -137,7 +137,7 @@ pytype_strict_contrib_test(
         "requires-tpu",
     ],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_with_mini_batching",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),

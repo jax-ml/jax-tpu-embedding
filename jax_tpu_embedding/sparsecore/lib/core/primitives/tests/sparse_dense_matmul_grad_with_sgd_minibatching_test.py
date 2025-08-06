@@ -18,7 +18,7 @@ from absl.testing import absltest
 import einops
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd_with_mini_batching
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 import numpy as np
 
 
@@ -100,7 +100,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
 
     self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching = jax.named_call(
-        sparse_dense_matmul_grad_with_sgd_with_mini_batching.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching_primitive.bind,
+        sparse_dense_matmul_grad_with_sgd.tpu_sparse_dense_matmul_grad_with_sgd_primitive.bind,
         name="tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching",
     )
 
@@ -221,6 +221,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="sgd_test_computation",
             sharding_strategy=1,
+            minibatches=True,
         )
     )
 
@@ -882,6 +883,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="sgd_test_computation",
             sharding_strategy=1,
+            minibatches=True,
         )
     )
 

@@ -901,6 +901,7 @@ def tpu_sparse_dense_matmul_grad(
         embedding_id,
         sample_id,
         gain,
+        1,  # num_minibatches
         *flatten_variables,
         activation_gradient,
         *hyper_params,
@@ -908,6 +909,7 @@ def tpu_sparse_dense_matmul_grad(
         max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
         computation_name=symbol_name,
         sharding_strategy=sharding_strategy,
+        minibatches=False,
     )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(

@@ -63,6 +63,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: np.ndarray,
     accumulator: np.ndarray,
     activations_grad: np.ndarray,
@@ -72,8 +73,12 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     max_unique_ids_per_partition: int,
     computation_name: str = "adagrad_optimizer_update",
     sharding_strategy: int = 1,
+    # NOMUTANTS -- unused param for abstract eval.
+    minibatches: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
+  del num_minibatches_per_physical_sparse_core
+  del minibatches
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
@@ -110,6 +115,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     lhs_local_embedding_ids: mlir.ir.BlockArgument,
     lhs_local_sample_ids: mlir.ir.BlockArgument,
     lhs_gains: mlir.ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: mlir.ir.BlockArgument,
     accumulator: mlir.ir.BlockArgument,
     activations_grad: mlir.ir.BlockArgument,
@@ -119,6 +125,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     max_unique_ids_per_partition: int,
     computation_name: str = "adgrad_optimizer_update",
     sharding_strategy: int = 1,
+    minibatches: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad."""
   sdmm_sgd_config = {
@@ -209,15 +216,33 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
       lhs_local_embedding_ids,
       lhs_local_sample_ids,
       lhs_gains,
-      activations_grad,
-      embedding_table,
-      # slot variables
-      accumulator,
-      # hyperparameters
-      learning_rate,
   ]
+
+  if minibatches:
+    call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
+    operands += [
+        num_minibatches_per_physical_sparse_core,
+        embedding_table,
+        # slot variables
+        accumulator,
+        # activations grad
+        activations_grad,
+        # hyperparameters
+        learning_rate,
+    ]
+  else:
+    call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
+    operands += [
+        activations_grad,
+        embedding_table,
+        # slot variables
+        accumulator,
+        # hyperparameters
+        learning_rate,
+    ]
+
   op = jax.ffi.ffi_lowering(
-      "SparseDenseMatmulGradOpWithOptimizerUpdate",
+      call_target,
       result_types=[
           ir.TupleType.get_tuple([embedding_table.type, accumulator.type])
       ],
