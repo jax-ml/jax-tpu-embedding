@@ -14,13 +14,18 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PARTITIONED_COO_TENSORS_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PARTITIONED_COO_TENSORS_H_
 
+#include <bitset>
+#include <cstddef>
 #include <vector>
 
+#include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/minibatching_splits_impl.h"
 
 namespace jax_sc_embedding {
+
 class PartitionedCooTensors {
  public:
   PartitionedCooTensors(int reserve_count, int num_sc_per_device,
@@ -30,13 +35,14 @@ class PartitionedCooTensors {
         num_sc_per_device_(num_sc_per_device),
         bucket_offsets_(),
         curr_sc_id_(0),
-        curr_bucket_id_(0) {
+        curr_bucket_id_(0),
+        merged_(false) {
     coo_tensors_.reserve(reserve_count);
     bucket_offsets_.reserve(1 + num_sc_per_device * bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
   }
 
-  void MergeLast(const CooFormat& coo_tensor) {
+  void MergeWithLastCoo(const CooFormat& coo_tensor) {
     DCHECK_GT(coo_tensors_.size(), 0);
     CooFormat& last = coo_tensors_.back();
     DCHECK_EQ(last.row_id, coo_tensor.row_id);
@@ -65,9 +71,6 @@ class PartitionedCooTensors {
     return bucket_offsets_[end_index] - bucket_offsets_[start_index];
   }
 
-  // Get buckets per SC.
-  int GetBucketCount() const { return bucket_count_per_sc_; }
-
   // Get COO tensors for given SC and bucket.
   absl::Span<const CooFormat> operator()(int local_sc_id, int bucket_id) const {
     const int start_index = local_sc_id * bucket_count_per_sc_ + bucket_id;
@@ -83,26 +86,53 @@ class PartitionedCooTensors {
   void FillRemainingScBuckets() {
     AdvanceBucketOffsets(/* target_sc_id= */ curr_sc_id_ + 1,
                          /* target_bucket_id= */ 0);
-    // NOTE: Maybe prevent modifying offsets and coo_tensors after this?
   }
 
-  // TODO: http://b/428790659 - A merge operation from a given binary split to
-  // create minibatches.
-  // Temporary: this merges all buckets into one per SC.
+  template <size_t N = CooFormat::kMaxMinibatchingBuckets>
   void MergeAll() {
-    DCHECK_GT(bucket_count_per_sc_, 1);
-    for (int i = 0; i < num_sc_per_device_; ++i) {
-      bucket_offsets_[i + 1] = bucket_offsets_[(i + 1) * bucket_count_per_sc_];
-    }
-    bucket_offsets_.resize(1 + num_sc_per_device_);
-    bucket_count_per_sc_ = 1;
+    Merge<N>(0);
   }
 
-  // TODO: http://b/428790659 - An internal counter to compute per bucket unique
-  // id counts.
+  template <size_t N = CooFormat::kMaxMinibatchingBuckets>
+  void Merge(std::bitset<N - 1> split) {
+    CHECK(!merged_) << "Merge can only be called once.";
+    AdvanceBucketOffsets(/* target_sc_id= */ num_sc_per_device_,
+                         /* target_bucket_id= */ 0);
+    DCHECK_EQ(bucket_count_per_sc_, N);
 
-  // TODO: http://b/428790659 - Compute per SC and local device splits from
-  // unique id counts per bucket.
+    std::bitset<N - 1> splitpos = internal::GetSplitPos<N>(split);
+    DCHECK_EQ(splitpos.count(), split.count());
+
+    const int minibatches = split.count() + 1;  // N splits -> N+1 minibatches.
+
+    DCHECK(absl::c_is_sorted(bucket_offsets_));
+
+    for (int sc_id = 0; sc_id < num_sc_per_device_; ++sc_id) {
+      const int start_pos = 1 + sc_id * bucket_count_per_sc_;
+      const int dest_pos = 1 + sc_id * minibatches;
+      for (int bucket_id = 0, minibatch_id = 0; bucket_id < N - 1;
+           ++bucket_id) {
+        if (splitpos.test(bucket_id)) {
+          bucket_offsets_[dest_pos + minibatch_id] =
+              bucket_offsets_[start_pos + bucket_id];
+          ++minibatch_id;
+        }
+      }
+      // SparseCore partition.
+      bucket_offsets_[dest_pos + minibatches - 1] =
+          bucket_offsets_[start_pos + bucket_count_per_sc_ - 1];
+    }
+
+    bucket_offsets_.resize(1 + num_sc_per_device_ * minibatches);
+
+    DCHECK(absl::c_is_sorted(bucket_offsets_));
+
+    bucket_count_per_sc_ = minibatches;
+    merged_ = true;
+  }
+
+  // Minibatches (after merging) or Max buckets (before merging).
+  int GetNumMinibatches() const { return bucket_count_per_sc_; }
 
  private:
   // Advance bucket offsets to the given `target_sc_id` and `target_bucket_id`.
@@ -137,6 +167,8 @@ class PartitionedCooTensors {
   // Internal counters of the current SC and bucket being populated.
   int curr_sc_id_;
   int curr_bucket_id_;
+  // Merged into minibatches?
+  bool merged_;
 };
 
 }  // namespace jax_sc_embedding

@@ -304,7 +304,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       // If the row ids and col ids are both same as the previous one,
       // dedup the id by adding the gains.
       if (col_id == prev_col_id && row_id == prev_row_id) {
-        grouped_coo_tensors.MergeLast(coo_tensor);
+        grouped_coo_tensors.MergeWithLastCoo(coo_tensor);
       } else {
         ids_per_sc_partition[global_sc_id] += 1;
         // If either max_unique_ids_per_partition or max_ids_per_partition is
@@ -480,7 +480,7 @@ void FillLocalDeviceBuffer(
             ? coo_buffer_size                      // use whole buffer
             : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
     int coo_index = coo_begin;
-    for (int bucket_id = 0; bucket_id < grouped_coo_tensors.GetBucketCount();
+    for (int bucket_id = 0; bucket_id < grouped_coo_tensors.GetNumMinibatches();
          ++bucket_id) {
       coo_index = FillMinibatchBuffer(
           {

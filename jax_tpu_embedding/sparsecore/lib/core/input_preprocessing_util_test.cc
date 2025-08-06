@@ -762,7 +762,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   EXPECT_THAT(gains, expected_gains);
 }
 
-TEST(InputPreprocessingUtilTest, FillBufferMinibatching) {
+TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   std::vector<CooFormat> coo_formats;
 
   for (int row = 0; row < 8; ++row) {
@@ -792,8 +792,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatching) {
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
           max_unique_id_per_sc, required_buffer_sizes_per_sc);
 
-  // Merge all buckets.
-  coo_tensors_by_id.MergeAll();
+  coo_tensors_by_id.MergeAll();  // combine into single minibatch.
 
   Eigen::VectorXi row_pointers(8 * 4);
   Eigen::VectorXi embedding_ids(40 * 4);

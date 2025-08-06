@@ -51,6 +51,7 @@ cc_library(
     hdrs = ["input_preprocessing_util.h"],
     deps = [
         ":coo_format",
+        ":minibatching_splits_impl",
         ":partitioned_coo_tensors",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
@@ -300,6 +301,8 @@ cc_library(
     hdrs = ["partitioned_coo_tensors.h"],
     deps = [
         ":coo_format",
+        ":minibatching_splits_impl",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:span",
     ],
@@ -313,9 +316,17 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "minibatching_splits_impl",
+    hdrs = ["minibatching_splits_impl.h"],
+    deps = [
+        ":coo_format",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/types:span",
-        "@eigen_archive//:eigen3",
     ],
 )
 
@@ -335,6 +346,16 @@ cc_test(
     deps = [
         ":coo_format",
         ":partitioned_coo_tensors",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "minibatching_splits_test",
+    srcs = ["minibatching_splits_test.cc"],
+    deps = [
+        ":minibatching_splits_impl",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )

@@ -13,6 +13,8 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 
+#include <bitset>
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
@@ -100,15 +102,83 @@ TEST(PartitionedCooTensorsTest, MergeBuckets) {
   tensors.Add(1, 0, coo3);
   tensors.Add(1, 0, coo4);
   tensors.Add(1, 1, coo5);
-  tensors.FillRemainingScBuckets();
 
-  tensors.MergeAll();
+  tensors.MergeAll<2>();
 
-  EXPECT_EQ(tensors.GetBucketCount(), 1);
+  EXPECT_EQ(tensors.GetNumMinibatches(), 1);
   EXPECT_THAT(tensors(0, 0), ElementsAre(coo1, coo2));
   EXPECT_THAT(tensors(1, 0), ElementsAre(coo3, coo4, coo5));
   EXPECT_EQ(tensors.Size(0), 2);
   EXPECT_EQ(tensors.Size(1), 3);
+}
+
+TEST(PartitionedCooTensorsTest, PartialMerge) {
+  PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/2,
+                                /*bucket_count=*/4);
+  CooFormat coo1(1, 1, 1.0);
+  CooFormat coo2(2, 2, 2.0);
+  CooFormat coo3(3, 3, 3.0);
+  CooFormat coo4(4, 4, 4.0);
+  CooFormat coo5(5, 5, 5.0);
+  CooFormat coo6(6, 6, 6.0);
+  CooFormat coo7(7, 7, 7.0);
+  CooFormat coo8(8, 8, 8.0);
+
+  tensors.Add(0, 0, coo1);
+  tensors.Add(0, 1, coo2);
+  tensors.Add(0, 2, coo3);
+  tensors.Add(0, 3, coo4);
+  tensors.Add(1, 0, coo5);
+  tensors.Add(1, 1, coo6);
+  tensors.Add(1, 2, coo7);
+  tensors.Add(1, 3, coo8);
+
+  // This split ({2,3}) results in minibatches {0,1,2} and {3}.
+  tensors.Merge<4>(std::bitset<3>(0b010));
+
+  EXPECT_EQ(tensors.GetNumMinibatches(), 2);
+  EXPECT_THAT(tensors(0, 0), ElementsAre(coo1, coo2, coo3));
+  EXPECT_THAT(tensors(0, 1), ElementsAre(coo4));
+  EXPECT_THAT(tensors(1, 0), ElementsAre(coo5, coo6, coo7));
+  EXPECT_THAT(tensors(1, 1), ElementsAre(coo8));
+  EXPECT_EQ(tensors.Size(0), 4);
+  EXPECT_EQ(tensors.Size(1), 4);
+}
+
+TEST(PartitionedCooTensorsTest, NoMerge) {
+  PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/2,
+                                /*bucket_count=*/4);
+  CooFormat coo1(1, 1, 1.0);
+  CooFormat coo2(2, 2, 2.0);
+  CooFormat coo3(3, 3, 3.0);
+  CooFormat coo4(4, 4, 4.0);
+  CooFormat coo5(5, 5, 5.0);
+  CooFormat coo6(6, 6, 6.0);
+  CooFormat coo7(7, 7, 7.0);
+  CooFormat coo8(8, 8, 8.0);
+
+  tensors.Add(0, 0, coo1);
+  tensors.Add(0, 1, coo2);
+  tensors.Add(0, 2, coo3);
+  tensors.Add(0, 3, coo4);
+  tensors.Add(1, 0, coo5);
+  tensors.Add(1, 1, coo6);
+  tensors.Add(1, 2, coo7);
+  tensors.Add(1, 3, coo8);
+
+  tensors.Merge<4>(std::bitset<3>(0b111));
+
+  EXPECT_EQ(tensors.GetNumMinibatches(), 4);
+  EXPECT_THAT(tensors(0, 0), ElementsAre(coo1));
+  EXPECT_THAT(tensors(0, 1), ElementsAre(coo2));
+  EXPECT_THAT(tensors(0, 2), ElementsAre(coo3));
+  EXPECT_THAT(tensors(0, 3), ElementsAre(coo4));
+  EXPECT_THAT(tensors(1, 0), ElementsAre(coo5));
+  EXPECT_THAT(tensors(1, 1), ElementsAre(coo6));
+  EXPECT_THAT(tensors(1, 2), ElementsAre(coo7));
+  EXPECT_THAT(tensors(1, 3), ElementsAre(coo8));
+  EXPECT_EQ(tensors.Size(0), 4);
+  EXPECT_EQ(tensors.Size(1), 4);
 }
 
 }  // namespace
