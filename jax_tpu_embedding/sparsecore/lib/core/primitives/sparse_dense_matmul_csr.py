@@ -47,15 +47,22 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
     lhs_local_embedding_ids: jnp.ndarray,
     lhs_local_sample_ids: jnp.ndarray,
     lhs_gains: jnp.ndarray,
+    num_minibatches_per_sparse_core: np.int32,
     embedding_table: jnp.ndarray,
-    *_,
+    *,
     device_batch_size: int,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
     quantization_config: tuple[float, float, int] | None = None,
+    # NOMUTANTS -- unused param for abstract eval.
+    minibatches: bool = False,
 ):
   """Abstract eval for sdmm_csr."""
+
+  del minibatches
+  del num_minibatches_per_sparse_core
+
   if lhs_row_pointers.dtype != np.int32:
     raise ValueError(
         f"lhs_row_pointers must have type int32, got {lhs_row_pointers.dtype}"
@@ -152,6 +159,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
+    num_minibatches_per_sparse_core: np.int32,
     embedding_table: np.ndarray,
     *,
     device_batch_size: int,
@@ -159,6 +167,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
     quantization_config: tuple[float, float, int] | None = None,
+    minibatches: bool = False,
 ) -> jnp.ndarray:
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
@@ -169,16 +178,6 @@ def _tpu_sparse_dense_matmul_csr_lowering(
       mlir.dense_int_array(
           [device_batch_size, embedding_table.type.get_dim_size(1)]  # pylint: disable=attribute-error
       ),
-  )
-
-  tuple_op = hlo.TupleOp([
-      lhs_row_pointers,
-      lhs_local_embedding_ids,
-      lhs_local_sample_ids,
-      lhs_gains,
-  ])
-  tuple_op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
   )
 
   sdmm_csr_config = {
@@ -199,14 +198,35 @@ def _tpu_sparse_dense_matmul_csr_lowering(
       "sparse_dense_matmul_config": sdmm_csr_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
+  operands = (
+      [
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+      ]
+      + ([num_minibatches_per_sparse_core] if minibatches else [])
+      + [
+          embedding_table,
+          activation_init,
+      ]
+  )
+
+  if minibatches:  # Buffer contains minibatches
+    call_target = "SparseDenseMatmulWithMinibatchingOp"
+  else:  # Buffer contains per SC buffer
+    # We still have tests that use this format.
+    call_target = "SparseDenseMatmulOp"
 
   return jax.ffi.ffi_lowering(
-      "SparseDenseMatmulOp",
+      call_target,
       result_types=[mlir.aval_to_ir_type(out_aval)],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,
-  )(ctx, tuple_op.result, embedding_table, activation_init)  # type: ignore
+  )(
+      ctx, *operands
+  )  # type: ignore
 
 
 mlir.register_lowering(
