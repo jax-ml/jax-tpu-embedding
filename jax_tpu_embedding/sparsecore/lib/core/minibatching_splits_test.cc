@@ -14,8 +14,10 @@
 #include <bitset>
 #include <cstdint>
 #include <tuple>
+#include <utility>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_splits_impl.h"
@@ -23,6 +25,7 @@
 namespace jax_sc_embedding {
 namespace {
 
+using ::testing::UnorderedElementsAreArray;
 using ::testing::Values;
 
 class ComputeMinibatchingSplitTest
@@ -56,28 +59,50 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(std::vector<int32_t>{90, 10, 90, 10, 90, 10, 90, 10},
                         100, std::bitset<7>(0b1110000))));
 
-class GetSplitPosTest : public ::testing::TestWithParam<
-                            std::tuple<std::bitset<7>, std::bitset<7>>> {};
+class MergeBucketsTest : public ::testing::TestWithParam<
+                             std::tuple<std::vector<int32_t>, std::bitset<7>,
+                                        std::vector<std::pair<int, int>>>> {};
 
-TEST_P(GetSplitPosTest, TestSplitPos) {
-  auto [split, expected_splitpos] = GetParam();
+TEST_P(MergeBucketsTest, TestMergeBuckets) {
+  auto [unique_ids_per_bucket, split_pos, expected_merged_buckets] = GetParam();
+  std::vector<std::pair<int, int>> merged_buckets;
 
-  EXPECT_EQ(internal::GetSplitPos<8>(split), expected_splitpos);
+  auto merge_fn = [&](int left, int right) {
+    merged_buckets.push_back(std::make_pair(left, right));
+  };
+  internal::MergeBuckets<8>(split_pos, merge_fn);
+
+  EXPECT_THAT(merged_buckets,
+              UnorderedElementsAreArray(expected_merged_buckets));
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    TestSplitPos, GetSplitPosTest,
+    TestMergeBuckets, MergeBucketsTest,
     Values(
         // No Merge
-        std::make_tuple(std::bitset<7>(0b1111111), std::bitset<7>(0b1111111)),
+        std::make_tuple(std::vector<int32_t>{1, 2, 3, 4, 5, 6, 7, 8},
+                        std::bitset<7>(0b1111111),
+                        std::vector<std::pair<int, int>>{}),
         // Partial Merge
-        std::make_tuple(std::bitset<7>(0b1100011), std::bitset<7>(0b0101101)),
+        std::make_tuple(std::vector<int32_t>{1, 2, 3, 4, 5, 6, 7, 8},
+                        std::bitset<7>(0b0101101),
+                        std::vector<std::pair<int, int>>{
+                            {2, 3}, {0, 2}, {0, 4}}),
         // Full Merge
-        std::make_tuple(std::bitset<7>(0b0), std::bitset<7>(0b0)),
+        std::make_tuple(
+            std::vector<int32_t>{1, 2, 3, 4, 5, 6, 7, 8}, std::bitset<7>(0b0),
+            std::vector<std::pair<int, int>>{
+                {0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {4, 6}, {0, 4}}),
         // Partial Merge 2
-        std::make_tuple(std::bitset<7>(0b1010000), std::bitset<7>(0b0001010)),
+        std::make_tuple(std::vector<int32_t>{50, 50, 20, 80, 10, 10, 70, 10},
+                        std::bitset<7>(0b0001010),
+                        std::vector<std::pair<int, int>>{
+                            {0, 1}, {4, 5}, {0, 2}, {4, 6}, {0, 4}}),
         // Partial Merge 3
-        std::make_tuple(std::bitset<7>(0b1110000), std::bitset<7>(0b0101010))));
+        std::make_tuple(std::vector<int32_t>{90, 10, 90, 10, 90, 10, 90, 10},
+                        std::bitset<7>(0b0101010),
+                        std::vector<std::pair<int, int>>{
+                            {0, 1}, {4, 5}, {0, 2}, {0, 4}})));
 
 }  // namespace
 }  // namespace jax_sc_embedding

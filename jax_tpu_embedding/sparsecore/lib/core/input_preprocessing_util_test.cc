@@ -14,12 +14,15 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 #include <array>
+#include <bitset>
 #include <climits>
+#include <cmath>
 #include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/algorithm/container.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
@@ -30,7 +33,9 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::IsNan;
+using ::testing::NanSensitiveFloatEq;
 using ::testing::Pair;
+using ::testing::Pointwise;
 
 TEST(InputPreprocessingUtilTest, ColIds) {
   // int GetColId(int col_id, int col_shift, int col_offset, int num_scs_mod,
@@ -801,7 +806,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
   PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 4,
+      .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
@@ -813,6 +818,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
           max_unique_id_per_sc, required_buffer_sizes_per_sc,
           minibatching_split);
+
+  coo_tensors_by_id.MergeAll();
 
   Eigen::VectorXi row_pointers(8 * 4);
   Eigen::VectorXi embedding_ids(40 * 4);
@@ -910,8 +917,166 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   EXPECT_THAT(gains, expected_gains);
 }
 
-// TODO: http://b/428790659 - Add a tests for minibatching buffer filling with
-//   no merging (requires changing initial buffer creation).
+TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
+  std::vector<CooFormat> coo_formats;
+
+  for (int row = 0; row < 8; ++row) {
+    for (int col = 0; col < 64; ++col) {
+      coo_formats.push_back(CooFormat(row, col, 1.0));
+    }
+  }
+  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
+  ExtractedCooTensors extracted_coo_tensors(4, 8);
+  extracted_coo_tensors.coo_tensors = coo_formats;
+  StackedTableMetadata stacked_table_metadata(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/33,
+      /*max_unique_ids_per_partition=*/33, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+      .enable_minibatching = true,
+  };
+  MinibatchingSplit minibatching_split = 0;
+  PartitionedCooTensors coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
+
+  // 4 Minibatches of bucket sizes [16,8,24,16]
+  // 62:                  32
+  // 60, 61:          16      48
+  // 56, 57, 58, 59: 8  24  40  56
+  // Overwrite split.
+  minibatching_split = 0;
+  minibatching_split.set(61);
+  minibatching_split.set(60);
+  minibatching_split.set(57);
+  coo_tensors_by_id.Merge(minibatching_split);
+  EXPECT_EQ(coo_tensors_by_id.GetNumMinibatches(), 4);
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < coo_tensors_by_id.GetNumMinibatches(); j++) {
+      auto coo_tensors = coo_tensors_by_id(i, j);
+      if (j == coo_tensors_by_id.GetNumMinibatches() - 1)
+        coo_tensors.remove_suffix(1);  // Ignore the sentinel node.
+      EXPECT_TRUE(absl::c_is_sorted(
+          coo_tensors, [&](const CooFormat& coo1, const CooFormat& coo2) {
+            // Sorted by global SC ID.
+            return (coo1.col_id % 4) < (coo2.col_id % 4);
+          }));
+    }
+  }
+
+  // Each SC has ids 2 rows with ids [0,1,..63] each. Last partition will also
+  // have the sentinel node.
+  // 4 Minibatches of bucket sizes [16,8,24,16]
+  EXPECT_EQ(coo_tensors_by_id(0, 0).size(), 16 * 2);
+  EXPECT_EQ(coo_tensors_by_id(0, 1).size(), 8 * 2);
+  EXPECT_EQ(coo_tensors_by_id(0, 2).size(), 24 * 2);
+  EXPECT_EQ(coo_tensors_by_id(0, 3).size(), 16 * 2 + 1);
+
+  const int coo_buffer_size_per_sc = 168;
+
+  Eigen::VectorXi row_pointers(32 * 4);
+  Eigen::VectorXi embedding_ids(coo_buffer_size_per_sc * 4);
+  Eigen::VectorXi sample_ids(coo_buffer_size_per_sc * 4);
+  Eigen::VectorXf gains(coo_buffer_size_per_sc * 4);
+
+  FillLocalDeviceBuffer(coo_tensors_by_id,
+                        /*row_pointers_size_per_bucket=*/8,
+                        coo_buffer_size_per_sc,
+                        /*batch_size_per_sc=*/2, options, row_pointers,
+                        embedding_ids, sample_ids, gains);
+
+  std::array<int, 128> expected_row_pointers = {
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC0 MB0
+      4,  12, 20, 28, 28, 28, 28, 28,  // SC0 MB1
+      12, 28, 44, 60, 60, 60, 60, 60,  // SC0 MB2
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC0 MB3
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC1 MB0
+      4,  12, 20, 28, 28, 28, 28, 28,  // SC1 MB1
+      12, 28, 44, 60, 60, 60, 60, 60,  // SC1 MB2
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC1 MB3
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC2 MB0
+      4,  12, 20, 28, 28, 28, 28, 28,  // SC2 MB1
+      12, 28, 44, 60, 60, 60, 60, 60,  // SC2 MB2
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC2 MB3
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC3 MB0
+      4,  12, 20, 28, 28, 28, 28, 28,  // SC3 MB1
+      12, 28, 44, 60, 60, 60, 60, 60,  // SC3 MB2
+      8,  16, 24, 32, 32, 32, 32, 32,  // SC3 MB3
+  };
+  EXPECT_THAT(row_pointers, ElementsAreArray(expected_row_pointers));
+
+  RowVectorXi expected_embedding_ids =
+      RowVectorXi::Constant(coo_buffer_size_per_sc * 4, INT_MAX);
+  RowVectorXi expected_sample_ids =
+      RowVectorXi::Constant(coo_buffer_size_per_sc * 4, INT_MAX);
+  RowVectorXf expected_gains =
+      RowVectorXf::Constant(coo_buffer_size_per_sc * 4, std::nanf(""));
+  // Sum of padded minibatch buffer sizes per SC: 32 (MB0) + 32 (MB1) + 64 (MB2)
+  // + 32 (MB3) = 160.
+  const int minibatches_buffer_size_per_sc = 160;
+  for (int sc = 0; sc < 4; ++sc) {
+    // MB0
+    expected_embedding_ids.segment(sc * minibatches_buffer_size_per_sc, 32)
+        << (RowVectorXi(8) << 0, 0, 1, 1, 2, 2, 3, 3)
+               .finished()
+               .replicate(1, 4);
+    expected_sample_ids.segment(sc * minibatches_buffer_size_per_sc, 32)
+        << (RowVectorXi(2) << 0, 1).finished().replicate(1, 16);
+    expected_gains.segment(sc * minibatches_buffer_size_per_sc, 32).setOnes();
+    // MB1
+    expected_embedding_ids.segment(sc * minibatches_buffer_size_per_sc + 32, 32)
+        << (RowVectorXi(8) << 4, 4, 5, 5, INT_MAX, INT_MAX, INT_MAX, INT_MAX)
+               .finished()
+               .replicate(1, 4);
+    expected_sample_ids.segment(sc * minibatches_buffer_size_per_sc + 32, 32)
+        << (RowVectorXi(8) << 0, 1, 0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX)
+               .finished()
+               .replicate(1, 4);
+    expected_gains.segment(sc * minibatches_buffer_size_per_sc + 32, 32)
+        << (RowVectorXf(8) << 1, 1, 1, 1, std::nanf(""), std::nanf(""),
+            std::nanf(""), std::nanf(""))
+               .finished()
+               .replicate(1, 4);
+    // MB2
+    expected_embedding_ids.segment(sc * minibatches_buffer_size_per_sc + 64, 64)
+        << (RowVectorXi(16) << 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, INT_MAX,
+            INT_MAX, INT_MAX, INT_MAX)
+               .finished()
+               .replicate(1, 4);
+    expected_sample_ids.segment(sc * minibatches_buffer_size_per_sc + 64, 64)
+        << (RowVectorXi(16) << 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, INT_MAX,
+            INT_MAX, INT_MAX, INT_MAX)
+               .finished()
+               .replicate(1, 4);
+    expected_gains.segment(sc * minibatches_buffer_size_per_sc + 64, 64)
+        << (RowVectorXf(16) << 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            std::nanf(""), std::nanf(""), std::nanf(""), std::nanf(""))
+               .finished()
+               .replicate(1, 4);
+    // MB3
+    expected_embedding_ids.segment(sc * minibatches_buffer_size_per_sc + 128,
+                                   32)
+        << (RowVectorXi(8) << 12, 12, 13, 13, 14, 14, 15, 15)
+               .finished()
+               .replicate(1, 4);
+    expected_sample_ids.segment(sc * minibatches_buffer_size_per_sc + 128, 32)
+        << (RowVectorXi(2) << 0, 1).finished().replicate(1, 16);
+    expected_gains.segment(sc * minibatches_buffer_size_per_sc + 128, 32)
+        .setOnes();
+  }
+
+  EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
+  EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
+  EXPECT_THAT(gains, Pointwise(NanSensitiveFloatEq(), expected_gains));
+}
 
 }  // namespace
 }  // namespace jax_sc_embedding

@@ -14,12 +14,15 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PARTITIONED_COO_TENSORS_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PARTITIONED_COO_TENSORS_H_
 
+#include <algorithm>
 #include <bitset>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_splits_impl.h"
@@ -29,10 +32,11 @@ namespace jax_sc_embedding {
 class PartitionedCooTensors {
  public:
   PartitionedCooTensors(int reserve_count, int num_sc_per_device,
-                        int bucket_count_per_sc = 1)
+                        uint32_t global_sc_count, int bucket_count_per_sc = 1)
       : coo_tensors_(),
         bucket_count_per_sc_(bucket_count_per_sc),
         num_sc_per_device_(num_sc_per_device),
+        global_sc_count_(global_sc_count),
         bucket_offsets_(),
         curr_sc_id_(0),
         curr_bucket_id_(0),
@@ -88,11 +92,52 @@ class PartitionedCooTensors {
                          /* target_bucket_id= */ 0);
   }
 
+  // Merge two given buckets.
+  template <size_t N = CooFormat::kMaxMinibatchingBuckets>
+  void MergeBucketCoos(int left, int right, uint32_t global_sc_count,
+                       std::bitset<N>& is_bucket_merged) {
+    DCHECK(absl::has_single_bit(N));
+    DCHECK(absl::has_single_bit(global_sc_count));
+    const int subtree_size = right - left;
+    DCHECK_GT(subtree_size, 0);
+    int i = right - 1, j = right;
+    while (i > left && is_bucket_merged.test(i)) {
+      i--;  // Find last non-merged node in left subtree.
+    }
+    while (j < right + subtree_size && is_bucket_merged.test(j)) {
+      j++;  // Find first non-merged node in right subtree.
+    }
+    for (int sc_id = 0; sc_id < num_sc_per_device_; ++sc_id) {
+      const int ptr_left = bucket_offsets_[sc_id * bucket_count_per_sc_ + i];
+      const int ptr_left_end =
+          bucket_offsets_[sc_id * bucket_count_per_sc_ + i + 1];
+      const int ptr_right = bucket_offsets_[sc_id * bucket_count_per_sc_ + j];
+      const int ptr_right_end =
+          bucket_offsets_[sc_id * bucket_count_per_sc_ + j + 1];
+      DCHECK_EQ(ptr_left_end, ptr_right) << "Must be contiguos buckets.";
+      // COOs already have same local SC and bucket, only need to compare global
+      // SC.
+      std::inplace_merge(
+          coo_tensors_.begin() + ptr_left, coo_tensors_.begin() + ptr_right,
+          coo_tensors_.begin() + ptr_right_end,
+          [&global_sc_count](const CooFormat& a, const CooFormat& b) {
+            return (a.col_id & (global_sc_count - 1)) <
+                   (b.col_id & (global_sc_count - 1));
+          });
+      // Combine into the right bucket (arbitrary choice).
+      bucket_offsets_[sc_id * bucket_count_per_sc_ + i + 1] = ptr_left;
+      bucket_offsets_[sc_id * bucket_count_per_sc_ + j] = ptr_left;
+      is_bucket_merged.set(i);
+    }
+  }
+
+  // Merges all buckets per SparseCore.
   template <size_t N = CooFormat::kMaxMinibatchingBuckets>
   void MergeAll() {
     Merge<N>(0);
   }
 
+  // Merges bucket contents as well as updating the offsets.
   template <size_t N = CooFormat::kMaxMinibatchingBuckets>
   void Merge(std::bitset<N - 1> split) {
     CHECK(!merged_) << "Merge can only be called once.";
@@ -100,19 +145,21 @@ class PartitionedCooTensors {
                          /* target_bucket_id= */ 0);
     DCHECK_EQ(bucket_count_per_sc_, N);
 
-    std::bitset<N - 1> splitpos = internal::GetSplitPos<N>(split);
-    DCHECK_EQ(splitpos.count(), split.count());
+    DCHECK(absl::c_is_sorted(bucket_offsets_));
+
+    std::bitset<N> is_bucket_merged = 0;
+    internal::MergeBuckets<N>(split, [&](int i, int j) {
+      MergeBucketCoos(i, j, global_sc_count_, is_bucket_merged);
+    });
 
     const int minibatches = split.count() + 1;  // N splits -> N+1 minibatches.
-
-    DCHECK(absl::c_is_sorted(bucket_offsets_));
 
     for (int sc_id = 0; sc_id < num_sc_per_device_; ++sc_id) {
       const int start_pos = 1 + sc_id * bucket_count_per_sc_;
       const int dest_pos = 1 + sc_id * minibatches;
       for (int bucket_id = 0, minibatch_id = 0; bucket_id < N - 1;
            ++bucket_id) {
-        if (splitpos.test(bucket_id)) {
+        if (!is_bucket_merged.test(bucket_id)) {
           bucket_offsets_[dest_pos + minibatch_id] =
               bucket_offsets_[start_pos + bucket_id];
           ++minibatch_id;
@@ -162,6 +209,8 @@ class PartitionedCooTensors {
   int bucket_count_per_sc_;
   // Number of SCs per device.
   int num_sc_per_device_;
+  // Number of global SCs.
+  uint32_t global_sc_count_;
   // Minibatching bucket offsets for all SCs (=1 for non-minibatching per SC).
   std::vector<int> bucket_offsets_;
   // Internal counters of the current SC and bucket being populated.

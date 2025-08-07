@@ -167,6 +167,9 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
     const auto sc_id = std::make_pair(
         /* local_sc_id= */ coo_tensor.row_id / options.batch_size_per_sc,
         /* global_sc_id= */ coo_tensor.col_id % options.num_scs);
+    DCHECK_GE(sc_id, last_sc_id) << absl::StrFormat(
+        "Failed: sc_id@(%d, %d) >= last_sc_id@(%d, %d)", sc_id.first,
+        sc_id.second, last_sc_id.first, last_sc_id.second);
     while (last_sc_id < sc_id) {
       if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
         break;
@@ -251,8 +254,8 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   // id).
   const int bucket_count =
       options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
-  PartitionedCooTensors grouped_coo_tensors(coo_tensors.size(),
-                                            num_sc_per_device, bucket_count);
+  PartitionedCooTensors grouped_coo_tensors(
+      coo_tensors.size(), num_sc_per_device, global_sc_count, bucket_count);
 
   uint32_t coo_tensor_index = 0;
   // Initialize the aggregated max ids and unique ids per SC to 0.
@@ -397,12 +400,6 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
                         stacked_table_name, allow_id_dropping);
   }
 
-  // NOTE: For non-minibatching, we can just use the buckets as minibatches
-  // directly as there is only one bucket per SC.
-  if (options.enable_minibatching) {
-    grouped_coo_tensors.Merge(minibatching_split);
-  }
-
   return grouped_coo_tensors;
 }
 int ComputeCooBufferSizePerDevice(
@@ -482,7 +479,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // `gains` because we fill values in a loop to a bigger array.
 void FillLocalDeviceBuffer(
     const PartitionedCooTensors& grouped_coo_tensors,
-    const int row_pointers_size_per_sc, const int coo_buffer_size_per_sc,
+    const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
@@ -493,18 +490,17 @@ void FillLocalDeviceBuffer(
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
   DCHECK_GT(batch_size_per_sc, 0);
   int coo_begin = 0;
+  int lhs_row_begin = 0;
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
-    const int lhs_row_begin = local_sc_id * row_pointers_size_per_sc;
-    const int lhs_row_end = lhs_row_begin + row_pointers_size_per_sc;
-    const int coo_end =
-        options.enable_minibatching
-            ? coo_buffer_size                      // use whole buffer
-            : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
-    int coo_index = coo_begin;
     for (int minibatch_id = 0;
          minibatch_id < grouped_coo_tensors.GetNumMinibatches();
          ++minibatch_id) {
-      coo_index = FillMinibatchBuffer(
+      const int lhs_row_end = lhs_row_begin + row_pointers_size_per_bucket;
+      const int coo_end =
+          options.enable_minibatching
+              ? coo_buffer_size                      // use whole buffer
+              : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
+      coo_begin = FillMinibatchBuffer(
           {
               .local_sc_id = local_sc_id,
               .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
@@ -518,18 +514,23 @@ void FillLocalDeviceBuffer(
               .coo_buffer_size = coo_buffer_size,
           },
           row_pointers, embedding_ids, sample_ids, gains);
-    }
-
-    // Only pad (to end of COO buffer) between SparseCores for
-    // non-mini-batching. Always pad after the last SparseCore. The end could be
-    // different per SparseCore for non-minibatching.
-    if (!options.enable_minibatching || local_sc_id == num_sc_per_device - 1) {
-      PadCooBuffer(coo_index, coo_end,
+      lhs_row_begin = lhs_row_end;
+      if (options.enable_minibatching) {
+        // Align minibatch buffer
+        PadCooBuffer(coo_begin, coo_buffer_size,
+                     /*pad_to_end=*/false, embedding_ids, sample_ids, gains);
+      }
+    }  // end minibatch loop
+    if (!options.enable_minibatching) {
+      const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
+      // Pad to end of SparseCore buffer.
+      PadCooBuffer(coo_begin, sc_end,
                    /*pad_to_end=*/true, embedding_ids, sample_ids, gains);
-      CHECK_EQ(coo_index, coo_end);
     }
-    coo_begin = coo_index;
-  }
+  }  // end SparseCore loop
+  // Pad to end of device buffer.
+  PadCooBuffer(coo_begin, coo_buffer_size,
+               /*pad_to_end=*/true, embedding_ids, sample_ids, gains);
 }
 
 }  // namespace jax_sc_embedding

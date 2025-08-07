@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "absl/functional/function_ref.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -79,36 +80,52 @@ std::bitset<N - 1> ComputeMinibatchingSplit(
   return split;
 }
 
-// Converts a binary tree splits into split positions.
+using MergeFn = absl::FunctionRef<void(int, int)>;
+struct NoOpMerge {
+  void operator()(int, int) const {}
+};
+
+// Merges buckets based on a binary tree split indicator.
+// The `split` bitset indicates which nodes of the binary tree should be split.
+// If a node is not split, its left and right children are merged using the
+// provided `merge_fun`.
 //
 // Example:
 //   Input split: 0b1100011 (split index {0,1,5,6})
 //   This represents splits between:
 //     - {0,1}
 //     - {2,3}
-//     - {6,7}
 //     - {5,6}
-//   Resulting in split positions: {1, 3, 6, 7}.
+//     - {3,4}
+//   This function will call `merge_fun` for the following pairs of buckets:
+//     - index = 2: {4,5}
+//     - index = 3: {6,7}
+//     - index = 4: {1,2}
 //
 // pos         0 1 2 3 4 5 6 7
 // split index  0   1   2   3
 // split index    4       5
 // split index        6
+//
+// The `merge_fun` is called with the indices of the buckets to be merged.
 template <size_t N>
-std::bitset<N - 1> GetSplitPos(std::bitset<N - 1> split) {
+void MergeBuckets(std::bitset<N - 1> split, MergeFn merge_fun = NoOpMerge()) {
   static_assert(absl::has_single_bit(N));
   int split_index = 0;
   std::bitset<N - 1> splitpos;
   for (int subtree_size = 2; subtree_size <= N; subtree_size *= 2) {
     for (int i = 0; i < N; i += subtree_size, ++split_index) {
-      if (split.test(split_index)) {
-        const int right_index = i + subtree_size / 2;
-        // Split between {right_index -1, right_index}.
-        splitpos.set(right_index - 1);
+      const int right_index = i + subtree_size / 2;
+      const int left_index = i;
+      // Merge/Split left subtree with right subtree.
+      // Implementations decide how to do the merging, for input preprocessing,
+      // we merge the last unmerged node in left subtree with first unmerged
+      // node in right subtree.
+      if (!split.test(split_index)) {
+        merge_fun(left_index, right_index);
       }
     }
   }
-  return splitpos;
 }
 
 }  // namespace internal

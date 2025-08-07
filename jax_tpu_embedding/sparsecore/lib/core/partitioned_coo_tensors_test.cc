@@ -27,6 +27,7 @@ using ::testing::SizeIs;
 
 TEST(PartitionedCooTensorsTest, Empty) {
   PartitionedCooTensors tensors(/*reserve_count=*/0, /*sc_count=*/1,
+                                /*global_sc_count=*/1,
                                 /*bucket_count=*/1);
   tensors.FillRemainingScBuckets();
   EXPECT_THAT(tensors(0, 0), SizeIs(0));
@@ -35,6 +36,7 @@ TEST(PartitionedCooTensorsTest, Empty) {
 
 TEST(PartitionedCooTensorsTest, SingleScSingleBucket) {
   PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/1,
+                                /*global_sc_count=*/1,
                                 /*bucket_count=*/1);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
@@ -66,6 +68,7 @@ TEST(PartitionedCooTensorsTest, MultiScSingleBucket) {
 
 TEST(PartitionedCooTensorsTest, MultiScMultiBucket) {
   PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/2,
+                                /*global_sc_count=*/2,
                                 /*bucket_count=*/2);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -90,6 +93,7 @@ TEST(PartitionedCooTensorsTest, MultiScMultiBucket) {
 
 TEST(PartitionedCooTensorsTest, MergeBuckets) {
   PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/2,
+                                /*global_sc_count=*/2,
                                 /*bucket_count=*/2);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -106,7 +110,7 @@ TEST(PartitionedCooTensorsTest, MergeBuckets) {
   tensors.MergeAll<2>();
 
   EXPECT_EQ(tensors.GetNumMinibatches(), 1);
-  EXPECT_THAT(tensors(0, 0), ElementsAre(coo1, coo2));
+  EXPECT_THAT(tensors(0, 0), ElementsAre(coo2, coo1));
   EXPECT_THAT(tensors(1, 0), ElementsAre(coo3, coo4, coo5));
   EXPECT_EQ(tensors.Size(0), 2);
   EXPECT_EQ(tensors.Size(1), 3);
@@ -114,6 +118,7 @@ TEST(PartitionedCooTensorsTest, MergeBuckets) {
 
 TEST(PartitionedCooTensorsTest, PartialMerge) {
   PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/2,
+                                /*global_sc_count=*/2,
                                 /*bucket_count=*/4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -137,9 +142,9 @@ TEST(PartitionedCooTensorsTest, PartialMerge) {
   tensors.Merge<4>(std::bitset<3>(0b010));
 
   EXPECT_EQ(tensors.GetNumMinibatches(), 2);
-  EXPECT_THAT(tensors(0, 0), ElementsAre(coo1, coo2, coo3));
+  EXPECT_THAT(tensors(0, 0), ElementsAre(coo2, coo1, coo3));
   EXPECT_THAT(tensors(0, 1), ElementsAre(coo4));
-  EXPECT_THAT(tensors(1, 0), ElementsAre(coo5, coo6, coo7));
+  EXPECT_THAT(tensors(1, 0), ElementsAre(coo6, coo5, coo7));
   EXPECT_THAT(tensors(1, 1), ElementsAre(coo8));
   EXPECT_EQ(tensors.Size(0), 4);
   EXPECT_EQ(tensors.Size(1), 4);
@@ -147,6 +152,7 @@ TEST(PartitionedCooTensorsTest, PartialMerge) {
 
 TEST(PartitionedCooTensorsTest, NoMerge) {
   PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/2,
+                                /*global_sc_count=*/2,
                                 /*bucket_count=*/4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);

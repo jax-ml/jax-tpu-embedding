@@ -192,7 +192,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 
 void FillLocalDeviceBuffer(
     const PartitionedCooTensors& grouped_coo_tensors,
-    int row_pointers_size_per_sc, int coo_buffer_size_per_sc,
+    int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,

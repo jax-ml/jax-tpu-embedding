@@ -33,6 +33,7 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
@@ -240,7 +241,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   absl::Mutex mutex;
   PreprocessSparseDenseMatmulOutput out;
   const int num_scs = options.GetNumScs();
-  const int row_pointers_size_per_sc =
+  const int row_pointers_size_per_bucket =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
 
   // Main thread release GIL so that the other threads can acquire / release.
@@ -270,9 +271,13 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
             num_scs, options.num_sc_per_device, stacked_table_metadata,
             options.batch_number);
 
-        MatrixXi row_pointers_per_device(
-            options.local_device_count,
-            row_pointers_size_per_sc * options.num_sc_per_device);
+        const int max_minibatching_buckets =
+            options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets
+                                        : 1;
+        MatrixXi row_pointers_per_device(options.local_device_count,
+                                         row_pointers_size_per_bucket *
+                                             max_minibatching_buckets *
+                                             options.num_sc_per_device);
         row_pointers_per_device.setConstant(coo_buffer_size_per_device);
         MatrixXi embedding_ids_per_device(options.local_device_count,
                                           coo_buffer_size_per_device);
@@ -366,11 +371,11 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
               gains_per_device.row(local_device);
           const int coo_buffer_size_per_sc =
               coo_buffer_size_per_device / options.num_sc_per_device;
-          FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_sc,
-                                coo_buffer_size_per_sc, batch_size_per_sc,
-                                options, row_pointer_buffer,
-                                embedding_id_buffer, sample_id_buffer,
-                                gain_buffer);
+          FillLocalDeviceBuffer(
+              grouped_coo_tensors, row_pointers_size_per_bucket,
+              coo_buffer_size_per_sc, batch_size_per_sc, options,
+              row_pointer_buffer, embedding_id_buffer, sample_id_buffer,
+              gain_buffer);
         }
         CheckBufferUsage(
             /* max_required_buffer_size_per_device= */
