@@ -147,10 +147,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
 
   std::vector<CooFormat> expected_sc_0;
   expected_sc_0.push_back(CooFormat(0, 0, 1.0));
@@ -233,10 +235,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
       .num_sc_per_device = 2,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
 
   EXPECT_THAT(
       coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
@@ -295,10 +299,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
   EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
@@ -338,10 +344,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
   EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
@@ -386,10 +394,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8, 8, 8}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   // 4 partitions of size 8 with 2 elements each
@@ -435,10 +445,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({64, 64, 64, 64}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   // 8 partitions of size 256 with 32 elements each
@@ -480,10 +492,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({128, 0, 0, 0}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({4, 0, 0, 0}));
   // 1 partition of size 128 with 128 elements
@@ -525,10 +539,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
   // 1 partition of size 32 with 32 elements
@@ -571,10 +587,12 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
       .num_sc_per_device = 4,
       .allow_id_dropping = true,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
   // 4 partition of size 8 with 4 element each
@@ -661,10 +679,12 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
 
   Eigen::VectorXi row_pointers(8 * 4);
   Eigen::VectorXi embedding_ids(40 * 4);
@@ -787,10 +807,12 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .allow_id_dropping = false,
       .enable_minibatching = true,
   };
+  MinibatchingSplit minibatching_split = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc,
+          minibatching_split);
 
   Eigen::VectorXi row_pointers(8 * 4);
   Eigen::VectorXi embedding_ids(40 * 4);

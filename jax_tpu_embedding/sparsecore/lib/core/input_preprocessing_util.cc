@@ -14,7 +14,6 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 #include <algorithm>
-#include <bitset>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -232,7 +231,8 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> max_ids_per_sc,
     Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
-    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc) {
+    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc,
+    MinibatchingSplit& minibatching_split) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const std::vector<CooFormat>& coo_tensors = extracted_coo_tensors.coo_tensors;
   const int num_sc_per_device = options.num_sc_per_device;
@@ -259,8 +259,6 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   max_ids_per_sc.fill(0);
   max_unique_ids_per_sc.fill(0);
   required_buffer_size_per_sc.fill(0);
-
-  std::bitset<CooFormat::kMaxMinibatchingBuckets - 1> minibatching_split = 0;
 
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
@@ -392,9 +390,6 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
             max_unique_ids_per_partition);
       }
     }
-
-    // TODO: http://b/428790659 - Perform an inter-host communication to
-    // finalize device splits.
 
     ValidateMaxIdsOrDie(observed_max_ids_per_partition,
                         observed_max_unique_ids_per_partition,

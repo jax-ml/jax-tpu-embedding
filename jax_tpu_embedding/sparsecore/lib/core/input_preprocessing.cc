@@ -159,58 +159,6 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
 
 namespace {
 
-// Preprocess inputs for a single table. Stacked table here refers to a
-// a table that has no parent in the table stacking hierarchy. So in the case
-// of table stacking, the stacked table is the top level table and in the case
-// where we don't have any table stacking, the table itself is top level.
-void PreprocessInputForStackedTablePerLocalDevice(
-    const absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    const int local_device_id,
-    const PreprocessSparseDenseMatmulInputOptions& options,
-    const int coo_buffer_size, const int row_pointers_size_per_sc,
-    Eigen::Ref<RowVectorXi> row_pointer_buffer,
-    Eigen::Ref<RowVectorXi> embedding_id_buffer,
-    Eigen::Ref<RowVectorXi> sample_id_buffer,
-    Eigen::Ref<RowVectorXf> gain_buffer, Eigen::Ref<RowVectorXi> max_ids_buffer,
-    Eigen::Ref<RowVectorXi> max_unique_ids_buffer,
-    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer) {
-  //
-  // Step 1: Extract the COO tensors for each feature.
-  //
-
-  // Note that the stacked_table_metadata list is sorted by row offsets of the
-  // features.
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata, input_batches, local_device_id, options);
-
-  row_pointer_buffer.setConstant(coo_buffer_size);
-
-  //
-  // Step 2: Sort the COO tensors and group them by SC.
-  //
-
-  const PartitionedCooTensors grouped_coo_tensors =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata[0], options,
-          max_ids_buffer, max_unique_ids_buffer,
-          required_buffer_size_per_sc_buffer);
-
-  //
-  // Step 3: Compute the row pointers and fill device buffer.
-  //
-  const int batch_size_per_sc = CeilOfRatio(
-      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
-  const int coo_buffer_size_per_sc =
-      coo_buffer_size / options.num_sc_per_device;
-  FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_sc,
-                        coo_buffer_size_per_sc, batch_size_per_sc, options,
-                        row_pointer_buffer, embedding_id_buffer,
-                        sample_id_buffer, gain_buffer);
-}
-
 // Check the buffer usage ratio and log a warning if it exceeds a certain
 // threshold.
 // `max_required_buffer_size_per_device`: The maximum buffer size required by
@@ -325,6 +273,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         MatrixXi row_pointers_per_device(
             options.local_device_count,
             row_pointers_size_per_sc * options.num_sc_per_device);
+        row_pointers_per_device.setConstant(coo_buffer_size_per_device);
         MatrixXi embedding_ids_per_device(options.local_device_count,
                                           coo_buffer_size_per_device);
         MatrixXi sample_ids_per_device(options.local_device_count,
@@ -347,9 +296,66 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         //   the maximum size of any SC buffer shard.
         MatrixXi required_buffer_size_per_sc(options.local_device_count,
                                              options.num_sc_per_device);
+        int batch_size_for_device;
+        MinibatchingSplit minibatching_split = 0;
+        std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
+        partitioned_coo_tensors_per_device.reserve(options.local_device_count);
         for (int local_device = 0; local_device < options.local_device_count;
              ++local_device) {
-          // Get the tuple outputs for the current split.
+          //
+          // Step 1: Extract the COO tensors for each feature.
+          //
+
+          // Note that the stacked_table_metadata list is sorted by row offsets
+          // of the features.
+
+          ExtractedCooTensors extracted_coo_tensors =
+              internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+                  stacked_table_metadata, input_batches, local_device, options);
+          if (local_device == 0)
+            batch_size_for_device = extracted_coo_tensors.batch_size_for_device;
+          else
+            CHECK_EQ(batch_size_for_device,
+                     extracted_coo_tensors.batch_size_for_device);
+
+          //
+          // Step 2: Sort the COO tensors and group them by SC.
+          //
+
+          Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
+              max_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
+              max_unique_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
+              required_buffer_size_per_sc.row(local_device);
+          const PartitionedCooTensors grouped_coo_tensors =
+              SortAndGroupCooTensorsPerLocalDevice(
+                  extracted_coo_tensors, stacked_table_metadata[0], options,
+                  max_ids_per_partition_per_sc_buffer,
+                  max_unique_ids_per_partition_per_sc_buffer,
+                  required_buffer_size_per_sc_buffer, minibatching_split);
+          partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
+        }
+
+        // NOTE: For non-minibatching, we can just use the buckets as
+        // minibatches directly as there is only one bucket per SC.
+
+        // TODO: http://b/428790659 - Combine minibatching split across stacked
+        // tables.
+        // TODO: http://b/428790659 - Perform an inter-host communication to
+        // finalize device splits.
+
+        for (int local_device = 0; local_device < options.local_device_count;
+             ++local_device) {
+          PartitionedCooTensors& grouped_coo_tensors =
+              partitioned_coo_tensors_per_device[local_device];
+          if (options.enable_minibatching)
+            grouped_coo_tensors.Merge(minibatching_split);
+          //
+          // Step 3: Compute the row pointers and fill device buffer.
+          //
+          const int batch_size_per_sc =
+              CeilOfRatio(batch_size_for_device, options.num_sc_per_device);
           Eigen::Ref<RowVectorXi> row_pointer_buffer =
               row_pointers_per_device.row(local_device);
           Eigen::Ref<RowVectorXi> embedding_id_buffer =
@@ -358,19 +364,13 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
               sample_ids_per_device.row(local_device);
           Eigen::Ref<RowVectorXf> gain_buffer =
               gains_per_device.row(local_device);
-          Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
-              max_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
-              max_unique_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
-              required_buffer_size_per_sc.row(local_device);
-          PreprocessInputForStackedTablePerLocalDevice(
-              stacked_table_metadata, input_batches, local_device, options,
-              coo_buffer_size_per_device, row_pointers_size_per_sc,
-              row_pointer_buffer, embedding_id_buffer, sample_id_buffer,
-              gain_buffer, max_ids_per_partition_per_sc_buffer,
-              max_unique_ids_per_partition_per_sc_buffer,
-              required_buffer_size_per_sc_buffer);
+          const int coo_buffer_size_per_sc =
+              coo_buffer_size_per_device / options.num_sc_per_device;
+          FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_sc,
+                                coo_buffer_size_per_sc, batch_size_per_sc,
+                                options, row_pointer_buffer,
+                                embedding_id_buffer, sample_id_buffer,
+                                gain_buffer);
         }
         CheckBufferUsage(
             /* max_required_buffer_size_per_device= */

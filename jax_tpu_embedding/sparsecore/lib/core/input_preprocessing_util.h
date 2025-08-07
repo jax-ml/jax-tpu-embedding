@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
+#include <bitset>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -45,6 +46,8 @@ using MatrixXf =
 // pybind11 converts this to a 1D numpy array when returning the value.
 using RowVectorXi = Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>;
 using RowVectorXf = Eigen::Matrix<float, 1, Eigen::Dynamic, Eigen::RowMajor>;
+
+using MinibatchingSplit = std::bitset<CooFormat::kMaxMinibatchingBuckets - 1>;
 
 enum class FeatureStackingStrategy {
   // Stack all features into one large tensor, then split it across SparseCores.
@@ -170,7 +173,8 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> max_ids_per_sc,
     Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
-    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc);
+    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc,
+    MinibatchingSplit& minibatching_split);
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
