@@ -221,6 +221,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
           sample_ids,
           embedding_ids,
           gains,
+          1,  # num_minibatches_per_physical_sparse_core
           embedding_table,
           accumulator,
           linear,
@@ -434,6 +435,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
             lhs_local_embedding_ids,
             lhs_local_sample_ids,
             lhs_gains,
+            1,  # num_minibatches_per_physical_sparse_core
             embedding_table_sharded[0],
             accumulator_sharded[0],
             linear_sharded[0],

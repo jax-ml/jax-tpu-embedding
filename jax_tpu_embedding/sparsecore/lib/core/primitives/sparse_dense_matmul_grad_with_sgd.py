@@ -187,23 +187,24 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
       lhs_gains,
   ]
 
+  # b/436897459 - Unify argument order.
   if minibatches:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
     operands += [
         num_minibatches_per_sparse_core,
         embedding_table,
         activations_grad,
-        # hyperparameters
-        learning_rate,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
         activations_grad,
         embedding_table,
-        # hyperparameters
-        learning_rate,
     ]
+  operands += [
+      # hyperparameters
+      learning_rate,
+  ]
 
   op = jax.ffi.ffi_lowering(
       call_target,

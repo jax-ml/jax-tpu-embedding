@@ -218,6 +218,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
       lhs_gains,
   ]
 
+  # b/436897459 - Unify argument order.
   if minibatches:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
     operands += [
@@ -227,8 +228,6 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
         accumulator,
         # activations grad
         activations_grad,
-        # hyperparameters
-        learning_rate,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
@@ -237,9 +236,11 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
         embedding_table,
         # slot variables
         accumulator,
-        # hyperparameters
-        learning_rate,
     ]
+  operands += [
+      # hyperparameters
+      learning_rate,
+  ]
 
   op = jax.ffi.ffi_lowering(
       call_target,

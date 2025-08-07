@@ -388,6 +388,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
           sample_ids,
           embedding_ids,
           gains,
+          1,  # num_minibatches_per_physical_sparse_core
           embedding_table,
           momentum,
           velocity,
@@ -545,6 +546,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
             lhs_local_embedding_ids,
             lhs_local_sample_ids,
             lhs_gains,
+            1,  # num_minibatches_per_physical_sparse_core
             embedding_table_sharded[0],
             momentum_sharded[0],
             velocity_sharded[0],

@@ -77,6 +77,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: np.ndarray,
     accumulator: np.ndarray,
     linear: np.ndarray,
@@ -92,8 +93,12 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     max_unique_ids_per_partition: int,
     computation_name: str = "ftrl_optimizer_update",
     sharding_strategy: int = 1,
+    # NOMUTANTS -- unused param for abstract eval.
+    minibatches: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_ftrl."""
+  del minibatches
+  del num_minibatches_per_physical_sparse_core
 
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
@@ -149,6 +154,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     lhs_local_embedding_ids: mlir.ir.BlockArgument,
     lhs_local_sample_ids: mlir.ir.BlockArgument,
     lhs_gains: mlir.ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: mlir.ir.BlockArgument,
     accumulator: mlir.ir.BlockArgument,
     linear: mlir.ir.BlockArgument,
@@ -164,6 +170,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     max_unique_ids_per_partition: int,
     computation_name: str = "ftrl_optimizer_update",
     sharding_strategy: int = 1,
+    minibatches: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_ftrl."""
 
@@ -340,21 +347,39 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
+    ]
+  # b/436897459 - Unify argument order.
+  if minibatches:
+    call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
+    operands += [
+        num_minibatches_per_physical_sparse_core,
+        embedding_table,
+        # slot variables
+        accumulator,
+        linear,
+        # activations grad
+        activations_grad,
+    ]
+  else:
+    call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
+    operands += [
         activations_grad,
         embedding_table,
         # slot variables
         accumulator,
         linear,
-        # hyperparameters
-        learning_rate_,
-        learning_rate_power_,
-        l1_regularization_strength_,
-        l2_regularization_strength_,
-        beta_,
-        multiply_linear_by_learning_rate_,
     ]
+  operands += [
+      # hyperparameters
+      learning_rate_,
+      learning_rate_power_,
+      l1_regularization_strength_,
+      l2_regularization_strength_,
+      beta_,
+      multiply_linear_by_learning_rate_,
+  ]
   custom_call_op = jax.ffi.ffi_lowering(
-      "SparseDenseMatmulGradOpWithOptimizerUpdate",
+      call_target,
       result_types=[
           ir.TupleType.get_tuple(
               [embedding_table.type, accumulator.type, linear.type]
