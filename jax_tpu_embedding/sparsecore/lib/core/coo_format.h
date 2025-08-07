@@ -123,11 +123,11 @@ struct CooFormat {
   // The key is used to group and sort COO tensors for efficient processing.
   // TODO: b/428790659 - Update hash function.
   uint64_t GetGroupingKey(const uint32_t num_scs_bit, const int index,
-                          const bool enable_minibatching = false,
+                          const bool create_buckets = false,
                           HashFn hash_fn = Identity()) const {
     // This structure ensures tensors are sorted first by bucket_id, then by
     // sparse core, and finally by embedding ID.
-    const uint32_t bucket_id = enable_minibatching ? GetBucketId(hash_fn) : 0;
+    const uint32_t bucket_id = create_buckets ? GetBucketId(hash_fn) : 0;
 
     DCHECK_LE(index, kIndexMask);
 
