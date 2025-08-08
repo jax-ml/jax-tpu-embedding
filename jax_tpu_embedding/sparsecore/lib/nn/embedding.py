@@ -16,10 +16,11 @@
 import collections
 import dataclasses
 import functools
-from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
+from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union, cast
 
 from absl import logging
 import einops
+from flax import jax_utils as flax_utils
 from flax import struct
 import jax
 from jax.experimental import shard_map
@@ -97,6 +98,75 @@ class SparseDenseMatmulInputStats:
         max_unique_ids_per_partition=stats.max_unique_ids_per_partition,
         required_buffer_size_per_sc=stats.required_buffer_sizes,
     )
+
+
+class PreprocessedInput(struct.PyTreeNode):
+  """The result of preprocessing input for sparse dense matmul.
+
+  Attributes:
+    sparse_dense_matmul_input: The sparse dense matmul input.
+    num_minibatches: The number of minibatches.
+
+  Properties:
+    lhs_row_pointers: The row pointers of the sparse matrix.
+    lhs_embedding_ids: The embedding ids of the sparse matrix.
+    lhs_sample_ids: The sample ids of the sparse matrix.
+    lhs_gains: The gains of the sparse matrix.
+  """
+
+  sparse_dense_matmul_input: SparseDenseMatmulInput
+  num_minibatches: int
+
+  def get_pmap_input(
+      self, devices: Sequence[jax.Device] | None = None
+  ) -> "PreprocessedInput":
+    return self.replace(
+        num_minibatches=flax_utils.replicate(self.num_minibatches, devices)
+    )
+
+  @classmethod
+  def get_partition(
+      cls, mesh_or_axes: jax.sharding.Mesh | str | tuple[str, ...]
+  ) -> jax.sharding.PartitionSpec:
+    if isinstance(mesh_or_axes, jax.sharding.Mesh):
+      axes = mesh_or_axes.axis_names[0]  # Default to first axis in the mesh
+    else:
+      axes = mesh_or_axes  # User provided axes
+    return cast(
+        jax.sharding.PartitionSpec,
+        cls(  # pytype: disable=wrong-arg-types
+            sparse_dense_matmul_input=jax.sharding.PartitionSpec(axes),
+            num_minibatches=jax.sharding.PartitionSpec(),
+        ),
+    )
+
+  @classmethod
+  def get_sharding(
+      cls, mesh: jax.sharding.Mesh, axes: str | tuple[str, ...] | None = None
+  ) -> jax.sharding.Sharding:
+    if axes is None:
+      axes = mesh.axis_names[0]
+    return jax.tree.map(
+        lambda x: jax.sharding.NamedSharding(mesh, x), cls.get_partition(axes)
+    )
+
+  # Properties for backward compatibility. This class acts as a drop-in
+  # replacement for SparseDenseMatmulInput.
+  @property
+  def lhs_row_pointers(self) -> Mapping[str, np.ndarray]:
+    return self.sparse_dense_matmul_input.lhs_row_pointers
+
+  @property
+  def lhs_embedding_ids(self) -> Mapping[str, np.ndarray]:
+    return self.sparse_dense_matmul_input.lhs_embedding_ids
+
+  @property
+  def lhs_sample_ids(self) -> Mapping[str, np.ndarray]:
+    return self.sparse_dense_matmul_input.lhs_sample_ids
+
+  @property
+  def lhs_gains(self) -> Mapping[str, np.ndarray]:
+    return self.sparse_dense_matmul_input.lhs_gains
 
 
 # TODO: b/346873239 - Add more checks for the feature specs to ensure all the
@@ -381,7 +451,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: bool = False,
     feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
-) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
+) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
   Args:
@@ -413,13 +483,13 @@ def preprocess_sparse_dense_matmul_input(
     batch_number: The batch number.
 
   Returns:
-    A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
+    A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
 
-  *preprocessed_inputs, stats = (
+  *preprocessed_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
           tree.flatten(features),
           tree.flatten(features_weights),
@@ -435,9 +505,13 @@ def preprocess_sparse_dense_matmul_input(
       )
   )
 
-  return SparseDenseMatmulInput(
-      *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_cc(stats)
+  return (
+      PreprocessedInput(
+          SparseDenseMatmulInput(*preprocessed_inputs),
+          num_minibatches,
+      ),
+      SparseDenseMatmulInputStats.from_cc(stats),
+  )
 
 
 def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
@@ -454,7 +528,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     allow_id_dropping: bool = False,
     feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
-) -> tuple[SparseDenseMatmulInput, SparseDenseMatmulInputStats]:
+) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
   Args:
@@ -493,14 +567,14 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     batch_number: The batch number.
 
   Returns:
-    A tuple of PreprocessSparseDenseMatmulInput and SparseDenseMatmulInputStats.
+    A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   tree.assert_same_structure(indices, feature_specs)
   tree.assert_same_structure(values, feature_specs)
   tree.assert_same_structure(dense_shapes, feature_specs)
 
-  *preprocessed_inputs, stats = (
+  *preprocessed_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
           tree.flatten(indices),
           tree.flatten(values),
@@ -517,9 +591,13 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       )
   )
 
-  return SparseDenseMatmulInput(
-      *preprocessed_inputs
-  ), SparseDenseMatmulInputStats.from_cc(stats)
+  return (
+      PreprocessedInput(
+          SparseDenseMatmulInput(*preprocessed_inputs),
+          num_minibatches,
+      ),
+      SparseDenseMatmulInputStats.from_cc(stats),
+  )
 
 
 def _get_activation_for_feature(
@@ -602,7 +680,7 @@ def _unstack_embedding_activations(
 
 @jax.named_call
 def tpu_sparse_dense_matmul(
-    preprocessed_inputs: SparseDenseMatmulInput,
+    preprocessed_inputs: PreprocessedInput | SparseDenseMatmulInput,
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     *,
@@ -661,10 +739,15 @@ def tpu_sparse_dense_matmul(
     ValueError: The input arrays and tuples are not of the expected structure or
       the sharding strategy is not supported.
   """
-  lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
-  lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
-  lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
-  lhs_gains = preprocessed_inputs.lhs_gains
+  if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
+    # backward compatibility with older input format.
+    preprocessed_inputs = PreprocessedInput(preprocessed_inputs, 1)
+  (
+      lhs_row_pointers,
+      lhs_embedding_ids,
+      lhs_sample_ids,
+      lhs_gains,
+  ) = preprocessed_inputs.sparse_dense_matmul_input
 
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
 
@@ -694,7 +777,7 @@ def tpu_sparse_dense_matmul(
             embedding_id,
             sample_id,
             gain,
-            1,  # num_minibatches
+            preprocessed_inputs.num_minibatches,
             embedding_variable[0],  # [0] is the embedding table
             device_batch_size=stacked_table.total_sample_count
             // global_device_count,
@@ -796,7 +879,7 @@ def _stack_embedding_gradients(
 @jax.named_call
 def tpu_sparse_dense_matmul_grad(
     activation_gradients: Nested[jax.Array],
-    preprocessed_inputs: SparseDenseMatmulInput,
+    preprocessed_inputs: PreprocessedInput | SparseDenseMatmulInput,
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     *,
@@ -851,12 +934,17 @@ def tpu_sparse_dense_matmul_grad(
   Returns:
     The updated activation embedding variables.
   """
-  # Verify the input structures and lengths.
-  lhs_row_pointers = preprocessed_inputs.lhs_row_pointers
-  lhs_embedding_ids = preprocessed_inputs.lhs_embedding_ids
-  lhs_sample_ids = preprocessed_inputs.lhs_sample_ids
-  lhs_gains = preprocessed_inputs.lhs_gains
+  if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
+    # backward compatibility with older input format.
+    preprocessed_inputs = PreprocessedInput(preprocessed_inputs, 1)
+  (
+      lhs_row_pointers,
+      lhs_embedding_ids,
+      lhs_sample_ids,
+      lhs_gains,
+  ) = preprocessed_inputs.sparse_dense_matmul_input
 
+  # Verify the input structures and lengths.
   assert lhs_row_pointers.keys() == embedding_variables.keys()
   # Activations match the feature specs structure
   tree.assert_same_structure(feature_specs, activation_gradients)
@@ -901,7 +989,7 @@ def tpu_sparse_dense_matmul_grad(
         embedding_id,
         sample_id,
         gain,
-        1,  # num_minibatches
+        preprocessed_inputs.num_minibatches,
         *flatten_variables,
         activation_gradient,
         *hyper_params,

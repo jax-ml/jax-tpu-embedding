@@ -215,7 +215,10 @@ class ShakespeareTest(absltest.TestCase):
     self.sparse_matmul = shard_map.shard_map(
         sharded_matmul,
         mesh=self.mesh,
-        in_specs=(P('device'), P('device', None)),
+        in_specs=(
+            embedding.PreprocessedInput.get_partition(self.mesh),
+            P('device', None),
+        ),
         out_specs=P('device'),
         check_rep=False,
     )
@@ -228,7 +231,11 @@ class ShakespeareTest(absltest.TestCase):
     self.sparse_grad_update = shard_map.shard_map(
         sharded_grad_update,
         mesh=self.mesh,
-        in_specs=(P('device'), P('device'), P('device', None)),
+        in_specs=(
+            P('device'),
+            embedding.PreprocessedInput.get_partition(self.mesh),
+            P('device', None),
+        ),
         out_specs=P('device', None),
         check_rep=False,
     )

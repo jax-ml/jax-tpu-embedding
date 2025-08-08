@@ -422,7 +422,7 @@ def run_model():
         continue
       jaxpr = jax.make_jaxpr(p_train_step_fn)(
           train_state,
-          preprocessed_inputs,
+          preprocessed_inputs.get_pmap_input(),
           emb_variables,
           labels_sharded,
       )
@@ -435,7 +435,7 @@ def run_model():
 
     train_state, metrics_update, emb_variables = p_train_step_fn(
         train_state,
-        preprocessed_inputs,
+        preprocessed_inputs.get_pmap_input(),
         emb_variables,
         labels_sharded,
     )

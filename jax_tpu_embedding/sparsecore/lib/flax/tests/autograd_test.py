@@ -140,18 +140,16 @@ class ShakespeareTest(absltest.TestCase):
           feature_structure, [feature_weights]
       )
 
-      return embed.EmbeddingLookupInput(
-          *embedding.preprocess_sparse_dense_matmul_input(
-              features,
-              feature_weights,
-              feature_specs,
-              local_device_count=mesh.local_mesh.size,
-              global_device_count=mesh.size,
-              num_sc_per_device=num_sc_per_device,
-              sharding_strategy='MOD',
-              batch_number=batch_number,
-          )[0]
-      )
+      return embedding.preprocess_sparse_dense_matmul_input(
+          features,
+          feature_weights,
+          feature_specs,
+          local_device_count=mesh.local_mesh.size,
+          global_device_count=mesh.size,
+          num_sc_per_device=num_sc_per_device,
+          sharding_strategy='MOD',
+          batch_number=batch_number,
+      )[0]
 
     first_model_input = process_inputs(-1, feature_batches[0])
     params = model.init(jax.random.key(42), first_model_input)
