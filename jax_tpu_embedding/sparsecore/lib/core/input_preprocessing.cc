@@ -238,7 +238,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   CHECK_GT(options.local_device_count, 0);
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
 
-  absl::Mutex mutex;
+  absl::Mutex output_mutex;
   PreprocessSparseDenseMatmulOutput out;
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
@@ -255,166 +255,158 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   absl::BlockingCounter counter(stacked_tables.size());
 
   tsl::profiler::TraceMeProducer producer("InputPreprocessingMainThread");
-  {
-    for (const auto& [stacked_table_name, stacked_table_metadata] :
-         stacked_tables) {
-      PreprocessingThreadPool()->Schedule([&, context_id =
-                                                  producer.GetContextId()] {
-        tsl::profiler::TraceMeConsumer consumer(
-            [&] {
-              return absl::StrCat("InputPreprocessingTable-",
-                                  stacked_table_name);
-            },
-            context_id);
-        // Allocate the static buffers.
-        const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
-            num_scs, options.num_sc_per_device, stacked_table_metadata,
-            options.batch_number);
 
-        const int max_minibatching_buckets =
-            options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets
-                                        : 1;
-        MatrixXi row_pointers_per_device(options.local_device_count,
-                                         row_pointers_size_per_bucket *
-                                             max_minibatching_buckets *
-                                             options.num_sc_per_device);
-        row_pointers_per_device.setConstant(coo_buffer_size_per_device);
-        MatrixXi embedding_ids_per_device(options.local_device_count,
-                                          coo_buffer_size_per_device);
-        MatrixXi sample_ids_per_device(options.local_device_count,
-                                       coo_buffer_size_per_device);
-        MatrixXf gains_per_device(options.local_device_count,
-                                  coo_buffer_size_per_device);
+  for (const auto& [stacked_table_name, stacked_table_metadata] :
+       stacked_tables) {
+    PreprocessingThreadPool()->Schedule([&,
+                                         context_id = producer.GetContextId()] {
+      tsl::profiler::TraceMeConsumer consumer(
+          [&] {
+            return absl::StrCat("InputPreprocessingTable-", stacked_table_name);
+          },
+          context_id);
+      // Allocate the static buffers.
+      const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
+          num_scs, options.num_sc_per_device, stacked_table_metadata,
+          options.batch_number);
 
-        const int stats_size_per_device = num_scs;
-        // NOTE: max ids and max unique ids are {global_sc_count *
-        //   num_devices}, where they are then aggregated(max) along device
-        //   dimension to get {global_sc_count} (i.e. max [unique] ids for each
-        //   sc), which can be further aggregated(max) for a single value for
-        //   all SCs.
-        MatrixXi max_ids_per_partition_per_sc(options.local_device_count,
-                                              stats_size_per_device);
-        MatrixXi max_unique_ids_per_partition_per_sc(options.local_device_count,
-                                                     stats_size_per_device);
-        // NOTE: required buffer size is {local_sc_count * num_devices}, which
-        //   is same as {global_sc_count}, and can be further aggregated to get
-        //   the maximum size of any SC buffer shard.
-        MatrixXi required_buffer_size_per_sc(options.local_device_count,
-                                             options.num_sc_per_device);
-        int batch_size_for_device;
-        MinibatchingSplit minibatching_split = 0;
-        std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
-        partitioned_coo_tensors_per_device.reserve(options.local_device_count);
-        for (int local_device = 0; local_device < options.local_device_count;
-             ++local_device) {
-          //
-          // Step 1: Extract the COO tensors for each feature.
-          //
+      const int max_minibatching_buckets =
+          options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+      MatrixXi row_pointers_per_device(options.local_device_count,
+                                       row_pointers_size_per_bucket *
+                                           max_minibatching_buckets *
+                                           options.num_sc_per_device);
+      row_pointers_per_device.setConstant(coo_buffer_size_per_device);
+      MatrixXi embedding_ids_per_device(options.local_device_count,
+                                        coo_buffer_size_per_device);
+      MatrixXi sample_ids_per_device(options.local_device_count,
+                                     coo_buffer_size_per_device);
+      MatrixXf gains_per_device(options.local_device_count,
+                                coo_buffer_size_per_device);
 
-          // Note that the stacked_table_metadata list is sorted by row offsets
-          // of the features.
+      const int stats_size_per_device = num_scs;
+      // NOTE: max ids and max unique ids are {global_sc_count *
+      //   num_devices}, where they are then aggregated(max) along device
+      //   dimension to get {global_sc_count} (i.e. max [unique] ids for each
+      //   sc), which can be further aggregated(max) for a single value for
+      //   all SCs.
+      MatrixXi max_ids_per_partition_per_sc(options.local_device_count,
+                                            stats_size_per_device);
+      MatrixXi max_unique_ids_per_partition_per_sc(options.local_device_count,
+                                                   stats_size_per_device);
+      // NOTE: required buffer size is {local_sc_count * num_devices}, which
+      //   is same as {global_sc_count}, and can be further aggregated to get
+      //   the maximum size of any SC buffer shard.
+      MatrixXi required_buffer_size_per_sc(options.local_device_count,
+                                           options.num_sc_per_device);
+      int batch_size_for_device;
+      MinibatchingSplit minibatching_split = 0;
+      std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
+      partitioned_coo_tensors_per_device.reserve(options.local_device_count);
+      for (int local_device = 0; local_device < options.local_device_count;
+           ++local_device) {
+        //
+        // Step 1: Extract the COO tensors for each feature.
+        //
 
-          ExtractedCooTensors extracted_coo_tensors =
-              internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-                  stacked_table_metadata, input_batches, local_device, options);
-          if (local_device == 0)
-            batch_size_for_device = extracted_coo_tensors.batch_size_for_device;
-          else
-            CHECK_EQ(batch_size_for_device,
-                     extracted_coo_tensors.batch_size_for_device);
+        // Note that the stacked_table_metadata list is sorted by row offsets
+        // of the features.
 
-          //
-          // Step 2: Sort the COO tensors and group them by SC.
-          //
+        ExtractedCooTensors extracted_coo_tensors =
+            internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+                stacked_table_metadata, input_batches, local_device, options);
+        if (local_device == 0)
+          batch_size_for_device = extracted_coo_tensors.batch_size_for_device;
+        else
+          CHECK_EQ(batch_size_for_device,
+                   extracted_coo_tensors.batch_size_for_device);
 
-          Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
-              max_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
-              max_unique_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
-              required_buffer_size_per_sc.row(local_device);
-          const PartitionedCooTensors grouped_coo_tensors =
-              SortAndGroupCooTensorsPerLocalDevice(
-                  extracted_coo_tensors, stacked_table_metadata[0], options,
-                  max_ids_per_partition_per_sc_buffer,
-                  max_unique_ids_per_partition_per_sc_buffer,
-                  required_buffer_size_per_sc_buffer, minibatching_split);
-          partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
-        }
+        //
+        // Step 2: Sort the COO tensors and group them by SC.
+        //
 
-        // NOTE: For non-minibatching, we can just use the buckets as
-        // minibatches directly as there is only one bucket per SC.
+        Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
+            max_ids_per_partition_per_sc.row(local_device);
+        Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
+            max_unique_ids_per_partition_per_sc.row(local_device);
+        Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
+            required_buffer_size_per_sc.row(local_device);
+        const PartitionedCooTensors grouped_coo_tensors =
+            SortAndGroupCooTensorsPerLocalDevice(
+                extracted_coo_tensors, stacked_table_metadata[0], options,
+                max_ids_per_partition_per_sc_buffer,
+                max_unique_ids_per_partition_per_sc_buffer,
+                required_buffer_size_per_sc_buffer, minibatching_split);
+        partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
+      }
 
-        // TODO: http://b/428790659 - Combine minibatching split across stacked
-        // tables.
-        // TODO: http://b/428790659 - Perform an inter-host communication to
-        // finalize device splits.
+      // NOTE: For non-minibatching, we can just use the buckets as
+      // minibatches directly as there is only one bucket per SC.
 
-        for (int local_device = 0; local_device < options.local_device_count;
-             ++local_device) {
-          PartitionedCooTensors& grouped_coo_tensors =
-              partitioned_coo_tensors_per_device[local_device];
-          if (options.enable_minibatching)
-            grouped_coo_tensors.Merge(minibatching_split);
-          //
-          // Step 3: Compute the row pointers and fill device buffer.
-          //
-          const int batch_size_per_sc =
-              CeilOfRatio(batch_size_for_device, options.num_sc_per_device);
-          Eigen::Ref<RowVectorXi> row_pointer_buffer =
-              row_pointers_per_device.row(local_device);
-          Eigen::Ref<RowVectorXi> embedding_id_buffer =
-              embedding_ids_per_device.row(local_device);
-          Eigen::Ref<RowVectorXi> sample_id_buffer =
-              sample_ids_per_device.row(local_device);
-          Eigen::Ref<RowVectorXf> gain_buffer =
-              gains_per_device.row(local_device);
-          const int coo_buffer_size_per_sc =
-              coo_buffer_size_per_device / options.num_sc_per_device;
-          FillLocalDeviceBuffer(
-              grouped_coo_tensors, row_pointers_size_per_bucket,
-              coo_buffer_size_per_sc, batch_size_per_sc, options,
-              row_pointer_buffer, embedding_id_buffer, sample_id_buffer,
-              gain_buffer);
-        }
-        CheckBufferUsage(
-            /* max_required_buffer_size_per_device= */
-            required_buffer_size_per_sc.maxCoeff() * options.num_sc_per_device,
-            coo_buffer_size_per_device, stacked_table_name,
-            options.batch_number);
+      // TODO: http://b/428790659 - Combine minibatching split across stacked
+      // tables.
+      // TODO: http://b/428790659 - Perform an inter-host communication to
+      // finalize device splits.
 
-        max_ids_per_partition_per_sc.resize(
-            1, max_ids_per_partition_per_sc.size());
-        max_unique_ids_per_partition_per_sc.resize(
-            1, max_unique_ids_per_partition_per_sc.size());
-        required_buffer_size_per_sc.resize(1,
-                                           required_buffer_size_per_sc.size());
-        {
-          // This used to be (unintentionally) synchronized using GIL, but
-          // there's a possible race condition with the threadpool without the
-          // python objects since we don't use the GIL anymore.
-          absl::MutexLock lock(&mutex);
-          out.lhs_row_pointers[stacked_table_name.c_str()] =
-              std::move(row_pointers_per_device);
-          out.lhs_embedding_ids[stacked_table_name.c_str()] =
-              std::move(embedding_ids_per_device);
-          out.lhs_sample_ids[stacked_table_name.c_str()] =
-              std::move(sample_ids_per_device);
-          out.lhs_gains[stacked_table_name.c_str()] =
-              std::move(gains_per_device);
+      for (int local_device = 0; local_device < options.local_device_count;
+           ++local_device) {
+        PartitionedCooTensors& grouped_coo_tensors =
+            partitioned_coo_tensors_per_device[local_device];
+        if (options.enable_minibatching)
+          grouped_coo_tensors.Merge(minibatching_split);
+        //
+        // Step 3: Compute the row pointers and fill device buffer.
+        //
+        const int batch_size_per_sc =
+            CeilOfRatio(batch_size_for_device, options.num_sc_per_device);
+        Eigen::Ref<RowVectorXi> row_pointer_buffer =
+            row_pointers_per_device.row(local_device);
+        Eigen::Ref<RowVectorXi> embedding_id_buffer =
+            embedding_ids_per_device.row(local_device);
+        Eigen::Ref<RowVectorXi> sample_id_buffer =
+            sample_ids_per_device.row(local_device);
+        Eigen::Ref<RowVectorXf> gain_buffer =
+            gains_per_device.row(local_device);
+        const int coo_buffer_size_per_sc =
+            coo_buffer_size_per_device / options.num_sc_per_device;
+        FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
+                              coo_buffer_size_per_sc, batch_size_per_sc,
+                              options, row_pointer_buffer, embedding_id_buffer,
+                              sample_id_buffer, gain_buffer);
+      }
+      // NOMUTANTS -- Informational.
+      CheckBufferUsage(
+          /* max_required_buffer_size_per_device= */
+          required_buffer_size_per_sc.maxCoeff() * options.num_sc_per_device,
+          coo_buffer_size_per_device, stacked_table_name, options.batch_number);
 
-          out.stats.max_ids_per_partition[stacked_table_name.c_str()] =
-              std::move(max_ids_per_partition_per_sc);
-          out.stats.max_unique_ids_per_partition[stacked_table_name.c_str()] =
-              std::move(max_unique_ids_per_partition_per_sc);
-          out.stats.required_buffer_sizes[stacked_table_name.c_str()] =
-              std::move(required_buffer_size_per_sc);
-        }
-        counter.DecrementCount();
-      });
-    }
-    counter.Wait();
+      max_ids_per_partition_per_sc.resize(1,
+                                          max_ids_per_partition_per_sc.size());
+      max_unique_ids_per_partition_per_sc.resize(
+          1, max_unique_ids_per_partition_per_sc.size());
+      required_buffer_size_per_sc.resize(1, required_buffer_size_per_sc.size());
+      {
+        // We need to use a recent version of absl for OSS for below warning.
+        absl::MutexLock mutex_lock(&output_mutex);  // NOLINT
+        out.lhs_row_pointers[stacked_table_name.c_str()] =
+            std::move(row_pointers_per_device);
+        out.lhs_embedding_ids[stacked_table_name.c_str()] =
+            std::move(embedding_ids_per_device);
+        out.lhs_sample_ids[stacked_table_name.c_str()] =
+            std::move(sample_ids_per_device);
+        out.lhs_gains[stacked_table_name.c_str()] = std::move(gains_per_device);
+
+        out.stats.max_ids_per_partition[stacked_table_name.c_str()] =
+            std::move(max_ids_per_partition_per_sc);
+        out.stats.max_unique_ids_per_partition[stacked_table_name.c_str()] =
+            std::move(max_unique_ids_per_partition_per_sc);
+        out.stats.required_buffer_sizes[stacked_table_name.c_str()] =
+            std::move(required_buffer_size_per_sc);
+      }
+      counter.DecrementCount();
+    });
   }
+  counter.Wait();
 
   return out;
 }

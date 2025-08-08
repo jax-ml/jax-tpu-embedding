@@ -112,7 +112,6 @@ template <size_t N>
 void MergeBuckets(std::bitset<N - 1> split, MergeFn merge_fun = NoOpMerge()) {
   static_assert(absl::has_single_bit(N));
   int split_index = 0;
-  std::bitset<N - 1> splitpos;
   for (int subtree_size = 2; subtree_size <= N; subtree_size *= 2) {
     for (int i = 0; i < N; i += subtree_size, ++split_index) {
       const int right_index = i + subtree_size / 2;
