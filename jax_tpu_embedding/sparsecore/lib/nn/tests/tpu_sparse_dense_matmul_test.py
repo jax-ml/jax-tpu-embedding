@@ -422,7 +422,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           tpu_sparse_dense_matmul_fn,
           static_broadcasted_argnums=[2],
       )(
-          preprocessed_inputs.get_pmap_input(devices),
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
       )
@@ -446,7 +446,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           sharded_matmul,
           mesh=mesh,
           in_specs=(
-              embedding.PreprocessedInput.get_partition(mesh),
+              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -548,7 +548,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           tpu_sparse_dense_matmul_fn,
           static_broadcasted_argnums=[2],
       )(
-          preprocessed_inputs.get_pmap_input(devices),
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
       )
@@ -572,7 +572,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           sharded_matmul,
           mesh=mesh,
           in_specs=(
-              embedding.PreprocessedInput.get_partition(mesh),
+              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -701,7 +701,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           tpu_sparse_dense_matmul_fn,
           static_broadcasted_argnums=[2],
       )(
-          preprocessed_inputs.get_pmap_input(devices),
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
       )
@@ -811,7 +811,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           tpu_sparse_dense_matmul_fn,
           static_broadcasted_argnums=(2),
       )(
-          preprocessed_inputs.get_pmap_input(devices),
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
       )
@@ -834,7 +834,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           sharded_matmul,
           mesh=mesh,
           in_specs=(
-              embedding.PreprocessedInput.get_partition(mesh),
+              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
@@ -1345,7 +1345,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           tpu_sparse_dense_matmul_fn,
           static_broadcasted_argnums=(2,),
       )(
-          preprocessed_inputs.get_pmap_input(devices),
+          preprocessed_inputs,
           embedding_variables,
           tuple(tree.flatten(feature_specs)),
       )
@@ -1374,7 +1374,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           sharded_matmul,
           mesh=mesh,
           in_specs=(
-              embedding.PreprocessedInput.get_partition(mesh),
+              P(mesh.axis_names[0]),
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
