@@ -51,9 +51,7 @@ cc_library(
     hdrs = ["input_preprocessing_util.h"],
     deps = [
         ":coo_format",
-        ":minibatching_splits_impl",
         ":partitioned_coo_tensors",
-        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
@@ -62,7 +60,6 @@ cc_library(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
-        "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -111,6 +108,7 @@ cc_test(
         ":coo_format",
         ":input_preprocessing_util",
         ":partitioned_coo_tensors",
+        ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
@@ -127,6 +125,7 @@ cc_library(
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
         ":partitioned_coo_tensors",
+        ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -331,6 +330,26 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "sort_and_group_coo_tensors_impl",
+    hdrs = ["sort_and_group_coo_tensors_impl.h"],
+    deps = [
+        ":coo_format",
+        ":input_preprocessing_util",
+        ":minibatching_splits_impl",
+        ":partitioned_coo_tensors",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/numeric:bits",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+        "@eigen_archive//:eigen3",
+        "@highway//hwy/contrib/sort:vqsort",
+        "@tsl//tsl/profiler/lib:traceme",
     ],
 )
 
