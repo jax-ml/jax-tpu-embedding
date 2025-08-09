@@ -106,7 +106,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices_tensor,
         values_tensor,
@@ -148,7 +148,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
 
     self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
-    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_) = (
+    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [numpy_features],
             [numpy_weights],
@@ -209,7 +209,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices_tensor,
         values_tensor,
@@ -238,7 +238,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
 
     self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
-    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_) = (
+    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [numpy_features],
             [numpy_weights],
@@ -418,7 +418,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_transformation_with_col_transformations(self, has_leading_dimension):
     batch_number = 42
-    (row_pointers, embedding_ids, sample_ids, gains, *_) = (
+    (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features],
             [self.input_weights],
@@ -445,7 +445,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices_tensor,
         values_tensor,
@@ -927,7 +927,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
 
     # Preprocess inputs for the stacked features.
     batch_number = 42
-    row_pointers, embedding_ids, sample_ids, gains, *_ = (
+    row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, input_features_a2],
             [self.input_weights_a, input_weights_a2],
@@ -962,7 +962,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices,
         values,
@@ -984,7 +984,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_table_stacking_single_chip(self, has_leading_dimension):
     batch_number = 42
-    row_pointers, embedding_ids, sample_ids, gains, *_ = (
+    row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
@@ -1019,7 +1019,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices,
         values,
@@ -1070,7 +1070,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         ),
     )
     batch_number = 42
-    (row_pointers, embedding_ids, sample_ids, gains, *_) = (
+    (row_pointers, embedding_ids, sample_ids, gains, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
@@ -1105,7 +1105,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices,
         values,
@@ -1127,7 +1127,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_table_stacking_multi_chip(self, has_leading_dimension):
     batch_number = 42
-    row_pointers, embedding_ids, sample_ids, gains, *_ = (
+    row_pointers, embedding_ids, sample_ids, gains, _ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
@@ -1162,7 +1162,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices,
         values,
@@ -1258,7 +1258,7 @@ class MeanCombinerTest(parameterized.TestCase):
         embedding_ids_sparse,
         sample_ids_sparse,
         gains_sparse,
-        *_,
+        _,
     ) = sparse_tensor_input_preprocessing(
         indices_tensor,
         values_tensor,
@@ -1299,7 +1299,7 @@ class MeanCombinerTest(parameterized.TestCase):
       )
     self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
-    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_) = (
+    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, _) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [numpy_features],
             [numpy_weights],
