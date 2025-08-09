@@ -174,7 +174,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     Eigen::Ref<RowVectorXi> max_ids_per_sc,
     Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
     Eigen::Ref<RowVectorXi> required_buffer_size_per_sc,
-    MinibatchingSplit& minibatching_split);
+    int& dropped_id_counter, MinibatchingSplit& minibatching_split);
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,

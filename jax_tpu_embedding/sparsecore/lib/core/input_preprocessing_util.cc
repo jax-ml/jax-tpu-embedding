@@ -235,7 +235,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     Eigen::Ref<RowVectorXi> max_ids_per_sc,
     Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
     Eigen::Ref<RowVectorXi> required_buffer_size_per_sc,
-    MinibatchingSplit& minibatching_split) {
+    int& dropped_id_counter, MinibatchingSplit& minibatching_split) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const std::vector<CooFormat>& coo_tensors = extracted_coo_tensors.coo_tensors;
   const int num_sc_per_device = options.num_sc_per_device;
@@ -326,6 +326,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
             ids_per_sc_partition[global_sc_id] > max_ids_per_partition;
         if (over_capacity) {
           // Dropped id.
+          ++dropped_id_counter;
           continue;
         } else {
           grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);

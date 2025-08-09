@@ -221,6 +221,9 @@ void SparseDenseMatmulInputStats::merge(
   MergeStats(max_ids_per_partition, other.max_ids_per_partition);
   MergeStats(max_unique_ids_per_partition, other.max_unique_ids_per_partition);
   MergeStats(required_buffer_sizes, other.required_buffer_sizes);
+  for (const auto& [table, count] : other.dropped_id_count) {
+    dropped_id_count[table] += count;
+  }
 }
 
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
@@ -300,6 +303,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       MatrixXi required_buffer_size_per_sc(options.local_device_count,
                                            options.num_sc_per_device);
       int batch_size_for_device;
+      int table_dropped_ids = 0;
       MinibatchingSplit minibatching_split = 0;
       std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
       partitioned_coo_tensors_per_device.reserve(options.local_device_count);
@@ -331,13 +335,16 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
             max_unique_ids_per_partition_per_sc.row(local_device);
         Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
             required_buffer_size_per_sc.row(local_device);
+        int dropped_ids = 0;
         const PartitionedCooTensors grouped_coo_tensors =
             SortAndGroupCooTensorsPerLocalDevice(
                 extracted_coo_tensors, stacked_table_metadata[0], options,
                 max_ids_per_partition_per_sc_buffer,
                 max_unique_ids_per_partition_per_sc_buffer,
-                required_buffer_size_per_sc_buffer, minibatching_split);
+                required_buffer_size_per_sc_buffer, dropped_ids,
+                minibatching_split);
         partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
+        table_dropped_ids += dropped_ids;
       }
 
       // NOTE: For non-minibatching, we can just use the buckets as
@@ -402,6 +409,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
             std::move(max_unique_ids_per_partition_per_sc);
         out.stats.required_buffer_sizes[stacked_table_name.c_str()] =
             std::move(required_buffer_size_per_sc);
+        out.stats.dropped_id_count[stacked_table_name.c_str()] =
+            table_dropped_ids;
       }
       counter.DecrementCount();
     });

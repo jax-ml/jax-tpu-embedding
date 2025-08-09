@@ -32,7 +32,13 @@ struct SparseDenseMatmulInputStats {
   StackedTableMap<RowVectorXi> max_ids_per_partition;
   StackedTableMap<RowVectorXi> max_unique_ids_per_partition;
   StackedTableMap<RowVectorXi> required_buffer_sizes;
+  StackedTableMap<int> dropped_id_count;
 
+  int TotalDroppedIdCount() const {
+    int sum = 0;
+    for (const auto& [_, v] : dropped_id_count) sum += v;
+    return sum;
+  }
   // Merge another SparseDenseMatmulInputStats object into the current one.
   void merge(const SparseDenseMatmulInputStats& other);
 };
