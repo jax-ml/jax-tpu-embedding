@@ -26,6 +26,7 @@
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 
 namespace jax_sc_embedding {
 namespace {

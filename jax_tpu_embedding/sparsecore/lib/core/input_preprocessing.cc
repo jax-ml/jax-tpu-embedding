@@ -37,6 +37,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "tsl/profiler/lib/connected_traceme.h"
 #include "tsl/profiler/lib/traceme.h"
 
