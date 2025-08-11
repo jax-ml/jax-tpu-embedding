@@ -35,7 +35,7 @@ LogicalNames = typing.LogicalNames
 P = jax.sharding.PartitionSpec
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
-EmbeddingLookupInput = embedding.PreprocessedInput
+EmbeddingLookupInput = embedding.SparseDenseMatmulInput
 
 EMBEDDING_PARAM_NAME = 'sc_embedding_variables'
 
@@ -96,9 +96,6 @@ class SparseCoreEmbed(nn.Module):
   def setup(self):
     self.embedding_table_partition = P(self.sharding_axis, None)
     self.data_partition = P(self.sharding_axis)
-    self.embedding_lookup_input_partition = EmbeddingLookupInput.get_partition(
-        self.sharding_axis
-    )
     self.num_shards = self.mesh.shape[self.sharding_axis]
 
     initializer = functools.partial(
@@ -210,7 +207,6 @@ def _emb_lookup(
 ):
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
-  pe = embedding_layer.embedding_lookup_input_partition
   return shard_map(
       functools.partial(
           embedding.tpu_sparse_dense_matmul,
@@ -219,7 +215,7 @@ def _emb_lookup(
           sharding_strategy=embedding_layer.table_sharding_strategy,
       ),
       mesh=embedding_layer.mesh,
-      in_specs=(pe, pt),
+      in_specs=(pd, pt),
       out_specs=pd,
       check_rep=False,
   )(
@@ -249,7 +245,6 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
 
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
-  pe = embedding_layer.embedding_lookup_input_partition
   emb_table_grads = shard_map(
       functools.partial(
           embedding.tpu_sparse_dense_matmul_grad,
@@ -257,7 +252,7 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
           sharding_strategy=embedding_layer.table_sharding_strategy,
       ),
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pe, pt),
+      in_specs=(pd, pd, pt),
       out_specs=pt,
       check_rep=False,
   )(

@@ -56,8 +56,6 @@ struct PreprocessSparseDenseMatmulOutput {
   StackedTableMap<MatrixXi> lhs_embedding_ids;
   StackedTableMap<MatrixXi> lhs_sample_ids;
   StackedTableMap<MatrixXf> lhs_gains;
-  // TODO: b/428790659 - Populate this value based on computed split.
-  int num_minibatches = 1;
   SparseDenseMatmulInputStats stats;
 };
 

@@ -144,9 +144,9 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
   py::tuple ret_object = py::make_tuple(
       std::move(out.lhs_row_pointers), std::move(out.lhs_embedding_ids),
       std::move(out.lhs_sample_ids), std::move(out.lhs_gains),
-      std::move(out.num_minibatches), std::move(out.stats));
-  static constexpr size_t kCsrWrappedCooArraysCount = 4;
-  for (size_t i = 0; i < kCsrWrappedCooArraysCount; ++i) {
+      std::move(out.stats));
+  // Skip the last element (stats).
+  for (size_t i = 0; i < ret_object.size() - 1; ++i) {
     if (!has_leading_dimension) {
       for (auto& iterator : ret_object[i].cast<py::dict>()) {
         ret_object[i][iterator.first] =

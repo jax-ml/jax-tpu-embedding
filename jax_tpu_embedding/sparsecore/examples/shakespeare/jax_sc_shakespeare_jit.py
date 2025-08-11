@@ -402,7 +402,7 @@ def run_model():
       tpu_sparse_dense_matmul = shard_map(
           f=tpu_sparse_dense_matmul,
           mesh=mesh,
-          in_specs=(embedding.PreprocessedInput.get_partition('device'), pe),
+          in_specs=(pd, pe),
           out_specs=pd,
           check_rep=False,
       )
@@ -444,11 +444,7 @@ def run_model():
       tpu_sparse_dense_matmul_grad = shard_map(
           f=tpu_sparse_dense_matmul_grad,
           mesh=mesh,
-          in_specs=(
-              pd,
-              embedding.PreprocessedInput.get_partition('device'),
-              pe,
-          ),
+          in_specs=(pd, pd, pe),
           out_specs=pe,
           check_rep=False,
       )
@@ -529,11 +525,7 @@ def run_model():
         sharding_strategy='MOD',
         batch_number=step,
     )
-    preprocessed_inputs = preprocessed_inputs.replace(
-        sparse_dense_matmul_input=make_global_view(
-            preprocessed_inputs.sparse_dense_matmul_input
-        )
-    )
+    preprocessed_inputs = make_global_view(preprocessed_inputs)
     fdo_client.record(stats)
 
     # ----------------------------------------------------------------------

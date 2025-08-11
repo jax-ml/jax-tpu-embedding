@@ -160,7 +160,7 @@ class ShakespeareTest(absltest.TestCase):
         sharded_matmul,
         mesh=mesh,
         in_specs=(
-            embedding.PreprocessedInput.get_partition(mesh),
+            P(mesh.axis_names[0]),
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0]),
@@ -178,7 +178,7 @@ class ShakespeareTest(absltest.TestCase):
         mesh=mesh,
         in_specs=(
             P(mesh.axis_names[0]),
-            embedding.PreprocessedInput.get_partition(mesh),
+            P(mesh.axis_names[0]),
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0], None),
