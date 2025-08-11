@@ -124,11 +124,14 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   const int max_unique_ids_per_partition =
       stacked_table_metadata.max_unique_ids_per_partition;
   const absl::string_view stacked_table_name = stacked_table_metadata.name;
+  // Minibatching is enabled and we need to create buckets for minibatching.
+  const bool create_buckets = options.enable_minibatching &&
+                              (std::is_same_v<SplitType, MinibatchingSplit>);
 
   // Partition COO tensors among SparseCores for the local device (based on row
   // id).
   const int bucket_count =
-      options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+      create_buckets ? CooFormat::kMaxMinibatchingBuckets : 1;
   PartitionedCooTensors grouped_coo_tensors(
       coo_tensors.size(), num_sc_per_device, global_sc_count, bucket_count);
 
@@ -160,7 +163,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       // local_embedding_id(32-num_scs bits), index(26 bits)].
       //  Note that this assumes `num_scs` is a power of 2.
       keys.push_back(coo_tensors[coo_tensor_index].GetGroupingKey(
-          num_sc_bits, coo_tensor_index, options.enable_minibatching));
+          num_sc_bits, coo_tensor_index, create_buckets));
     }
 
     // The expected allocation size may be uninitialized.
@@ -176,8 +179,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       const CooFormat& coo_tensor = coo_tensors[index];
       const uint32_t col_id = coo_tensor.col_id;
       const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
-      const uint32_t bucket_id =
-          options.enable_minibatching ? coo_tensor.GetBucketId() : 0;
+      const uint32_t bucket_id = create_buckets ? coo_tensor.GetBucketId() : 0;
       const uint32_t row_id = coo_tensor.row_id;
 
       if (bucket_id == prev_bucket_id && col_id != prev_col_id) {
@@ -257,16 +259,25 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
         unique_ids_per_partition_per_bucket.maxCoeff();
 
     if (options.enable_minibatching) {
+      // This works both when minibatching is required and not. In the former
+      // case we have bool which tells us if minibatching is required,
+      // in the latter case it is std::bitset<64> which tells us the exact
+      // splits.
       for (int global_sc_id = 0; global_sc_id < global_sc_count;
            ++global_sc_id) {
         auto unique_ids_per_bucket =
             unique_ids_per_partition_per_bucket.row(global_sc_id).array();
-        // absl::Makespan works because the array would be row-major and values
-        // would be contiguous in memory.
-        static_assert(decltype(unique_ids_per_bucket)::IsRowMajor);
-        minibatching_split |= internal::ComputeMinibatchingSplit(
-            absl::MakeSpan(unique_ids_per_bucket),
-            max_unique_ids_per_partition);
+        if constexpr (std::is_same_v<SplitType, MinibatchingSplit>) {
+          // absl::Makespan works because the array would be row-major and
+          // values would be contiguous in memory.
+          static_assert(decltype(unique_ids_per_bucket)::IsRowMajor);
+          minibatching_split |= internal::ComputeMinibatchingSplit(
+              absl::MakeSpan(unique_ids_per_bucket),
+              max_unique_ids_per_partition);
+        } else {
+          minibatching_split |=
+              unique_ids_per_bucket.maxCoeff() > max_unique_ids_per_partition;
+        }
       }
     }
 

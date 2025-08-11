@@ -14,6 +14,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
 #include <algorithm>
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -304,8 +305,10 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       MatrixXi required_buffer_size_per_sc(options.local_device_count,
                                            options.num_sc_per_device);
       int batch_size_for_device;
+      bool minibatching_required = false;
       int table_dropped_ids = 0;
       MinibatchingSplit minibatching_split = 0;
+      std::vector<ExtractedCooTensors> extracted_coo_tensors_per_device;
       std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
       partitioned_coo_tensors_per_device.reserve(options.local_device_count);
       for (int local_device = 0; local_device < options.local_device_count;
@@ -320,6 +323,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         ExtractedCooTensors extracted_coo_tensors =
             internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
                 stacked_table_metadata, input_batches, local_device, options);
+        extracted_coo_tensors_per_device.push_back(extracted_coo_tensors);
         if (local_device == 0)
           batch_size_for_device = extracted_coo_tensors.batch_size_for_device;
         else
@@ -343,7 +347,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
                 max_ids_per_partition_per_sc_buffer,
                 max_unique_ids_per_partition_per_sc_buffer,
                 required_buffer_size_per_sc_buffer, dropped_ids,
-                minibatching_split);
+                minibatching_required);
         partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
         table_dropped_ids += dropped_ids;
       }
@@ -351,17 +355,39 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       // NOTE: For non-minibatching, we can just use the buckets as
       // minibatches directly as there is only one bucket per SC.
 
-      // TODO: http://b/428790659 - Combine minibatching split across stacked
-      // tables.
-      // TODO: http://b/428790659 - Perform an inter-host communication to
-      // finalize device splits.
+      // TODO: b/428790659 - Sync this flag across stacked tables and hosts.
+
+      if (options.enable_minibatching && minibatching_required) {
+        for (int local_device = 0; local_device < options.local_device_count;
+             ++local_device) {
+          Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
+              max_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
+              max_unique_ids_per_partition_per_sc.row(local_device);
+          Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
+              required_buffer_size_per_sc.row(local_device);
+          partitioned_coo_tensors_per_device[local_device] =
+              SortAndGroupCooTensorsPerLocalDevice(
+                  extracted_coo_tensors_per_device[local_device],
+                  stacked_table_metadata[0], options,
+                  max_ids_per_partition_per_sc_buffer,
+                  max_unique_ids_per_partition_per_sc_buffer,
+                  required_buffer_size_per_sc_buffer, table_dropped_ids,
+                  minibatching_split);
+        }
+      }
+
+      // TODO: b/428790659 - Sync the minibatching split across
+      // stacked tables and hosts.
 
       for (int local_device = 0; local_device < options.local_device_count;
            ++local_device) {
         PartitionedCooTensors& grouped_coo_tensors =
             partitioned_coo_tensors_per_device[local_device];
-        if (options.enable_minibatching)
+        if (options.enable_minibatching && minibatching_required) {
           grouped_coo_tensors.Merge(minibatching_split);
+        }
+
         //
         // Step 3: Compute the row pointers and fill device buffer.
         //
