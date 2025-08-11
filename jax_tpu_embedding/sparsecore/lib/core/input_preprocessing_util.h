@@ -167,15 +167,6 @@ struct StackedTableMetadata {
   int max_col_id;
 };
 
-PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
-    const ExtractedCooTensors& extracted_coo_tensors,
-    const StackedTableMetadata& stacked_table_metadata,
-    const PreprocessSparseDenseMatmulInputOptions& options,
-    Eigen::Ref<RowVectorXi> max_ids_per_sc,
-    Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
-    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc,
-    int& dropped_id_counter, MinibatchingSplit& minibatching_split);
-
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
