@@ -979,12 +979,13 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .enable_minibatching = true,
   };
   MinibatchingSplit minibatching_split = 0;
-  int dropped_id_counter = 0;
+  int dropped_ids = 0;
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_split);
+          max_unique_id_per_sc, required_buffer_sizes_per_sc, dropped_ids,
+          minibatching_split);
+  EXPECT_EQ(dropped_ids, 0);
 
   // 4 Minibatches of bucket sizes [16,8,24,16]
   // 62:                  32

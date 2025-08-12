@@ -29,6 +29,7 @@
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
+#include "absl/synchronization/barrier.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -228,6 +229,7 @@ void SparseDenseMatmulInputStats::merge(
   }
 }
 
+// TODO: b/428790659 - Modularize this function into smaller functions.
 PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
@@ -245,6 +247,10 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
 
   absl::Mutex output_mutex;
   PreprocessSparseDenseMatmulOutput out;
+
+  bool minibatching_required = 0;
+  MinibatchingSplit minibatching_split = 0;
+
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
@@ -258,7 +264,10 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   // 2D numpy arrays (rectangles) can be run in parallel, 1D arrays require
   // casting each sample to a numpy array.
   absl::BlockingCounter counter(stacked_tables.size());
-
+  auto minibatching_req_barrier =
+      std::make_unique<absl::Barrier>(stacked_tables.size());
+  auto minibatching_split_barrier =
+      std::make_unique<absl::Barrier>(stacked_tables.size());
   tsl::profiler::TraceMeProducer producer("InputPreprocessingMainThread");
 
   for (const auto& [stacked_table_name, stacked_table_metadata] :
@@ -305,7 +314,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       MatrixXi required_buffer_size_per_sc(options.local_device_count,
                                            options.num_sc_per_device);
       int batch_size_for_device;
-      bool minibatching_required = false;
+      bool table_minibatching_required = false;
       int table_dropped_ids = 0;
       MinibatchingSplit minibatching_split = 0;
       std::vector<ExtractedCooTensors> extracted_coo_tensors_per_device;
@@ -347,7 +356,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
                 max_ids_per_partition_per_sc_buffer,
                 max_unique_ids_per_partition_per_sc_buffer,
                 required_buffer_size_per_sc_buffer, dropped_ids,
-                minibatching_required);
+                table_minibatching_required);
         partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
         table_dropped_ids += dropped_ids;
       }
@@ -355,30 +364,42 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       // NOTE: For non-minibatching, we can just use the buckets as
       // minibatches directly as there is only one bucket per SC.
 
-      // TODO: b/428790659 - Sync this flag across stacked tables and hosts.
+      MinibatchingSplit table_minibatching_split = 0;
+      if (options.enable_minibatching) {
+        {
+          absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
+          minibatching_required |= table_minibatching_required;
+        }
+        // TODO: b/428790659 - Sync this flag across hosts.
+        if (minibatching_req_barrier->Block()) minibatching_req_barrier.reset();
 
-      if (options.enable_minibatching && minibatching_required) {
-        for (int local_device = 0; local_device < options.local_device_count;
-             ++local_device) {
-          Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
-              max_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
-              max_unique_ids_per_partition_per_sc.row(local_device);
-          Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
-              required_buffer_size_per_sc.row(local_device);
-          partitioned_coo_tensors_per_device[local_device] =
-              SortAndGroupCooTensorsPerLocalDevice(
-                  extracted_coo_tensors_per_device[local_device],
-                  stacked_table_metadata[0], options,
-                  max_ids_per_partition_per_sc_buffer,
-                  max_unique_ids_per_partition_per_sc_buffer,
-                  required_buffer_size_per_sc_buffer, table_dropped_ids,
-                  minibatching_split);
+        if (minibatching_required) {
+          for (int local_device = 0; local_device < options.local_device_count;
+               ++local_device) {
+            Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
+                max_ids_per_partition_per_sc.row(local_device);
+            Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
+                max_unique_ids_per_partition_per_sc.row(local_device);
+            Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
+                required_buffer_size_per_sc.row(local_device);
+            partitioned_coo_tensors_per_device[local_device] =
+                SortAndGroupCooTensorsPerLocalDevice(
+                    extracted_coo_tensors_per_device[local_device],
+                    stacked_table_metadata[0], options,
+                    max_ids_per_partition_per_sc_buffer,
+                    max_unique_ids_per_partition_per_sc_buffer,
+                    required_buffer_size_per_sc_buffer, table_dropped_ids,
+                    minibatching_split);
+          }
+          {
+            absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
+            minibatching_split |= table_minibatching_split;
+          }
+          // TODO: b/428790659 - Sync the minibatching split across hosts.
+          if (minibatching_split_barrier->Block())
+            minibatching_split_barrier.reset();
         }
       }
-
-      // TODO: b/428790659 - Sync the minibatching split across
-      // stacked tables and hosts.
 
       for (int local_device = 0; local_device < options.local_device_count;
            ++local_device) {
@@ -420,7 +441,6 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
           1, max_unique_ids_per_partition_per_sc.size());
       required_buffer_size_per_sc.resize(1, required_buffer_size_per_sc.size());
       {
-        // We need to use a recent version of absl for OSS for below warning.
         absl::MutexLock mutex_lock(&output_mutex);  // NOLINT
         out.lhs_row_pointers[stacked_table_name.c_str()] =
             std::move(row_pointers_per_device);
@@ -443,6 +463,9 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     });
   }
   counter.Wait();
+
+  out.num_minibatches = minibatching_split.count() + 1;
+  DCHECK(options.enable_minibatching || out.num_minibatches == 1);
 
   return out;
 }
