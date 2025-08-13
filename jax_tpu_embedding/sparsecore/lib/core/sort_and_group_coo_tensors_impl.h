@@ -214,9 +214,8 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       prev_bucket_id = bucket_id;
     }
     // Sentinel node to terminate buffer filling. At least one coo tensor would
-    // exist for the given local_sc_id, we use its bucket id. Sentinel node does
-    // not count for unique ids. The buffer filling logic however does consider
-    // sentinel node in the buffer size before discarding it.
+    // exist for the given local_sc_id, we use its bucket id. Sentinel node is
+    // not filled in buffer or counted for max (unique) ids.
     grouped_coo_tensors.Add(
         local_sc_id, prev_bucket_id,
         CooFormat(
@@ -224,7 +223,6 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
             /* col_id= */ 0,
             /* gain= */ 0.0));
     grouped_coo_tensors.FillRemainingScBuckets();
-    required_buffer_size_per_sc[local_sc_id]++;
 
     // Update global max using this device's values.
     for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {

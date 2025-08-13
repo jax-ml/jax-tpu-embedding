@@ -107,13 +107,16 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
 
   int processed = 0;
   for (const CooFormat& coo_tensor : options.coo_tensors) {
-    ++processed;
+    const bool is_sentinel = coo_tensor.row_id == options.batch_size_per_sc *
+                                                      (options.local_sc_id + 1);
+    if (!is_sentinel) ++processed;
     const auto sc_id = std::make_pair(
         /* local_sc_id= */ coo_tensor.row_id / options.batch_size_per_sc,
         /* global_sc_id= */ coo_tensor.col_id % options.num_scs);
     DCHECK_GE(sc_id, last_sc_id) << absl::StrFormat(
         "Failed: sc_id@(%d, %d) >= last_sc_id@(%d, %d)", sc_id.first,
         sc_id.second, last_sc_id.first, last_sc_id.second);
+    // Advance last_sc_id to current sc_id.
     while (last_sc_id < sc_id) {
       if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
         break;
@@ -125,8 +128,7 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
       IncrementScId(last_sc_id, options.num_scs, options.num_sc_per_device);
     }
     // Terminate at the sentinel node.
-    if (coo_tensor.row_id ==
-        options.batch_size_per_sc * (options.local_sc_id + 1)) {
+    if (is_sentinel) {
       DCHECK_EQ(coo_tensor.gain, 0);
       break;
     }

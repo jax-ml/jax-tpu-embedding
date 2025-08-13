@@ -216,7 +216,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
   EXPECT_EQ(dropped_id_counter, 0);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
@@ -274,7 +274,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
   EXPECT_EQ(dropped_id_counter, 0);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({17, 17}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({16, 16}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
@@ -323,7 +323,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
   EXPECT_THAT(dropped_id_counter, 0);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
@@ -372,7 +372,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
   EXPECT_THAT(dropped_id_counter, 0);
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
@@ -427,7 +427,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8, 8, 8}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   // 4 partitions of size 8 with 2 elements each
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
@@ -483,7 +483,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
   // 8 partitions of size 256 with 32 elements each
   EXPECT_THAT(required_buffer_sizes_per_sc,
-              ElementsAreArray({257, 257, 257, 257}));
+              ElementsAreArray({256, 256, 256, 256}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
@@ -534,7 +534,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({4, 0, 0, 0}));
   // 1 partition of size 128 with 128 elements
   EXPECT_THAT(required_buffer_sizes_per_sc,
-              ElementsAreArray({129, 129, 129, 129}));
+              ElementsAreArray({128, 128, 128, 128}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
@@ -584,7 +584,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
   // 1 partition of size 32 with 32 elements
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 }
 
 TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
@@ -634,7 +634,7 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
   EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
   // 4 partition of size 8 with 4 element each
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({33, 33, 33, 33}));
+  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
 
   // Note that sample 2, 3, 6, 7, 10, 11, 14, 15 are dropped.
   // It's unclear how embedding activations will be constructed without these
@@ -968,8 +968,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/33,
-      /*max_unique_ids_per_partition=*/33, /*row_offset=*/0, /*col_offset=*/0,
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
+      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
