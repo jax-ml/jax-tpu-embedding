@@ -13,7 +13,7 @@
 # limitations under the License.
 """ Python proto rule. """
 
-load("@com_google_protobuf//:protobuf.bzl", _py_proto_library = "py_proto_library")
+load("@com_google_protobuf//bazel:protobuf.bzl", _py_proto_library = "py_proto_library")
 
 def py_proto_library(name, deps = [], extra_deps = [], **kwargs):
     """Generates Python code from proto files.
