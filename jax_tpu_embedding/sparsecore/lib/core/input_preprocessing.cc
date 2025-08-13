@@ -316,7 +316,6 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       int batch_size_for_device;
       bool table_minibatching_required = false;
       int table_dropped_ids = 0;
-      MinibatchingSplit minibatching_split = 0;
       std::vector<ExtractedCooTensors> extracted_coo_tensors_per_device;
       std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
       partitioned_coo_tensors_per_device.reserve(options.local_device_count);
@@ -389,7 +388,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
                     max_ids_per_partition_per_sc_buffer,
                     max_unique_ids_per_partition_per_sc_buffer,
                     required_buffer_size_per_sc_buffer, table_dropped_ids,
-                    minibatching_split);
+                    table_minibatching_split);
           }
           {
             absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT

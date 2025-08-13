@@ -145,9 +145,12 @@ cc_test(
     srcs = ["input_preprocessing_test.cc"],
     deps = [
         ":abstract_input_batch",
+        ":coo_format",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         ":ragged_tensor_input_batch",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],

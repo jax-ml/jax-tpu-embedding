@@ -16,12 +16,16 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/log/check.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 
@@ -505,5 +509,123 @@ INSTANTIATE_TEST_SUITE_P(
     [](const testing::TestParamInfo<MinibatchingTest::ParamType>& info) {
       return info.param ? "MinibatchingEnabled" : "MinibatchingDisabled";
     });
+
+class SingleHostMinibatchingTest : public ::testing::Test {
+ protected:
+  std::vector<StackedTableMetadata> stacked_table_metadata_{
+      StackedTableMetadata(
+          /*name=*/"table_0",
+          /*feature_index=*/0, /*max_ids_per_partition=*/16,
+          /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
+          /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16),
+      StackedTableMetadata(
+          /*name=*/"table_1",
+          /*feature_index=*/1, /*max_ids_per_partition=*/16,
+          /*max_unique_ids_per_partition=*/16, /*row_offset=*/16,
+          /*col_offset=*/32, /*col_shift=*/0, /*batch_size=*/16)};
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches_;
+
+  void CreateInputBatches(absl::Span<const int> max_ids_per_partitions,
+                          absl::Span<const int> max_unique_ids_per_partitions,
+                          int global_sc_count, int local_sc_count) {
+    CHECK_EQ(max_ids_per_partitions.size(),
+             max_unique_ids_per_partitions.size());
+    CHECK_EQ(max_ids_per_partitions.size(), stacked_table_metadata_.size());
+    for (int table_id = 0; table_id < max_ids_per_partitions.size();
+         ++table_id) {
+      const int batch_size = stacked_table_metadata_[table_id].batch_size;
+      const int batch_size_per_sc = batch_size / local_sc_count;
+      std::vector<int> ids;
+      std::vector<int> row_offsets;
+      row_offsets.push_back(0);
+      int curr_row_offset = 0;
+      for (int local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
+        CHECK_GE(max_ids_per_partitions[table_id],
+                 max_unique_ids_per_partitions[table_id]);
+        // Example: max ids = 5, max unique ids = 3 => {0,0,0,1,2}
+        // 0 is non-unique (0,0).
+        for (int i = 0; i < max_ids_per_partitions[table_id] -
+                                max_unique_ids_per_partitions[table_id];
+             ++i) {
+          ids.push_back(i *
+                        global_sc_count);  // embedding id = i, global id = 0.
+        }
+        // others are unique (0,1,2).
+        for (int j = 0; j < max_unique_ids_per_partitions[table_id]; ++j) {
+          ids.push_back(j);
+        }
+      }
+      const int ids_per_sc = ids.size() / local_sc_count;
+      const int ids_per_row = ids_per_sc / batch_size_per_sc;
+      CHECK_GT(ids_per_row, 0);
+      for (int local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
+        for (int row_id = 0; row_id < batch_size_per_sc - 1; ++row_id) {
+          curr_row_offset += ids_per_row;
+          row_offsets.push_back(curr_row_offset);
+        }
+        curr_row_offset = (local_sc_id + 1) * ids_per_sc;
+        row_offsets.push_back(curr_row_offset);
+      }
+      CHECK_EQ(row_offsets.back(), ids.size());
+
+      input_batches_.push_back(
+          std::make_unique<
+              RaggedTensorInputBatch<std::vector<int>, std::vector<int>>>(
+              ids, row_offsets));
+    }
+  }
+};
+
+TEST_F(SingleHostMinibatchingTest, MinibatchCountIsCorrectWhenNotRequired) {
+  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
+                                                  .global_device_count = 1,
+                                                  .num_sc_per_device = 4,
+                                                  .enable_minibatching = true};
+
+  CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                     /*max_unique_ids_per_partitions=*/{4, 6},
+                     /*global_sc_count=*/4,
+                     /*local_sc_count=*/4);
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_), stacked_tables, options);
+
+  EXPECT_EQ(output.num_minibatches, 1);
+}
+
+TEST_F(SingleHostMinibatchingTest, MinibatchCountIsCorrectWhenRequired) {
+  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
+                                                  .global_device_count = 1,
+                                                  .num_sc_per_device = 4,
+                                                  .enable_minibatching = true};
+
+  // Reduce max ids and max unique ids to trigger minibatching.
+  // Also increase buffer size.
+  stacked_table_metadata_[0].max_ids_per_partition = 5;
+  stacked_table_metadata_[0].max_unique_ids_per_partition = 2;
+  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 2048;
+
+  stacked_table_metadata_[1].max_ids_per_partition = 5;
+  stacked_table_metadata_[1].max_unique_ids_per_partition = 6;
+  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 2048;
+
+  CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
+                     /*max_unique_ids_per_partitions=*/{5, 10},
+                     /*global_sc_count=*/4,
+                     /*local_sc_count=*/4);
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_), stacked_tables, options);
+
+  EXPECT_GT(output.num_minibatches, 1);
+  EXPECT_EQ(output.num_minibatches, 8);
+}
+
 }  // namespace
 }  // namespace jax_sc_embedding

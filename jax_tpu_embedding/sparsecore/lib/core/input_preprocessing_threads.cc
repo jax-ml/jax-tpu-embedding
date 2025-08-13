@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <new>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
