@@ -366,7 +366,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       MinibatchingSplit table_minibatching_split = 0;
       if (options.enable_minibatching) {
         {
-          absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
+          absl::MutexLock minibatching_lock(output_mutex);
           minibatching_required |= table_minibatching_required;
         }
         // TODO: b/428790659 - Sync this flag across hosts.
@@ -391,7 +391,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
                     table_minibatching_split);
           }
           {
-            absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
+            absl::MutexLock minibatching_lock(output_mutex);
             minibatching_split |= table_minibatching_split;
           }
           // TODO: b/428790659 - Sync the minibatching split across hosts.
@@ -440,7 +440,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
           1, max_unique_ids_per_partition_per_sc.size());
       required_buffer_size_per_sc.resize(1, required_buffer_size_per_sc.size());
       {
-        absl::MutexLock mutex_lock(&output_mutex);  // NOLINT
+        absl::MutexLock mutex_lock(output_mutex);
         out.lhs_row_pointers[stacked_table_name.c_str()] =
             std::move(row_pointers_per_device);
         out.lhs_embedding_ids[stacked_table_name.c_str()] =
