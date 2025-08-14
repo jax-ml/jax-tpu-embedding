@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -61,6 +62,9 @@ enum class FeatureStackingStrategy {
 };
 
 enum class ShardingStrategy : int { kMod = 1 };
+
+using AllReduceCallback =
+    absl::AnyInvocable<uint64_t(int sync_key, uint64_t local_data) const>;
 
 struct PreprocessSparseDenseMatmulInputOptions {
   const int local_device_count;
