@@ -17,15 +17,18 @@
 #include <bitset>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
+#include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 
@@ -64,14 +67,22 @@ enum class FeatureStackingStrategy {
 enum class ShardingStrategy : int { kMod = 1 };
 
 struct PreprocessSparseDenseMatmulInputOptions {
+  // The number of TPU devices on the current host.
   const int local_device_count ABSL_REQUIRE_EXPLICIT_INIT;
+  // The total number of TPU devices across all hosts.
   const int global_device_count ABSL_REQUIRE_EXPLICIT_INIT;
+  // The number of SparseCores per TPU device.
   const int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
+  // The sharding strategy used to distribute embedding IDs across SparseCores.
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
+  // Whether to allow dropping embedding IDs if the buffer size is exceeded.
   const bool allow_id_dropping = true;
+  // The strategy used for stacking features from different tables.
   FeatureStackingStrategy feature_stacking_strategy =
       FeatureStackingStrategy::kSplitThenStack;
+  // Whether mini-batching is enabled.
   const bool enable_minibatching = false;
+  // Experimental flag for static single minibatch.
   const bool experimental_static_single_minibatch = false;
 
   // The batch number should be a sequential counter that is unique for each
@@ -81,6 +92,11 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // (e.g., LOG_IF(INFO, batch_number_ % 100 == 0)).
   const int batch_number = 0;
 
+  // (Non-owning) Interface for performing all-reduce operations, used during
+  // mini-batching to synchronize state across different hosts.
+  AllReduceInterface* absl_nullable all_reduce_interface;
+
+  // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
 
