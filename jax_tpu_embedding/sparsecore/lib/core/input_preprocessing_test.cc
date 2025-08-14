@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -31,6 +32,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "tsl/platform/env.h"  // from @tsl
+#include "tsl/platform/statusor.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
 
 namespace jax_sc_embedding {
@@ -616,8 +618,10 @@ TEST_F(MinibatchingCountTest,
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Act
-  PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
-      absl::MakeSpan(input_batches), stacked_tables, options);
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
 
   // Assert
   EXPECT_EQ(output.num_minibatches, 1);
@@ -654,8 +658,10 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Act
-  PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
-      absl::MakeSpan(input_batches), stacked_tables, options);
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
 
   // Assert
   EXPECT_GT(output.num_minibatches, 1);
@@ -691,9 +697,10 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
   // Act
   for (int host_id = 0; host_id < kHosts; ++host_id) {
     MultiHostPool()->Schedule([&, host_id]() {
-      PreprocessSparseDenseMatmulOutput output =
-          PreprocessSparseDenseMatmulInput(
-              absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
+      TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                              PreprocessSparseDenseMatmulInput(
+                                  absl::MakeSpan(*input_batches[host_id]),
+                                  stacked_tables, options));
       {
         absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
         minibatches_per_host[host_id] = output.num_minibatches;
@@ -739,9 +746,10 @@ TEST_F(MinibatchingCountTest,
   // Act
   for (int host_id = 0; host_id < kHosts; ++host_id) {
     MultiHostPool()->Schedule([&, host_id]() {
-      PreprocessSparseDenseMatmulOutput output =
-          PreprocessSparseDenseMatmulInput(
-              absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
+      TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                              PreprocessSparseDenseMatmulInput(
+                                  absl::MakeSpan(*input_batches[host_id]),
+                                  stacked_tables, options));
       {
         absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
         minibatches_per_host[host_id] = output.num_minibatches;

@@ -22,6 +22,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
+#include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -62,6 +65,9 @@ enum class FeatureStackingStrategy {
 
 enum class ShardingStrategy : int { kMod = 1 };
 
+using AllReduceCallback = absl::AnyInvocable<absl::StatusOr<uint64_t>(
+    int sync_key, uint64_t local_data) const>;
+
 struct PreprocessSparseDenseMatmulInputOptions {
   const int local_device_count;
   const int global_device_count;
@@ -78,6 +84,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // mini-batching. The number should be sequential to help limit logging
   // (e.g., LOG_IF(INFO, batch_number_ % 100 == 0)).
   const int batch_number = 0;
+
+  const AllReduceCallback all_reduce_callback;
 
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
