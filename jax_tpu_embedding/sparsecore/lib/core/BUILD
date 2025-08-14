@@ -151,8 +151,10 @@ cc_test(
         ":ragged_tensor_input_batch",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:env",
     ],
 )
 

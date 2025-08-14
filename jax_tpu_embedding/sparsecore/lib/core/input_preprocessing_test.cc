@@ -23,16 +23,23 @@
 #include <gtest/gtest.h>
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
+#include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
+#include "tsl/platform/env.h"  // from @tsl
+#include "tsl/platform/threadpool.h"  // from @tsl
 
 namespace jax_sc_embedding {
 namespace {
 
+using ::testing::Each;
 using ::testing::ElementsAreArray;
+using ::testing::Eq;
+using ::testing::Gt;
 using ::testing::SizeIs;
 
 class TableStackingTest : public ::testing::Test {
@@ -510,7 +517,7 @@ INSTANTIATE_TEST_SUITE_P(
       return info.param ? "MinibatchingEnabled" : "MinibatchingDisabled";
     });
 
-class SingleHostMinibatchingTest : public ::testing::Test {
+class MinibatchingCountTest : public ::testing::Test {
  protected:
   std::vector<StackedTableMetadata> stacked_table_metadata_{
       StackedTableMetadata(
@@ -523,11 +530,15 @@ class SingleHostMinibatchingTest : public ::testing::Test {
           /*feature_index=*/1, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/16,
           /*col_offset=*/32, /*col_shift=*/0, /*batch_size=*/16)};
-  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches_;
 
-  void CreateInputBatches(absl::Span<const int> max_ids_per_partitions,
-                          absl::Span<const int> max_unique_ids_per_partitions,
-                          int global_sc_count, int local_sc_count) {
+  // Helper function to create input batches for testing.
+  // It generates a sequence of ids based on `max_ids_per_partitions` and
+  // `max_unique_ids_per_partitions` for each table.
+  std::vector<std::unique_ptr<AbstractInputBatch>> CreateInputBatches(
+      absl::Span<const int> max_ids_per_partitions,
+      absl::Span<const int> max_unique_ids_per_partitions, int global_sc_count,
+      int local_sc_count) {
+    std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
     CHECK_EQ(max_ids_per_partitions.size(),
              max_unique_ids_per_partitions.size());
     CHECK_EQ(max_ids_per_partitions.size(), stacked_table_metadata_.size());
@@ -568,35 +579,52 @@ class SingleHostMinibatchingTest : public ::testing::Test {
       }
       CHECK_EQ(row_offsets.back(), ids.size());
 
-      input_batches_.push_back(
+      input_batches.push_back(
           std::make_unique<
               RaggedTensorInputBatch<std::vector<int>, std::vector<int>>>(
               ids, row_offsets));
     }
+    return input_batches;
+  }
+
+  static constexpr int kHosts = 2;
+
+  // Helper to get a static thread pool shared across tests that simulates
+  // a multi-host environment.
+  static tsl::thread::ThreadPool* MultiHostPool() {
+    static tsl::thread::ThreadPool* pool = new tsl::thread::ThreadPool(
+        tsl::Env::Default(), "MultiHostPool", /*num_threads=*/kHosts);
+    return pool;
   }
 };
 
-TEST_F(SingleHostMinibatchingTest, MinibatchCountIsCorrectWhenNotRequired) {
+TEST_F(MinibatchingCountTest,
+       SingleHostMinibatchCountIsCorrectWhenNotRequired) {
+  // Arrange
   PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
                                                   .global_device_count = 1,
                                                   .num_sc_per_device = 4,
                                                   .enable_minibatching = true};
 
-  CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
-                     /*max_unique_ids_per_partitions=*/{4, 6},
-                     /*global_sc_count=*/4,
-                     /*local_sc_count=*/4);
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                         /*max_unique_ids_per_partitions=*/{4, 6},
+                         /*global_sc_count=*/4,
+                         /*local_sc_count=*/4);
 
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
+  // Act
   PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
-      absl::MakeSpan(input_batches_), stacked_tables, options);
+      absl::MakeSpan(input_batches), stacked_tables, options);
 
+  // Assert
   EXPECT_EQ(output.num_minibatches, 1);
 }
 
-TEST_F(SingleHostMinibatchingTest, MinibatchCountIsCorrectWhenRequired) {
+TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
+  // Arrange
   PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
                                                   .global_device_count = 1,
                                                   .num_sc_per_device = 4,
@@ -616,16 +644,116 @@ TEST_F(SingleHostMinibatchingTest, MinibatchCountIsCorrectWhenRequired) {
                      /*max_unique_ids_per_partitions=*/{5, 10},
                      /*global_sc_count=*/4,
                      /*local_sc_count=*/4);
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
+                         /*max_unique_ids_per_partitions=*/{5, 10},
+                         /*global_sc_count=*/4,
+                         /*local_sc_count=*/4);
 
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
+  // Act
   PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
-      absl::MakeSpan(input_batches_), stacked_tables, options);
+      absl::MakeSpan(input_batches), stacked_tables, options);
 
+  // Assert
   EXPECT_GT(output.num_minibatches, 1);
   EXPECT_EQ(output.num_minibatches, 8);
 }
 
+TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
+  // Arrange
+  absl::BlockingCounter counter(kHosts);
+
+  absl::Mutex mutex;
+  std::vector<int> minibatches_per_host(kHosts, -1);
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  auto input_batch_host0 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                         /*max_unique_ids_per_partitions=*/{4, 6},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  auto input_batch_host1 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{8, 12},
+                         /*max_unique_ids_per_partitions=*/{8, 12},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
+      {&input_batch_host0, &input_batch_host1};
+
+  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
+                                                  .global_device_count = 2,
+                                                  .num_sc_per_device = 4,
+                                                  .enable_minibatching = true};
+
+  // Act
+  for (int host_id = 0; host_id < kHosts; ++host_id) {
+    MultiHostPool()->Schedule([&, host_id]() {
+      PreprocessSparseDenseMatmulOutput output =
+          PreprocessSparseDenseMatmulInput(
+              absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
+      {
+        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        minibatches_per_host[host_id] = output.num_minibatches;
+      }
+      counter.DecrementCount();
+    });
+  }
+  counter.Wait();
+
+  // Assert
+  EXPECT_THAT(minibatches_per_host, Each(Eq(1)));
+}
+
+// TODO: b/428790659 - This test is disabled because it requires multi-host
+//   collectives which is not yet implemented.
+TEST_F(MinibatchingCountTest,
+       DISABLED_MultiHostMinibatchCountIsCorrectWhenRequired) {
+  // Arrange
+  absl::BlockingCounter counter(kHosts);
+
+  absl::Mutex mutex;
+  std::vector<int> minibatches_per_host(kHosts, -1);
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  auto input_batch_host0 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{80, 120},
+                         /*max_unique_ids_per_partitions=*/{48, 50},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  auto input_batch_host1 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{40, 200},
+                         /*max_unique_ids_per_partitions=*/{30, 64},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
+      {&input_batch_host0, &input_batch_host1};
+
+  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
+                                                  .global_device_count = 2,
+                                                  .num_sc_per_device = 4,
+                                                  .enable_minibatching = true};
+
+  // Act
+  for (int host_id = 0; host_id < kHosts; ++host_id) {
+    MultiHostPool()->Schedule([&, host_id]() {
+      PreprocessSparseDenseMatmulOutput output =
+          PreprocessSparseDenseMatmulInput(
+              absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
+      {
+        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        minibatches_per_host[host_id] = output.num_minibatches;
+      }
+      counter.DecrementCount();
+    });
+  }
+  counter.Wait();
+
+  // Assert
+  EXPECT_THAT(minibatches_per_host, Each(Gt(1)));
+  EXPECT_THAT(minibatches_per_host, Each(Eq(32)));
+}
 }  // namespace
 }  // namespace jax_sc_embedding
