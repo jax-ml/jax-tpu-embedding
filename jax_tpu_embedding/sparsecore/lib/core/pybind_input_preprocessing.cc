@@ -25,6 +25,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
@@ -135,8 +136,14 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
     // objects (features, specs and weights).
     py::gil_scoped_release release;
 
-    out = PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
-                                           stacked_tables, options);
+    auto out_or = PreprocessSparseDenseMatmulInput(
+        absl::MakeSpan(input_batches), stacked_tables, options);
+    if (!out_or.ok()) {
+      py::set_error(PyExc_RuntimeError,
+                    std::string(out_or.status().message()).c_str());
+      throw py::error_already_set();
+    }
+    out = std::move(out_or.value());
   }
   // We need the GIL back to create the output tuple. The tuple creation
   // implicitly wraps Eigen matrices into numpy arrays (without copying), which

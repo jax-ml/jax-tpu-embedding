@@ -28,9 +28,11 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/fake_all_reduce.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "tsl/platform/env.h"  // from @tsl
+#include "tsl/platform/statusor.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
 
 namespace jax_sc_embedding {
@@ -616,8 +618,10 @@ TEST_F(MinibatchingCountTest,
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Act
-  PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
-      absl::MakeSpan(input_batches), stacked_tables, options);
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
 
   // Assert
   EXPECT_EQ(output.num_minibatches, 1);
@@ -654,8 +658,10 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Act
-  PreprocessSparseDenseMatmulOutput output = PreprocessSparseDenseMatmulInput(
-      absl::MakeSpan(input_batches), stacked_tables, options);
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
 
   // Assert
   EXPECT_GT(output.num_minibatches, 1);
@@ -683,17 +689,31 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
   std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
       {&input_batch_host0, &input_batch_host1};
 
-  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
-                                                  .global_device_count = 2,
-                                                  .num_sc_per_device = 4,
-                                                  .enable_minibatching = true};
+  auto fake_all_reduce = testing_utils::CreateFakeAllReduceCallback(kHosts);
+
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .enable_minibatching = true,
+      .batch_number = 100,
+      .all_reduce_callback = [&](int batch_number, uint64_t local_val)
+          -> absl::StatusOr<uint64_t> {
+        if (batch_number == options.batch_number * 2 + 1) {
+          ADD_FAILURE() << "SyncMinibatchingSplit should not be called when no "
+                           "host requires minibatching.";
+          return 0ULL;
+        }
+        return fake_all_reduce(batch_number, local_val);
+      }};
 
   // Act
   for (int host_id = 0; host_id < kHosts; ++host_id) {
     MultiHostPool()->Schedule([&, host_id]() {
-      PreprocessSparseDenseMatmulOutput output =
-          PreprocessSparseDenseMatmulInput(
-              absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
+      TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                              PreprocessSparseDenseMatmulInput(
+                                  absl::MakeSpan(*input_batches[host_id]),
+                                  stacked_tables, options));
       {
         absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
         minibatches_per_host[host_id] = output.num_minibatches;
@@ -707,16 +727,15 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
   EXPECT_THAT(minibatches_per_host, Each(Eq(1)));
 }
 
-// TODO: b/428790659 - This test is disabled because it requires multi-host
-//   collectives which is not yet implemented.
-TEST_F(MinibatchingCountTest,
-       DISABLED_MultiHostMinibatchCountIsCorrectWhenRequired) {
+TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
   // Arrange
   absl::BlockingCounter counter(kHosts);
 
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
+  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 8192;
+  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 8192;
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
@@ -731,17 +750,21 @@ TEST_F(MinibatchingCountTest,
   std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
       {&input_batch_host0, &input_batch_host1};
 
-  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
-                                                  .global_device_count = 2,
-                                                  .num_sc_per_device = 4,
-                                                  .enable_minibatching = true};
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .enable_minibatching = true,
+      .all_reduce_callback =
+          testing_utils::CreateFakeAllReduceCallback(kHosts)};
 
   // Act
   for (int host_id = 0; host_id < kHosts; ++host_id) {
     MultiHostPool()->Schedule([&, host_id]() {
-      PreprocessSparseDenseMatmulOutput output =
-          PreprocessSparseDenseMatmulInput(
-              absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
+      TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                              PreprocessSparseDenseMatmulInput(
+                                  absl::MakeSpan(*input_batches[host_id]),
+                                  stacked_tables, options));
       {
         absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
         minibatches_per_host[host_id] = output.num_minibatches;
@@ -755,5 +778,62 @@ TEST_F(MinibatchingCountTest,
   EXPECT_THAT(minibatches_per_host, Each(Gt(1)));
   EXPECT_THAT(minibatches_per_host, Each(Eq(32)));
 }
+
+TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
+  // Arrange
+  absl::BlockingCounter counter(kHosts);
+
+  absl::Mutex mutex;
+  std::vector<int> minibatches_per_host(kHosts, -1);
+
+  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 8192;
+  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 8192;
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  // Host 0: Requires minibatching
+  auto input_batch_host0 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{80, 120},
+                         /*max_unique_ids_per_partitions=*/{48, 50},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  // Host 1: Does not require minibatching
+  auto input_batch_host1 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                         /*max_unique_ids_per_partitions=*/{4, 6},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
+      {&input_batch_host0, &input_batch_host1};
+
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .enable_minibatching = true,
+      .all_reduce_callback =
+          testing_utils::CreateFakeAllReduceCallback(kHosts)};
+
+  // Act
+  for (int host_id = 0; host_id < kHosts; ++host_id) {
+    MultiHostPool()->Schedule([&, host_id]() {
+      TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                              PreprocessSparseDenseMatmulInput(
+                                  absl::MakeSpan(*input_batches[host_id]),
+                                  stacked_tables, options));
+      {
+        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        minibatches_per_host[host_id] = output.num_minibatches;
+      }
+      counter.DecrementCount();
+    });
+  }
+  counter.Wait();
+
+  // Assert
+  // Both hosts should agree on the number of minibatches, which should be > 1
+  // because host 0 required it.
+  EXPECT_THAT(minibatches_per_host, Each(Gt(1)));
+  EXPECT_THAT(minibatches_per_host, Each(Eq(minibatches_per_host[0])));
+}
+
 }  // namespace
 }  // namespace jax_sc_embedding
