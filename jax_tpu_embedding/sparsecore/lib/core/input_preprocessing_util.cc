@@ -196,7 +196,8 @@ int ComputeCooBufferSizePerDevice(
         << ", the default value (" << theoretical_max
         << ") may be too "
            "large and can cause OOM. Utilize the stats returned from "
-           "the sparse dense matmul preprocessing API.";
+           "the sparse dense matmul preprocessing API and update using "
+           "`embedding.update_preprocessing_parameters`. ";
   }
   LOG_IF(INFO, batch_number % 100 == 0) << "Computed Coo Buffer Size for table "
                                         << stacked_table_name << ": " << result;
