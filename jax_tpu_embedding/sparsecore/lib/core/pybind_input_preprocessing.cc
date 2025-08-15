@@ -243,6 +243,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
       .def_readonly("max_unique_ids_per_partition",
                     &SparseDenseMatmulInputStats::max_unique_ids_per_partition)
       .def_readonly("required_buffer_sizes",
-                    &SparseDenseMatmulInputStats::required_buffer_sizes);
+                    &SparseDenseMatmulInputStats::required_buffer_sizes)
+      .def_readonly("dropped_id_count",
+                    &SparseDenseMatmulInputStats::dropped_id_count);
 }
 }  // namespace jax_sc_embedding
