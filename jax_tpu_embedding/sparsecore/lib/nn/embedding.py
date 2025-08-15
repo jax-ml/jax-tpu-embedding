@@ -86,7 +86,10 @@ class SparseDenseMatmulInputStats:
       metadata={"suffix": "_max_unique_ids"}
   )
   required_buffer_size_per_sc: dict[str, np.ndarray] = dataclasses.field(
-      metadata={"suffix": "_required_buffer_size"}
+      metadata={"suffix": "_required_buffer_size"}, default_factory=dict
+  )
+  id_drop_counters: dict[str, int] = dataclasses.field(
+      metadata={"suffix": "_id_drop_counters"}, default_factory=dict
   )
 
   @classmethod
@@ -97,6 +100,7 @@ class SparseDenseMatmulInputStats:
         max_ids_per_partition=stats.max_ids_per_partition,
         max_unique_ids_per_partition=stats.max_unique_ids_per_partition,
         required_buffer_size_per_sc=stats.required_buffer_sizes,
+        id_drop_counters=stats.dropped_id_count,
     )
 
 
