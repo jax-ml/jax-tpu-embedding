@@ -218,7 +218,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     )
     sc_module = embed.SparseCoreEmbed(feature_specs=feature_specs)
     step = 42
-    embedding_lookups = sc_module.preprocess_inputs(
+    embedding_lookup_input = sc_module.preprocess_inputs(
         step,
         (self.input_tensor, self.input_tensor_table_b),
         (self.input_weights, self.input_weights_table_b),
@@ -294,7 +294,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     var_spec = jax.eval_shape(
         sc_module.init,
         jax.random.PRNGKey(0),
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     out_sharding = nn.get_sharding(var_spec, sc_module.mesh)
@@ -308,7 +308,7 @@ class EmbeddingLayerTest(absltest.TestCase):
         out_shardings=out_sharding,
     )(
         jax.random.PRNGKey(0),
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     # Replace the embedding variables in params with the ones we created.
@@ -326,7 +326,7 @@ class EmbeddingLayerTest(absltest.TestCase):
 
     activations = jax.jit(sc_module.apply)(
         params,
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     # Check the activation correctness.
@@ -399,7 +399,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     )(
         params,
         activations_grad,
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     # Updates params with the new embedding variables.
@@ -455,7 +455,7 @@ class EmbeddingLayerTest(absltest.TestCase):
         sharding_axis=sharding_axis,
     )
     step = 42
-    embedding_lookups = sc_module.preprocess_inputs(
+    embedding_lookup_input = sc_module.preprocess_inputs(
         step,
         (self.input_tensor, self.input_tensor),
         (self.input_weights, self.input_weights),
@@ -512,7 +512,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     var_spec = jax.eval_shape(
         sc_module.init,
         jax.random.PRNGKey(0),
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     out_sharding = nn.get_sharding(var_spec, mesh)
@@ -526,7 +526,7 @@ class EmbeddingLayerTest(absltest.TestCase):
         out_shardings=out_sharding,
     )(
         jax.random.PRNGKey(0),
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     # Replace the embedding variables in params with the ones we created.
@@ -544,7 +544,7 @@ class EmbeddingLayerTest(absltest.TestCase):
 
     activations = jax.jit(sc_module.apply)(
         params,
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     # Check the activation correctness.
@@ -590,7 +590,7 @@ class EmbeddingLayerTest(absltest.TestCase):
     )(
         params,
         activations_grad,
-        embedding_lookups,
+        embedding_lookup_input,
     )
 
     # Updates params with the new embedding variables.

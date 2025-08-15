@@ -35,7 +35,7 @@ LogicalNames = typing.LogicalNames
 P = jax.sharding.PartitionSpec
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
-EmbeddingLookupInput = embedding.SparseDenseMatmulInput
+EmbeddingLookupInput = embedding.PreprocessedInput
 
 EMBEDDING_PARAM_NAME = 'sc_embedding_variables'
 
