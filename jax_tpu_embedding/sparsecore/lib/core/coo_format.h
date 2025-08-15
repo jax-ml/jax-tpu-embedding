@@ -58,6 +58,15 @@ struct CooFormat {
   CooFormat(int row_id, int col_id, float gain)
       : row_id(row_id), col_id(col_id), gain(gain) {}
 
+  static CooFormat CreateScSentinelCoo(int batch_size_per_sc, int local_sc_id) {
+    return CooFormat(batch_size_per_sc * (local_sc_id + 1), /*col_id=*/0,
+                     /*gain=*/0.0f);
+  }
+
+  bool IsSentinelNode(int batch_size_per_sc, int local_sc_id) const {
+    return row_id == batch_size_per_sc * (local_sc_id + 1) && gain == 0.0f;
+  }
+
   // Defines the Row ID as the sum of the Sample ID and the Row Offset,
   // where Row Offset accounts for table stacking.
   //

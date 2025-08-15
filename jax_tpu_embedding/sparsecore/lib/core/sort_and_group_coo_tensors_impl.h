@@ -218,10 +218,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     // not filled in buffer or counted for max (unique) ids.
     grouped_coo_tensors.Add(
         local_sc_id, prev_bucket_id,
-        CooFormat(
-            /* row_id= */ batch_size_per_sc * (local_sc_id + 1),
-            /* col_id= */ 0,
-            /* gain= */ 0.0));
+        CooFormat::CreateScSentinelCoo(batch_size_per_sc, local_sc_id));
     grouped_coo_tensors.FillRemainingScBuckets();
 
     // Update global max using this device's values.

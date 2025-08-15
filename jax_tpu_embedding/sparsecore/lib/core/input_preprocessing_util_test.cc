@@ -731,11 +731,12 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   Eigen::VectorXi embedding_ids(40 * 4);
   Eigen::VectorXi sample_ids(40 * 4);
   Eigen::VectorXf gains(40 * 4);
+  int dropped_static_bound = 0;
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
                         /*batch_size_per_sc=*/2, options, row_pointers,
-                        embedding_ids, sample_ids, gains);
+                        embedding_ids, sample_ids, gains, dropped_static_bound);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32,  //
@@ -820,6 +821,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
       IsNan()  //
   );
+  EXPECT_EQ(dropped_static_bound, 0);
   EXPECT_THAT(gains, expected_gains);
 }
 
@@ -862,11 +864,12 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   Eigen::VectorXi embedding_ids(40 * 4);
   Eigen::VectorXi sample_ids(40 * 4);
   Eigen::VectorXf gains(40 * 4);
+  int dropped_static_bound = 0;
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
                         /*batch_size_per_sc=*/2, options, row_pointers,
-                        embedding_ids, sample_ids, gains);
+                        embedding_ids, sample_ids, gains, dropped_static_bound);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32,  //
@@ -951,6 +954,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
       IsNan()  //
   );
+  EXPECT_EQ(dropped_static_bound, 0);
   EXPECT_THAT(gains, expected_gains);
 }
 
@@ -1025,12 +1029,13 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   Eigen::VectorXi embedding_ids(coo_buffer_size_per_sc * 4);
   Eigen::VectorXi sample_ids(coo_buffer_size_per_sc * 4);
   Eigen::VectorXf gains(coo_buffer_size_per_sc * 4);
+  int dropped_static_bound = 0;
 
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_bucket=*/8,
                         coo_buffer_size_per_sc,
                         /*batch_size_per_sc=*/2, options, row_pointers,
-                        embedding_ids, sample_ids, gains);
+                        embedding_ids, sample_ids, gains, dropped_static_bound);
 
   std::array<int, 128> expected_row_pointers = {
       8,  16, 24, 32, 32, 32, 32, 32,  // SC0 MB0
@@ -1091,7 +1096,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
                .finished()
                .replicate(1, 4);
     expected_sample_ids.segment(sc * minibatches_buffer_size_per_sc + 64, 64)
-        << (RowVectorXi(16) << 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, INT_MAX,
+        << (RowVectorXi(16) << 0, 1, 0, 1, 0, 1
+            , 0, 1, 0, 1, 0, 1, INT_MAX,
             INT_MAX, INT_MAX, INT_MAX)
                .finished()
                .replicate(1, 4);
@@ -1115,6 +1121,61 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
   EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
   EXPECT_THAT(gains, Pointwise(NanSensitiveFloatEq(), expected_gains));
+  EXPECT_EQ(dropped_static_bound, 0);
+}
+
+TEST(InputPreprocessingUtilTest,
+     FillBufferStaticBoundCountsOneDropNoMinibatching) {
+  std::vector<CooFormat> coo_formats;
+  coo_formats.emplace_back(/*row=*/0, /*col=*/0, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/0, /*col=*/1, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/1, /*col=*/0, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/1, /*col=*/1, /*gain=*/1.0);
+
+  ExtractedCooTensors extracted(/*num_sc_per_device=*/1,
+                                /*batch_size_for_device=*/4);
+  extracted.coo_tensors = coo_formats;
+
+  Eigen::VectorXi max_id_per_sc{{0}};
+  Eigen::VectorXi max_unique_id_per_sc{{0}};
+  Eigen::VectorXi required_buffer_sizes_per_sc{{0}};
+
+  StackedTableMetadata meta(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
+      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+
+  PreprocessSparseDenseMatmulInputOptions opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 1,
+      .allow_id_dropping = false,
+  };
+
+  bool minibatching_required = false;
+  int dropped_sort = 0;
+  PartitionedCooTensors grouped =
+      SortAndGroupCooTensorsPerLocalDevice(
+          extracted, meta, opts, max_id_per_sc, max_unique_id_per_sc,
+          required_buffer_sizes_per_sc, dropped_sort, minibatching_required);
+
+  const int row_ptrs_size_per_bucket = 4;
+  const int coo_buffer_size_per_sc = 3;
+  const int batch_size_per_sc = 4;
+
+  Eigen::VectorXi row_pointers(row_ptrs_size_per_bucket);
+  Eigen::VectorXi embedding_ids(coo_buffer_size_per_sc);
+  Eigen::VectorXi sample_ids(coo_buffer_size_per_sc);
+  Eigen::VectorXf gains(coo_buffer_size_per_sc);
+
+  int dropped_static = 0;
+  FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
+                        coo_buffer_size_per_sc, batch_size_per_sc, opts,
+                        row_pointers, embedding_ids, sample_ids, gains,
+                        /*dropped_id_count_static_bound=*/dropped_static);
+
+  EXPECT_EQ(dropped_static, 1);
+  EXPECT_EQ(dropped_sort, 0);
 }
 
 }  // namespace

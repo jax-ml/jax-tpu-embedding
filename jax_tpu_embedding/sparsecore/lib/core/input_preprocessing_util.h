@@ -187,7 +187,8 @@ void FillLocalDeviceBuffer(
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
-    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains);
+    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains,
+    int& dropped_id_count_static_bound);
 
 }  // namespace jax_sc_embedding
 

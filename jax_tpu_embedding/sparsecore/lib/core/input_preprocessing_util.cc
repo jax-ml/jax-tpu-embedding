@@ -13,6 +13,7 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
+#include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -93,6 +94,19 @@ void PadCooBuffer(int& coo_index, int coo_end, bool pad_to_end,
   }
 }
 
+int GetNonSentinelCooCount(absl::Span<const CooFormat> coo_tensors,
+                             int batch_size_per_sc, int local_sc_id) {
+  if (coo_tensors.empty()) {
+    return 0;
+  }
+  const CooFormat& last_coo = coo_tensors.back();
+  // Check if the last element is a sentinel.
+  if (last_coo.IsSentinelNode(batch_size_per_sc, local_sc_id)) {
+    return coo_tensors.size() - 1;
+  }
+  return coo_tensors.size();
+}
+
 // Fill the row pointers buffer from `lhs_row_begin` to `lhs_row_end` and COO
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
@@ -100,16 +114,23 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
                         Eigen::Ref<RowVectorXi> row_pointers,
                         Eigen::Ref<RowVectorXi> embedding_ids,
                         Eigen::Ref<RowVectorXi> sample_ids,
-                        Eigen::Ref<RowVectorXf> gains) {
+                        Eigen::Ref<RowVectorXf> gains,
+                        int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
   auto last_sc_id = std::make_pair(options.local_sc_id, 0);
 
+  int total_real_coos = GetNonSentinelCooCount(
+      options.coo_tensors, options.batch_size_per_sc, options.local_sc_id);
+  int written_real_coos = 0;
+
   int processed = 0;
   for (const CooFormat& coo_tensor : options.coo_tensors) {
-    const bool is_sentinel = coo_tensor.row_id == options.batch_size_per_sc *
-                                                      (options.local_sc_id + 1);
-    if (!is_sentinel) ++processed;
+    const bool is_sentinel = coo_tensor.IsSentinelNode(
+        options.batch_size_per_sc, options.local_sc_id);
+    if (!is_sentinel) {
+      ++processed;
+    }
     const auto sc_id = std::make_pair(
         /* local_sc_id= */ coo_tensor.row_id / options.batch_size_per_sc,
         /* global_sc_id= */ coo_tensor.col_id % options.num_scs);
@@ -129,10 +150,11 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
     }
     // Terminate at the sentinel node.
     if (is_sentinel) {
-      DCHECK_EQ(coo_tensor.gain, 0);
       break;
     }
     if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
+      dropped_id_count_static_bound +=
+          std::max(0, total_real_coos - written_real_coos);
       break;
     }
 
@@ -140,6 +162,7 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
     sample_ids[coo_index] = coo_tensor.row_id % options.batch_size_per_sc;
     gains[coo_index] = coo_tensor.gain;
     ++coo_index;
+    ++written_real_coos;
   }
 
   PadRowPointersBuffer(lhs_row_index, /*padding=*/coo_index - options.coo_begin,
@@ -242,7 +265,8 @@ void FillLocalDeviceBuffer(
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
-    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains) {
+    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains,
+    int& dropped_id_count_static_bound) {
   tsl::profiler::TraceMe t("FillRowPointers");
   const int num_sc_per_device = options.num_sc_per_device;
   const int num_scs = options.GetNumScs();
@@ -271,8 +295,8 @@ void FillLocalDeviceBuffer(
               .num_sc_per_device = num_sc_per_device,
               .num_scs = num_scs,
               .coo_buffer_size = coo_buffer_size,
-          },
-          row_pointers, embedding_ids, sample_ids, gains);
+          }, row_pointers, embedding_ids, sample_ids, gains,
+          dropped_id_count_static_bound);
       lhs_row_begin = lhs_row_end;
       if (options.enable_minibatching) {
         // Align minibatch buffer

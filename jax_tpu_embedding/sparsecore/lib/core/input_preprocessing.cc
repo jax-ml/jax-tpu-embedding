@@ -426,7 +426,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
                               coo_buffer_size_per_sc, batch_size_per_sc,
                               options, row_pointer_buffer, embedding_id_buffer,
-                              sample_id_buffer, gain_buffer);
+                              sample_id_buffer, gain_buffer, table_dropped_ids);
       }
       // NOMUTANTS -- Informational.
       CheckBufferUsage(
