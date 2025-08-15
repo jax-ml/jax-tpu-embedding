@@ -312,7 +312,7 @@ def prepare_feature_specs_for_training(
     logging.info(
         "Populated feature spec for %s with: %s",
         feature.name,
-        feature_specs,
+        feature,
     )
 
   for feature in tree.flatten(feature_specs):
@@ -532,8 +532,9 @@ def _get_activation_for_feature(
   if feature.output_shape[-1] > feature.table_spec.embedding_dim:
     raise ValueError(
         f"Feature {feature.name} has output shape {feature.output_shape} and"
-        f" embedding dim {feature.table_spec.embedding_dim}. The output shape"
-        " must be at least same as the (original, unpadded)embedding dim."
+        f" embedding dim {feature.table_spec.embedding_dim}. The embedding dim"
+        " in output shape cannot be more than the (original,"
+        " unpadded) embedding dim in the FeatureSpec."
     )
   stacked_table_activation = activations[
       feature.table_spec.stacked_table_spec.stack_name
