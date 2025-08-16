@@ -23,13 +23,14 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
-#include "absl/synchronization/barrier.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -38,6 +39,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/minibatching_sync_service.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "tsl/profiler/lib/connected_traceme.h"
@@ -230,12 +232,13 @@ void SparseDenseMatmulInputStats::merge(
 }
 
 // TODO: b/428790659 - Modularize this function into smaller functions.
-PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
+absl::StatusOr<PreprocessSparseDenseMatmulOutput>
+PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options) {
-  tsl::profiler::TraceMe t([=] {
+  tsl::profiler::TraceMe t([=, &options] {
     return absl::StrCat("input_preprocessing_cc-", options.local_device_count,
                         "/", options.global_device_count);
   });
@@ -246,14 +249,17 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
 
   absl::Mutex output_mutex;
-  PreprocessSparseDenseMatmulOutput out;
-
-  bool minibatching_required = 0;
-  MinibatchingSplit minibatching_split = 0;
+  absl::Status status ABSL_GUARDED_BY(output_mutex) = absl::OkStatus();
+  PreprocessSparseDenseMatmulOutput out ABSL_GUARDED_BY(output_mutex);
 
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+
+  MinibatchingSyncService<bool> minibatching_required_sync_service(
+      stacked_tables.size());
+  MinibatchingSyncService<MinibatchingSplit> minibatching_split_sync_service(
+      stacked_tables.size());
 
   // Main thread release GIL so that the other threads can acquire / release.
   // The input preprocessing is essentially broken into 3 parts.
@@ -264,10 +270,6 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   // 2D numpy arrays (rectangles) can be run in parallel, 1D arrays require
   // casting each sample to a numpy array.
   absl::BlockingCounter counter(stacked_tables.size());
-  auto minibatching_req_barrier =
-      std::make_unique<absl::Barrier>(stacked_tables.size());
-  auto minibatching_split_barrier =
-      std::make_unique<absl::Barrier>(stacked_tables.size());
   tsl::profiler::TraceMeProducer producer("InputPreprocessingMainThread");
 
   for (const auto& [stacked_table_name, stacked_table_metadata] :
@@ -363,16 +365,24 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
       // NOTE: For non-minibatching, we can just use the buckets as
       // minibatches directly as there is only one bucket per SC.
 
-      MinibatchingSplit table_minibatching_split = 0;
+      bool minibatching_required = false;
+      MinibatchingSplit minibatching_split = 0;
       if (options.enable_minibatching) {
-        {
-          absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
-          minibatching_required |= table_minibatching_required;
+        auto minibatching_required_or =
+            minibatching_required_sync_service.SyncValue(
+                table_minibatching_required,
+                /*sync_key=*/options.batch_number * 2,
+                options.all_reduce_callback);
+        if (!minibatching_required_or.ok()) {
+          absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
+          status = minibatching_required_or.status();
+          counter.DecrementCount();
+          return;
         }
-        // TODO: b/428790659 - Sync this flag across hosts.
-        if (minibatching_req_barrier->Block()) minibatching_req_barrier.reset();
+        minibatching_required = minibatching_required_or.value();
 
         if (minibatching_required) {
+          MinibatchingSplit table_minibatching_split = 0;
           for (int local_device = 0; local_device < options.local_device_count;
                ++local_device) {
             Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
@@ -390,13 +400,18 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
                     required_buffer_size_per_sc_buffer, table_dropped_ids,
                     table_minibatching_split);
           }
-          {
-            absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
-            minibatching_split |= table_minibatching_split;
+          auto minibatching_split_or =
+              minibatching_split_sync_service.SyncValue(
+                  table_minibatching_split,
+                  /*sync_key=*/options.batch_number * 2 + 1,
+                  options.all_reduce_callback);
+          if (!minibatching_split_or.ok()) {
+            absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
+            status = minibatching_split_or.status();
+            counter.DecrementCount();
+            return;
           }
-          // TODO: b/428790659 - Sync the minibatching split across hosts.
-          if (minibatching_split_barrier->Block())
-            minibatching_split_barrier.reset();
+          minibatching_split = minibatching_split_or.value();
         }
       }
 
@@ -440,7 +455,7 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
           1, max_unique_ids_per_partition_per_sc.size());
       required_buffer_size_per_sc.resize(1, required_buffer_size_per_sc.size());
       {
-        absl::MutexLock mutex_lock(&output_mutex);  // NOLINT
+        absl::MutexLock mutex_lock(&output_mutex);  // NOLINT (b/438618768)
         out.lhs_row_pointers[stacked_table_name.c_str()] =
             std::move(row_pointers_per_device);
         out.lhs_embedding_ids[stacked_table_name.c_str()] =
@@ -462,8 +477,11 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
     });
   }
   counter.Wait();
+  if (!status.ok()) {
+    return status;
+  }
 
-  out.num_minibatches = minibatching_split.count() + 1;
+  out.num_minibatches = minibatching_split_sync_service.GetNumMinibatches();
   DCHECK(options.enable_minibatching || out.num_minibatches == 1);
 
   return out;
