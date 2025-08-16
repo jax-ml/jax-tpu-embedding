@@ -52,10 +52,10 @@ cc_library(
     deps = [
         ":coo_format",
         ":partitioned_coo_tensors",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/numeric:bits",
-        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
@@ -355,6 +355,61 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:traceme",
+    ],
+)
+
+cc_library(
+    name = "fake_all_reduce",
+    srcs = ["fake_all_reduce.cc"],
+    hdrs = ["fake_all_reduce.h"],
+    deps = [
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "minibatching_sync_service",
+    hdrs = ["minibatching_sync_service.h"],
+    deps = [
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/synchronization",
+        "@tsl//tsl/platform:statusor",
+    ],
+)
+
+cc_test(
+    name = "minibatching_sync_service_test",
+    srcs = ["minibatching_sync_service_test.cc"],
+    deps = [
+        ":fake_all_reduce",
+        ":input_preprocessing_threads",
+        ":input_preprocessing_util",
+        ":minibatching_sync_service",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:env",
+        "@tsl//tsl/platform:status",
+    ],
+)
+
+cc_test(
+    name = "fake_all_reduce_test",
+    srcs = ["fake_all_reduce_test.cc"],
+    deps = [
+        ":fake_all_reduce",
+        ":input_preprocessing_util",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:env",
+        "@tsl//tsl/platform:status_matchers",
+        "@tsl//tsl/platform:statusor",
     ],
 )
 
