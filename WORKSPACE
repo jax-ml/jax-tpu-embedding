@@ -20,7 +20,7 @@ load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 ##  SparseCore Dependencies
 ###############################################################################
 
-HIGHWAY_VERSION= "1.2.0"
+HIGHWAY_VERSION = "1.2.0"
 HIGHWAY_SHA256 = "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343"
 HIGHWAY_ARCHIVE = "https://github.com/google/highway/archive/{version}.tar.gz".format(version = HIGHWAY_VERSION)
 http_archive(
@@ -39,6 +39,27 @@ maybe(
     ],
     sha256 = "4531deccb913639c30e5c7512a054d5d875698daeb75d8cf90f284375fe7c360",
 )
+
+###############################################################################
+##  ML Toolchain Dependencies
+##  Details: https://github.com/google-ml-infra/rules_ml_toolchain
+###############################################################################
+
+http_archive(
+    name = "rules_ml_toolchain",
+    sha256 = "9dbee8f24cc1b430bf9c2a6661ab70cbca89979322ddc7742305a05ff637ab6b",
+    strip_prefix = "rules_ml_toolchain-545c80f1026d526ea9c7aaa410bf0b52c9a82e74",
+    urls = [
+        "https://github.com/google-ml-infra/rules_ml_toolchain/archive/545c80f1026d526ea9c7aaa410bf0b52c9a82e74.tar.gz",
+    ],
+)
+
+load(
+    "@rules_ml_toolchain//cc/deps:cc_toolchain_deps.bzl",
+    "cc_toolchain_deps",
+)
+
+cc_toolchain_deps()
 
 ###############################################################################
 ##  XLA Initialization
@@ -92,7 +113,7 @@ xla_workspace0()
 # Even though we don't use CUDA, this is required since it is needed
 # by TSL, one of our dependencies.
 load(
-    "@xla//third_party/gpus/cuda/hermetic:cuda_json_init_repository.bzl",
+    "@rules_ml_toolchain//gpu/cuda:cuda_json_init_repository.bzl",
     "cuda_json_init_repository",
 )
 
@@ -104,7 +125,7 @@ load(
     "CUDNN_REDISTRIBUTIONS",
 )
 load(
-    "@xla//third_party/gpus/cuda/hermetic:cuda_redist_init_repositories.bzl",
+    "@rules_ml_toolchain//gpu/cuda:cuda_redist_init_repositories.bzl",
     "cuda_redist_init_repositories",
     "cudnn_redist_init_repository",
 )
@@ -118,7 +139,7 @@ cudnn_redist_init_repository(
 )
 
 load(
-    "@xla//third_party/gpus/cuda/hermetic:cuda_configure.bzl",
+    "@rules_ml_toolchain//gpu/cuda:cuda_configure.bzl",
     "cuda_configure",
 )
 

@@ -13,6 +13,10 @@ common --announce_rc
 # Required by XLA/TSL python configure for experimental 'remotable' feature.
 common --experimental_repo_remote_exec
 
+# Disable Hermetic CC toolchains.
+build --@rules_ml_toolchain//common:enable_hermetic_cc=False
+build --repo_env USE_HERMETIC_CC_TOOLCHAIN=0
+
 # By default, execute all actions locally.
 build --spawn_strategy=local
 
