@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -60,7 +61,8 @@ struct PreprocessSparseDenseMatmulOutput {
   SparseDenseMatmulInputStats stats;
 };
 
-PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
+absl::StatusOr<PreprocessSparseDenseMatmulOutput>
+PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
