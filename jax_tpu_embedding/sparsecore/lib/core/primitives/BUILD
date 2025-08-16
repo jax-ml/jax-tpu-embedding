@@ -24,10 +24,7 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_csr.py",
     ],
-    visibility = [
-        "//jax_tpu_embedding/sparsecore:internal",
-        "//smartass/brain/configure/jax/python/lib:__pkg__",
-    ],
+    visibility = ["//jax_tpu_embedding/sparsecore:internal"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
