@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, TypeVar
 
 from flax import linen as nn
 from flax import typing
+import flax.jax_utils as flax_utils
 import jax
 from jax.experimental import layout
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
@@ -145,7 +146,7 @@ class SparseCoreEmbed(nn.Module):
     Returns:
       The processed data for embedding lookup.
     """
-    return embedding.preprocess_sparse_dense_matmul_input(
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
         features,
         features_weights,
         self.feature_specs,
@@ -154,7 +155,13 @@ class SparseCoreEmbed(nn.Module):
         num_sc_per_device=self.num_sc_per_device,
         sharding_strategy=self.table_sharding_strategy,
         batch_number=step,
-    )[0]
+    )
+    preprocessed_inputs.replace(
+        num_minibatches=flax_utils.replicate(
+            preprocessed_inputs.num_minibatches
+        )
+    )
+    return preprocessed_inputs
 
   def __call__(
       self, embedding_lookup_inputs: EmbeddingLookupInput
