@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
@@ -24,7 +25,7 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_csr.py",
     ],
-    visibility = ["//jax_tpu_embedding/sparsecore:internal"],
+    visibility = CORE_USERS,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
@@ -165,7 +166,7 @@ pytype_strict_library(
     visibility = [
         "//jax_tpu_embedding/sparsecore/lib/core:__pkg__",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives/tests:__pkg__",
-        "//jax_tpu_embedding/sparsecore/lib/nn/google:__pkg__",
+        "//jax_tpu_embedding/sparsecore/lib/nn:__subpackages__",
     ],
     deps = [
         ":optimizers_computation",  # buildcleaner: keep
