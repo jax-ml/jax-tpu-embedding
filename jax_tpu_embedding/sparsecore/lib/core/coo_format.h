@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_COO_FORMAT_H_
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <ostream>
 
@@ -43,11 +44,6 @@ struct CooFormat {
   // A deterministic hash function eventually used to compute mini-batching
   // bucket id as `hash(col_id) % bucket_count`.
   using HashFn = absl::FunctionRef<uint32_t(int col_id)>;
-
-  // C++17-compatible replacement for std::identity.
-  struct Identity {
-    uint32_t operator()(int col_id) const { return col_id; }
-  };
 
   CooFormat(int row_id, int embedding_id, float gain, int col_shift,
             int col_offset, int num_scs_mod)
@@ -118,7 +114,7 @@ struct CooFormat {
   }
 
   // TODO: b/428790659 - Update hash function.
-  uint32_t GetBucketId(HashFn hash_fn = Identity()) const {
+  uint32_t GetBucketId(HashFn hash_fn = std::identity()) const {
     // Checks that kMaxMinibatchingBuckets is a power of 2.
     static_assert(absl::has_single_bit(kMaxMinibatchingBuckets));
 
@@ -133,7 +129,7 @@ struct CooFormat {
   // TODO: b/428790659 - Update hash function.
   uint64_t GetGroupingKey(const uint32_t num_scs_bit, const int index,
                           const bool create_buckets = false,
-                          HashFn hash_fn = Identity()) const {
+                          HashFn hash_fn = std::identity()) const {
     // This structure ensures tensors are sorted first by bucket_id, then by
     // sparse core, and finally by embedding ID.
     const uint32_t bucket_id = create_buckets ? GetBucketId(hash_fn) : 0;
