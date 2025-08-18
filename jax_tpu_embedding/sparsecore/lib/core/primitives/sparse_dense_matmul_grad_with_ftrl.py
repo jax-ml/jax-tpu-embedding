@@ -27,6 +27,7 @@ import functools
 import json
 from typing import Tuple
 
+from absl import logging
 import jax
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import func as func_dialect
@@ -378,6 +379,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
       beta_,
       multiply_linear_by_learning_rate_,
   ]
+  logging.info("FTRL: operand count: %d", len(operands))
   custom_call_op = jax.ffi.ffi_lowering(
       call_target,
       result_types=[

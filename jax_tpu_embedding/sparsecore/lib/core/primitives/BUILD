@@ -126,6 +126,7 @@ pytype_strict_library(
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
+        pypi_requirement("absl/logging"),
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
