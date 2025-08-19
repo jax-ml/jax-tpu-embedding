@@ -459,7 +459,6 @@ class OptimizerSpecTest(absltest.TestCase):
         jnp.array(0.01, dtype=jnp.float32),
         jnp.array(0.02, dtype=jnp.float32),
         jnp.array(0.001, dtype=jnp.float32),
-        jnp.array(False, dtype=jnp.bool_),
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_ftrl)
 

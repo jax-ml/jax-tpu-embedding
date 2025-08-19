@@ -87,8 +87,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     l1_regularization_strength: np.float32,
     l2_regularization_strength: np.float32,
     beta: np.float32,
-    multiply_linear_by_learning_rate: np.bool = np.bool(False),
-    *_,
+    *,
+    multiply_linear_by_learning_rate: bool,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "ftrl_optimizer_update",
@@ -97,6 +97,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     minibatches: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_ftrl."""
+  del multiply_linear_by_learning_rate
   del minibatches
   del num_minibatches_per_physical_sparse_core
 
@@ -115,20 +116,15 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
 
   utils.ensure_dtype(accumulator, np.float32, "accumulator")
   utils.ensure_dtype(linear, np.float32, "linear")
-  utils.ensure_dtype(learning_rate, np.float32, "learning_rate_")
-  utils.ensure_dtype(learning_rate_power, np.float32, "learning_rate_power_")
+  utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
+  utils.ensure_dtype(learning_rate_power, np.float32, "learning_rate_power")
   utils.ensure_dtype(
-      l1_regularization_strength, np.float32, "l1_regularization_strength_"
+      l1_regularization_strength, np.float32, "l1_regularization_strength"
   )
   utils.ensure_dtype(
-      l2_regularization_strength, np.float32, "l2_regularization_strength_"
+      l2_regularization_strength, np.float32, "l2_regularization_strength"
   )
-  utils.ensure_dtype(beta, np.float32, "beta_")
-  utils.ensure_dtype(
-      multiply_linear_by_learning_rate,
-      np.bool,
-      "multiply_linear_by_learning_rate_",
-  )
+  utils.ensure_dtype(beta, np.float32, "beta")
 
   if (
       embedding_table.shape != accumulator.shape
@@ -154,18 +150,18 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     lhs_local_embedding_ids: mlir.ir.BlockArgument,
     lhs_local_sample_ids: mlir.ir.BlockArgument,
     lhs_gains: mlir.ir.BlockArgument,
-    num_minibatches_per_physical_sparse_core: np.int32,
+    num_minibatches_per_physical_sparse_core: mlir.ir.BlockArgument,
     embedding_table: mlir.ir.BlockArgument,
     accumulator: mlir.ir.BlockArgument,
     linear: mlir.ir.BlockArgument,
     activations_grad: mlir.ir.BlockArgument,
-    learning_rate_: mlir.ir.BlockArgument,
-    learning_rate_power_: mlir.ir.BlockArgument,
-    l1_regularization_strength_: mlir.ir.BlockArgument,
-    l2_regularization_strength_: mlir.ir.BlockArgument,
-    beta_: mlir.ir.BlockArgument,
-    multiply_linear_by_learning_rate_: mlir.ir.BlockArgument,
+    learning_rate: mlir.ir.BlockArgument,
+    learning_rate_power: mlir.ir.BlockArgument,
+    l1_regularization_strength: mlir.ir.BlockArgument,
+    l2_regularization_strength: mlir.ir.BlockArgument,
+    beta: mlir.ir.BlockArgument,
     *,
+    multiply_linear_by_learning_rate: bool = False,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "ftrl_optimizer_update",
@@ -180,7 +176,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
       "num_slot_variables": 2,
-      "num_hyperparameters": 6,
+      "num_hyperparameters": 5,
   }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_ftrl_config,
@@ -231,9 +227,6 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
                   [1, emb_dim_size],
                   ir.F32Type.get(),
               ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size], ir.IntegerType.get_signless(1)
-              ),
           ],
           [
               ir.TupleType.get_tuple([
@@ -260,87 +253,78 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
 
   with ir.InsertionPoint(entry_block):
     (
-        grad_,  # g
-        embedding_table_,  # Ē_o
-        accumulator_,  # Ā_o
-        linear_,  # L_o
-        lr_param_,  # λ
-        lr_power_param_,  # k
-        l1_param_,  # γ_1
-        l2_param_,  # γ_2
-        beta_param_,  # βZ
-        mul_by_lr_flag_,
+        grad,  # g
+        embedding_table_arg,  # Ē_o
+        accumulator_arg,  # Ā_o
+        linear_arg,  # L_o
+        lr_param,  # λ
+        lr_power_param,  # k
+        l1_param,  # γ_1
+        l2_param,  # γ_2
+        beta_param,  # βZ
     ) = entry_block.arguments
 
-    two_ = _hlo_f32(2.0, emb_dim_size)
-    zero_ = _hlo_f32(0.0, emb_dim_size)
+    two = _hlo_f32(2.0, emb_dim_size)
+    zero = _hlo_f32(0.0, emb_dim_size)
 
     # Accumulator
-    accumulator_new_ = hlo.add(accumulator_, hlo.multiply(grad_, grad_))
+    accumulator_new = hlo.add(accumulator_arg, hlo.multiply(grad, grad))
 
     # Power‑law terms
-    neg_lr_pow_ = hlo.negate(lr_power_param_)
-    p_old_ = hlo.power(accumulator_, neg_lr_pow_)
-    p_new_ = hlo.power(accumulator_new_, neg_lr_pow_)
-    delta_p_ = hlo.subtract(p_new_, p_old_)
+    neg_lr_pow = hlo.negate(lr_power_param)
+    p_old = hlo.power(accumulator_arg, neg_lr_pow)
+    p_new = hlo.power(accumulator_new, neg_lr_pow)
+    delta_p = hlo.subtract(p_new, p_old)
 
     # Linear State
-    linear_new_ = hlo.select(
-        mul_by_lr_flag_,
-        # multiply_linear_by_learning_rate = True
-        hlo.subtract(
-            hlo.add(linear_, hlo.multiply(lr_param_, grad_)),
-            hlo.multiply(delta_p_, embedding_table_),
-        ),
-        # multiply_linear_by_learning_rate = False
-        hlo.subtract(
-            hlo.add(linear_, grad_),
-            hlo.multiply(hlo.divide(delta_p_, lr_param_), embedding_table_),
-        ),
-    )
+    if multiply_linear_by_learning_rate:
+      linear_new = hlo.subtract(
+          hlo.add(linear_arg, hlo.multiply(lr_param, grad)),
+          hlo.multiply(delta_p, embedding_table_arg),
+      )
+    else:
+      linear_new = hlo.subtract(
+          hlo.add(linear_arg, grad),
+          hlo.multiply(hlo.divide(delta_p, lr_param), embedding_table_arg),
+      )
 
-    # Numerator
-    scale_ = hlo.select(
-        mul_by_lr_flag_,
-        lr_param_,
-        _hlo_const(np.ones((1, emb_dim_size), np.float32)),
-    )
-    l1_scaled = hlo.multiply(l1_param_, scale_)
-    numerator_ = hlo.select(
+    # # Numerator
+    if multiply_linear_by_learning_rate:
+      scale = lr_param
+    else:
+      scale = _hlo_const(np.ones((1, emb_dim_size), np.float32))
+
+    l1_scaled = hlo.multiply(l1_param, scale)
+    numerator = hlo.select(
         hlo.compare(
-            l1_param_,
-            zero_,
+            l1_param,
+            zero,
             comparison_direction=hlo.ComparisonDirectionAttr.get("EQ"),
             compare_type=hlo.ComparisonTypeAttr.get("FLOAT"),
         ),
-        hlo.negate(linear_new_),
+        hlo.negate(linear_new),
         hlo.subtract(
-            hlo.clamp(hlo.negate(l1_scaled), linear_new_, l1_scaled),
-            linear_new_,
+            hlo.clamp(hlo.negate(l1_scaled), linear_new, l1_scaled),
+            linear_new,
         ),
     )
 
     # Denominator
-    denominator_ = hlo.select(
-        mul_by_lr_flag_,
-        # multiply_linear_by_learning_rate = True
-        hlo.add(
-            hlo.add(
-                p_new_, hlo.multiply(two_, hlo.multiply(lr_param_, l2_param_))
-            ),
-            beta_param_,
-        ),
-        # multiply_linear_by_learning_rate = False
-        hlo.add(
-            hlo.divide(hlo.add(p_new_, beta_param_), lr_param_),
-            hlo.multiply(two_, l2_param_),
-        ),
-    )
+    if multiply_linear_by_learning_rate:
+      denominator = hlo.add(
+          hlo.add(p_new, hlo.multiply(two, hlo.multiply(lr_param, l2_param))),
+          beta_param,
+      )
+    else:
+      denominator = hlo.add(
+          hlo.divide(hlo.add(p_new, beta_param), lr_param),
+          hlo.multiply(two, l2_param),
+      )
 
     # Weight update
-    w_new = hlo.divide(numerator_, denominator_)
+    w_new = hlo.divide(numerator, denominator)
 
-    func_dialect.ReturnOp([hlo.tuple([w_new, accumulator_new_, linear_new_])])
+    func_dialect.ReturnOp([hlo.tuple([w_new, accumulator_new, linear_new])])
 
     operands = [
         lhs_row_pointers,
@@ -371,12 +355,11 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     ]
   operands += [
       # hyperparameters
-      learning_rate_,
-      learning_rate_power_,
-      l1_regularization_strength_,
-      l2_regularization_strength_,
-      beta_,
-      multiply_linear_by_learning_rate_,
+      learning_rate,
+      learning_rate_power,
+      l1_regularization_strength,
+      l2_regularization_strength,
+      beta,
   ]
   custom_call_op = jax.ffi.ffi_lowering(
       call_target,

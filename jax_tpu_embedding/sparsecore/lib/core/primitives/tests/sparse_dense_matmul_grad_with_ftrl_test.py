@@ -143,10 +143,6 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
           **{**_BASE_TEST_PARAMS, "beta": 1},
       ),
       dict(
-          testcase_name="multiply_linear_by_learning_rate_is_not_np.float32",
-          **{**_BASE_TEST_PARAMS, "multiply_linear_by_learning_rate": 1},
-      ),
-      dict(
           testcase_name="row_pointers_shape_rank_is_not_1",
           **{**_BASE_TEST_PARAMS, "row_pointers": np.array([[0, 1, 2, 3]])},
       ),
@@ -231,7 +227,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
           l1_regularization_strength,
           l2_regularization_strength,
           beta,
-          multiply_linear_by_learning_rate,
+          multiply_linear_by_learning_rate=multiply_linear_by_learning_rate,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
       )
@@ -396,7 +392,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
     l1_val = np.float32(0.001)
     l2_val = np.float32(0.002)
     beta_val = np.float32(0.01)
-    multiply_linear_by_learning_rate_flag = np.bool(False)
+    multiply_linear_by_learning_rate_flag = False
 
     activations_grad_np = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.01, np.float32)
     table_grad_np = self._compute_table_grad(
@@ -445,11 +441,12 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
             l1_val,
             l2_val,
             beta_val,
-            multiply_linear_by_learning_rate_flag,
+            multiply_linear_by_learning_rate=multiply_linear_by_learning_rate_flag,
             max_ids_per_partition=self.max_ids_per_partition,
             max_unique_ids_per_partition=self.max_unique_ids_per_partition,
             computation_name="ftrl_optimizer_test_computation",
             sharding_strategy=1,
+            minibatches=False,
         )
     )
     updated_table_unsharded = self._unshard_table(

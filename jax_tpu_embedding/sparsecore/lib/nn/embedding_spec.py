@@ -427,8 +427,6 @@ class FTRLOptimizerSpec(OptimizerSpec):
     beta: A float value.
     initial_accumulator_value: Initial value for the accumulator slot.
     initial_linear_value: Initial value for the linear slot.
-    multiply_linear_by_learning_rate: A bool value, if True, multiply the linear
-      slot by the learning rate.
   """
 
   def __init__(
@@ -442,7 +440,6 @@ class FTRLOptimizerSpec(OptimizerSpec):
       beta: float = 0.0,
       initial_accumulator_value: float = 0.1,
       initial_linear_value: float = 0.0,
-      multiply_linear_by_learning_rate: bool = False,
   ):
     super().__init__(learning_rate=learning_rate)
     self.learning_rate_power = learning_rate_power
@@ -451,7 +448,6 @@ class FTRLOptimizerSpec(OptimizerSpec):
     self.beta = beta
     self.initial_accumulator_value = initial_accumulator_value
     self.initial_linear_value = initial_linear_value
-    self.multiply_linear_by_learning_rate = multiply_linear_by_learning_rate
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return FTRLSlotVariables(
@@ -471,7 +467,6 @@ class FTRLOptimizerSpec(OptimizerSpec):
         jnp.array(self.l1_regularization_strength, dtype=jnp.float32),
         jnp.array(self.l2_regularization_strength, dtype=jnp.float32),
         jnp.array(self.beta, dtype=jnp.float32),
-        jnp.array(self.multiply_linear_by_learning_rate, dtype=jnp.bool_),
     )
 
   def __hash__(self) -> int:
@@ -483,7 +478,6 @@ class FTRLOptimizerSpec(OptimizerSpec):
         self.beta,
         self.initial_accumulator_value,
         self.initial_linear_value,
-        self.multiply_linear_by_learning_rate,
     ))
 
   def short_name(self) -> str:
