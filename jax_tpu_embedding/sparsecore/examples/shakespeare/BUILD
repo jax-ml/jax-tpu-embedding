@@ -63,6 +63,7 @@ pytype_strict_binary(
         # TPU chip configuration,
     ],
     main = "jax_sc_shakespeare_jit.py",
+    tags = ["oss_exclude"],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
@@ -127,6 +128,7 @@ pytype_strict_binary(
         # TPU chip configuration,
     ],
     main = "jax_sc_shakespeare_pmap.py",
+    tags = ["oss_exclude"],
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",

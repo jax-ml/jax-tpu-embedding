@@ -13,54 +13,6 @@
 # limitations under the License.
 workspace(name = "jax_tpu_embedding")
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
-
-###############################################################################
-##  SparseCore Dependencies
-###############################################################################
-
-HIGHWAY_VERSION = "1.2.0"
-HIGHWAY_SHA256 = "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343"
-HIGHWAY_ARCHIVE = "https://github.com/google/highway/archive/{version}.tar.gz".format(version = HIGHWAY_VERSION)
-http_archive(
-    name = "highway",
-    sha256 = HIGHWAY_SHA256,
-    strip_prefix = "highway-{version}".format(version = HIGHWAY_VERSION),
-    urls = [HIGHWAY_ARCHIVE],
-)
-
-# rules_license come _before_ XLA, since highway requires a newer version.
-maybe(
-    http_archive,
-    name = "rules_license",
-    urls = [
-        "https://github.com/bazelbuild/rules_license/releases/download/0.0.7/rules_license-0.0.7.tar.gz",
-    ],
-    sha256 = "4531deccb913639c30e5c7512a054d5d875698daeb75d8cf90f284375fe7c360",
-)
-
-###############################################################################
-##  ML Toolchain Dependencies
-##  Details: https://github.com/google-ml-infra/rules_ml_toolchain
-###############################################################################
-
-http_archive(
-    name = "rules_ml_toolchain",
-    sha256 = "9dbee8f24cc1b430bf9c2a6661ab70cbca89979322ddc7742305a05ff637ab6b",
-    strip_prefix = "rules_ml_toolchain-545c80f1026d526ea9c7aaa410bf0b52c9a82e74",
-    urls = [
-        "https://github.com/google-ml-infra/rules_ml_toolchain/archive/545c80f1026d526ea9c7aaa410bf0b52c9a82e74.tar.gz",
-    ],
-)
-
-load(
-    "@rules_ml_toolchain//cc/deps:cc_toolchain_deps.bzl",
-    "cc_toolchain_deps",
-)
-
-cc_toolchain_deps()
-
 ###############################################################################
 ##  XLA Initialization
 ###############################################################################
@@ -69,6 +21,12 @@ cc_toolchain_deps()
 # The XLA commit is determined by external/xla/workspace.bzl.
 load("//third_party/xla:workspace.bzl", xla_repo = "repo")
 xla_repo()
+
+load("@xla//:workspace4.bzl", "xla_workspace4")
+xla_workspace4()
+
+load("@xla//:workspace3.bzl", "xla_workspace3")
+xla_workspace3()
 
 # Initialize hermetic Python
 load("@xla//third_party/py:python_init_rules.bzl", "python_init_rules")
@@ -95,12 +53,6 @@ load("@pypi//:requirements.bzl", "install_deps")
 install_deps()
 
 # Load all XLA dependencies.
-load("@xla//:workspace4.bzl", "xla_workspace4")
-xla_workspace4()
-
-load("@xla//:workspace3.bzl", "xla_workspace3")
-xla_workspace3()
-
 load("@xla//:workspace2.bzl", "xla_workspace2")
 xla_workspace2()
 
@@ -110,13 +62,18 @@ xla_workspace1()
 load("@xla//:workspace0.bzl", "xla_workspace0")
 xla_workspace0()
 
+load(
+    "@rules_ml_toolchain//cc/deps:cc_toolchain_deps.bzl",
+    "cc_toolchain_deps",
+)
+cc_toolchain_deps()
+
 # Even though we don't use CUDA, this is required since it is needed
 # by TSL, one of our dependencies.
 load(
     "@rules_ml_toolchain//gpu/cuda:cuda_json_init_repository.bzl",
     "cuda_json_init_repository",
 )
-
 cuda_json_init_repository()
 
 load(
@@ -144,3 +101,19 @@ load(
 )
 
 cuda_configure(name = "local_config_cuda")
+
+###############################################################################
+##  SparseCore-Specific Dependencies
+###############################################################################
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+HIGHWAY_VERSION = "1.2.0"
+HIGHWAY_SHA256 = "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343"
+HIGHWAY_ARCHIVE = "https://github.com/google/highway/archive/{version}.tar.gz".format(version = HIGHWAY_VERSION)
+http_archive(
+    name = "highway",
+    sha256 = HIGHWAY_SHA256,
+    strip_prefix = "highway-{version}".format(version = HIGHWAY_VERSION),
+    urls = [HIGHWAY_ARCHIVE],
+)

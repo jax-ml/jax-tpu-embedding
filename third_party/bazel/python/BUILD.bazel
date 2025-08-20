@@ -21,18 +21,6 @@ package(
 )
 
 bzl_library(
-    name = "proto_bzl",
-    srcs = ["proto.bzl"],
-    visibility = ["//visibility:private"],
-)
-
-bzl_library(
-    name = "py_test_bzl",
-    srcs = ["py_test.bzl"],
-    visibility = ["//visibility:private"],
-)
-
-bzl_library(
     name = "pybind11_bzl",
     srcs = ["pybind11.bzl"],
     visibility = ["//visibility:private"],
@@ -47,11 +35,5 @@ bzl_library(
 bzl_library(
     name = "pypi_bzl",
     srcs = ["pypi.bzl"],
-    visibility = ["//visibility:private"],
-)
-
-bzl_library(
-    name = "strict_bzl",
-    srcs = ["strict.bzl"],
     visibility = ["//visibility:private"],
 )

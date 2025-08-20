@@ -14,20 +14,20 @@
 """Default (OSS) build versions of Python pytype rules."""
 
 load("@bazel_skylib//lib:collections.bzl", "collections")
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 # Placeholder to use until bazel supports pytype_library.
 def pytype_library(name, deps = [], pytype_deps = [], pytype_srcs = [], **kwargs):
     _ = (pytype_deps, pytype_srcs)  # @unused
-    native.py_library(name = name, deps = collections.uniq(deps), **kwargs)
+    py_library(name = name, deps = collections.uniq(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_binary.
 def pytype_strict_binary(name, deps = [], **kwargs):
-    native.py_binary(name = name, deps = collections.uniq(deps), **kwargs)
+    py_binary(name = name, deps = collections.uniq(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_library.
 def pytype_strict_library(name, deps = [], **kwargs):
-    native.py_library(name = name, deps = collections.uniq(deps), **kwargs)
+    py_library(name = name, deps = collections.uniq(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_contrib_test.
 def pytype_strict_contrib_test(name, deps = [], **kwargs):
