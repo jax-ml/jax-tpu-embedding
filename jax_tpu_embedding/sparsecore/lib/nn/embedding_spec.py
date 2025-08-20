@@ -128,6 +128,14 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
     """
     return ()
 
+  def slot_variables_rank(self) -> tuple[int, ...]:
+    """Ranks for each slot variable (1 for 1D per-row scalar, 2 for 2D).
+
+    Returns:
+      A tuple of integers representing the rank of each slot variable.
+    """
+    return tuple(2 for _ in self.slot_variables_initializers())
+
   def slot_variables_count(self) -> int:
     """Returns the number of slot variables for the optimizer."""
     return len(self.slot_variables_initializers())
