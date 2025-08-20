@@ -167,7 +167,7 @@ TEST(FakeAllReduceTest, TestBoolValue) {
   const int host_count = 2;
   std::unique_ptr<AllReduceInterface> all_reduce =
       std::make_unique<FakeAllReduce>(host_count);
-  std::vector<bool> results(host_count);
+  bool result[host_count];
 
   // Act
   {
@@ -175,18 +175,18 @@ TEST(FakeAllReduceTest, TestBoolValue) {
 
     // Group 0
     pool.Schedule([&]() {
-      TF_ASSERT_OK_AND_ASSIGN(results[0],
+      TF_ASSERT_OK_AND_ASSIGN(result[0],
                               all_reduce->BlockingAllReduce(0, true));
     });
     pool.Schedule([&]() {
-      TF_ASSERT_OK_AND_ASSIGN(results[1],
+      TF_ASSERT_OK_AND_ASSIGN(result[1],
                               all_reduce->BlockingAllReduce(0, false));
     });
     // Destructor waits for completion.
   }
 
   // Assert
-  EXPECT_THAT(results, Each(true));
+  EXPECT_THAT(result, Each(true));
 }
 
 }  // namespace
