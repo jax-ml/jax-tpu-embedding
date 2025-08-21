@@ -244,11 +244,13 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
   }
   CHECK_GT(options.local_device_count, 0);
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
+  CHECK(options.enable_minibatching ||
+        !options.experimental_static_single_minibatch);
 
   absl::Mutex output_mutex;
   PreprocessSparseDenseMatmulOutput out;
 
-  bool minibatching_required = 0;
+  bool minibatching_required = false;
   MinibatchingSplit minibatching_split = 0;
 
   const int num_scs = options.GetNumScs();
@@ -284,8 +286,11 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
           num_scs, options.num_sc_per_device, stacked_table_metadata,
           options.batch_number);
 
-      const int max_minibatching_buckets =
-          options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+      int max_minibatching_buckets = 1;
+      if (options.enable_minibatching &&
+          !options.experimental_static_single_minibatch) {
+        max_minibatching_buckets = CooFormat::kMaxMinibatchingBuckets;
+      }
       MatrixXi row_pointers_per_device(options.local_device_count,
                                        row_pointers_size_per_bucket *
                                            max_minibatching_buckets *
@@ -360,17 +365,17 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
         table_dropped_ids += dropped_ids;
       }
 
-      // NOTE: For non-minibatching, we can just use the buckets as
-      // minibatches directly as there is only one bucket per SC.
-
       MinibatchingSplit table_minibatching_split = 0;
-      if (options.enable_minibatching) {
+      if (options.enable_minibatching &&
+          !options.experimental_static_single_minibatch) {
         {
           absl::MutexLock minibatching_lock(&output_mutex);  // NOLINT
           minibatching_required |= table_minibatching_required;
         }
         // TODO: b/428790659 - Sync this flag across hosts.
-        if (minibatching_req_barrier->Block()) minibatching_req_barrier.reset();
+        if (minibatching_req_barrier->Block()) {
+          minibatching_req_barrier.reset();
+        }
 
         if (minibatching_required) {
           for (int local_device = 0; local_device < options.local_device_count;
@@ -395,8 +400,9 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
             minibatching_split |= table_minibatching_split;
           }
           // TODO: b/428790659 - Sync the minibatching split across hosts.
-          if (minibatching_split_barrier->Block())
+          if (minibatching_split_barrier->Block()) {
             minibatching_split_barrier.reset();
+          }
         }
       }
 
@@ -465,6 +471,8 @@ PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
 
   out.num_minibatches = minibatching_split.count() + 1;
   DCHECK(options.enable_minibatching || out.num_minibatches == 1);
+  DCHECK(!options.experimental_static_single_minibatch ||
+         out.num_minibatches == 1);
 
   return out;
 }

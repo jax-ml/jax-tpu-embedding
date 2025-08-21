@@ -34,20 +34,35 @@
 namespace jax_sc_embedding {
 namespace {
 
+// Options for filling the SparseCore input buffers.
 struct BufferFillingOptions {
+  // The local SparseCore ID on the current device.
   int local_sc_id;
+  // The input COO tensors for the current local_sc_id and minibatch.
   absl::Span<const CooFormat> coo_tensors;
 
+  // The beginning index (inclusive) in the row_pointers buffer for this
+  // segment.
   int lhs_row_begin;
+  // The ending index (exclusive) in the row_pointers buffer for this segment.
   int lhs_row_end;
 
+  // The beginning index (inclusive) in the COO buffers (embedding_ids,
+  // sample_ids, gains) for this segment.
   int coo_begin;
+  // The ending index (exclusive) in the COO buffers for this segment.
   int coo_end;
 
+  // The batch size handled by each SparseCore.
   int batch_size_per_sc;
+  // The number of SparseCores per device.
   int num_sc_per_device;
+  // The total number of SparseCores across all devices.
   int num_scs;
+  // The total size of the COO buffer for the current device.
   int coo_buffer_size;
+  // Whether minibatching is enabled.
+  bool enable_minibatching;
 };
 
 // Check if the current indexes are valid within the buffer sizes.
@@ -107,6 +122,15 @@ int GetNonSentinelCooCount(absl::Span<const CooFormat> coo_tensors,
   return coo_tensors.size();
 }
 
+// Returns the row pointer value for a given `coo_index`.
+// If minibatching is enabled, it points to the global index in the COO buffer.
+// Otherwise, it's the `coo_index` relative to the beginning of the current
+// SparseCore's COO buffer segment.
+int GetRowPointer(int coo_index, const BufferFillingOptions& options) {
+  if (options.enable_minibatching) return coo_index;
+  return coo_index - options.coo_begin;
+}
+
 // Fill the row pointers buffer from `lhs_row_begin` to `lhs_row_end` and COO
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
@@ -142,7 +166,7 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
       if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
         break;
       }
-      row_pointers[lhs_row_index++] = coo_index - options.coo_begin;
+      row_pointers[lhs_row_index++] = GetRowPointer(coo_index, options);
       // Align partition.
       PadCooBuffer(coo_index, options.coo_end,
                    /*pad_to_end=*/false, embedding_ids, sample_ids, gains);
@@ -165,7 +189,8 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
     ++written_real_coos;
   }
 
-  PadRowPointersBuffer(lhs_row_index, /*padding=*/coo_index - options.coo_begin,
+  PadRowPointersBuffer(lhs_row_index,
+                       /*padding=*/GetRowPointer(coo_index, options),
                        options.lhs_row_end, row_pointers);
   return coo_index;
 }
@@ -295,7 +320,9 @@ void FillLocalDeviceBuffer(
               .num_sc_per_device = num_sc_per_device,
               .num_scs = num_scs,
               .coo_buffer_size = coo_buffer_size,
-          }, row_pointers, embedding_ids, sample_ids, gains,
+              .enable_minibatching = options.enable_minibatching,
+          },
+          row_pointers, embedding_ids, sample_ids, gains,
           dropped_id_count_static_bound);
       lhs_row_begin = lhs_row_end;
       if (options.enable_minibatching) {
