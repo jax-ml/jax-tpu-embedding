@@ -52,6 +52,7 @@ cc_library(
     deps = [
         ":coo_format",
         ":partitioned_coo_tensors",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings:str_format",

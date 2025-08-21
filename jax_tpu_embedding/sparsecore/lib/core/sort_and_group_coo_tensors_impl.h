@@ -14,7 +14,6 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SORT_AND_GROUP_COO_TENSORS_IMPL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SORT_AND_GROUP_COO_TENSORS_IMPL_H_
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -93,6 +92,20 @@ inline void ValidateKeyCapacity(const int local_sc_id, const int key_count) {
         local_sc_id, key_count, CooFormat::kIndexMask);
   }
 }
+
+// Updates the global maximum number of ids per partition by taking the
+// element-wise maximum between the current global maximum and the provided
+// local maximum's sum across bucket.
+inline void UpdateMaxIdsPerPartition(BlockRow<int>& global_max,
+                                     const MatrixXi& local_max_per_bucket) {
+  // global_max: 1 x global_sc_count
+  // local_max: global_sc_count x bucket_count
+  DCHECK_EQ(global_max.rows(), 1);
+  DCHECK_EQ(global_max.cols(), local_max_per_bucket.rows());
+  global_max =
+      global_max.cwiseMax(local_max_per_bucket.rowwise().sum().transpose());
+}
+
 }  // namespace internal
 
 // Sorts and groups the provided COO tensors in this hierarchy: Local SC ->
@@ -107,10 +120,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    Eigen::Ref<RowVectorXi> max_ids_per_sc,
-    Eigen::Ref<RowVectorXi> max_unique_ids_per_sc,
-    Eigen::Ref<RowVectorXi> required_buffer_size_per_sc,
-    int& dropped_id_counter, SplitType& minibatching_split) {
+    internal::StatsPerDevice& stats, SplitType& minibatching_split) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const std::vector<CooFormat>& coo_tensors = extracted_coo_tensors.coo_tensors;
   const int num_sc_per_device = options.num_sc_per_device;
@@ -136,10 +146,6 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       coo_tensors.size(), num_sc_per_device, global_sc_count, bucket_count);
 
   uint32_t coo_tensor_index = 0;
-  // Initialize the aggregated max ids and unique ids per SC to 0.
-  max_ids_per_sc.fill(0);
-  max_unique_ids_per_sc.fill(0);
-  required_buffer_size_per_sc.fill(0);
 
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
@@ -203,7 +209,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
                 max_ids_per_partition;
         if (over_capacity) {
           // Dropped id.
-          ++dropped_id_counter;
+          ++stats.dropped_id_count;
           continue;
         } else {
           grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
@@ -222,19 +228,14 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     grouped_coo_tensors.FillRemainingScBuckets();
 
     // Update global max using this device's values.
-    for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
-      const int ids_per_partition =
-          ids_per_sc_partition_per_bucket.row(global_sc_id).sum();
-      const int unique_ids_per_partition =
-          unique_ids_per_partition_per_bucket.row(global_sc_id).sum();
-
-      max_ids_per_sc[global_sc_id] =
-          std::max(max_ids_per_sc[global_sc_id], ids_per_partition);
-      required_buffer_size_per_sc[local_sc_id] +=
-          RoundUpTo(ids_per_partition, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
-      max_unique_ids_per_sc[global_sc_id] = std::max(
-          max_unique_ids_per_sc[global_sc_id], unique_ids_per_partition);
-    }
+    internal::UpdateMaxIdsPerPartition(stats.max_ids_per_partition,
+                                       ids_per_sc_partition_per_bucket);
+    internal::UpdateMaxIdsPerPartition(stats.max_unique_ids_per_partition,
+                                       unique_ids_per_partition_per_bucket);
+    auto partition_sizes =
+        ids_per_sc_partition_per_bucket.rowwise().sum().array();
+    stats.required_buffer_size[local_sc_id] +=
+        RoundUpTo(partition_sizes, TPU_VECTOR_REGISTER_ALIGMENT_SIZE).sum();
 
     if (VLOG_IS_ON(2)) {
       LOG(INFO) << "Observed ids per partition/sparsecore"

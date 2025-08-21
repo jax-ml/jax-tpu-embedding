@@ -129,7 +129,7 @@ TEST(InputPreprocessingUtilTest, IncrementScId) {
   EXPECT_THAT(sc_id, Pair(1, 0));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup) {
+TEST(SortAndGroupTest, Base) {
   std::vector<CooFormat> coo_formats;
 
   for (int row = 0; row < 8; ++row) {
@@ -138,9 +138,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -154,12 +151,14 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
       .allow_id_dropping = false,
   };
   MinibatchingSplit minibatching_split = 0;
-  int dropped_id_counter = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_split);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
   std::vector<CooFormat> expected_sc_0;
   expected_sc_0.push_back(CooFormat(0, 0, 1.0));
@@ -213,13 +212,16 @@ TEST(InputPreprocessingUtilTest, SortAndGroup) {
               ElementsAreArray(expected_sc_2));
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/3, /*bucket_id=*/0),
               ElementsAreArray(expected_sc_3));
-  EXPECT_EQ(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({2, 2, 2, 2}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({1, 1, 1, 1}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({32, 32, 32, 32}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
+TEST(SortAndGroupTest, TwoScs) {
   std::vector<CooFormat> coo_formats;
 
   for (int row = 0; row < 8; ++row) {
@@ -228,9 +230,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0}};
   ExtractedCooTensors extracted_coo_tensors(2, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -243,15 +242,17 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
       .num_sc_per_device = 2,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/2,
+                              /*num_sc_per_device=*/2);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
+  EXPECT_EQ(minibatching_split, 0);
 
   EXPECT_THAT(
       coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
@@ -271,13 +272,15 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_TwoScs) {
           CooFormat(5, 1, 1.0), CooFormat(6, 1, 1.0), CooFormat(7, 1, 1.0),
           CooFormat(4, 3, 1.0), CooFormat(5, 3, 1.0), CooFormat(6, 3, 1.0),
           CooFormat(7, 3, 1.0), CooFormat(8, 0, 0.0)));
-  EXPECT_EQ(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({16, 16}));
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition, ElementsAreArray({8, 8}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({2, 2}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({16, 16}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
+TEST(SortAndGroupTest, VerifyIdLimitations1) {
   std::vector<CooFormat> coo_formats;
 
   // With 8 samples, each sample has 4 ids [0, 1, 2, 3]
@@ -296,9 +299,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -311,22 +311,27 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations1) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
-  EXPECT_THAT(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+  EXPECT_EQ(minibatching_split, 0);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({2, 2, 2, 2}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({1, 1, 1, 1}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({32, 32, 32, 32}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
+TEST(SortAndGroupTest, VerifyIdLimitations2) {
   std::vector<CooFormat> coo_formats;
 
   // With 16 samples, each sample has 4 ids [0, 1, 2, 3]
@@ -345,9 +350,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 16);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -360,22 +362,27 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations2) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
-  EXPECT_THAT(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+  EXPECT_EQ(minibatching_split, 0);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({4, 4, 4, 4}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({1, 1, 1, 1}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({32, 32, 32, 32}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
+TEST(SortAndGroupTest, VerifyIdLimitations3) {
   std::vector<CooFormat> coo_formats;
 
   // With 16 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
@@ -399,9 +406,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 16);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -414,23 +418,28 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations3) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
-  EXPECT_THAT(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({8, 8, 8, 8}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
+  EXPECT_EQ(minibatching_split, 0);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({8, 8, 8, 8}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({2, 2, 2, 2}));
   // 4 partitions of size 8 with 2 elements each
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({32, 32, 32, 32}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
+TEST(SortAndGroupTest, VerifyIdLimitations4) {
   std::vector<CooFormat> coo_formats;
 
   // With 128 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
@@ -454,9 +463,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 128);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -469,24 +475,28 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations4) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
-  EXPECT_THAT(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({64, 64, 64, 64}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({2, 2, 2, 2}));
+  EXPECT_EQ(minibatching_split, 0);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({64, 64, 64, 64}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({2, 2, 2, 2}));
   // 8 partitions of size 256 with 32 elements each
-  EXPECT_THAT(required_buffer_sizes_per_sc,
+  EXPECT_THAT(stats_per_device.required_buffer_size,
               ElementsAreArray({256, 256, 256, 256}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
+TEST(SortAndGroupTest, VerifyIdLimitations5) {
   std::vector<CooFormat> coo_formats;
 
   // With 128 samples, each sample has 8 ids [0, 4, 8, 16]
@@ -505,9 +515,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
     coo_formats.push_back(CooFormat(row, 8, 1.0));
     coo_formats.push_back(CooFormat(row, 16, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 128);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -520,24 +527,27 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations5) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
-  EXPECT_THAT(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({128, 0, 0, 0}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({4, 0, 0, 0}));
+  EXPECT_EQ(minibatching_split, 0);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({128, 0, 0, 0}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({4, 0, 0, 0}));
   // 1 partition of size 128 with 128 elements
-  EXPECT_THAT(required_buffer_sizes_per_sc,
+  EXPECT_THAT(stats_per_device.required_buffer_size,
               ElementsAreArray({128, 128, 128, 128}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
+TEST(SortAndGroupTest, VerifyIdLimitations6) {
   std::vector<CooFormat> coo_formats;
 
   // This is one of the worst case scenarios.
@@ -556,9 +566,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
   for (int row = 0; row < 128; ++row) {
     coo_formats.push_back(CooFormat(row, row * 4, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 128);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -571,23 +578,27 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_VerifyIdLimitations6) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
-  EXPECT_THAT(dropped_id_counter, 0);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({32, 0, 0, 0}));
+  EXPECT_EQ(minibatching_split, 0);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({32, 0, 0, 0}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({32, 0, 0, 0}));
   // 1 partition of size 32 with 32 elements
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({32, 32, 32, 32}));
 }
 
-TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
+TEST(SortAndGroupTest, IdDropping) {
   std::vector<CooFormat> coo_formats;
 
   // With 16 samples, each sample has 4 ids [0, 1, 2, 3]
@@ -608,9 +619,6 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
   }
   // Force dropping of IDs here with max_ids_per_partition == 2
   // The later 2 samples for each sparsecore will be dropped.
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 16);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -624,17 +632,21 @@ TEST(InputPreprocessingUtilTest, SortAndGroup_IdDropping) {
       .allow_id_dropping = true,
   };
   bool minibatching_split = 0;
-  int dropped_id_counter = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_split);
-  EXPECT_THAT(dropped_id_counter, 32);
-  EXPECT_THAT(max_id_per_sc, ElementsAreArray({4, 4, 4, 4}));
-  EXPECT_THAT(max_unique_id_per_sc, ElementsAreArray({1, 1, 1, 1}));
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 32);
+  EXPECT_THAT(stats_per_device.max_ids_per_partition,
+              ElementsAreArray({4, 4, 4, 4}));
+  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
+              ElementsAreArray({1, 1, 1, 1}));
   // 4 partition of size 8 with 4 element each
-  EXPECT_THAT(required_buffer_sizes_per_sc, ElementsAreArray({32, 32, 32, 32}));
+  EXPECT_THAT(stats_per_device.required_buffer_size,
+              ElementsAreArray({32, 32, 32, 32}));
 
   // Note that sample 2, 3, 6, 7, 10, 11, 14, 15 are dropped.
   // It's unclear how embedding activations will be constructed without these
@@ -702,9 +714,6 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -717,26 +726,26 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
   };
-  bool minibatching_required = false;
-  int dropped_id_counter = 0;
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_required);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
-  EXPECT_FALSE(minibatching_required);
+  EXPECT_EQ(minibatching_split, 0);
 
-  Eigen::VectorXi row_pointers(8 * 4);
-  Eigen::VectorXi embedding_ids(40 * 4);
-  Eigen::VectorXi sample_ids(40 * 4);
-  Eigen::VectorXf gains(40 * 4);
+  CsrArraysPerHost csr_arrays_per_host(1, 8 * 4, 40 * 4);
+  internal::CsrArraysPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
   int dropped_static_bound = 0;
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
-                        /*batch_size_per_sc=*/2, options, row_pointers,
-                        embedding_ids, sample_ids, gains, dropped_static_bound);
+                        /*batch_size_per_sc=*/2, options, csr_array,
+                        dropped_static_bound);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32,  //
@@ -744,7 +753,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       2, 10, 18, 26, 32, 32, 32, 32,  //
       2, 10, 18, 26, 32, 32, 32, 32,  //
   };
-  EXPECT_THAT(row_pointers, ElementsAreArray(expected_row_pointers));
+  EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
 
   std::array<int, 4 * 40> expected_embedding_ids = {
       0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
@@ -769,7 +778,8 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
   };
 
-  EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
+  EXPECT_THAT(csr_array.embedding_ids,
+              ElementsAreArray(expected_embedding_ids));
 
   std::array<int, 4 * 40> expected_sample_ids = {
       0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
@@ -793,7 +803,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
   };
-  EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
+  EXPECT_THAT(csr_array.sample_ids, ElementsAreArray(expected_sample_ids));
 
   auto expected_gains = ElementsAre(
       1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
@@ -822,7 +832,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       IsNan()  //
   );
   EXPECT_EQ(dropped_static_bound, 0);
-  EXPECT_THAT(gains, expected_gains);
+  EXPECT_THAT(csr_array.gains, expected_gains);
 }
 
 TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
@@ -834,9 +844,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -851,25 +858,25 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .enable_minibatching = true,
   };
   MinibatchingSplit minibatching_split = 0;
-  int dropped_id_counter = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc,
-          dropped_id_counter, minibatching_split);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
 
   coo_tensors_by_id.MergeAll();
 
-  Eigen::VectorXi row_pointers(8 * 4);
-  Eigen::VectorXi embedding_ids(40 * 4);
-  Eigen::VectorXi sample_ids(40 * 4);
-  Eigen::VectorXf gains(40 * 4);
-  int dropped_static_bound = 0;
+  CsrArraysPerHost csr_arrays_per_host(1, 8 * 4, 40 * 4);
+  internal::CsrArraysPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
-                        /*batch_size_per_sc=*/2, options, row_pointers,
-                        embedding_ids, sample_ids, gains, dropped_static_bound);
+                        /*batch_size_per_sc=*/2, options, csr_array,
+                        stats_per_device.dropped_id_count);
 
   std::array<int, 32> expected_row_pointers = {
       2,  10,  18,  26,  32,  32,  32,  32,  // MB0
@@ -877,7 +884,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       66, 74,  82,  90,  96,  96,  96,  96,  // MB2
       98, 106, 114, 122, 128, 128, 128, 128  // MB3
   };
-  EXPECT_THAT(row_pointers, ElementsAreArray(expected_row_pointers));
+  EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
 
   std::array<int, 4 * 40> expected_embedding_ids = {
       0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
@@ -902,7 +909,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
   };
 
-  EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
+  EXPECT_THAT(csr_array.embedding_ids,
+              ElementsAreArray(expected_embedding_ids));
 
   std::array<int, 4 * 40> expected_sample_ids = {
       0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
@@ -926,7 +934,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
   };
-  EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
+  EXPECT_THAT(csr_array.sample_ids, ElementsAreArray(expected_sample_ids));
 
   auto expected_gains = ElementsAre(
       1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
@@ -954,8 +962,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
       IsNan()  //
   );
-  EXPECT_EQ(dropped_static_bound, 0);
-  EXPECT_THAT(gains, expected_gains);
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(csr_array.gains, expected_gains);
 }
 
 TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
@@ -966,9 +974,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       coo_formats.push_back(CooFormat(row, col, 1.0));
     }
   }
-  Eigen::VectorXi max_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0, 0, 0, 0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0, 0, 0, 0}};
   ExtractedCooTensors extracted_coo_tensors(4, 8);
   extracted_coo_tensors.coo_tensors = coo_formats;
   StackedTableMetadata stacked_table_metadata(
@@ -983,13 +988,15 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .enable_minibatching = true,
   };
   MinibatchingSplit minibatching_split = 0;
-  int dropped_ids = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options, max_id_per_sc,
-          max_unique_id_per_sc, required_buffer_sizes_per_sc, dropped_ids,
-          minibatching_split);
-  EXPECT_EQ(dropped_ids, 0);
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
 
   // 4 Minibatches of bucket sizes [16,8,24,16]
   // 62:                  32
@@ -1024,20 +1031,20 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   EXPECT_EQ(coo_tensors_by_id(0, 3).size(), 16 * 2 + 1);
 
   const int coo_buffer_size_per_sc = 168;
-
-  Eigen::VectorXi row_pointers(32 * 4);
-  Eigen::VectorXi embedding_ids(coo_buffer_size_per_sc * 4);
-  Eigen::VectorXi sample_ids(coo_buffer_size_per_sc * 4);
-  Eigen::VectorXf gains(coo_buffer_size_per_sc * 4);
-  int dropped_static_bound = 0;
+  const int row_pointers_size = 128;
+  const int num_devices = 1;
+  CsrArraysPerHost csr_arrays_per_host = CsrArraysPerHost(
+      num_devices, row_pointers_size, coo_buffer_size_per_sc * 4);
+  internal::CsrArraysPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_bucket=*/8,
                         coo_buffer_size_per_sc,
-                        /*batch_size_per_sc=*/2, options, row_pointers,
-                        embedding_ids, sample_ids, gains, dropped_static_bound);
+                        /*batch_size_per_sc=*/2, options, csr_array,
+                        stats_per_device.dropped_id_count);
 
-  std::array<int, 128> expected_row_pointers = {
+  std::array<int, row_pointers_size> expected_row_pointers = {
       // SC0 (Base: 0)
       8,   16,  24,  32,  32,  32,  32,  32,   // MB0
       36,  44,  52,  60,  60,  60,  60,  60,   // MB1
@@ -1059,7 +1066,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       556, 572, 588, 604, 604, 604, 604, 604,  // MB2
       616, 624, 632, 640, 640, 640, 640, 640,  // MB3
   };
-  EXPECT_THAT(row_pointers, ElementsAreArray(expected_row_pointers));
+  EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
 
   RowVectorXi expected_embedding_ids =
       RowVectorXi::Constant(coo_buffer_size_per_sc * 4, INT_MAX);
@@ -1122,10 +1129,12 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
         .setOnes();
   }
 
-  EXPECT_THAT(embedding_ids, ElementsAreArray(expected_embedding_ids));
-  EXPECT_THAT(sample_ids, ElementsAreArray(expected_sample_ids));
-  EXPECT_THAT(gains, Pointwise(NanSensitiveFloatEq(), expected_gains));
-  EXPECT_EQ(dropped_static_bound, 0);
+  EXPECT_THAT(csr_array.embedding_ids,
+              ElementsAreArray(expected_embedding_ids));
+  EXPECT_THAT(csr_array.sample_ids, ElementsAreArray(expected_sample_ids));
+  EXPECT_THAT(csr_array.gains,
+              Pointwise(NanSensitiveFloatEq(), expected_gains));
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
 }
 
 TEST(InputPreprocessingUtilTest,
@@ -1140,14 +1149,11 @@ TEST(InputPreprocessingUtilTest,
                                 /*batch_size_for_device=*/4);
   extracted.coo_tensors = coo_formats;
 
-  Eigen::VectorXi max_id_per_sc{{0}};
-  Eigen::VectorXi max_unique_id_per_sc{{0}};
-  Eigen::VectorXi required_buffer_sizes_per_sc{{0}};
-
-  StackedTableMetadata meta(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
-      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
+  StackedTableMetadata meta("stacked_table", /*feature_index=*/0,
+                            /*max_ids_per_partition=*/32,
+                            /*max_unique_ids_per_partition=*/32,
+                            /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                            /*batch_size=*/0);
 
   PreprocessSparseDenseMatmulInputOptions opts{
       .local_device_count = 1,
@@ -1157,25 +1163,27 @@ TEST(InputPreprocessingUtilTest,
   };
 
   bool minibatching_required = false;
-  int dropped_sort = 0;
-  PartitionedCooTensors grouped =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted, meta, opts, max_id_per_sc, max_unique_id_per_sc,
-          required_buffer_sizes_per_sc, dropped_sort, minibatching_required);
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/1,
+                              /*num_sc_per_device=*/1);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
+  PartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
+      extracted, meta, opts, stats_per_device, minibatching_required);
+  int dropped_sort = stats_per_device.dropped_id_count;
 
   const int row_ptrs_size_per_bucket = 4;
   const int coo_buffer_size_per_sc = 3;
   const int batch_size_per_sc = 4;
 
-  Eigen::VectorXi row_pointers(row_ptrs_size_per_bucket);
-  Eigen::VectorXi embedding_ids(coo_buffer_size_per_sc);
-  Eigen::VectorXi sample_ids(coo_buffer_size_per_sc);
-  Eigen::VectorXf gains(coo_buffer_size_per_sc);
+  CsrArraysPerHost csr_arrays_per_host(1, row_ptrs_size_per_bucket,
+                                       coo_buffer_size_per_sc);
+  internal::CsrArraysPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
                         coo_buffer_size_per_sc, batch_size_per_sc, opts,
-                        row_pointers, embedding_ids, sample_ids, gains,
+                        csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
 
   EXPECT_EQ(dropped_static, 1);
