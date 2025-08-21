@@ -17,6 +17,7 @@
 
 #include <cstdint>
 
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
@@ -27,22 +28,22 @@ class AbstractInputBatch {
  public:
   struct ExtractCooTensorsOptions {
     // Start index of the slice to be processed (inclusive).
-    const int slice_start;
+    const int slice_start ABSL_REQUIRE_EXPLICIT_INIT;
     // End index of the slice to be processed (exclusive).
-    const int slice_end;
+    const int slice_end ABSL_REQUIRE_EXPLICIT_INIT;
     // Row offset to be added to the sample id.
-    const int row_offset;
+    const int row_offset ABSL_REQUIRE_EXPLICIT_INIT;
     // Column offset to be added to the embedding id.
-    const int col_offset;
+    const int col_offset ABSL_REQUIRE_EXPLICIT_INIT;
     // Number of bits to shift the embedding id.
-    const int col_shift;
+    const int col_shift ABSL_REQUIRE_EXPLICIT_INIT;
     // Number of sparse cores per device. Used to compute COO tensor counts per
     // SC.
-    const int num_sc_per_device;
+    const int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
     // Number of sparse cores.
-    const uint32_t num_scs;
+    const uint32_t num_scs ABSL_REQUIRE_EXPLICIT_INIT;
     // Combiner to be used for the row.
-    const RowCombiner combiner;
+    const RowCombiner combiner ABSL_REQUIRE_EXPLICIT_INIT;
   };
 
   // Return the batch size or the number of samples in this input batch.

@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
@@ -37,32 +38,32 @@ namespace {
 // Options for filling the SparseCore input buffers.
 struct BufferFillingOptions {
   // The local SparseCore ID on the current device.
-  int local_sc_id;
+  int local_sc_id ABSL_REQUIRE_EXPLICIT_INIT;
   // The input COO tensors for the current local_sc_id and minibatch.
-  absl::Span<const CooFormat> coo_tensors;
+  absl::Span<const CooFormat> coo_tensors ABSL_REQUIRE_EXPLICIT_INIT;
 
   // The beginning index (inclusive) in the row_pointers buffer for this
   // segment.
-  int lhs_row_begin;
+  int lhs_row_begin ABSL_REQUIRE_EXPLICIT_INIT;
   // The ending index (exclusive) in the row_pointers buffer for this segment.
-  int lhs_row_end;
+  int lhs_row_end ABSL_REQUIRE_EXPLICIT_INIT;
 
   // The beginning index (inclusive) in the COO buffers (embedding_ids,
   // sample_ids, gains) for this segment.
-  int coo_begin;
+  int coo_begin ABSL_REQUIRE_EXPLICIT_INIT;
   // The ending index (exclusive) in the COO buffers for this segment.
-  int coo_end;
+  int coo_end ABSL_REQUIRE_EXPLICIT_INIT;
 
   // The batch size handled by each SparseCore.
-  int batch_size_per_sc;
+  int batch_size_per_sc ABSL_REQUIRE_EXPLICIT_INIT;
   // The number of SparseCores per device.
-  int num_sc_per_device;
+  int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
   // The total number of SparseCores across all devices.
-  int num_scs;
+  int num_scs ABSL_REQUIRE_EXPLICIT_INIT;
   // The total size of the COO buffer for the current device.
-  int coo_buffer_size;
+  int coo_buffer_size ABSL_REQUIRE_EXPLICIT_INIT;
   // Whether minibatching is enabled.
-  bool enable_minibatching;
+  bool enable_minibatching ABSL_REQUIRE_EXPLICIT_INIT;
 };
 
 // Check if the current indexes are valid within the buffer sizes.

@@ -52,6 +52,7 @@ cc_library(
     deps = [
         ":coo_format",
         ":partitioned_coo_tensors",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings:str_format",
@@ -65,7 +66,10 @@ cc_library(
 cc_library(
     name = "abstract_input_batch",
     hdrs = ["abstract_input_batch.h"],
-    deps = [":input_preprocessing_util"],
+    deps = [
+        ":input_preprocessing_util",
+        "@com_google_absl//absl/base:core_headers",
+    ],
 )
 
 pybind_library(

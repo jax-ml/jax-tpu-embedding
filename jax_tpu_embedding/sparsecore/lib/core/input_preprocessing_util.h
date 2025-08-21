@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -63,9 +64,9 @@ enum class FeatureStackingStrategy {
 enum class ShardingStrategy : int { kMod = 1 };
 
 struct PreprocessSparseDenseMatmulInputOptions {
-  const int local_device_count;
-  const int global_device_count;
-  const int num_sc_per_device;
+  const int local_device_count ABSL_REQUIRE_EXPLICIT_INIT;
+  const int global_device_count ABSL_REQUIRE_EXPLICIT_INIT;
+  const int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   const bool allow_id_dropping = true;
   FeatureStackingStrategy feature_stacking_strategy =
