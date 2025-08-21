@@ -32,7 +32,6 @@ else:
   DLL = layout.DeviceLocalLayout  # type: ignore
 Layout = layout.Format
 LogicalNames = typing.LogicalNames
-P = jax.sharding.PartitionSpec
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
 EmbeddingLookupInput = embedding.PreprocessedInput
@@ -60,7 +59,8 @@ def with_sparsecore_layout(
     fn: Callable[..., Any],
     names: LogicalNames,
     mesh: jax.sharding.Mesh,
-):
+) -> Callable[..., Any]:
+  """Wraps a function to add a SparseCore layout."""
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
     return WithSparseCoreLayout(fn(*args, **kwargs), names, mesh=mesh)
@@ -73,7 +73,7 @@ class SparseCoreEmbed(nn.Module):
 
   # A sequence of FeatureSpecs to specify the configurations for the
   # input feature.
-  feature_specs: Nested[embedding_spec.FeatureSpec]
+  feature_specs: embedding.Nested[embedding_spec.FeatureSpec]
   # Axis in the mesh to use for sharding.
   sharding_axis: str = 'sparsecore_sharding'
   # Mesh to use for the embedding layer.
@@ -94,8 +94,10 @@ class SparseCoreEmbed(nn.Module):
     super().__post_init__()
 
   def setup(self):
-    self.embedding_table_partition = P(self.sharding_axis, None)
-    self.data_partition = P(self.sharding_axis)
+    self.embedding_table_partition = jax.sharding.PartitionSpec(
+        self.sharding_axis, None
+    )
+    self.data_partition = jax.sharding.PartitionSpec(self.sharding_axis)
     self.num_shards = self.mesh.shape[self.sharding_axis]
 
     initializer = functools.partial(
@@ -118,17 +120,17 @@ class SparseCoreEmbed(nn.Module):
       self, initializer: Callable[[jax.Array], tuple[jax.Array, ...]]
   ):
     return with_sparsecore_layout(
-        initializer,
-        (self.sharding_axis,),
+        fn=initializer,
+        names=(self.sharding_axis, None),
         mesh=self.mesh,
     )
 
   def preprocess_inputs(
       self,
       step: int,
-      features: Nested[np.ndarray],
-      features_weights: Nested[np.ndarray],
-  ) -> EmbeddingLookupInput:
+      features: embedding.Nested[np.ndarray],
+      features_weights: embedding.Nested[np.ndarray],
+  ) -> embedding.PreprocessedInput:
     """Preprocesses the input for sparse dense matmul.
 
     This method do not need to be invoked with module.apply().
@@ -157,8 +159,8 @@ class SparseCoreEmbed(nn.Module):
     )[0]
 
   def __call__(
-      self, embedding_lookup_inputs: EmbeddingLookupInput
-  ) -> Nested[jax.Array]:
+      self, embedding_lookup_inputs: embedding.PreprocessedInput
+  ) -> embedding.Nested[jax.Array]:
     """Computes the embedding activations.
 
     Args:
@@ -175,8 +177,8 @@ class SparseCoreEmbed(nn.Module):
 
   def apply_gradient(
       self,
-      gradients: Nested[jax.Array],
-      embedding_lookup_inputs: EmbeddingLookupInput,
+      gradients: embedding.Nested[jax.Array],
+      embedding_lookup_inputs: embedding.PreprocessedInput,
   ) -> Mapping[str, Mapping[str, jax.Array]]:
     """Apply the gradients to the embedding variables.
 
@@ -202,7 +204,7 @@ class SparseCoreEmbed(nn.Module):
 @functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
 def _emb_lookup(
     embedding_layer: SparseCoreEmbed,
-    embedding_lookup_inputs: EmbeddingLookupInput,
+    embedding_lookup_inputs: embedding.PreprocessedInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
   pt = embedding_layer.embedding_table_partition
@@ -226,7 +228,7 @@ def _emb_lookup(
 
 def _emb_lookup_fwd(
     embedding_layer: SparseCoreEmbed,
-    embedding_lookup_inputs: EmbeddingLookupInput,
+    embedding_lookup_inputs: embedding.PreprocessedInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
   return _emb_lookup(

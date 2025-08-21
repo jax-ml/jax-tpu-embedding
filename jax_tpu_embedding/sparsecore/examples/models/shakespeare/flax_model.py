@@ -20,7 +20,6 @@ from jax_tpu_embedding.sparsecore.lib.flax import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 
-
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
 
@@ -30,19 +29,39 @@ Nested = embedding.Nested
 ################################################################################
 class Model(nn.Module):
   """Shakespeare model using embedding layer."""
-  feature_specs: Nested[embedding_spec.FeatureSpec]
 
+  feature_specs: Nested[embedding_spec.FeatureSpec]
   global_batch_size: int
   vocab_size: int
   seq_len: int
   embedding_size: int
-  table_name: str = 'shakespeare_table'
   feature_name: str = 'shakespeare_feature'
   mesh: jax.sharding.Mesh | None = None
   sharding_axis: str = 'sparsecore_sharding'
 
+  def add_sharding_constraint(self, x: jax.Array, names: tuple[str | None]):
+    # Add a sharding constraint to the array.
+    #
+    # Add a sharding constraint to the array to ensure that the sharding
+    # information is not lost during compilation. This may not be necessary but
+    # it helps SPMD and ensures that the sharding information is as expected.
+    #
+    # Args:
+    #   x: The array to add the sharding constraint to.
+    #   names: The mesh axes for the partition spec.
+    #
+    # Returns:
+    #   The array with the sharding constraint added.
+    return jax.lax.with_sharding_constraint(
+        x,
+        jax.sharding.NamedSharding(
+            self.mesh, jax.sharding.PartitionSpec(*names)
+        ),
+    )
+
   @nn.compact
-  def __call__(self, embedding_lookup_inputs: embed.EmbeddingLookupInput):
+  def __call__(self, embedding_lookup_inputs: embedding.PreprocessedInput):
+    # Run the embedding layer.
     x = embed.SparseCoreEmbed(
         feature_specs=self.feature_specs,
         mesh=self.mesh,
@@ -52,9 +71,28 @@ class Model(nn.Module):
     # Unpack the activations.
     x = x[self.feature_name]
     x = jnp.reshape(x, (self.global_batch_size, -1))
+    x = self.add_sharding_constraint(x, (self.sharding_axis,))
 
-    # Apply the model.
-    x = nn.Dense(self.embedding_size)(x)
-    x = nn.Dense(self.vocab_size)(x)
+    # Apply the dense portion of the model.
+    x = nn.Dense(
+        self.embedding_size,
+        kernel_init=nn.with_partitioning(
+            nn.initializers.xavier_uniform(), (self.sharding_axis,)
+        ),
+        bias_init=nn.with_partitioning(
+            nn.initializers.zeros, (self.sharding_axis,)
+        ),
+    )(x)
+    x = self.add_sharding_constraint(x, (self.sharding_axis,))
+    x = nn.Dense(
+        self.vocab_size,
+        kernel_init=nn.with_partitioning(
+            nn.initializers.xavier_uniform(), (self.sharding_axis,)
+        ),
+        bias_init=nn.with_partitioning(
+            nn.initializers.zeros, (self.sharding_axis,)
+        ),
+    )(x)
+    x = self.add_sharding_constraint(x, (self.sharding_axis,))
 
     return x

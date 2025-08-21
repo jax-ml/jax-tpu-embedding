@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
-from typing import Tuple
 
 from absl.testing import absltest
 import einops
@@ -197,8 +196,8 @@ class EmbeddingLayerTest(absltest.TestCase):
 
   def _row_initialize_with_padding(
       self,
-      shape: Tuple[int, ...],
-      padded_shape: Tuple[int, ...],
+      shape: tuple[int, ...],
+      padded_shape: tuple[int, ...],
       offset: int = 0,
       pad_value: float = _PAD_VALUE,
   ):

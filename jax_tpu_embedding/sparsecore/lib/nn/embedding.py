@@ -16,7 +16,7 @@
 import collections
 import dataclasses
 import functools
-from typing import List, Mapping, NamedTuple, Sequence, Tuple, TypeAlias, TypeVar, Union
+from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union
 import warnings
 
 from absl import logging
@@ -119,8 +119,8 @@ class PreprocessedInput(struct.PyTreeNode):
   """
 
   sparse_dense_matmul_input: SparseDenseMatmulInput
-  num_minibatches: jnp.ndarray = struct.field(
-      default_factory=lambda: jnp.array(1)
+  num_minibatches: np.ndarray = struct.field(
+      default_factory=lambda: np.array(1)
   )
 
   # Backward compatibility properties and functions. This class acts as a
@@ -1068,7 +1068,7 @@ def _init_stacked_embedding_table(
     stack_name: str,
     table_specs: List[embedding_spec.TableSpec],
     global_sharding: jax.sharding.NamedSharding,
-    sharding_axis: str | Tuple[str, ...],
+    sharding_axis: str | tuple[str, ...],
     num_sparsecore_per_device: int | None = None,
 ) -> EmbeddingVariables:
   """Initializes a stacked embedding table."""
