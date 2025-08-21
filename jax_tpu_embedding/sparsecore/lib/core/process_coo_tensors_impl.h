@@ -61,6 +61,9 @@ void ProcessCooTensors(
 
   const int num_scs_bit = std::log2(options.num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
+  DCHECK_EQ(
+      extracted_coo_tensors.batch_size_for_device % options.num_sc_per_device,
+      0);
   const int batch_size_per_sc =
       extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   CHECK_GT(batch_size_per_sc, 0);

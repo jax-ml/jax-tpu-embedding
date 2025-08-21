@@ -103,6 +103,15 @@ void ExtractCooTensorsForSingleFeatureSlice(
       },
       extracted_coo_tensors);
 }
+
+void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
+                          absl::string_view stacked_table_name) {
+  CHECK_EQ(batch_size_for_device % num_sc_per_device, 0) << absl::StrFormat(
+      "batch_size_for_device (%d) for stacked table '%s' must be divisible by "
+      "num_sc_per_device (%d).",
+      batch_size_for_device, stacked_table_name, num_sc_per_device);
+}
+
 }  // namespace
 
 namespace internal {
@@ -119,6 +128,8 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
         input_batches[feature_metadata.feature_index]->size() /
         options.local_device_count;
   }
+  CheckDeviceBatchSize(batch_size_for_device, options.num_sc_per_device,
+                       stacked_table_metadata[0].name);
 
   int feature_slices_per_device;
   switch (options.feature_stacking_strategy) {
