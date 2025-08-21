@@ -22,6 +22,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "fuzztest/fuzztest.h"
 #include "absl/algorithm/container.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
@@ -58,6 +59,25 @@ TEST(InputPreprocessingUtilTest, ColIds) {
                           /*num_scs_mod=*/3),
       26);
 }
+
+void GetColIdIsCorrect(int embedding_id, int col_shift,
+                       int col_offset_per_shard, int num_scs_bit) {
+  const int num_scs = 1 << num_scs_bit;
+  const int num_scs_mod = num_scs - 1;
+  const int col_offset = col_offset_per_shard * num_scs;
+  int col_id =
+      CooFormat::GetColId(embedding_id, col_shift, col_offset, num_scs_mod);
+  // Partition ID is shifted by col_shift.
+  EXPECT_EQ(col_id % num_scs, (embedding_id + col_shift) % num_scs);
+  // Local embedding ID is shifted by col_offset.
+  EXPECT_EQ(col_id / num_scs, (embedding_id + col_offset) / num_scs);
+}
+
+FUZZ_TEST(InputPreprocessingUtilTest, GetColIdIsCorrect)
+    .WithDomains(/*embedding_id=*/fuzztest::InRange(0, 1000000),
+                 /*col_shift=*/fuzztest::InRange(0, 1000000),
+                 /*col_offset_per_shard=*/fuzztest::InRange(0, 1000000),
+                 /*num_scs_bit=*/fuzztest::InRange(0, 10));
 
 TEST(InputPreprocessingUtilTest, CeilOfRatio) {
   EXPECT_EQ(CeilOfRatio(/*numerator=*/1, /*denominator=*/1), 1);

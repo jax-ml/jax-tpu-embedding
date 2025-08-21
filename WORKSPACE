@@ -20,6 +20,7 @@ workspace(name = "jax_tpu_embedding")
 
 # The XLA commit is determined by external/xla/workspace.bzl.
 load("//third_party/xla:workspace.bzl", xla_repo = "repo")
+
 xla_repo()
 
 load("@xla//:workspace4.bzl", "xla_workspace4")
@@ -30,36 +31,44 @@ xla_workspace3()
 
 # Initialize hermetic Python
 load("@xla//third_party/py:python_init_rules.bzl", "python_init_rules")
+
 python_init_rules()
 
 load("@xla//third_party/py:python_init_repositories.bzl", "python_init_repositories")
+
 python_init_repositories(
+    default_python_version = "system",
     requirements = {
         "3.10": "//third_party/py:requirements_lock_3_10.txt",
         "3.11": "//third_party/py:requirements_lock_3_11.txt",
         "3.12": "//third_party/py:requirements_lock_3_12.txt",
         "3.13": "//third_party/py:requirements_lock_3_13.txt",
     },
-    default_python_version = "system",
 )
 
 load("@xla//third_party/py:python_init_toolchains.bzl", "python_init_toolchains")
+
 python_init_toolchains()
 
 load("//third_party/bazel/python:python_init_pip.bzl", "python_init_pip")
+
 python_init_pip()
 
 load("@pypi//:requirements.bzl", "install_deps")
+
 install_deps()
 
 # Load all XLA dependencies.
 load("@xla//:workspace2.bzl", "xla_workspace2")
+
 xla_workspace2()
 
 load("@xla//:workspace1.bzl", "xla_workspace1")
+
 xla_workspace1()
 
 load("@xla//:workspace0.bzl", "xla_workspace0")
+
 xla_workspace0()
 
 load(
@@ -116,4 +125,12 @@ http_archive(
     sha256 = HIGHWAY_SHA256,
     strip_prefix = "highway-{version}".format(version = HIGHWAY_VERSION),
     urls = [HIGHWAY_ARCHIVE],
+)
+
+FUZZTEST_COMMIT = "0f82dad406f431ca5e8607626825be15423ba339"
+
+http_archive(
+    name = "com_google_fuzztest",
+    strip_prefix = "fuzztest-" + FUZZTEST_COMMIT,
+    url = "https://github.com/google/fuzztest/archive/" + FUZZTEST_COMMIT + ".zip",
 )
