@@ -279,7 +279,7 @@ class EmbeddingLayerTest(absltest.TestCase):
             sharding=sharding,
             arrays=embedding_variables['table_a'],
         ),
-        slot=embedding_spec.SGDSlotVariables(),
+        slot=(),
     )
     embedding_variables['table_b'] = embedding.EmbeddingVariables(
         table=jax.make_array_from_single_device_arrays(
@@ -287,7 +287,7 @@ class EmbeddingLayerTest(absltest.TestCase):
             sharding=sharding,
             arrays=embedding_variables['table_b'],
         ),
-        slot=embedding_spec.SGDSlotVariables(),
+        slot=(),
     )
 
     var_spec = jax.eval_shape(
@@ -505,7 +505,7 @@ class EmbeddingLayerTest(absltest.TestCase):
             sharding=sharding,
             arrays=embedding_variables['table_a_table_c'],
         ),
-        slot=embedding_spec.SGDSlotVariables(),
+        slot=(),
     )
 
     var_spec = jax.eval_shape(
