@@ -416,10 +416,10 @@ cc_test(
     deps = [
         ":all_reduce_interface",
         ":fake_all_reduce",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
         "@tsl//tsl/platform:env",
-        "@tsl//tsl/platform:status_matchers",
         "@tsl//tsl/platform:statusor",
     ],
 )

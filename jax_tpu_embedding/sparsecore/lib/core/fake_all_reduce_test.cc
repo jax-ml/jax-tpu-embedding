@@ -20,10 +20,10 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "tsl/platform/env.h"  // from @tsl
-#include "tsl/platform/status_matchers.h"  // from @tsl  // IWYU pragma: keep (OSS, b/438618768)
 #include "tsl/platform/statusor.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
 
@@ -31,8 +31,8 @@ namespace jax_sc_embedding {
 namespace testing_utils {
 namespace {
 
+using ::absl_testing::IsOkAndHolds;
 using ::testing::Each;
-using ::tsl::testing::IsOkAndHolds;
 
 // Helper function to run BlockingAllReduce across multiple simulated hosts.
 // The `host_values` array provides the value passed to BlockingAllReduce for
