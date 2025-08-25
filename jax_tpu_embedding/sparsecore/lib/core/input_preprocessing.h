@@ -60,7 +60,8 @@ struct PreprocessSparseDenseMatmulOutput {
   SparseDenseMatmulInputStats stats;
 };
 
-PreprocessSparseDenseMatmulOutput PreprocessSparseDenseMatmulInput(
+absl::StatusOr<PreprocessSparseDenseMatmulOutput>
+PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
