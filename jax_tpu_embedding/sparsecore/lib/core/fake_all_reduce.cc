@@ -26,7 +26,7 @@ namespace testing_utils {
 
 uint64_t ReductionGroupState::Participate(uint64_t local_val) {
   {
-    absl::MutexLock lock(&mu);  // NOLINT (b/438618768)
+    absl::MutexLock lock(&mu);
     current_result |= local_val;
   }
 
@@ -50,7 +50,7 @@ absl::StatusOr<uint64_t> FakeAllReduce::BlockingAllReduce(
     int sync_key, uint64_t minibatching_split) {
   std::shared_ptr<ReductionGroupState> group;
   {
-    absl::MutexLock map_lock(&map_mutex_);  // NOLINT (b/438618768)
+    absl::MutexLock map_lock(&map_mutex_);
     auto& group_ptr = groups_[sync_key];
     if (group_ptr == nullptr) {
       group_ptr = std::make_shared<ReductionGroupState>(
@@ -62,7 +62,7 @@ absl::StatusOr<uint64_t> FakeAllReduce::BlockingAllReduce(
 }
 
 void FakeAllReduce::RemoveGroup(int sync_key) {
-  absl::MutexLock map_lock(&map_mutex_);  // NOLINT (b/438618768)
+  absl::MutexLock map_lock(&map_mutex_);
   groups_.erase(sync_key);
 }
 

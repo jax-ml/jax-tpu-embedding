@@ -695,7 +695,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
           PreprocessSparseDenseMatmulInput(
               absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
       {
-        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        absl::MutexLock lock(&mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
       }
       counter.DecrementCount();
@@ -743,7 +743,7 @@ TEST_F(MinibatchingCountTest,
           PreprocessSparseDenseMatmulInput(
               absl::MakeSpan(*input_batches[host_id]), stacked_tables, options);
       {
-        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        absl::MutexLock lock(&mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
       }
       counter.DecrementCount();
