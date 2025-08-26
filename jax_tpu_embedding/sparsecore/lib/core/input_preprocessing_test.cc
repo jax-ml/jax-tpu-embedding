@@ -21,8 +21,11 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -38,6 +41,7 @@
 namespace jax_sc_embedding {
 namespace {
 
+using ::absl_testing::IsOk;
 using ::testing::Each;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
@@ -122,6 +126,54 @@ class TableStackingTest : public ::testing::Test {
     input_batches_single_.push_back(std::make_unique<InputBatch>(input_c_));
     input_batches_single_.push_back(std::make_unique<InputBatch>(input_d_));
   }
+};
+
+class FakeAllReduceNoMinibatchingRequired
+    : public testing_utils::FakeAllReduce {
+ public:
+  explicit FakeAllReduceNoMinibatchingRequired(int host_count)
+      : testing_utils::FakeAllReduce(host_count) {}
+
+  absl::StatusOr<uint64_t> BlockingAllReduce(
+      int sync_key, uint64_t minibatching_split) override {
+    if (sync_key % 2 == 1) {  // Odd keys are for splits.
+      ADD_FAILURE() << "SyncMinibatchingSplit should not be called when no "
+                       "host requires minibatching. Called with split: "
+                    << minibatching_split;
+    }
+    return testing_utils::FakeAllReduce::BlockingAllReduce(sync_key,
+                                                           minibatching_split);
+  }
+};
+
+struct FakeAllReduceSyncKeyCollector : public testing_utils::FakeAllReduce {
+  explicit FakeAllReduceSyncKeyCollector(int host_count)
+      : testing_utils::FakeAllReduce(host_count) {}
+  absl::StatusOr<bool> BlockingAllReduce(int sync_key,
+                                         bool minibatching_required) override {
+    {
+      absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+      sync_keys.push_back(sync_key);
+    }
+    return testing_utils::FakeAllReduce::BlockingAllReduce(
+        sync_key, minibatching_required);
+  }
+  absl::StatusOr<uint64_t> BlockingAllReduce(
+      int sync_key, uint64_t minibatching_split) override {
+    {
+      absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+      sync_keys.push_back(sync_key);
+    }
+    return testing_utils::FakeAllReduce::BlockingAllReduce(sync_key,
+                                                           minibatching_split);
+  }
+  std::vector<int> GetSyncKeys() {
+    absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+    return std::vector<int>(sync_keys);
+  }
+
+  absl::Mutex mutex;
+  std::vector<int> sync_keys ABSL_GUARDED_BY(mutex);
 };
 
 TEST_F(TableStackingTest, MultiProcessStackingStackThenSplit) {
@@ -644,11 +696,7 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
   stacked_table_metadata_[1].max_unique_ids_per_partition = 6;
   stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 2048;
 
-  CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
-                     /*max_unique_ids_per_partitions=*/{5, 10},
-                     /*global_sc_count=*/4,
-                     /*local_sc_count=*/4);
-  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+  auto input_batches =
       CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
                          /*max_unique_ids_per_partitions=*/{5, 10},
                          /*global_sc_count=*/4,
@@ -692,12 +740,16 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
   std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
       {&input_batch_host0, &input_batch_host1};
 
+  auto fake_all_reduce =
+      std::make_unique<FakeAllReduceNoMinibatchingRequired>(kHosts);
+
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 1,
       .global_device_count = 2,
       .num_sc_per_device = 4,
       .enable_minibatching = true,
-      .all_reduce_interface = fake_all_reduce_interface.get()};
+      .batch_number = 100,
+      .all_reduce_interface = fake_all_reduce.get()};
 
   // Act
   for (int host_id = 0; host_id < kHosts; ++host_id) {
@@ -721,11 +773,14 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
 
 TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
   // Arrange
+
   absl::BlockingCounter counter(kHosts);
 
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
+  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 8192;
+  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 8192;
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
@@ -740,15 +795,14 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
   std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
       {&input_batch_host0, &input_batch_host1};
 
-  auto fake_all_reduce_interface =
-      std::make_unique<testing_utils::FakeAllReduce>(kHosts);
+  auto fake_all_reduce = std::make_unique<testing_utils::FakeAllReduce>(kHosts);
 
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 1,
       .global_device_count = 2,
       .num_sc_per_device = 4,
       .enable_minibatching = true,
-      .all_reduce_interface = fake_all_reduce_interface.get()};
+      .all_reduce_interface = fake_all_reduce.get()};
 
   // Act
   for (int host_id = 0; host_id < kHosts; ++host_id) {
@@ -770,5 +824,97 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
   EXPECT_THAT(minibatches_per_host, Each(Gt(1)));
   EXPECT_THAT(minibatches_per_host, Each(Eq(32)));
 }
+
+TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
+  // Arrange
+  absl::BlockingCounter counter(kHosts);
+
+  absl::Mutex mutex;
+  std::vector<int> minibatches_per_host(kHosts, -1);
+
+  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 8192;
+  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 8192;
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  // Host 0: Requires minibatching
+  auto input_batch_host0 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{80, 120},
+                         /*max_unique_ids_per_partitions=*/{48, 50},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  // Host 1: Does not require minibatching
+  auto input_batch_host1 =
+      CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                         /*max_unique_ids_per_partitions=*/{4, 6},
+                         /*global_sc_count=*/8, /*local_sc_count=*/4);
+  std::vector<std::vector<std::unique_ptr<AbstractInputBatch>>*> input_batches =
+      {&input_batch_host0, &input_batch_host1};
+
+  auto fake_all_reduce = std::make_unique<testing_utils::FakeAllReduce>(kHosts);
+
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .enable_minibatching = true,
+      .all_reduce_interface = fake_all_reduce.get()};
+
+  // Act
+  for (int host_id = 0; host_id < kHosts; ++host_id) {
+    MultiHostPool()->Schedule([&, host_id]() {
+      TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                              PreprocessSparseDenseMatmulInput(
+                                  absl::MakeSpan(*input_batches[host_id]),
+                                  stacked_tables, options));
+      {
+        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        minibatches_per_host[host_id] = output.num_minibatches;
+      }
+      counter.DecrementCount();
+    });
+  }
+  counter.Wait();
+
+  // Assert
+  // Both hosts should agree on the number of minibatches, which should be > 1
+  // because host 0 required it.
+  EXPECT_THAT(minibatches_per_host, Each(Gt(1)));
+  EXPECT_THAT(minibatches_per_host, Each(Eq(minibatches_per_host[0])));
+}
+
+TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  auto all_reduce = std::make_unique<FakeAllReduceSyncKeyCollector>(1);
+  const int kBatchCount = 10;
+
+  // Act
+  for (int batch_num = 0; batch_num < kBatchCount; ++batch_num) {
+    PreprocessSparseDenseMatmulInputOptions options{
+        .local_device_count = 1,
+        .global_device_count = 1,
+        .num_sc_per_device = 4,
+        .enable_minibatching = true,
+        .batch_number = batch_num,
+        .all_reduce_interface = all_reduce.get()};
+    auto input_batches =
+        CreateInputBatches(/*max_ids_per_partitions=*/{80, 90},
+                           /*max_unique_ids_per_partitions=*/{80, 90},
+                           /*global_sc_count=*/4,
+                           /*local_sc_count=*/4);
+    ASSERT_THAT(PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                                 stacked_tables, options),
+                IsOk());
+  }
+
+  // Assert
+  auto sync_keys = all_reduce->GetSyncKeys();
+  auto sync_keys_set =
+      absl::flat_hash_set<int>(sync_keys.begin(), sync_keys.end());
+  EXPECT_THAT(sync_keys_set, SizeIs(kBatchCount * 2));
+}
+
 }  // namespace
 }  // namespace jax_sc_embedding
