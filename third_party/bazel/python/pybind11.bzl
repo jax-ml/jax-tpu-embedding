@@ -14,6 +14,7 @@
 """Pybind11 Extensions."""
 
 load("@bazel_skylib//lib:collections.bzl", "collections")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@xla//xla/tsl:tsl.bzl", "tsl_pybind_extension_opensource")
 
 def pybind_extension(name, deps, **kwargs):
@@ -24,4 +25,4 @@ def pybind_extension(name, deps, **kwargs):
 def pybind_library(name, deps, **kwargs):
     # Add pybind11 and python headers to deps.
     deps = collections.uniq(deps + ["@pybind11", "@local_config_python//:python_headers"])
-    native.cc_library(name = name, deps = deps, **kwargs)
+    cc_library(name = name, deps = deps, **kwargs)
