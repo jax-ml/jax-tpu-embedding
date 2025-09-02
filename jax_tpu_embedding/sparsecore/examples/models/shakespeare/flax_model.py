@@ -74,25 +74,9 @@ class Model(nn.Module):
     x = self.add_sharding_constraint(x, (self.sharding_axis,))
 
     # Apply the dense portion of the model.
-    x = nn.Dense(
-        self.embedding_size,
-        kernel_init=nn.with_partitioning(
-            nn.initializers.xavier_uniform(), (self.sharding_axis,)
-        ),
-        bias_init=nn.with_partitioning(
-            nn.initializers.zeros, (self.sharding_axis,)
-        ),
-    )(x)
+    x = nn.Dense(self.embedding_size)(x)
     x = self.add_sharding_constraint(x, (self.sharding_axis,))
-    x = nn.Dense(
-        self.vocab_size,
-        kernel_init=nn.with_partitioning(
-            nn.initializers.xavier_uniform(), (self.sharding_axis,)
-        ),
-        bias_init=nn.with_partitioning(
-            nn.initializers.zeros, (self.sharding_axis,)
-        ),
-    )(x)
+    x = nn.Dense(self.vocab_size)(x)
     x = self.add_sharding_constraint(x, (self.sharding_axis,))
 
     return x
