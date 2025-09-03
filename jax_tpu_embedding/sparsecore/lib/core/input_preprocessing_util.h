@@ -43,13 +43,118 @@ namespace jax_sc_embedding {
 inline constexpr int TPU_VECTOR_REGISTER_ALIGMENT_SIZE = 8;
 
 // numpy uses row major order, while eigen defaults to column major.
-using MatrixXi =
-    Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-using MatrixXf =
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+template <typename T>
+using MatrixX =
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+
+using MatrixXi = MatrixX<int>;
+using MatrixXf = MatrixX<float>;
 // pybind11 converts this to a 1D numpy array when returning the value.
-using RowVectorXi = Eigen::Matrix<int, 1, Eigen::Dynamic, Eigen::RowMajor>;
-using RowVectorXf = Eigen::Matrix<float, 1, Eigen::Dynamic, Eigen::RowMajor>;
+template <typename T>
+using RowVectorX = Eigen::Matrix<T, 1, Eigen::Dynamic, Eigen::RowMajor>;
+
+using RowVectorXi = RowVectorX<int>;
+using RowVectorXf = RowVectorX<float>;
+
+template <typename T>
+using BlockRow = Eigen::Block<MatrixX<T>, 1, Eigen::Dynamic, Eigen::RowMajor>;
+
+namespace internal {
+
+struct CsrArraysPerDevice {
+  BlockRow<int> row_pointers;
+  BlockRow<int> embedding_ids;
+  BlockRow<int> sample_ids;
+  BlockRow<float> gains;
+};
+
+struct StatsPerDevice {
+  BlockRow<int> max_ids_per_partition;
+  BlockRow<int> max_unique_ids_per_partition;
+  BlockRow<int> required_buffer_size;
+  int dropped_id_count;
+};
+
+}  // namespace internal
+
+struct CsrArraysPerHost {
+  MatrixXi row_pointers;
+  MatrixXi embedding_ids;
+  MatrixXi sample_ids;
+  MatrixXf gains;
+
+  CsrArraysPerHost(int local_device_count, int row_pointers_size_per_device,
+                   int coo_buffer_size_per_device)
+      : row_pointers(local_device_count, row_pointers_size_per_device),
+        embedding_ids(local_device_count, coo_buffer_size_per_device),
+        sample_ids(local_device_count, coo_buffer_size_per_device),
+        gains(local_device_count, coo_buffer_size_per_device) {
+    row_pointers.setConstant(coo_buffer_size_per_device);
+  }
+
+  internal::CsrArraysPerDevice GetCsrArraysPerDevice(int local_device_id)
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return internal::CsrArraysPerDevice{
+        .row_pointers = row_pointers.row(local_device_id),
+        .embedding_ids = embedding_ids.row(local_device_id),
+        .sample_ids = sample_ids.row(local_device_id),
+        .gains = gains.row(local_device_id),
+    };
+  }
+};
+
+struct StatsPerHost {
+  // NOTE: max ids and max unique ids are {global_sc_count *
+  //   num_devices}, where they are then aggregated(max) along device
+  //   dimension to get {global_sc_count} (i.e. max [unique] ids for each
+  //   sc), which can be further aggregated(max) for a single value for
+  //   all SCs.
+  // NOTE: required buffer size is {local_sc_count * num_devices}, which
+  //   is same as {global_sc_count}, and can be further aggregated to get
+  //   the maximum size of any SC buffer shard.
+  MatrixXi max_ids_per_partition;
+  MatrixXi max_unique_ids_per_partition;
+  MatrixXi required_buffer_size;
+  int dropped_id_count;
+
+  StatsPerHost(int local_device_count, int global_sc_count,
+               int num_sc_per_device)
+      : max_ids_per_partition(local_device_count, global_sc_count),
+        max_unique_ids_per_partition(local_device_count, global_sc_count),
+        required_buffer_size(local_device_count, num_sc_per_device),
+        dropped_id_count(0) {
+    max_ids_per_partition.setZero();
+    max_unique_ids_per_partition.setZero();
+    required_buffer_size.setZero();
+  }
+
+  void Merge(const StatsPerHost& other) {
+    max_ids_per_partition =
+        max_ids_per_partition.cwiseMax(other.max_ids_per_partition);
+    max_unique_ids_per_partition = max_unique_ids_per_partition.cwiseMax(
+        other.max_unique_ids_per_partition);
+    required_buffer_size =
+        required_buffer_size.cwiseMax(other.required_buffer_size);
+    dropped_id_count += other.dropped_id_count;
+  }
+
+  void Flatten() {
+    max_ids_per_partition.resize(1, max_ids_per_partition.size());
+    max_unique_ids_per_partition.resize(1, max_unique_ids_per_partition.size());
+    required_buffer_size.resize(1, required_buffer_size.size());
+  }
+
+  internal::StatsPerDevice GetStatsPerDevice(int local_device_id)
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return internal::StatsPerDevice{
+        .max_ids_per_partition = max_ids_per_partition.row(local_device_id),
+        .max_unique_ids_per_partition =
+            max_unique_ids_per_partition.row(local_device_id),
+        .required_buffer_size = required_buffer_size.row(local_device_id),
+        .dropped_id_count = 0,
+    };
+  }
+};
 
 using MinibatchingSplit = std::bitset<CooFormat::kMaxMinibatchingBuckets - 1>;
 
@@ -126,10 +231,10 @@ struct ExtractedCooTensors {
 // Rounds up the given value to the next multiple of the given alignment.
 // This is equivalent to ceil(value / align) * align, but implemented in an
 // integer-safe way.
-template <typename T>
-static inline T RoundUpTo(T value, T align) {
+template <typename T, typename U>
+static inline auto RoundUpTo(T value, U align) {
   return (value + align - 1) / align * align;
-};
+}
 
 inline unsigned int CeilOfRatio(unsigned int numerator,
                                 unsigned int denominator) {
@@ -204,9 +309,7 @@ void FillLocalDeviceBuffer(
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
-    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains,
-    int& dropped_id_count_static_bound);
+    internal::CsrArraysPerDevice& csr, int& dropped_id_count_static_bound);
 
 }  // namespace jax_sc_embedding
 

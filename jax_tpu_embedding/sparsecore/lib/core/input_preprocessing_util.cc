@@ -98,20 +98,18 @@ void PadRowPointersBuffer(int& lhs_row_offset, int padding, int row_end,
 //   pad_to_end: whether to pad to the end of the buffer or just align to HBM
 //     granularity.
 void PadCooBuffer(int& coo_index, int coo_end, bool pad_to_end,
-                  Eigen::Ref<RowVectorXi> embedding_ids,
-                  Eigen::Ref<RowVectorXi> sample_ids,
-                  Eigen::Ref<RowVectorXf> gains) {
+                  internal::CsrArraysPerDevice& csr) {
   while ((pad_to_end || coo_index % TPU_VECTOR_REGISTER_ALIGMENT_SIZE != 0) &&
          coo_index < coo_end) {
-    embedding_ids[coo_index] = INT_MAX;
-    sample_ids[coo_index] = INT_MAX;
-    gains[coo_index] = std::nanf("");
+    csr.embedding_ids[coo_index] = INT_MAX;
+    csr.sample_ids[coo_index] = INT_MAX;
+    csr.gains[coo_index] = std::nanf("");
     ++coo_index;
   }
 }
 
 int GetNonSentinelCooCount(absl::Span<const CooFormat> coo_tensors,
-                             int batch_size_per_sc, int local_sc_id) {
+                           int batch_size_per_sc, int local_sc_id) {
   if (coo_tensors.empty()) {
     return 0;
   }
@@ -136,10 +134,7 @@ int GetRowPointer(int coo_index, const BufferFillingOptions& options) {
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
 int FillMinibatchBuffer(const BufferFillingOptions& options,
-                        Eigen::Ref<RowVectorXi> row_pointers,
-                        Eigen::Ref<RowVectorXi> embedding_ids,
-                        Eigen::Ref<RowVectorXi> sample_ids,
-                        Eigen::Ref<RowVectorXf> gains,
+                        internal::CsrArraysPerDevice& csr_arrays,
                         int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
@@ -167,10 +162,11 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
       if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
         break;
       }
-      row_pointers[lhs_row_index++] = GetRowPointer(coo_index, options);
+      csr_arrays.row_pointers[lhs_row_index++] =
+          GetRowPointer(coo_index, options);
       // Align partition.
       PadCooBuffer(coo_index, options.coo_end,
-                   /*pad_to_end=*/false, embedding_ids, sample_ids, gains);
+                   /*pad_to_end=*/false, csr_arrays);
       IncrementScId(last_sc_id, options.num_scs, options.num_sc_per_device);
     }
     // Terminate at the sentinel node.
@@ -183,16 +179,17 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
       break;
     }
 
-    embedding_ids[coo_index] = coo_tensor.col_id / options.num_scs;
-    sample_ids[coo_index] = coo_tensor.row_id % options.batch_size_per_sc;
-    gains[coo_index] = coo_tensor.gain;
+    csr_arrays.embedding_ids[coo_index] = coo_tensor.col_id / options.num_scs;
+    csr_arrays.sample_ids[coo_index] =
+        coo_tensor.row_id % options.batch_size_per_sc;
+    csr_arrays.gains[coo_index] = coo_tensor.gain;
     ++coo_index;
     ++written_real_coos;
   }
 
   PadRowPointersBuffer(lhs_row_index,
                        /*padding=*/GetRowPointer(coo_index, options),
-                       options.lhs_row_end, row_pointers);
+                       options.lhs_row_end, csr_arrays.row_pointers);
   return coo_index;
 }
 
@@ -290,8 +287,7 @@ void FillLocalDeviceBuffer(
     const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    Eigen::Ref<RowVectorXi> row_pointers, Eigen::Ref<RowVectorXi> embedding_ids,
-    Eigen::Ref<RowVectorXi> sample_ids, Eigen::Ref<RowVectorXf> gains,
+    internal::CsrArraysPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
   tsl::profiler::TraceMe t("FillRowPointers");
   const int num_sc_per_device = options.num_sc_per_device;
@@ -323,25 +319,25 @@ void FillLocalDeviceBuffer(
               .coo_buffer_size = coo_buffer_size,
               .enable_minibatching = options.enable_minibatching,
           },
-          row_pointers, embedding_ids, sample_ids, gains,
-          dropped_id_count_static_bound);
+
+          csr_arrays, dropped_id_count_static_bound);
       lhs_row_begin = lhs_row_end;
       if (options.enable_minibatching) {
         // Align minibatch buffer
         PadCooBuffer(coo_begin, coo_buffer_size,
-                     /*pad_to_end=*/false, embedding_ids, sample_ids, gains);
+                     /*pad_to_end=*/false, csr_arrays);
       }
     }  // end minibatch loop
     if (!options.enable_minibatching) {
       const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
       // Pad to end of SparseCore buffer.
       PadCooBuffer(coo_begin, sc_end,
-                   /*pad_to_end=*/true, embedding_ids, sample_ids, gains);
+                   /*pad_to_end=*/true, csr_arrays);
     }
   }  // end SparseCore loop
   // Pad to end of device buffer.
   PadCooBuffer(coo_begin, coo_buffer_size,
-               /*pad_to_end=*/true, embedding_ids, sample_ids, gains);
+               /*pad_to_end=*/true, csr_arrays);
 }
 
 }  // namespace jax_sc_embedding

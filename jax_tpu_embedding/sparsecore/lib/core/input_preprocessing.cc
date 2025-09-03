@@ -34,7 +34,6 @@
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
-#include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
@@ -313,33 +312,16 @@ PreprocessSparseDenseMatmulInput(
           !options.experimental_static_single_minibatch) {
         max_minibatching_buckets = CooFormat::kMaxMinibatchingBuckets;
       }
-      MatrixXi row_pointers_per_device(options.local_device_count,
-                                       row_pointers_size_per_bucket *
-                                           max_minibatching_buckets *
-                                           options.num_sc_per_device);
-      row_pointers_per_device.setConstant(coo_buffer_size_per_device);
-      MatrixXi embedding_ids_per_device(options.local_device_count,
-                                        coo_buffer_size_per_device);
-      MatrixXi sample_ids_per_device(options.local_device_count,
-                                     coo_buffer_size_per_device);
-      MatrixXf gains_per_device(options.local_device_count,
-                                coo_buffer_size_per_device);
+      CsrArraysPerHost csr_arrays_per_host(options.local_device_count,
+                                           row_pointers_size_per_bucket *
+                                               max_minibatching_buckets *
+                                               options.num_sc_per_device,
+                                           coo_buffer_size_per_device);
 
-      const int stats_size_per_device = num_scs;
-      // NOTE: max ids and max unique ids are {global_sc_count *
-      //   num_devices}, where they are then aggregated(max) along device
-      //   dimension to get {global_sc_count} (i.e. max [unique] ids for each
-      //   sc), which can be further aggregated(max) for a single value for
-      //   all SCs.
-      MatrixXi max_ids_per_partition_per_sc(options.local_device_count,
-                                            stats_size_per_device);
-      MatrixXi max_unique_ids_per_partition_per_sc(options.local_device_count,
-                                                   stats_size_per_device);
-      // NOTE: required buffer size is {local_sc_count * num_devices}, which
-      //   is same as {global_sc_count}, and can be further aggregated to get
-      //   the maximum size of any SC buffer shard.
-      MatrixXi required_buffer_size_per_sc(options.local_device_count,
-                                           options.num_sc_per_device);
+      StatsPerHost stats_per_host(options.local_device_count,
+                                  options.GetNumScs(),
+                                  options.num_sc_per_device);
+
       int batch_size_for_device;
       bool table_minibatching_required = false;
       int table_dropped_ids = 0;
@@ -369,22 +351,14 @@ PreprocessSparseDenseMatmulInput(
         // Step 2: Sort the COO tensors and group them by SC.
         //
 
-        Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
-            max_ids_per_partition_per_sc.row(local_device);
-        Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
-            max_unique_ids_per_partition_per_sc.row(local_device);
-        Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
-            required_buffer_size_per_sc.row(local_device);
-        int dropped_ids = 0;
+        internal::StatsPerDevice stats_per_device =
+            stats_per_host.GetStatsPerDevice(local_device);
         const PartitionedCooTensors grouped_coo_tensors =
             SortAndGroupCooTensorsPerLocalDevice(
                 extracted_coo_tensors, stacked_table_metadata[0], options,
-                max_ids_per_partition_per_sc_buffer,
-                max_unique_ids_per_partition_per_sc_buffer,
-                required_buffer_size_per_sc_buffer, dropped_ids,
-                table_minibatching_required);
+                stats_per_device, table_minibatching_required);
         partitioned_coo_tensors_per_device.push_back(grouped_coo_tensors);
-        table_dropped_ids += dropped_ids;
+        stats_per_host.dropped_id_count += stats_per_device.dropped_id_count;
       }
 
       bool minibatching_required = false;
@@ -404,23 +378,19 @@ PreprocessSparseDenseMatmulInput(
         minibatching_required = minibatching_required_or.value();
 
         if (minibatching_required) {
+          stats_per_host.dropped_id_count = 0;
           MinibatchingSplit table_minibatching_split = 0;
           for (int local_device = 0; local_device < options.local_device_count;
                ++local_device) {
-            Eigen::Ref<RowVectorXi> max_ids_per_partition_per_sc_buffer =
-                max_ids_per_partition_per_sc.row(local_device);
-            Eigen::Ref<RowVectorXi> max_unique_ids_per_partition_per_sc_buffer =
-                max_unique_ids_per_partition_per_sc.row(local_device);
-            Eigen::Ref<RowVectorXi> required_buffer_size_per_sc_buffer =
-                required_buffer_size_per_sc.row(local_device);
+            internal::StatsPerDevice stats_per_device =
+                stats_per_host.GetStatsPerDevice(local_device);
             partitioned_coo_tensors_per_device[local_device] =
                 SortAndGroupCooTensorsPerLocalDevice(
                     extracted_coo_tensors_per_device[local_device],
-                    stacked_table_metadata[0], options,
-                    max_ids_per_partition_per_sc_buffer,
-                    max_unique_ids_per_partition_per_sc_buffer,
-                    required_buffer_size_per_sc_buffer, table_dropped_ids,
+                    stacked_table_metadata[0], options, stats_per_device,
                     table_minibatching_split);
+            stats_per_host.dropped_id_count +=
+                stats_per_device.dropped_id_count;
           }
           auto minibatching_split_or =
               minibatching_split_sync_service.SyncValue(
@@ -450,50 +420,43 @@ PreprocessSparseDenseMatmulInput(
         //
         const int batch_size_per_sc =
             CeilOfRatio(batch_size_for_device, options.num_sc_per_device);
-        Eigen::Ref<RowVectorXi> row_pointer_buffer =
-            row_pointers_per_device.row(local_device);
-        Eigen::Ref<RowVectorXi> embedding_id_buffer =
-            embedding_ids_per_device.row(local_device);
-        Eigen::Ref<RowVectorXi> sample_id_buffer =
-            sample_ids_per_device.row(local_device);
-        Eigen::Ref<RowVectorXf> gain_buffer =
-            gains_per_device.row(local_device);
         const int coo_buffer_size_per_sc =
             coo_buffer_size_per_device / options.num_sc_per_device;
+        internal::CsrArraysPerDevice csr_arrays_per_device =
+            csr_arrays_per_host.GetCsrArraysPerDevice(local_device);
         FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
                               coo_buffer_size_per_sc, batch_size_per_sc,
-                              options, row_pointer_buffer, embedding_id_buffer,
-                              sample_id_buffer, gain_buffer, table_dropped_ids);
+                              options, csr_arrays_per_device,
+                              table_dropped_ids);
+        stats_per_host.dropped_id_count += table_dropped_ids;
       }
       // NOMUTANTS -- Informational.
       CheckBufferUsage(
           /* max_required_buffer_size_per_device= */
-          required_buffer_size_per_sc.maxCoeff() * options.num_sc_per_device,
+          stats_per_host.required_buffer_size.maxCoeff() *
+              options.num_sc_per_device,
           coo_buffer_size_per_device, stacked_table_name, options.batch_number);
 
-      max_ids_per_partition_per_sc.resize(1,
-                                          max_ids_per_partition_per_sc.size());
-      max_unique_ids_per_partition_per_sc.resize(
-          1, max_unique_ids_per_partition_per_sc.size());
-      required_buffer_size_per_sc.resize(1, required_buffer_size_per_sc.size());
+      stats_per_host.Flatten();
       {
         absl::MutexLock mutex_lock(&output_mutex);  // NOLINT (b/438618768)
         out.lhs_row_pointers[stacked_table_name.c_str()] =
-            std::move(row_pointers_per_device);
+            std::move(csr_arrays_per_host.row_pointers);
         out.lhs_embedding_ids[stacked_table_name.c_str()] =
-            std::move(embedding_ids_per_device);
+            std::move(csr_arrays_per_host.embedding_ids);
         out.lhs_sample_ids[stacked_table_name.c_str()] =
-            std::move(sample_ids_per_device);
-        out.lhs_gains[stacked_table_name.c_str()] = std::move(gains_per_device);
+            std::move(csr_arrays_per_host.sample_ids);
+        out.lhs_gains[stacked_table_name.c_str()] =
+            std::move(csr_arrays_per_host.gains);
 
         out.stats.max_ids_per_partition[stacked_table_name.c_str()] =
-            std::move(max_ids_per_partition_per_sc);
+            std::move(stats_per_host.max_ids_per_partition);
         out.stats.max_unique_ids_per_partition[stacked_table_name.c_str()] =
-            std::move(max_unique_ids_per_partition_per_sc);
+            std::move(stats_per_host.max_unique_ids_per_partition);
         out.stats.required_buffer_sizes[stacked_table_name.c_str()] =
-            std::move(required_buffer_size_per_sc);
+            std::move(stats_per_host.required_buffer_size);
         out.stats.dropped_id_count[stacked_table_name.c_str()] =
-            table_dropped_ids;
+            stats_per_host.dropped_id_count;
       }
       counter.DecrementCount();
     });
