@@ -110,17 +110,18 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         0.01,
         np.float32,
     )
-    emb_tables = np.array([emb_table_sharded[0]])
-    hyperparams = np.array([0.01])
+    emb_tables = [emb_table_sharded[0]]
+    learning_rate = np.array(0.01, dtype=np.float32)
+    hyperparams = (learning_rate,)
     # Do the embedding update.
     (updated_emb_table,) = self.tpu_sparse_dense_matmul_grad_with_optimizer(
         lhs_row_pointers,
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
-        emb_tables,
+        *emb_tables,
         z_grad,
-        hyperparams,
+        *hyperparams,
         optimizer_generator=optimizers_computation.sgd,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
@@ -568,17 +569,18 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         ],
         dtype=np.float32,
     )
-    emb_tables = np.array([emb_table_sharded[0], accumulator_init])
-    hyperparams = np.array([0.01])
+    emb_tables = [emb_table_sharded[0], accumulator_init]
+    learning_rate = np.array(0.01, dtype=np.float32)
+    hyperparams = (learning_rate,)
     (updated_table, updated_accumulator) = (
         self.tpu_sparse_dense_matmul_grad_with_optimizer(
             lhs_row_pointers,
             lhs_local_embedding_ids,
             lhs_local_sample_ids,
             lhs_gains,
-            emb_tables,
+            *emb_tables,
             z_grad,
-            hyperparams,
+            *hyperparams,
             optimizer_generator=optimizers_computation.adagrad,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
@@ -588,6 +590,274 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     )
     np.testing.assert_equal(expected_accumulator, updated_accumulator)
     np.testing.assert_equal(expected_table, updated_table)
+
+  def test_abstract_eval_input_validation(self):
+    f = (
+        sparse_dense_matmul_optimizer_grad
+        ._tpu_sparse_dense_matmul_optimizer_grad_abstract_eval
+    )
+
+    # Baseline valid shapes/dtypes.
+    lhs_row_pointers = np.zeros((4,), dtype=np.int32)
+    lhs_local_embedding_ids = np.zeros((self.batch_size,), dtype=np.int32)
+    lhs_local_sample_ids = np.zeros((self.batch_size,), dtype=np.int32)
+    lhs_gains = np.ones((self.batch_size,), dtype=np.float32)
+    table = np.zeros((8, self.emb_size), dtype=np.float32)
+    activations_grad = np.zeros(
+        (self.batch_size, self.emb_size), dtype=np.float32
+    )
+    hparam = np.array(0.01, dtype=np.float32)
+    opt_gen = lambda *a, **k: None
+    # Wrong dtype for row_pointers.
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers.astype(np.int64),
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+      )
+
+    # Wrong rank for sample ids (should be rank-1).
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids.reshape(self.batch_size, 1),
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+      )
+
+    # Missing table (only gradients passed).
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          activations_grad,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+      )
+
+    # First "table" not rank-2.
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          np.zeros((8,), dtype=np.float32),
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+      )
+
+    # Slot variable with invalid rank (must be 1 or 2).
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          np.zeros((4, 2, 2), dtype=np.float32),
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+      )
+
+    # Invalid sharding strategy.
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+          sharding_strategy=2,
+      )
+
+    # Non-positive limits.
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=0,
+          max_unique_ids_per_partition=1,
+      )
+
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=0,
+      )
+
+    # Empty computation name.
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=opt_gen,
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+          computation_name="",
+      )
+
+    # Non-callable optimizer_generator.
+    with self.assertRaises(ValueError):
+      f(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          table,
+          activations_grad,
+          hparam,
+          optimizer_generator=None,   # pytype: disable=wrong-arg-types
+          max_ids_per_partition=1,
+          max_unique_ids_per_partition=1,
+      )
+
+    # Optional minibatches scalar is accepted and ignored by abstract eval.
+    f(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        np.array(1, dtype=np.int32),
+        table,
+        activations_grad,
+        hparam,
+        optimizer_generator=opt_gen,
+        max_ids_per_partition=1,
+        max_unique_ids_per_partition=1,
+    )
+
+  def test_sc_emb_backward_pass_with_sgd_and_minibatches_scalar(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_sharded = einops.rearrange(
+        self.emb_table,
+        "(v c s) f -> c (s v) f",
+        c=len(self.global_devices),
+        s=4,
+    )
+    z_grad = jnp.full(
+        (self.batch_size // self.num_chips, self.emb_size),
+        0.01,
+        np.float32,
+    )
+    emb_tables = [emb_table_sharded[0]]
+    learning_rate = np.array(0.01, dtype=np.float32)
+    hyperparams = (learning_rate,)
+    minibatches = np.array(1, dtype=np.int32)
+
+    (updated_emb_table,) = self.tpu_sparse_dense_matmul_grad_with_optimizer(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        minibatches,
+        *emb_tables,
+        z_grad,
+        *hyperparams,
+        optimizer_generator=optimizers_computation.sgd,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        computation_name="optimizer_test_computation_sgd_minibatch",
+        sharding_strategy=1,
+    )
+
+    expected_emb_activations = np.array(
+        [
+            [-1.00000e-04] * 8,
+            [3.99990e00] * 8,
+            [7.99990e00] * 8,
+            [1.19999e01] * 8,
+            [1.60000e01] * 8,
+            [2.00000e01] * 8,
+            [2.40000e01] * 8,
+            [2.80000e01] * 8,
+            [9.99900e-01] * 8,
+            [4.99990e00] * 8,
+            [8.99990e00] * 8,
+            [1.29999e01] * 8,
+            [1.70000e01] * 8,
+            [2.10000e01] * 8,
+            [2.50000e01] * 8,
+            [2.90000e01] * 8,
+            [1.99990e00] * 8,
+            [5.99990e00] * 8,
+            [9.99990e00] * 8,
+            [1.39999e01] * 8,
+            [1.80000e01] * 8,
+            [2.20000e01] * 8,
+            [2.60000e01] * 8,
+            [3.00000e01] * 8,
+            [2.99990e00] * 8,
+            [6.99990e00] * 8,
+            [1.09999e01] * 8,
+            [1.49999e01] * 8,
+            [1.90000e01] * 8,
+            [2.30000e01] * 8,
+            [2.70000e01] * 8,
+            [3.10000e01] * 8,
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_equal(updated_emb_table, expected_emb_activations)
 
 
 if __name__ == "__main__":

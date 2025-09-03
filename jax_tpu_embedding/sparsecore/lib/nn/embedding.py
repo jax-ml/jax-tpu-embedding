@@ -1023,8 +1023,30 @@ def _init_embedding_variables_shard(
       table=tspec.initializer,
       slot=tspec.optimizer.slot_variables_initializers(),
   )
+
+  # Table is always 2D.
+  table_array = initializers.table(rng, shape)
+
+  # Slots may be 1D or 2D depending on the optimizer spec.
+  slot_ranks = tspec.optimizer.slot_variables_rank()
+  if len(slot_ranks) != len(initializers.slot):
+    # Fallback to 2D for all if not specified correctly.
+    slot_ranks = tuple(2 for _ in initializers.slot)
+
+  slot_arrays: list[jax.Array] = []
+  for init, rank in zip(initializers.slot, slot_ranks):
+    if rank == 1:
+      slot_arrays.append(init(rng, (shape[0],)))
+    elif rank == 2:
+      slot_arrays.append(init(rng, shape))
+    else:
+      raise ValueError(
+          f"Unsupported slot variable rank {rank}. Only 1 or 2 are allowed."
+      )
+
   return EmbeddingVariables(
-      *jax.tree.map(lambda init: init(rng, shape), initializers)
+      table=table_array,
+      slot=tuple(slot_arrays),
   )
 
 
