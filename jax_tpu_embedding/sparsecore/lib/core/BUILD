@@ -179,6 +179,7 @@ pybind_extension(
     srcs = ["pybind_input_preprocessing.cc"],
     deps = [
         ":abstract_input_batch",
+        ":all_reduce_interface",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         ":numpy_input_batch",
