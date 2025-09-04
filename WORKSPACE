@@ -29,6 +29,28 @@ xla_workspace4()
 load("@xla//:workspace3.bzl", "xla_workspace3")
 xla_workspace3()
 
+# Initialize hermetic C++.
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "rules_ml_toolchain",
+    sha256 = "1ae689a7681da56dc109ab0bfd9c2588b056bd494db65452dabfbb7068cebc30",
+    strip_prefix = "rules_ml_toolchain-5b12b030160b5e0a4a2188f808bc732d3afd45bd",
+    urls = [
+        "https://github.com/google-ml-infra/rules_ml_toolchain/archive/5b12b030160b5e0a4a2188f808bc732d3afd45bd.tar.gz",
+    ],
+)
+
+load(
+    "@rules_ml_toolchain//cc/deps:cc_toolchain_deps.bzl",
+    "cc_toolchain_deps",
+)
+
+cc_toolchain_deps()
+
+register_toolchains("@rules_ml_toolchain//cc:linux_x86_64_linux_x86_64")
+register_toolchains("@rules_ml_toolchain//cc:linux_aarch64_linux_aarch64")
+
 # Initialize hermetic Python
 load("@xla//third_party/py:python_init_rules.bzl", "python_init_rules")
 
@@ -71,12 +93,6 @@ load("@xla//:workspace0.bzl", "xla_workspace0")
 
 xla_workspace0()
 
-load(
-    "@rules_ml_toolchain//cc/deps:cc_toolchain_deps.bzl",
-    "cc_toolchain_deps",
-)
-cc_toolchain_deps()
-
 # Even though we don't use CUDA, this is required since it is needed
 # by TSL, one of our dependencies.
 load(
@@ -114,8 +130,6 @@ cuda_configure(name = "local_config_cuda")
 ###############################################################################
 ##  SparseCore-Specific Dependencies
 ###############################################################################
-
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 HIGHWAY_VERSION = "1.2.0"
 HIGHWAY_SHA256 = "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343"
