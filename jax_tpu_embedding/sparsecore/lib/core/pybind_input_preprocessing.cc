@@ -26,6 +26,7 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
@@ -211,6 +212,22 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
       has_leading_dimension, allow_id_dropping, feature_stacking_strategy,
       batch_number);
 }
+
+template <typename T, typename Func, typename... Args>
+void DefineInputPreprocessingBindingsFor(py::module m,
+                                         const absl::string_view name,
+                                         Func&& func_ptr, Args... args) {
+  m.def(name.data(), func_ptr, args..., py::arg("feature_specs"),
+        py::arg("local_device_count"), py::arg("global_device_count"),
+        py::kw_only(), py::arg("num_sc_per_device"),
+        py::arg("sharding_strategy") = ShardingStrategy::kMod,
+        py::arg("has_leading_dimension") = false,
+        py::arg("allow_id_dropping") = false,
+        py::arg("feature_stacking_strategy") =
+            FeatureStackingStrategy::kSplitThenStack,
+        py::arg("batch_number") = 0);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
@@ -221,28 +238,14 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
       .value("STACK_THEN_SPLIT", FeatureStackingStrategy::kStackThenSplit)
       .value("SPLIT_THEN_STACK", FeatureStackingStrategy::kSplitThenStack)
       .export_values();
-  m.def("PreprocessSparseDenseMatmulInput",
-        &PyNumpyPreprocessSparseDenseMatmulInput, py::arg("features"),
-        py::arg("feature_weights"), py::arg("feature_specs"),
-        py::arg("local_device_count"), py::arg("global_device_count"),
-        py::kw_only(), py::arg("num_sc_per_device"),
-        py::arg("sharding_strategy") = ShardingStrategy::kMod,
-        py::arg("has_leading_dimension") = false,
-        py::arg("allow_id_dropping") = false,
-        py::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kSplitThenStack,
-        py::arg("batch_number") = 0);
-  m.def("PreprocessSparseDenseMatmulSparseCooInput",
-        &PySparseCooPreprocessSparseDenseMatmulInput, py::arg("indices"),
-        py::arg("values"), py::arg("dense_shapes"), py::arg("feature_specs"),
-        py::arg("local_device_count"), py::arg("global_device_count"),
-        py::kw_only(), py::arg("num_sc_per_device"),
-        py::arg("sharding_strategy") = ShardingStrategy::kMod,
-        py::arg("has_leading_dimension") = false,
-        py::arg("allow_id_dropping") = false,
-        py::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kSplitThenStack,
-        py::arg("batch_number") = 0);
+  DefineInputPreprocessingBindingsFor<NumpySparseInputBatch>(
+      m, "PreprocessSparseDenseMatmulInput",
+      &PyNumpyPreprocessSparseDenseMatmulInput, py::arg("features"),
+      py::arg("features_weights"));
+  DefineInputPreprocessingBindingsFor<PySparseCooInputBatch>(
+      m, "PreprocessSparseDenseMatmulSparseCooInput",
+      &PySparseCooPreprocessSparseDenseMatmulInput, py::arg("indices"),
+      py::arg("values"), py::arg("dense_shapes"));
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())
       .def_readonly("max_ids_per_partition",
