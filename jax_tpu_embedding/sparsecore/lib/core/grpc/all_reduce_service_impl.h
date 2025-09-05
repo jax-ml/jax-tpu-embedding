@@ -15,10 +15,12 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 
 #include <memory>
+#include <optional>
 
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/synchronization/barrier.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "include/grpcpp/server_context.h"  // from @com_github_grpc_grpc
@@ -31,36 +33,29 @@ namespace rpc {
 
 // Implementation of the gRPC AllReduce service. This class manages the state
 // for multiple concurrent all-reduce operations, identified by a `sync_key`.
-//
-// Synchronization Strategy:
-// - `mutex_`: Protects access to `all_reduce_state_map_` and `local_data_cv_`.
-//   All operations modifying or reading the map must hold this mutex.
-// - `local_data_cv_`: A condition variable used to signal when a new
-//   `sync_key` has been initialized via `InitializeState`. The `ContributeData`
-//   RPC handlers wait on this if they receive a request for a `sync_key`
-//   before the local task has called `InitializeState` for that key.
-// - `AllReduceState::rpc_counter`: Each all-reduce operation (per `sync_key`)
-//   has a `BlockingCounter`. This counter is initialized to `num_tasks_ - 1`
-//   in `InitializeState`. Each successful `ContributeData` RPC decrements
-//   this counter. The local task's `Wait` method blocks until this counter
-//   reaches zero, ensuring all remote contributions have been received.
-//
-// Deadlock Prevention:
-// The `Wait` method retrieves the `rpc_counter` pointer under `mutex_`, but
-// then calls `rpc_counter->Wait()` *outside* of the mutex lock. This is crucial
-// because `ContributeData` needs to acquire `mutex_` to decrement the counter.
-// If `Wait` held `mutex_` while blocking on `rpc_counter`, it would prevent
-// `ContributeData` from acquiring the lock and decrementing the counter,
-// leading to a deadlock.
 class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   struct AllReduceState {
     AllReduceData local_data;
-    std::unique_ptr<absl::BlockingCounter> rpc_counter;
+    // Counter to wait for all other local threads to make their
+    // contributions.
+    std::unique_ptr<absl::BlockingCounter> local_contributions_counter;
+    // Counter for all local threads to retrieve the results and delete
+    // this state from the map when done.
+    std::unique_ptr<absl::BlockingCounter> results_counter;
+    // Barrier to synchronize all local threads before they can retrieve the
+    // final result.
+    std::unique_ptr<absl::Barrier> global_results_barrier;
+    // Counter for the local threads that performs the RPC to wait for all
+    // other tasks.
+    std::unique_ptr<absl::BlockingCounter> incoming_rpc_counter;
   };
 
  public:
-  explicit AllReduceServiceImpl(int task_id, int num_tasks)
-      : task_id_(task_id), num_tasks_(num_tasks) {}
+  explicit AllReduceServiceImpl(int task_id, int num_tasks,
+                                int threads_per_task = 1)
+      : task_id_(task_id),
+        num_tasks_(num_tasks),
+        threads_per_task_(threads_per_task) {}
 
   // Called by remote peers. Returns this server's local value for the sync_key.
   ::grpc::ServerUnaryReactor* ContributeData(
@@ -68,19 +63,33 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
       AllReduceResponse* response) override;
 
   // Method to register the local data for a given sync_key. Called by the local
-  // client.
-  void InitializeState(int sync_key, const AllReduceData& data);
+  // client. Returns the locally-reduced data for the initializer thread, or
+  // nullopt for other threads.
+  absl::StatusOr<std::optional<AllReduceData>> InitializeOrUpdateState(
+      int sync_key, const AllReduceData& data);
 
-  // Wait for reduction on a given sync_key.
-  absl::StatusOr<AllReduceData> Wait(int sync_key);
+  // Waits for incoming RPCs from all other tasks. Should be called from only
+  // the initializer thread.
+  void WaitIncomingRPCs(int sync_key);
+
+  // A barrier for all local threads to wait on before retrieving the result.
+  void WaitResults(int sync_key);
+
+  // Gets locally and globally reduced result.
+  absl::StatusOr<AllReduceData> GetResult(int sync_key);
 
  private:
   int task_id_;
   int num_tasks_;
+  // Number of threads (within the same process) that will participate in the
+  // all-reduce operation.
+  int threads_per_task_;
+
   absl::Mutex mutex_;
   absl::flat_hash_map<int, AllReduceState> all_reduce_state_map_
       ABSL_GUARDED_BY(mutex_);
-  absl::CondVar local_data_cv_ ABSL_GUARDED_BY(mutex_);
+  // CV to wait for state to be updated by all local thread.
+  absl::CondVar local_reduced_cv_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace rpc

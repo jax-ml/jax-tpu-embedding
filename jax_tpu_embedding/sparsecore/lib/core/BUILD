@@ -189,6 +189,7 @@ pybind_extension(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
         "@pybind11//:pybind11_eigen",
         "@pybind11_abseil//pybind11_abseil:absl_casters",

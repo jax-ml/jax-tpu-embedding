@@ -47,6 +47,7 @@ namespace {
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 using ::testing::Each;
+using ::testing::HasSubstr;
 
 struct Peer {
   int task_id;
@@ -93,13 +94,14 @@ class AllReduceTest : public ::testing::Test {
     }
   }
 
-  Peer CreatePeer(int task_id, int num_tasks) {
+  Peer CreatePeer(int task_id, int num_tasks, int threads_per_task = 1) {
     Peer peer;
     peer.task_id = task_id;
     const int port = tsl::testing::PickUnusedPortOrDie();
     peer.address = absl::StrCat("localhost:", port);
 
-    peer.service = std::make_unique<AllReduceServiceImpl>(task_id, num_tasks);
+    peer.service = std::make_unique<AllReduceServiceImpl>(task_id, num_tasks,
+                                                          threads_per_task);
 
     ::grpc::ServerBuilder builder;
     builder.AddListeningPort(peer.address, GetDefaultServerCredentials());
@@ -205,11 +207,11 @@ TEST_F(AllReduceTest, BlockingAllReduceNoStubs) {
   EXPECT_THAT(interface.BlockingAllReduce(/*sync_key=*/1,
                                           /*minibatching_required=*/true),
               StatusIs(absl::StatusCode::kFailedPrecondition,
-                       "No gRPC stubs available."));
+                       HasSubstr("No gRPC stubs available.")));
   EXPECT_THAT(interface.BlockingAllReduce(/*sync_key=*/2,
                                           /*minibatching_split=*/uint64_t{100}),
               StatusIs(absl::StatusCode::kFailedPrecondition,
-                       "No gRPC stubs available."));
+                       HasSubstr("No gRPC stubs available.")));
 }
 
 class AllReduceFuzzTest
@@ -252,6 +254,101 @@ FUZZ_TEST_F(AllReduceFuzzTest, BlockingAllReduceUint64Fuzz)
     .WithDomains(
         fuzztest::Arbitrary<int>(),
         fuzztest::VectorOf(fuzztest::Arbitrary<uint64_t>()).WithSize(4));
+
+class MultipleLocalValuesAllReduceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    num_tasks_ = 2;
+    threads_per_task_ = 2;
+    total_threads_ = num_tasks_ * threads_per_task_;
+    thread_pool_ = std::make_unique<tsl::thread::ThreadPool>(
+        tsl::Env::Default(), "MultipleLocalValuesAllReduceTest",
+        total_threads_ * 2);
+
+    // Setup task services and servers.
+    task_services_.resize(num_tasks_);
+    task_servers_.resize(num_tasks_);
+    std::vector<std::string> task_address(num_tasks_);
+    for (int i = 0; i < num_tasks_; ++i) {
+      const int port = tsl::testing::PickUnusedPortOrDie();
+      task_address[i] = absl::StrCat("localhost:", port);
+      task_services_[i] = std::make_unique<AllReduceServiceImpl>(
+          i, num_tasks_, threads_per_task_);
+      ::grpc::ServerBuilder builder;
+      builder.AddListeningPort(task_address[i], GetDefaultServerCredentials());
+      builder.RegisterService(task_services_[i].get());
+      task_servers_[i] = builder.BuildAndStart();
+    }
+
+    // Setup task interfaces.
+    task_interfaces_.resize(num_tasks_);
+    for (int task_id = 0; task_id < num_tasks_; ++task_id) {
+      std::vector<std::string> peer_task_addresses;
+      for (int j = 0; j < num_tasks_; ++j) {
+        if (j != task_id) {
+          peer_task_addresses.push_back(task_address[j]);
+        }
+      }
+      task_interfaces_[task_id] = std::make_unique<GrpcAllReduceInterface>(
+          peer_task_addresses, task_id, num_tasks_, /*all_reduce_port=*/0,
+          task_services_[task_id].get(), threads_per_task_);
+      task_interfaces_[task_id]->SetUp();
+    }
+  }
+
+  void TearDown() override {
+    for (auto& server : task_servers_) {
+      if (server) {
+        server->Shutdown();
+      }
+    }
+    for (auto& server : task_servers_) {
+      if (server) {
+        server->Wait();
+      }
+    }
+  }
+
+  template <typename T>
+  std::vector<absl::StatusOr<T>> RunAllReduceTest(
+      int sync_key, const std::vector<T>& inputs) {
+    std::vector<absl::StatusOr<T>> results(total_threads_);
+    absl::BlockingCounter barrier(total_threads_);
+    for (int thread_id = 0; thread_id < total_threads_; ++thread_id) {
+      thread_pool_->Schedule([&, thread_id]() {
+        int task_id = thread_id / threads_per_task_;
+        results[thread_id] = task_interfaces_[task_id]->BlockingAllReduce(
+            sync_key, inputs[thread_id]);
+        barrier.DecrementCount();
+      });
+    }
+    barrier.Wait();
+    return results;
+  }
+
+  int num_tasks_;
+  int threads_per_task_;
+  int total_threads_;
+  std::vector<std::unique_ptr<AllReduceServiceImpl>> task_services_;
+  std::vector<std::unique_ptr<::grpc::Server>> task_servers_;
+  std::vector<std::unique_ptr<GrpcAllReduceInterface>> task_interfaces_;
+  std::unique_ptr<tsl::thread::ThreadPool> thread_pool_;
+};
+
+TEST_F(MultipleLocalValuesAllReduceTest, BlockingAllReduceUint64) {
+  // Arrange
+  // 2 Tasks x 2 Threads per Task.
+  std::vector<uint64_t> inputs = {10, 20, 30, 40};
+  const uint64_t expected_result =
+      absl::c_accumulate(inputs, uint64_t{0}, std::bit_or<>());
+
+  // Act
+  std::vector<absl::StatusOr<uint64_t>> results =
+      RunAllReduceTest(/*sync_key=*/456, inputs);
+
+  // Assert
+  EXPECT_THAT(results, Each(IsOkAndHolds(expected_result)));
+}
 
 }  // namespace
 }  // namespace rpc

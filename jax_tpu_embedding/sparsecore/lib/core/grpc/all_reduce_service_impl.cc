@@ -14,8 +14,11 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 
 #include <memory>
+#include <optional>
 
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
+#include "absl/synchronization/barrier.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
@@ -26,6 +29,18 @@
 
 namespace jax_sc_embedding {
 namespace rpc {
+namespace {
+void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
+  if (accumulator.has_bool_val()) {
+    accumulator.set_bool_val(value.bool_val() || accumulator.bool_val());
+  } else if (accumulator.has_uint64_val()) {
+    accumulator.set_uint64_val(value.uint64_val() | accumulator.uint64_val());
+  } else {
+    LOG(FATAL) << "Unsupported data type for reduction: "
+               << accumulator.value_case();
+  }
+}
+}  // namespace
 
 ::grpc::ServerUnaryReactor* AllReduceServiceImpl::ContributeData(
     ::grpc::CallbackServerContext* context, const AllReduceData* request,
@@ -33,10 +48,11 @@ namespace rpc {
   auto* reactor = context->DefaultReactor();
   absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
 
-  // Wait for local value.
+  // Wait for local state to be finalized.
   while (all_reduce_state_map_.find(request->sync_key()) ==
          all_reduce_state_map_.end()) {
-    bool timeout = local_data_cv_.WaitWithTimeout(&mutex_, absl::Seconds(60));
+    bool timeout =
+        local_reduced_cv_.WaitWithTimeout(&mutex_, absl::Seconds(60));
     if (timeout) {
       reactor->Finish(grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED,
                                    "Timed out waiting for local value."));
@@ -44,57 +60,100 @@ namespace rpc {
     }
   }
 
+  // Get the state.
   auto it = all_reduce_state_map_.find(request->sync_key());
   CHECK(it != all_reduce_state_map_.end());
+
+  // Combine remote value with local value.
   AllReduceData& local_data = it->second.local_data;
 
   if (local_data.value_case() != request->value_case()) {
-    it->second.rpc_counter->DecrementCount();
+    it->second.incoming_rpc_counter->DecrementCount();
     reactor->Finish(
         grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
                      "Request data type does not match local data type."));
     return reactor;
   }
 
-  // Reduce local value.
-  if (local_data.has_bool_val()) {
-    local_data.set_bool_val(request->bool_val() || local_data.bool_val());
-  } else if (local_data.has_uint64_val()) {
-    local_data.set_uint64_val(request->uint64_val() | local_data.uint64_val());
-  }
+  ReduceData(*request, local_data);
 
-  all_reduce_state_map_[request->sync_key()].rpc_counter->DecrementCount();
+  all_reduce_state_map_[request->sync_key()]
+      .incoming_rpc_counter->DecrementCount();
 
   reactor->Finish(::grpc::Status::OK);
   return reactor;
 }
 
-void AllReduceServiceImpl::InitializeState(int sync_key,
-                                           const AllReduceData& data) {
+absl::StatusOr<std::optional<AllReduceData>>
+AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
+                                              const AllReduceData& data) {
   absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
-  all_reduce_state_map_[sync_key] = {
-      .local_data = data,
-      .rpc_counter = std::make_unique<absl::BlockingCounter>(num_tasks_ - 1),
-  };
-  local_data_cv_.SignalAll();
+  auto it = all_reduce_state_map_.find(sync_key);
+
+  if (it == all_reduce_state_map_.end()) {
+    // Initialize the state and wait for all other tasks.
+    all_reduce_state_map_[sync_key] = {
+        .local_data = data,
+        .local_contributions_counter =
+            std::make_unique<absl::BlockingCounter>(threads_per_task_ - 1),
+        .results_counter =
+            std::make_unique<absl::BlockingCounter>(threads_per_task_),
+        .global_results_barrier =
+            std::make_unique<absl::Barrier>(threads_per_task_),
+        .incoming_rpc_counter =
+            std::make_unique<absl::BlockingCounter>(num_tasks_ - 1),
+    };
+    auto* local_contributions_counter =
+        all_reduce_state_map_[sync_key].local_contributions_counter.get();
+
+    // Wait without mutex to avoid deadlock.
+    mutex_.Unlock();  // NOLINT (b/438618768)
+    local_contributions_counter->Wait();
+
+    // Lock to update CV.
+    mutex_.Lock();  // NOLINT (b/438618768)
+    local_reduced_cv_.SignalAll();
+
+    return all_reduce_state_map_[sync_key].local_data;
+  } else {
+    // Update the state.
+    ReduceData(data, it->second.local_data);
+    it->second.local_contributions_counter->DecrementCount();
+  }
+  return std::nullopt;
 }
 
-absl::StatusOr<AllReduceData> AllReduceServiceImpl::Wait(int sync_key) {
-  absl::BlockingCounter* rpc_counter = nullptr;
+void AllReduceServiceImpl::WaitIncomingRPCs(int sync_key) {
+  absl::BlockingCounter* incoming_rpc_counter = nullptr;
   {
     absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
-    rpc_counter = all_reduce_state_map_.at(sync_key).rpc_counter.get();
+    incoming_rpc_counter =
+        all_reduce_state_map_.at(sync_key).incoming_rpc_counter.get();
   }
 
   // Wait for the counter outside of the mutex lock to prevent deadlock.
-  CHECK_NE(rpc_counter, nullptr);
-  // TODO: b/428790659 - Add timeout (absl::BlockingCounter does not support
-  // timeout, maybe use absl::CondVar::WaitWithTimeout instead?)
-  rpc_counter->Wait();
+  CHECK(incoming_rpc_counter != nullptr);
+  incoming_rpc_counter->Wait();
+}
 
+void AllReduceServiceImpl::WaitResults(int sync_key) {
+  absl::Barrier* global_results_barrier = nullptr;
+  {
+    absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+    global_results_barrier =
+        all_reduce_state_map_.at(sync_key).global_results_barrier.get();
+  }
+  CHECK(global_results_barrier != nullptr);
+  global_results_barrier->Block();
+}
+
+absl::StatusOr<AllReduceData> AllReduceServiceImpl::GetResult(int sync_key) {
   absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
-  AllReduceData result = all_reduce_state_map_[sync_key].local_data;
-  all_reduce_state_map_.erase(sync_key);
+  auto& state = all_reduce_state_map_[sync_key];
+  AllReduceData result = state.local_data;
+  if (state.results_counter->DecrementCount()) {
+    all_reduce_state_map_.erase(sync_key);
+  }
   return result;
 }
 

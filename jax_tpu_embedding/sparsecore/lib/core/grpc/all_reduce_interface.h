@@ -32,10 +32,12 @@ class GrpcAllReduceInterface final : public AllReduceInterface {
  public:
   GrpcAllReduceInterface(std::vector<std::string> peer_addresses, int task_id,
                          int num_tasks, int all_reduce_port,
-                         AllReduceServiceImpl* local_service)
+                         AllReduceServiceImpl* local_service,
+                         int threads_per_task = 1)
       : peer_addresses_(peer_addresses),
         task_id_(task_id),
         num_tasks_(num_tasks),
+        threads_per_task_(threads_per_task),
         all_reduce_port_(all_reduce_port),
         local_service_(local_service) {
     CHECK_EQ(peer_addresses_.size(), num_tasks_ - 1);
@@ -65,6 +67,7 @@ class GrpcAllReduceInterface final : public AllReduceInterface {
   std::vector<std::string> peer_addresses_;
   int task_id_;
   int num_tasks_;
+  int threads_per_task_;
   int all_reduce_port_;
   AllReduceServiceImpl* local_service_;  // Not owned.
 

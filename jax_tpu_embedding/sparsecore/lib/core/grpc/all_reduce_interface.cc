@@ -15,11 +15,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
@@ -32,31 +34,20 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/grpc_credentials.h"
+#include "tsl/platform/errors.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
 
 namespace jax_sc_embedding {
 namespace rpc {
+namespace {
 
-void GrpcAllReduceInterface::SetUp() {
-  for (const auto& peer_address : peer_addresses_) {
-    auto creds = GetDefaultChannelCredentials();
-    auto channel = ::grpc::CreateChannel(peer_address, creds);
-    auto stub = AllReduceGrpcService::NewStub(channel);
-    stubs_.push_back(std::move(stub));
-  }
-}
-
-absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
-    const AllReduceData& request) {
-  if (stubs_.empty()) {
-    return absl::FailedPreconditionError("No gRPC stubs available.");
-  }
-
-  // Initialize State on the local service.
-  local_service_->InitializeState(request.sync_key(), request);
+// Helper function to send ContributeData RPCs to all peers.
+absl::Status SendLocalData(
+    const std::vector<std::unique_ptr<AllReduceGrpcService::Stub>>& stubs,
+    const AllReduceData& request, int num_hosts) {
   absl::Mutex mutex;
   grpc::Status overall_status ABSL_GUARDED_BY(mutex) = grpc::Status::OK;
-  absl::BlockingCounter outgoing_rpcs(stubs_.size());
+  absl::BlockingCounter outgoing_rpcs(stubs.size());
 
   struct ContributeDataArgs {
     ::grpc::ClientContext context;
@@ -65,8 +56,8 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
   };
 
   // Send our data to all other peers asynchronously.
-  DCHECK_EQ(stubs_.size(), num_tasks_ - 1);
-  for (const auto& stub : stubs_) {
+  DCHECK_EQ(stubs.size(), num_hosts - 1);
+  for (const auto& stub : stubs) {
     auto args = std::make_shared<ContributeDataArgs>();
     args->context.set_deadline(
         absl::ToChronoTime(absl::Now() + absl::Seconds(60)));
@@ -85,11 +76,6 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
         });
   }
 
-  // Wait to receive data from all other hosts (Local service performs the
-  // reduction).
-  TF_ASSIGN_OR_RETURN(AllReduceData result,
-                      local_service_->Wait(request.sync_key()));
-
   // Wait for all outgoing RPCs to complete.
   outgoing_rpcs.Wait();
 
@@ -99,6 +85,49 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
         static_cast<absl::StatusCode>(overall_status.error_code()),
         overall_status.error_message());
   }
+  return absl::OkStatus();
+}
+
+}  // namespace
+
+void GrpcAllReduceInterface::SetUp() {
+  for (const auto& peer_address : peer_addresses_) {
+    auto creds = GetDefaultChannelCredentials();
+    auto channel = ::grpc::CreateChannel(peer_address, creds);
+    auto stub = AllReduceGrpcService::NewStub(channel);
+    stubs_.push_back(std::move(stub));
+  }
+}
+
+absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
+    const AllReduceData& request) {
+  if (stubs_.empty()) {
+    return absl::FailedPreconditionError(
+        "No gRPC stubs available. Did you forget to call SetUp?");
+  }
+
+  // Initialize State on the local service. The thread initializing the state
+  // waits for all other local threads to contribute their values.
+  TF_ASSIGN_OR_RETURN(
+      std::optional<AllReduceData> locally_reduced_data,
+      local_service_->InitializeOrUpdateState(request.sync_key(), request));
+
+  // Only send RPCs from the task that initializes state.
+  if (locally_reduced_data.has_value()) {
+    // Send our data to all other peers asynchronously and wait for completion.
+    TF_RETURN_IF_ERROR(
+        SendLocalData(stubs_, locally_reduced_data.value(), num_tasks_));
+
+    // Wait to receive data from all other hosts (Local service performs the
+    // reduction).
+    local_service_->WaitIncomingRPCs(request.sync_key());
+  }
+
+  // Wait for one of the threads to aggregate results.
+  local_service_->WaitResults(request.sync_key());
+
+  TF_ASSIGN_OR_RETURN(AllReduceData result,
+                      local_service_->GetResult(request.sync_key()));
 
   return result;
 }
