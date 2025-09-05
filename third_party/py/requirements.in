@@ -5,6 +5,7 @@ numpy
 dm-tree
 # Pre-release of JAX required for SparseCore TPUs.
 jax[tpu] --pre
+portpicker
 
 # Build utilities.
 auditwheel

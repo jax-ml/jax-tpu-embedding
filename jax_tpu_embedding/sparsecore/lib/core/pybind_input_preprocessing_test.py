@@ -23,6 +23,7 @@ from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
+import portpicker
 
 
 FeatureStackingStrategy = embedding.FeatureStackingStrategy
@@ -2872,6 +2873,22 @@ class InputPreprocessingTest(parameterized.TestCase):
     np.testing.assert_allclose(
         gains["table"], expected_gains["table"], rtol=1e-5
     )
+
+
+class MinibatchingTest(absltest.TestCase):
+
+  def test_minibatching_node_creation(self):
+    num_hosts = 8
+    ports = [portpicker.pick_unused_port() for _ in range(num_hosts)]
+    for host_id in range(num_hosts):
+      minibatching_node = pybind_input_preprocessing.MinibatchingNode(
+          host_id,
+          num_hosts,
+          [f"localhost:{port}" for i, port in enumerate(ports) if i != host_id],
+          ports[host_id],
+      )
+      all_reduce_interface = minibatching_node.get_all_reduce_interface()
+      self.assertIsNotNone(all_reduce_interface)
 
 
 if __name__ == "__main__":

@@ -29,10 +29,12 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sparse_coo_input_batch.h"
+#include "pybind11/attr.h"  // from @pybind11
 #include "pybind11/cast.h"  // from @pybind11
 #include "pybind11/eigen.h"  // from @pybind11
 #include "pybind11/gil.h"  // from @pybind11
@@ -228,6 +230,12 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
       .value("SPLIT_THEN_STACK", FeatureStackingStrategy::kSplitThenStack)
       .export_values();
   py::class_<AllReduceInterface> all_reduce_interface(m, "AllReduceInterface");
+  py::class_<rpc::MinibatchingNode, std::shared_ptr<rpc::MinibatchingNode>>(
+      m, "MinibatchingNode")
+      .def(py::init<int, int, std::vector<std::string>, int>())
+      .def("get_all_reduce_interface",
+           &rpc::MinibatchingNode::GetAllReduceInterface,
+           py::return_value_policy::reference_internal);
   m.def("PreprocessSparseDenseMatmulInput",
         &PyNumpyPreprocessSparseDenseMatmulInput, py::arg("features"),
         py::arg("feature_weights"), py::arg("feature_specs"),

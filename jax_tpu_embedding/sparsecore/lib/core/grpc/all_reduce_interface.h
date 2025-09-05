@@ -23,11 +23,10 @@
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 
 namespace jax_sc_embedding {
 namespace rpc {
-
-class AllReduceServiceImpl;  // Forward declaration
 
 class GrpcAllReduceInterface final : public AllReduceInterface {
  public:

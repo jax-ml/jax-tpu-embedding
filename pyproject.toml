@@ -19,6 +19,7 @@ dependencies = [
     'flax',
     'jax',
     'numpy',
+    'portpicker'
 ]
 
 # `version` is set by setuptools to use `jax_tpu_embedding.sparsecore.__version__`.

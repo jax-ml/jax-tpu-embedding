@@ -184,6 +184,7 @@ pybind_extension(
         ":input_preprocessing_util",
         ":numpy_input_batch",
         ":sparse_coo_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -249,6 +250,7 @@ pytype_strict_contrib_test(
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("numpy"),
+        pypi_requirement("portpicker"),
     ],
 )
 

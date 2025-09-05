@@ -82,7 +82,22 @@ cc_library(
     name = "grpc_credentials",
     hdrs = ["grpc_credentials.h"],
     deps = [
-        "@com_github_grpc_grpc//:grpc++_unsecure",
+        "@com_github_grpc_grpc//:grpc++",
+    ],
+)
+
+cc_library(
+    name = "minibatching_node",
+    hdrs = ["minibatching_node.h"],
+    deps = [
+        ":all_reduce_service_impl",
+        ":grpc_all_reduce_interface",
+        ":grpc_credentials",
+        "//jax_tpu_embedding/sparsecore/lib/core:all_reduce_interface",
+        "//jax_tpu_embedding/sparsecore/lib/core/grpc/oss:grpc_credentials",  # buildcleaner: keep
+        "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings",
     ],
 )
 
