@@ -41,10 +41,8 @@ class GrpcAllReduceInterface final : public AllReduceInterface {
         all_reduce_port_(all_reduce_port),
         local_service_(local_service) {
     CHECK_EQ(peer_addresses_.size(), num_tasks_ - 1);
+    SetUp();
   }
-
-  // Create gRPC channels to other peers.
-  void SetUp();
 
   // Performs a blocking All-Reduce operation.
   // `sync_key`: A unique key for this all-reduce operation.
@@ -72,6 +70,10 @@ class GrpcAllReduceInterface final : public AllReduceInterface {
   AllReduceServiceImpl* local_service_;  // Not owned.
 
   std::vector<std::unique_ptr<AllReduceGrpcService::Stub>> stubs_;
+
+ private:
+  // Create gRPC channels to other peers.
+  void SetUp();
 };
 
 }  // namespace rpc

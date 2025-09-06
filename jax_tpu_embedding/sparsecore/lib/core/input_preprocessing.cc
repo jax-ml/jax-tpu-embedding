@@ -258,12 +258,6 @@ PreprocessSparseDenseMatmulInput(
   }
   CHECK_GT(options.local_device_count, 0);
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
-  const int num_hosts =
-      options.global_device_count / options.local_device_count;
-  CHECK(!options.enable_minibatching ||
-        options.experimental_static_single_minibatch || num_hosts == 1 ||
-        options.all_reduce_interface != nullptr)
-      << "AllReduceInterface must be provided for multi-host minibatching.";
   CHECK(options.enable_minibatching ||
         !options.experimental_static_single_minibatch)
       << "experimental_static_single_minibatch enabled without "

@@ -30,24 +30,27 @@
 namespace jax_sc_embedding {
 namespace rpc {
 
+// This class encapsulates the gRPC server and client-side interface required
+// for performing all-reduce operations across multiple hosts in a minibatching
+// setup. It initializes an `AllReduceServiceImpl` to handle incoming
+// All-Reduce RPCs from other peers and a `GrpcAllReduceInterface` to
+// initiate All-Reduce RPCs to other peers.
 class MinibatchingNode {
  public:
-  MinibatchingNode(int host_id, int num_hosts,
+  MinibatchingNode(int task_id, int num_tasks,
                    std::vector<std::string> peer_addresses,
-                   int minibatching_port)
-      : all_reduce_service_(
-            std::make_unique<AllReduceServiceImpl>(host_id, num_hosts)),
+                   int minibatching_port, int threads_per_task = 1)
+      : all_reduce_service_(std::make_unique<AllReduceServiceImpl>(
+            task_id, num_tasks, threads_per_task)),
         all_reduce_interface_(std::make_unique<GrpcAllReduceInterface>(
-            peer_addresses, host_id, num_hosts, minibatching_port,
-            all_reduce_service_.get())),
+            peer_addresses, task_id, num_tasks, minibatching_port,
+            all_reduce_service_.get(), threads_per_task)),
         all_reduce_server_(
             ::grpc::ServerBuilder()
                 .AddListeningPort(absl::StrCat("[::]:", minibatching_port),
                                   GetDefaultServerCredentials())
                 .RegisterService(all_reduce_service_.get())
-                .BuildAndStart()) {
-    all_reduce_interface_->SetUp();
-  }
+                .BuildAndStart()) {}
 
   AllReduceInterface* GetAllReduceInterface() ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return all_reduce_interface_.get();

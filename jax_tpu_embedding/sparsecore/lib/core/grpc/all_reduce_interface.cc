@@ -101,10 +101,7 @@ void GrpcAllReduceInterface::SetUp() {
 
 absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
     const AllReduceData& request) {
-  if (stubs_.empty()) {
-    return absl::FailedPreconditionError(
-        "No gRPC stubs available. Did you forget to call SetUp?");
-  }
+  CHECK_EQ(num_tasks_, stubs_.size() + 1);
 
   // Initialize State on the local service. The thread initializing the state
   // waits for all other local threads to contribute their values.
@@ -112,8 +109,9 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
       std::optional<AllReduceData> locally_reduced_data,
       local_service_->InitializeOrUpdateState(request.sync_key(), request));
 
-  // Only send RPCs from the task that initializes state.
-  if (locally_reduced_data.has_value()) {
+  // Only send RPCs from the task that initializes state (in case of
+  // multi-task).
+  if (locally_reduced_data.has_value() && num_tasks_ > 1) {
     // Send our data to all other peers asynchronously and wait for completion.
     TF_RETURN_IF_ERROR(
         SendLocalData(stubs_, locally_reduced_data.value(), num_tasks_));

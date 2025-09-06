@@ -77,7 +77,6 @@ class AllReduceTest : public ::testing::Test {
       }
       peers_[i].all_reduce_interface = std::make_unique<GrpcAllReduceInterface>(
           peer_addresses, i, num_tasks_, 0, peers_[i].service.get());
-      peers_[i].all_reduce_interface->SetUp();
     }
   }
 
@@ -195,25 +194,6 @@ TEST_F(AllReduceTest, BlockingAllReduceDataTypeMismatch) {
   EXPECT_THAT(statuses, Each(StatusIs(grpc::StatusCode::INVALID_ARGUMENT)));
 }
 
-TEST_F(AllReduceTest, BlockingAllReduceNoStubs) {
-  // Create an interface with no peer addresses (num_tasks must be 1).
-  AllReduceServiceImpl local_service(/*task_id=*/0, /*num_tasks=*/1);
-  GrpcAllReduceInterface interface(/*peer_addresses=*/{}, /*task_id=*/0,
-                                   /*num_tasks=*/1, /*all_reduce_port=*/0,
-                                   &local_service);
-  interface.SetUp();  // This will result in an empty `stubs_` vector.
-
-  // Expect a FailedPreconditionError when calling BlockingAllReduce.
-  EXPECT_THAT(interface.BlockingAllReduce(/*sync_key=*/1,
-                                          /*minibatching_required=*/true),
-              StatusIs(absl::StatusCode::kFailedPrecondition,
-                       HasSubstr("No gRPC stubs available.")));
-  EXPECT_THAT(interface.BlockingAllReduce(/*sync_key=*/2,
-                                          /*minibatching_split=*/uint64_t{100}),
-              StatusIs(absl::StatusCode::kFailedPrecondition,
-                       HasSubstr("No gRPC stubs available.")));
-}
-
 class AllReduceFuzzTest
     : public fuzztest::PerFuzzTestFixtureAdapter<AllReduceTest> {
  public:
@@ -292,7 +272,6 @@ class MultipleLocalValuesAllReduceTest : public ::testing::Test {
       task_interfaces_[task_id] = std::make_unique<GrpcAllReduceInterface>(
           peer_task_addresses, task_id, num_tasks_, /*all_reduce_port=*/0,
           task_services_[task_id].get(), threads_per_task_);
-      task_interfaces_[task_id]->SetUp();
     }
   }
 
