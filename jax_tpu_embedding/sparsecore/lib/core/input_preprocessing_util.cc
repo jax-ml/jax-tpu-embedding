@@ -93,13 +93,25 @@ void PadRowPointersBuffer(int& lhs_row_offset, int padding, int row_end,
   }
 }
 
-// Pad the COO buffer.
+// Enum to specify the padding behavior for `PadCooBuffer`.
+enum class PadType {
+  // Pads to the next HBM alignment boundary.
+  kAlignOnly,
+  // Pads to the end of the provided buffer segment (`coo_end`).
+  kPadToEnd
+};
+
+// Pads the COO buffer.
+//
 // Args:
-//   pad_to_end: whether to pad to the end of the buffer or just align to HBM
-//     granularity.
-void PadCooBuffer(int& coo_index, int coo_end, bool pad_to_end,
+//   `coo_index`: Current index into the COO buffer.
+//   `coo_end`: End index of the COO buffer segment to consider for padding.
+//   `pad_type`: Specifies the padding behavior.
+//   `csr`: CSR arrays to be padded.
+void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
                   internal::CsrArraysPerDevice& csr) {
-  while ((pad_to_end || coo_index % TPU_VECTOR_REGISTER_ALIGMENT_SIZE != 0) &&
+  while ((pad_type == PadType::kPadToEnd ||
+          coo_index % TPU_VECTOR_REGISTER_ALIGMENT_SIZE != 0) &&
          coo_index < coo_end) {
     csr.embedding_ids[coo_index] = INT_MAX;
     csr.sample_ids[coo_index] = INT_MAX;
@@ -165,8 +177,7 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
       csr_arrays.row_pointers[lhs_row_index++] =
           GetRowPointer(coo_index, options);
       // Align partition.
-      PadCooBuffer(coo_index, options.coo_end,
-                   /*pad_to_end=*/false, csr_arrays);
+      PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly, csr_arrays);
       IncrementScId(last_sc_id, options.num_scs, options.num_sc_per_device);
     }
     // Terminate at the sentinel node.
@@ -324,20 +335,18 @@ void FillLocalDeviceBuffer(
       lhs_row_begin = lhs_row_end;
       if (options.enable_minibatching) {
         // Align minibatch buffer
-        PadCooBuffer(coo_begin, coo_buffer_size,
-                     /*pad_to_end=*/false, csr_arrays);
+        PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
+                     csr_arrays);
       }
     }  // end minibatch loop
     if (!options.enable_minibatching) {
       const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
       // Pad to end of SparseCore buffer.
-      PadCooBuffer(coo_begin, sc_end,
-                   /*pad_to_end=*/true, csr_arrays);
+      PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd, csr_arrays);
     }
   }  // end SparseCore loop
   // Pad to end of device buffer.
-  PadCooBuffer(coo_begin, coo_buffer_size,
-               /*pad_to_end=*/true, csr_arrays);
+  PadCooBuffer(coo_begin, coo_buffer_size, PadType::kPadToEnd, csr_arrays);
 }
 
 }  // namespace jax_sc_embedding
