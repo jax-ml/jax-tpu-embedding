@@ -15,6 +15,7 @@
 
 from typing import Sequence
 
+from absl.testing import absltest
 import einops
 import jax
 import numpy
@@ -171,3 +172,25 @@ def create_per_device_sharded_stacked_tables(
   sharded_stacked = jax.numpy.concatenate(rotated_tables, axis=1)
 
   return sharded_stacked.reshape(num_devices, -1, dim)
+
+
+def skip_if_tpu_unavailable(f):
+  """Skips the test if TPU initialization fails.
+
+  See http://b/366070551#comment3 for more information.
+
+  Args:
+    f: The test function to wrap.
+
+  Returns:
+    A wrapper function that skips the test if TPU initialization fails.
+  """
+  def wrapper(*args, **kwargs):
+    try:
+      return f(*args, **kwargs)
+    except RuntimeError as e:
+      if "TPU initialization failed" in str(e):
+        raise absltest.SkipTest("TPU not available")
+      raise e
+
+  return wrapper

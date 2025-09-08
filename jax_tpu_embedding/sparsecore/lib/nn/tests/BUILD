@@ -78,6 +78,7 @@ pytype_strict_library(
     srcs = ["test_utils.py"],
     visibility = EXTERNAL_USERS,
     deps = [
+        pypi_requirement("absl/testing:absltest"),
         pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
