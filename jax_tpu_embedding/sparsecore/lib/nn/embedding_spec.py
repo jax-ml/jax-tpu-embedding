@@ -21,6 +21,7 @@ import dataclasses
 import inspect
 from typing import Callable, Sequence, TypeAlias
 
+from flax import struct
 import jax
 import jax.extend as jex
 import jax.numpy as jnp
@@ -739,7 +740,7 @@ class FeatureSpec:
     self._id_transformation = id_transformation
 
 
-@dataclasses.dataclass(eq=True, frozen=True, kw_only=True)
+@struct.dataclass(eq=True, frozen=True, kw_only=True)
 class StackedTableSpec:
   """Spec for a stacked table that is a combination of multiple tables."""
 

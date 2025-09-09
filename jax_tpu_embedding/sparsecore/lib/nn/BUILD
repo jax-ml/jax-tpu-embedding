@@ -32,6 +32,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_ftrl",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_laprop",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd",
+        pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
     ],

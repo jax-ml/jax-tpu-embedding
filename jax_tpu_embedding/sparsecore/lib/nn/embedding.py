@@ -418,6 +418,40 @@ def sharding_strategy_to_enum(
     )
 
 
+def get_all_reduce_interface(
+    peer_addresses: Sequence[str],
+    minibatching_port: int,
+    host_id: int | None = None,
+    host_count: int | None = None,
+) -> pybind_input_preprocessing.AllReduceInterface:
+  """Gets an AllReduceInterface for inter-process communication.
+
+  Args:
+    peer_addresses: A sequence of addresses for other participating processes.
+      These should be in a format compatible with gRPC channel creation, such as
+      "host:port", "ipv4:port", or "[ipv6]:port".
+    minibatching_port: The port number to be used for minibatching
+      communication.
+    host_id: The current host's index. If `None`, it will be set to
+      `jax.process_index()`.
+    host_count: The total number of hosts. If `None`, it will be set to
+      `jax.process_count()`.
+
+  Returns:
+    An instance of `pybind_input_preprocessing.AllReduceInterface`.
+  """
+  if host_id is None:
+    host_id = jax.process_index()
+  if host_count is None:
+    host_count = jax.process_count()
+  return pybind_input_preprocessing.MinibatchingNode(
+      host_id,
+      host_count,
+      peer_addresses,
+      minibatching_port,
+  ).get_all_reduce_interface()
+
+
 def preprocess_sparse_dense_matmul_input(
     features: Nested[ArrayLike],
     features_weights: Nested[ArrayLike],
@@ -431,6 +465,10 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: bool = False,
     feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
+    enable_minibatching: bool = False,
+    all_reduce_interface: (
+        pybind_input_preprocessing.AllReduceInterface | None
+    ) = None,
 ) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -461,6 +499,9 @@ def preprocess_sparse_dense_matmul_input(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
+    enable_minibatching: Whether to enable minibatching.
+    all_reduce_interface: Interface to communicate between multiple tasks. This
+      can be generated using the `get_all_reduce_interface` function.
 
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
@@ -468,6 +509,11 @@ def preprocess_sparse_dense_matmul_input(
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
+
+  if enable_minibatching and all_reduce_interface is None:
+    raise ValueError(
+        "all_reduce_interface must be provided when minibatching is enabled."
+    )
 
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
@@ -482,6 +528,8 @@ def preprocess_sparse_dense_matmul_input(
           allow_id_dropping=allow_id_dropping,
           feature_stacking_strategy=feature_stacking_strategy,
           batch_number=batch_number,
+          enable_minibatching=enable_minibatching,
+          all_reduce_interface=all_reduce_interface,
       )
   )
 
@@ -509,6 +557,10 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     allow_id_dropping: bool = False,
     feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
+    enable_minibatching: bool = False,
+    all_reduce_interface: (
+        pybind_input_preprocessing.AllReduceInterface | None
+    ) = None,
 ) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
@@ -546,6 +598,9 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
+    enable_minibatching: Whether to enable minibatching.
+    all_reduce_interface: Interface to communicate between multiple tasks. This
+      can be generated using the `get_all_reduce_interface` function.
 
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
@@ -554,6 +609,11 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   tree.assert_same_structure(indices, feature_specs)
   tree.assert_same_structure(values, feature_specs)
   tree.assert_same_structure(dense_shapes, feature_specs)
+
+  if enable_minibatching and all_reduce_interface is None:
+    raise ValueError(
+        "all_reduce_interface must be provided when minibatching is enabled."
+    )
 
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
@@ -569,6 +629,8 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           allow_id_dropping=allow_id_dropping,
           feature_stacking_strategy=feature_stacking_strategy,
           batch_number=batch_number,
+          enable_minibatching=enable_minibatching,
+          all_reduce_interface=all_reduce_interface,
       )
   )
 

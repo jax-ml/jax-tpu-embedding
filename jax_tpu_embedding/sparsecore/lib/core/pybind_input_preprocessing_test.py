@@ -2875,7 +2875,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     )
 
 
-class MinibatchingTest(absltest.TestCase):
+class MinibatchingNodeTest(absltest.TestCase):
 
   def test_minibatching_node_creation(self):
     num_hosts = 8

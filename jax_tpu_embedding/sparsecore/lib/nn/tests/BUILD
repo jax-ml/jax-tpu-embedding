@@ -217,3 +217,21 @@ pytype_strict_contrib_test(
         pypi_requirement("optax/schedules"),
     ],
 )
+
+pytype_strict_contrib_test(
+    name = "minibatching_test",
+    srcs = ["minibatching_test.py"],
+    tags = [
+        "exclusive-if-local",
+        "requires-tpu",
+    ],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+        pypi_requirement("portpicker"),
+    ],
+)
