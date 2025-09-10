@@ -52,7 +52,7 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
 
  public:
   explicit AllReduceServiceImpl(int task_id, int num_tasks,
-                                int threads_per_task = 1)
+                                int threads_per_task)
       : task_id_(task_id),
         num_tasks_(num_tasks),
         threads_per_task_(threads_per_task) {}
@@ -81,7 +81,7 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
  private:
   int task_id_;
   int num_tasks_;
-  // Number of threads (within the same process) that will participate in the
+  // Number of threads (within the same task) that will participate in the
   // all-reduce operation.
   int threads_per_task_;
 

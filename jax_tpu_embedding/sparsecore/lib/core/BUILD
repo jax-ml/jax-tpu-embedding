@@ -131,7 +131,6 @@ cc_library(
         ":coo_format",
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
-        ":minibatching_sync_service",
         ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/base:core_headers",
@@ -139,12 +138,12 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
-        "@eigen_archive//:eigen3",
         "@tsl//tsl/platform:errors",
         "@tsl//tsl/profiler/lib:connected_traceme",
         "@tsl//tsl/profiler/lib:traceme",
@@ -156,11 +155,13 @@ cc_test(
     srcs = ["input_preprocessing_test.cc"],
     deps = [
         ":abstract_input_batch",
+        ":all_reduce_interface",
         ":coo_format",
-        ":fake_all_reduce",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":minibatching_test_utils",
         ":ragged_tensor_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -171,6 +172,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:statusor",
+        "@tsl//tsl/platform:test",
     ],
 )
 
@@ -380,21 +382,6 @@ cc_library(
 )
 
 cc_library(
-    name = "fake_all_reduce",
-    srcs = ["fake_all_reduce.cc"],
-    hdrs = ["fake_all_reduce.h"],
-    deps = [
-        ":all_reduce_interface",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/synchronization",
-    ],
-)
-
-cc_library(
     name = "minibatching_sync_service",
     hdrs = ["minibatching_sync_service.h"],
     deps = [
@@ -412,9 +399,10 @@ cc_test(
     name = "minibatching_sync_service_test",
     srcs = ["minibatching_sync_service_test.cc"],
     deps = [
-        ":fake_all_reduce",
         ":input_preprocessing_util",
         ":minibatching_sync_service",
+        ":minibatching_test_utils",
+        "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest_main",
@@ -428,17 +416,14 @@ cc_library(
     deps = ["@com_google_absl//absl/status:statusor"],
 )
 
-cc_test(
-    name = "fake_all_reduce_test",
-    srcs = ["fake_all_reduce_test.cc"],
+cc_library(
+    name = "minibatching_test_utils",
+    testonly = True,
+    hdrs = ["minibatching_test_utils.h"],
     deps = [
-        ":all_reduce_interface",
-        ":fake_all_reduce",
-        "@com_google_absl//absl/status:status_matchers",
-        "@com_google_absl//absl/types:span",
-        "@com_google_googletest//:gtest_main",
-        "@tsl//tsl/platform:env",
-        "@tsl//tsl/platform:statusor",
+        "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
+        "@com_google_absl//absl/strings",
+        "@tsl//tsl/platform:test",
     ],
 )
 

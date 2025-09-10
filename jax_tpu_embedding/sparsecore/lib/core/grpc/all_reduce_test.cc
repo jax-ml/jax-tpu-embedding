@@ -76,7 +76,7 @@ class AllReduceTest : public ::testing::Test {
         }
       }
       peers_[i].all_reduce_interface = std::make_unique<GrpcAllReduceInterface>(
-          peer_addresses, i, num_tasks_, 0, peers_[i].service.get());
+          peer_addresses, i, num_tasks_, 0, peers_[i].service.get(), 1);
     }
   }
 

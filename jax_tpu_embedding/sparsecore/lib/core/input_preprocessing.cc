@@ -38,7 +38,6 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/minibatching_sync_service.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "tsl/platform/errors.h"  // from @tsl
@@ -217,8 +216,8 @@ void CheckBufferUsage(int max_required_buffer_size_per_device,
 }
 
 void MergeStats(
-    absl::flat_hash_map<std::string, Eigen::RowVectorXi>& current_stats,
-    const absl::flat_hash_map<std::string, Eigen::RowVectorXi>& other_stats) {
+    absl::flat_hash_map<std::string, RowVectorXi>& current_stats,
+    const absl::flat_hash_map<std::string, RowVectorXi>& other_stats) {
   for (const auto& [table_name, other_values] : other_stats) {
     auto it = current_stats.find(table_name);
     if (it == current_stats.end()) {
@@ -229,6 +228,14 @@ void MergeStats(
     }
   }
 }
+
+uint64_t Serialize(MinibatchingSplit value) { return value.to_ullong(); }
+MinibatchingSplit Deserialize(uint64_t value) {
+  return MinibatchingSplit(value);
+}
+
+bool Serialize(bool value) { return value; }
+bool Deserialize(bool value) { return value; }
 
 }  // namespace
 
@@ -270,11 +277,6 @@ PreprocessSparseDenseMatmulInput(
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
-
-  MinibatchingSyncService<bool> minibatching_required_sync_service(
-      stacked_tables.size());
-  MinibatchingSyncService<MinibatchingSplit> minibatching_split_sync_service(
-      stacked_tables.size());
 
   // Main thread release GIL so that the other threads can acquire / release.
   // The input preprocessing is essentially broken into 3 parts.
@@ -359,17 +361,16 @@ PreprocessSparseDenseMatmulInput(
       MinibatchingSplit minibatching_split = 0;
       if (options.enable_minibatching) {
         auto minibatching_required_or =
-            minibatching_required_sync_service.SyncValue(
-                table_minibatching_required,
+            options.all_reduce_interface->BlockingAllReduce(
                 /*sync_key=*/options.batch_number * 2,
-                options.all_reduce_interface);
+                Serialize(table_minibatching_required));
         if (!minibatching_required_or.ok()) {
           absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
           status.Update(minibatching_required_or.status());
           counter.DecrementCount();
           return;
         }
-        minibatching_required = minibatching_required_or.value();
+        minibatching_required = Deserialize(minibatching_required_or.value());
 
         if (minibatching_required) {
           stats_per_host.dropped_id_count = 0;
@@ -387,18 +388,21 @@ PreprocessSparseDenseMatmulInput(
                 stats_per_device.dropped_id_count;
           }
           auto minibatching_split_or =
-              minibatching_split_sync_service.SyncValue(
-                  table_minibatching_split,
+              options.all_reduce_interface->BlockingAllReduce(
                   /*sync_key=*/options.batch_number * 2 + 1,
-                  options.all_reduce_interface);
+                  Serialize(table_minibatching_split));
           if (!minibatching_split_or.ok()) {
             absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
             status.Update(minibatching_split_or.status());
             counter.DecrementCount();
             return;
           }
-          minibatching_split = minibatching_split_or.value();
+          minibatching_split = Deserialize(minibatching_split_or.value());
         }
+      }
+      {
+        absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
+        out.num_minibatches = minibatching_split.count() + 1;
       }
 
       for (int local_device = 0; local_device < options.local_device_count;
@@ -458,7 +462,6 @@ PreprocessSparseDenseMatmulInput(
   counter.Wait();
   TF_RETURN_IF_ERROR(status);
 
-  out.num_minibatches = minibatching_split_sync_service.GetNumMinibatches();
   DCHECK(options.enable_minibatching || out.num_minibatches == 1)
       << "Minibatching is not enabled but num_minibatches is not 1.";
   DCHECK(!options.experimental_static_single_minibatch ||

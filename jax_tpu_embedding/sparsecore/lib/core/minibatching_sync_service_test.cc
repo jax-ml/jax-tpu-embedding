@@ -21,8 +21,9 @@
 #include <gtest/gtest.h>
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
-#include "jax_tpu_embedding/sparsecore/lib/core/fake_all_reduce.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/minibatching_test_utils.h"
 #include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
 
@@ -44,7 +45,7 @@ void RunMinibatchingSync(const SyncTestCase<T>& test_case, int sync_key,
   const int num_hosts = test_case.num_hosts;
   const int num_tables = test_case.num_tables;
 
-  auto all_reduce = std::make_unique<testing_utils::FakeAllReduce>(num_hosts);
+  auto nodes = testing_utils::SetUpMinibatchingNodes(num_hosts);
   absl::Mutex results_mutex;
 
   std::vector<std::unique_ptr<MinibatchingSyncService<T>>> services;
@@ -61,7 +62,7 @@ void RunMinibatchingSync(const SyncTestCase<T>& test_case, int sync_key,
       pool.Schedule([&, host_id, table_id]() {
         auto status_or_value = services[host_id]->SyncValue(
             test_case.host_table_values[host_id][table_id], sync_key,
-            all_reduce.get());
+            nodes[host_id]->GetAllReduceInterface());
         absl::MutexLock lock(&results_mutex);  // NOLINT (b/438618768)
         if (!status_or_value.ok()) {
           shared_status.Update(status_or_value.status());
