@@ -112,6 +112,8 @@ cc_test(
         ":all_reduce_service_impl",
         ":grpc_all_reduce_interface",
         ":grpc_credentials",
+        ":minibatching_node",
+        "//jax_tpu_embedding/sparsecore/lib/core:minibatching_test_utils",
         "//jax_tpu_embedding/sparsecore/lib/core/grpc/oss:grpc_credentials",  # buildcleaner: keep
         "@com_github_grpc_grpc//:grpc++",
         "@com_google_absl//absl/algorithm:container",

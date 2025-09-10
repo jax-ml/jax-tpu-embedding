@@ -27,7 +27,7 @@ namespace testing_utils {
 
 // Helper function to set up MinibatchingNode instances for each host.
 inline std::vector<std::unique_ptr<rpc::MinibatchingNode>>
-SetUpMinibatchingNodes(int num_hosts) {
+SetUpMinibatchingNodes(int num_hosts, int threads_per_task = 1) {
   std::vector<int> ports;
   ports.reserve(num_hosts);
   for (int i = 0; i < num_hosts; ++i) {
@@ -49,8 +49,8 @@ SetUpMinibatchingNodes(int num_hosts) {
       other_peer_addresses.push_back(peer_addresses[j]);
     }
     nodes.push_back(std::make_unique<rpc::MinibatchingNode>(
-        /*task_id=*/i, /*num_tasks=*/num_hosts, other_peer_addresses,
-        ports[i]));
+        /*task_id=*/i, /*num_tasks=*/num_hosts, other_peer_addresses, ports[i],
+        threads_per_task));
   }
   return nodes;
 }
