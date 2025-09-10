@@ -116,6 +116,7 @@ cc_test(
         ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/types:span",
         "@com_google_fuzztest//fuzztest",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",

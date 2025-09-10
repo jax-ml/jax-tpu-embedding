@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 #include "fuzztest/fuzztest.h"
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
@@ -1209,6 +1210,96 @@ TEST(InputPreprocessingUtilTest,
 
   EXPECT_EQ(dropped_static, 1);
   EXPECT_EQ(dropped_sort, 0);
+}
+
+TEST(InputPreprocessingUtilTest,
+     FillBufferStaticBoundCountsDropsWithMinibatching) {
+  std::vector<CooFormat> coo_formats;
+  // 4 samples, 2 ids each. Total 8 ids.
+  // col=0 will be in minibatch 0, col=1 in minibatch 1.
+  coo_formats.emplace_back(/*row=*/0, /*col=*/0, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/0, /*col=*/1, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/1, /*col=*/0, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/1, /*col=*/1, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/2, /*col=*/0, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/2, /*col=*/1, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/3, /*col=*/0, /*gain=*/1.0);
+  coo_formats.emplace_back(/*row=*/3, /*col=*/1, /*gain=*/1.0);
+
+  ExtractedCooTensors extracted(/*num_sc_per_device=*/1,
+                                /*batch_size_for_device=*/4);
+  extracted.coo_tensors = coo_formats;
+
+  StackedTableMetadata meta("stacked_table", /*feature_index=*/0,
+                            /*max_ids_per_partition=*/32,
+                            /*max_unique_ids_per_partition=*/32,
+                            /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                            /*batch_size=*/0);
+
+  PreprocessSparseDenseMatmulInputOptions opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 1,
+      .allow_id_dropping = false,
+      .enable_minibatching = true,
+  };
+
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/1,
+                              /*num_sc_per_device=*/1);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
+  PartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
+      extracted, meta, opts, stats_per_device, minibatching_split);
+
+  // Create 2 minibatches by splitting based on bucket ID.
+  minibatching_split.set(0);
+  grouped.Merge(minibatching_split);
+  ASSERT_EQ(grouped.GetNumMinibatches(), 2);
+
+  static constexpr int row_ptrs_size_per_bucket = 4;
+  // Buffer size is 6, but there are 8 total IDs (4 in each minibatch).
+  static constexpr int coo_buffer_size_per_sc = 6;
+  static constexpr int batch_size_per_sc = 4;
+
+  CsrArraysPerHost csr_arrays_per_host(
+      1, row_ptrs_size_per_bucket * grouped.GetNumMinibatches(),
+      coo_buffer_size_per_sc);
+  internal::CsrArraysPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+
+  int dropped_static = 0;
+  FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
+                        coo_buffer_size_per_sc, batch_size_per_sc, opts,
+                        csr_arrays,
+                        /*dropped_id_count_static_bound=*/dropped_static);
+
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
+  // Minibatch 0 has 4 IDs, Minibatch 1 has 4 IDs. Buffer size is 6.
+  // Minibatch 0 is fully written (4 IDs).
+  // Although there are 2 slots left, the entire Minibatch 1 (4 IDs)
+  // needs to fit, potentially with padding. Since it doesn't, all 4 IDs
+  // from Minibatch 1 are dropped.
+  EXPECT_EQ(dropped_static, 4);
+
+  // Row pointers for MB0 all point to the end index 4.
+  // Row pointers for MB1 start from 4, and since all are dropped, they clamp at
+  // the buffer size 6.
+  std::array<int, 2 * row_ptrs_size_per_bucket> expected_row_pointers = {
+      4, 4, 4, 4, 6, 6, 6, 6};
+  EXPECT_THAT(csr_arrays.row_pointers, ElementsAreArray(expected_row_pointers));
+
+  // Embedding IDs from MB0 are {0, 0, 0, 0}. MB1 is dropped.
+  std::array<int, coo_buffer_size_per_sc> expected_embedding_ids = {
+      0, 0, 0, 0, INT_MAX, INT_MAX};
+  EXPECT_THAT(absl::MakeSpan(csr_arrays.embedding_ids).subspan(0, 6),
+              ElementsAreArray(expected_embedding_ids));
+
+  // Sample IDs from MB0 are {0, 1, 2, 3}. MB1 is dropped.
+  std::array<int, coo_buffer_size_per_sc> expected_sample_ids = {
+      0, 1, 2, 3, INT_MAX, INT_MAX};
+  EXPECT_THAT(absl::MakeSpan(csr_arrays.sample_ids).subspan(0, 6),
+              ElementsAreArray(expected_sample_ids));
 }
 
 }  // namespace
