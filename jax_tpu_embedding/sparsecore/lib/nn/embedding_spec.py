@@ -711,7 +711,7 @@ class FeatureSpec:
     name: Name of the feature.
     table_spec: The table spec for the feature.
     input_shape: The shape of the input jax array, this is [batch_size,
-      feature_sequence_len]
+      feature_valency]. The second element can be omitted for ragged input.
     output_shape: The expected shape of the output activation jax array, this is
       [batch_size, embedding_dim]
   """
