@@ -15,7 +15,6 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_COO_FORMAT_H_
 
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <ostream>
 
@@ -23,8 +22,31 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
+#include "highwayhash/arch_specific.h"  // from @highwayhash
+#include "highwayhash/hh_types.h"  // from @highwayhash
+#include "highwayhash/highwayhash.h"  // from @highwayhash
 
 namespace jax_sc_embedding {
+
+// Arbitrarily chosen, forever-unchanging hash key required by HighwayHash.
+static constexpr highwayhash::HHKey kHighwayHashKey = {
+    0x4451e30f87db9609ULL,
+    0xca7358a1fd2737f8ULL,
+    0x4b2c991fcee4fdeaULL,
+    0x0b2658e18326f6baULL,
+};
+
+// HighwayHash is a fast, strong (well-distributed and unpredictable)
+// pseudo-random-function. Its output is stable, meaning it won't change over
+// time for the same key and input. This makes it suitable for deterministic
+// random selection.
+inline uint64_t HighwayHash(int col_id) {
+  highwayhash::HHResult64 result;
+  highwayhash::HighwayHashCatT<HH_TARGET> hash(kHighwayHashKey);
+  hash.Append(reinterpret_cast<const char*>(&col_id), sizeof(col_id));
+  hash.Finalize(&result);
+  return result;
+}
 
 struct CooFormat {
   // Maximum buckets that can be formed during minibatching.
@@ -113,8 +135,7 @@ struct CooFormat {
            (embedding_id & ~num_scs_mod) + col_offset;
   }
 
-  // TODO: b/428790659 - Update hash function.
-  uint32_t GetBucketId(HashFn hash_fn = std::identity()) const {
+  uint32_t GetBucketId(HashFn hash_fn = HighwayHash) const {
     // Checks that kMaxMinibatchingBuckets is a power of 2.
     static_assert(absl::has_single_bit(kMaxMinibatchingBuckets));
 
@@ -126,10 +147,9 @@ struct CooFormat {
   // [57:26] {global_sc_id, local_embedding_id} (32 bits) <- rotated col_id
   // [25:0]  index (26 bits)
   // The key is used to group and sort COO tensors for efficient processing.
-  // TODO: b/428790659 - Update hash function.
   uint64_t GetGroupingKey(const uint32_t num_scs_bit, const int index,
                           const bool create_buckets = false,
-                          HashFn hash_fn = std::identity()) const {
+                          HashFn hash_fn = HighwayHash) const {
     // This structure ensures tensors are sorted first by bucket_id, then by
     // sparse core, and finally by embedding ID.
     const uint32_t bucket_id = create_buckets ? GetBucketId(hash_fn) : 0;

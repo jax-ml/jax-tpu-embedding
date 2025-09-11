@@ -200,6 +200,9 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // mini-batching to synchronize state across different hosts.
   AllReduceInterface* absl_nullable all_reduce_interface;
 
+  // Hash function used for creating minibatching buckets.
+  CooFormat::HashFn minibatching_bucketing_hash_fn = HighwayHash;
+
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 };

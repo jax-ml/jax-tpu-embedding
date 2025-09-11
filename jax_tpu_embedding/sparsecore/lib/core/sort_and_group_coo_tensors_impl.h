@@ -169,7 +169,8 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       // local_embedding_id(32-num_scs bits), index(26 bits)].
       //  Note that this assumes `num_scs` is a power of 2.
       keys.push_back(coo_tensors[coo_tensor_index].GetGroupingKey(
-          num_sc_bits, coo_tensor_index, create_buckets));
+          num_sc_bits, coo_tensor_index, create_buckets,
+          options.minibatching_bucketing_hash_fn));
     }
 
     // The expected allocation size may be uninitialized.
@@ -185,7 +186,10 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       const CooFormat& coo_tensor = coo_tensors[index];
       const uint32_t col_id = coo_tensor.col_id;
       const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
-      const uint32_t bucket_id = create_buckets ? coo_tensor.GetBucketId() : 0;
+      const uint32_t bucket_id =
+          create_buckets
+              ? coo_tensor.GetBucketId(options.minibatching_bucketing_hash_fn)
+              : 0;
       const uint32_t row_id = coo_tensor.row_id;
 
       if (bucket_id != prev_bucket_id || col_id != prev_col_id) {

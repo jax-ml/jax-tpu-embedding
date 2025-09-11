@@ -17,6 +17,7 @@
 #include <bitset>
 #include <climits>
 #include <cmath>
+#include <functional>
 #include <utility>
 #include <vector>
 
@@ -872,13 +873,14 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
+  auto hash_fn = std::identity();  // No hashing for simplicity.
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
       .enable_minibatching = true,
-  };
+      .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
                               /*num_sc_per_device=*/4);
@@ -1002,13 +1004,14 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
+  auto hash_fn = std::identity();  // No hashing for simplicity.
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
       .enable_minibatching = true,
-  };
+      .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
                               /*num_sc_per_device=*/4);
@@ -1236,12 +1239,14 @@ TEST(InputPreprocessingUtilTest,
                             /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
                             /*batch_size=*/0);
 
+  auto hash_fn = std::identity();  // No hashing for simplicity.
   PreprocessSparseDenseMatmulInputOptions opts{
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
       .enable_minibatching = true,
+      .minibatching_bucketing_hash_fn = hash_fn,
   };
 
   MinibatchingSplit minibatching_split = 0;

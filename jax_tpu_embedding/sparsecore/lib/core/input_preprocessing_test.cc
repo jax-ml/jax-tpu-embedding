@@ -559,7 +559,8 @@ TEST(CooFormatTest, BucketIdCalculationIsCorrect) {
   CooFormat coo_format(/*sample_id=*/1, /*embedding_id=*/70, /*gain=*/1.0,
                        /*col_shift=*/0, /*col_offset=*/0, /*num_scs_mod=*/3);
   EXPECT_EQ(coo_format.col_id, 70);
-  EXPECT_EQ(coo_format.GetBucketId(), 70 % CooFormat::kMaxMinibatchingBuckets);
+  EXPECT_EQ(coo_format.GetBucketId(),
+            HighwayHash(70) % CooFormat::kMaxMinibatchingBuckets);
 
   CooFormat coo_format_2(/*sample_id=*/2, /*embedding_id=*/127, /*gain=*/0.5,
                          /*col_shift=*/1, /*col_offset=*/32, /*num_scs_mod=*/3);
@@ -567,7 +568,7 @@ TEST(CooFormatTest, BucketIdCalculationIsCorrect) {
   // 128%4 + 127//4*4 + 32 = 156
   EXPECT_EQ(coo_format_2.col_id, 156);
   EXPECT_EQ(coo_format_2.GetBucketId(),
-            156 % CooFormat::kMaxMinibatchingBuckets);
+            HighwayHash(156) % CooFormat::kMaxMinibatchingBuckets);
 }
 
 // NOTE: We do not want to test for exact key value, since we only care about
@@ -735,7 +736,6 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
 
   // Assert
   EXPECT_GT(output.num_minibatches, 1);
-  EXPECT_EQ(output.num_minibatches, 8);
 }
 
 TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
@@ -841,7 +841,6 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
 
   // Assert
   EXPECT_THAT(minibatches_per_host, Each(Gt(1)));
-  EXPECT_THAT(minibatches_per_host, Each(Eq(32)));
 }
 
 TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
