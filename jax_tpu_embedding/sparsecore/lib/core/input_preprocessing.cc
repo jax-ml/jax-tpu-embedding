@@ -258,10 +258,6 @@ PreprocessSparseDenseMatmulInput(
   }
   CHECK_GT(options.local_device_count, 0);
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
-  CHECK(options.enable_minibatching ||
-        !options.experimental_static_single_minibatch)
-      << "experimental_static_single_minibatch enabled without "
-         "enable_minibatching";
 
   absl::Mutex output_mutex;
   absl::Status status ABSL_GUARDED_BY(output_mutex) = absl::OkStatus();
@@ -302,8 +298,7 @@ PreprocessSparseDenseMatmulInput(
           options.batch_number);
 
       int max_minibatching_buckets = 1;
-      if (options.enable_minibatching &&
-          !options.experimental_static_single_minibatch) {
+      if (options.enable_minibatching) {
         max_minibatching_buckets = CooFormat::kMaxMinibatchingBuckets;
       }
       CsrArraysPerHost csr_arrays_per_host(options.local_device_count,
@@ -461,8 +456,6 @@ PreprocessSparseDenseMatmulInput(
   out.num_minibatches = minibatching_split_sync_service.GetNumMinibatches();
   DCHECK(options.enable_minibatching || out.num_minibatches == 1)
       << "Minibatching is not enabled but num_minibatches is not 1.";
-  DCHECK(!options.experimental_static_single_minibatch ||
-         out.num_minibatches == 1);
 
   return out;
 }

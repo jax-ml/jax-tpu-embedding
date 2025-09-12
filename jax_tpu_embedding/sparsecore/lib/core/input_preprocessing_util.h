@@ -186,8 +186,6 @@ struct PreprocessSparseDenseMatmulInputOptions {
       FeatureStackingStrategy::kSplitThenStack;
   // Whether mini-batching is enabled.
   const bool enable_minibatching = false;
-  // Experimental flag for static single minibatch.
-  const bool experimental_static_single_minibatch = false;
 
   // The batch number should be a sequential counter that is unique for each
   // batch. It is safe to reset this counter to 0 on restart. The number should
