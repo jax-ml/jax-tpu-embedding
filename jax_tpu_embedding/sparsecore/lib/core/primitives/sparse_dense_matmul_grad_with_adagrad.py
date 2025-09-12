@@ -74,16 +74,16 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     computation_name: str = "adagrad_optimizer_update",
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
-    minibatches: bool = False,
+    enable_minibatching: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
-  del num_minibatches_per_physical_sparse_core
-  del minibatches
+  del enable_minibatching
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
       lhs_local_sample_ids,
       lhs_gains,
+      num_minibatches_per_physical_sparse_core,
       embedding_table,
       activations_grad,
       max_ids_per_partition,
@@ -125,7 +125,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     max_unique_ids_per_partition: int,
     computation_name: str = "adgrad_optimizer_update",
     sharding_strategy: int = 1,
-    minibatches: bool = False,
+    enable_minibatching: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad."""
   sdmm_sgd_config = {
@@ -219,7 +219,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
   ]
 
   # b/436897459 - Unify argument order.
-  if minibatches:
+  if enable_minibatching:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
     operands += [
         num_minibatches_per_physical_sparse_core,

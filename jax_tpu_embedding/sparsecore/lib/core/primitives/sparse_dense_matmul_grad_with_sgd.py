@@ -51,7 +51,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_abstract_eval(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
-    num_minibatches_per_sparse_core: np.int32,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: np.ndarray,
     activations_grad: np.ndarray,
     learning_rate: np.float32,
@@ -61,17 +61,17 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_abstract_eval(
     computation_name: str = "sgd_optimizer_update",
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
-    minibatches: bool = False,
+    enable_minibatching: bool = False,
 ) -> np.ndarray:
   """Abstract eval for sparse_dense_matmul_sgd."""
-  del num_minibatches_per_sparse_core
-  del minibatches
+  del enable_minibatching
   utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
       lhs_local_sample_ids,
       lhs_gains,
+      num_minibatches_per_physical_sparse_core,
       embedding_table,
       activations_grad,
       max_ids_per_partition,
@@ -94,7 +94,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
     lhs_local_embedding_ids: mlir.ir.BlockArgument,
     lhs_local_sample_ids: mlir.ir.BlockArgument,
     lhs_gains: mlir.ir.BlockArgument,
-    num_minibatches_per_sparse_core: np.int32,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: mlir.ir.BlockArgument,
     activations_grad: mlir.ir.BlockArgument,
     learning_rate: mlir.ir.BlockArgument,
@@ -103,7 +103,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
     max_unique_ids_per_partition: int,
     computation_name: str = "sgd_optimizer_update",
     sharding_strategy: int = 1,
-    minibatches: bool = False,
+    enable_minibatching: bool = False,
 ) -> np.ndarray:
   """Lowering for sdmm_sgd."""
   sdmm_sgd_config = {
@@ -188,10 +188,10 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
   ]
 
   # b/436897459 - Unify argument order.
-  if minibatches:
+  if enable_minibatching:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
     operands += [
-        num_minibatches_per_sparse_core,
+        num_minibatches_per_physical_sparse_core,
         embedding_table,
         activations_grad,
     ]

@@ -27,6 +27,7 @@ pytype_strict_library(
     ],
     visibility = CORE_USERS,
     deps = [
+        ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),

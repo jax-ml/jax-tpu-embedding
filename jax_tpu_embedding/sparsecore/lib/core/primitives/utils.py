@@ -37,6 +37,7 @@ def validate_abstract_eval_params(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: np.ndarray,
     activations_grad: np.ndarray,
     max_ids_per_partition: int,
@@ -49,10 +50,20 @@ def validate_abstract_eval_params(
   ensure_dtype(lhs_local_sample_ids, np.int32, "lhs_local_sample_ids")
   ensure_dtype(lhs_local_embedding_ids, np.int32, "lhs_local_embedding_ids")
   ensure_dtype(lhs_gains, np.float32, "lhs_gains")
+  ensure_dtype(
+      num_minibatches_per_physical_sparse_core,
+      np.int32,
+      "num_minibatches_per_physical_sparse_core",
+  )
   ensure_dtype(embedding_table, np.float32, "embedding_table")
   ensure_dtype(activations_grad, np.float32, "activations_grad")
   ensure_dim(lhs_row_pointers, 1, "lhs_row_pointers")
   ensure_dim(embedding_table, 2, "embedding_table")
+  ensure_dim(
+      num_minibatches_per_physical_sparse_core,
+      0,
+      "num_minibatches_per_physical_sparse_core",
+  )
   ensure_dim(activations_grad, 2, "activations_grad")
   if (
       lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape

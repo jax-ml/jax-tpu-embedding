@@ -317,7 +317,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingValidatorTest(
           learning_rate,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
 
@@ -481,7 +481,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
-            minibatches=True,
+            enable_minibatching=True,
         )
     )
 

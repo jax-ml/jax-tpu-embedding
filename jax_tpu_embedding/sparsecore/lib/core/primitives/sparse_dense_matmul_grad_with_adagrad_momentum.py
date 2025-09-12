@@ -76,6 +76,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: np.ndarray,
     accumulator: np.ndarray,
     momentum: np.ndarray,
@@ -91,13 +92,16 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
     max_unique_ids_per_partition: int,
     computation_name: str = "adagrad_momentum_optimizer_update",
     sharding_strategy: int = 1,
+    enable_minibatching: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adagrad_momentum."""
+  del enable_minibatching
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
       lhs_local_sample_ids,
       lhs_gains,
+      num_minibatches_per_physical_sparse_core,
       embedding_table,
       activations_grad,
       max_ids_per_partition,
@@ -136,6 +140,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     lhs_local_embedding_ids: mlir.ir.BlockArgument,
     lhs_local_sample_ids: mlir.ir.BlockArgument,
     lhs_gains: mlir.ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: mlir.ir.BlockArgument,
     embedding_table: mlir.ir.BlockArgument,
     accumulator: mlir.ir.BlockArgument,
     momentum: mlir.ir.BlockArgument,
@@ -151,6 +156,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     max_unique_ids_per_partition: int,
     computation_name: str = "adagrad_momentum_optimizer_update",
     sharding_strategy: int = 1,
+    enable_minibatching: bool = False,
 ) -> Tuple[ir.Value, ir.Value, ir.Value]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad_momentum."""
   sdmm_config = {
@@ -290,26 +296,41 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     out_tuple = hlo.tuple([w_new_, accum_new_, m_new_])
     func_dialect.ReturnOp([out_tuple])
 
-  operands = [
-      lhs_row_pointers,
-      lhs_local_embedding_ids,
-      lhs_local_sample_ids,
-      lhs_gains,
-      activations_grad,
-      embedding_table,
-      # slot variables
-      accumulator,
-      momentum,
-      # hyperparameters
-      learning_rate,
-      momentum_param,
-      beta2,
-      epsilon,
-      exponent,
-      use_nesterov,
-  ]
+  operands = (
+      [
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+      ]
+      + (
+          [num_minibatches_per_physical_sparse_core]
+          if enable_minibatching
+          else []
+      )
+      + [
+          activations_grad,
+          embedding_table,
+          # slot variables
+          accumulator,
+          momentum,
+          # hyperparameters
+          learning_rate,
+          momentum_param,
+          beta2,
+          epsilon,
+          exponent,
+          use_nesterov,
+      ]
+  )
+
+  if enable_minibatching:
+    call_target = "SparseDenseMatmulGradOpWithOptimizerUpdateWithMinibatching"
+  else:
+    call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
+
   custom_call_op = jax.ffi.ffi_lowering(
-      "SparseDenseMatmulGradOpWithOptimizerUpdate",
+      call_target,
       result_types=[
           ir.TupleType.get_tuple([
               embedding_table.type,

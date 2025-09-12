@@ -446,7 +446,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
             max_unique_ids_per_partition=self.max_unique_ids_per_partition,
             computation_name="ftrl_optimizer_test_computation",
             sharding_strategy=1,
-            minibatches=False,
+            enable_minibatching=False,
         )
     )
     updated_table_unsharded = self._unshard_table(

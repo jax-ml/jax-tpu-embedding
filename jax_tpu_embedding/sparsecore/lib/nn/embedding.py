@@ -809,6 +809,10 @@ def tpu_sparse_dense_matmul(
   # Casting to int since primitives requires JSON serializable value.
   sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))
 
+  num_minibatches = preprocessed_inputs.num_minibatches
+  if num_minibatches.ndim == 1:
+    num_minibatches = num_minibatches[0]
+
   activations = {}
   for stacked_table_name in stacked_table_specs:
     row_pointer = lhs_row_pointers[stacked_table_name]
@@ -827,7 +831,7 @@ def tpu_sparse_dense_matmul(
             embedding_id,
             sample_id,
             gain,
-            preprocessed_inputs.num_minibatches,
+            num_minibatches,
             embedding_variable[0],  # [0] is the embedding table
             device_batch_size=stacked_table.total_sample_count
             // global_device_count,
@@ -835,7 +839,7 @@ def tpu_sparse_dense_matmul(
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy,
             quantization_config=quantization_config_tuple,
-            minibatches=False,
+            enable_minibatching=False,
         )
     )
 
@@ -1019,6 +1023,10 @@ def tpu_sparse_dense_matmul_grad(
   # Casting to int since primitives requires JSON serializable value.
   sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))
 
+  num_minibatches = preprocessed_inputs.num_minibatches
+  if num_minibatches.ndim == 1:
+    num_minibatches = num_minibatches[0]
+
   updated_embedding_variables = {}
   for stacked_table_name in stacked_table_specs:
     row_pointer = lhs_row_pointers[stacked_table_name]
@@ -1044,7 +1052,7 @@ def tpu_sparse_dense_matmul_grad(
         embedding_id,
         sample_id,
         gain,
-        preprocessed_inputs.num_minibatches,
+        num_minibatches,
         *flatten_variables,
         activation_gradient,
         *hyper_params,
@@ -1052,7 +1060,7 @@ def tpu_sparse_dense_matmul_grad(
         max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
         computation_name=symbol_name,
         sharding_strategy=sharding_strategy,
-        minibatches=False,
+        enable_minibatching=False,
     )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(

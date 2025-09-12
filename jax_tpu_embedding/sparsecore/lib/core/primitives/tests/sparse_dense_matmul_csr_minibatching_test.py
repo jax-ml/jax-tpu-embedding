@@ -499,7 +499,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
     with self.subTest("invalid_local_embedding_ids_type"):
@@ -519,7 +519,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
     with self.subTest("invalid_local_sample_ids_type"):
@@ -537,7 +537,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
     with self.subTest("invalid_gains_type"):
@@ -555,7 +555,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
     with self.subTest("invalid_emb_table_type"):
@@ -573,7 +573,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
   def test_sc_emb_forward_pass_invalid_input_shapes(self):
@@ -610,7 +610,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
           sharding_strategy=1,
-          minibatches=True,
+          enable_minibatching=True,
       )
 
   def test_sc_emb_forward_pass_invalid_max_ids_per_partition(self):
@@ -643,7 +643,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=0,
         max_unique_ids_per_partition=256,
         sharding_strategy=1,
-        minibatches=True,
+        enable_minibatching=True,
     )
     self.assertRaises(
         ValueError,
@@ -658,7 +658,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=256,
         max_unique_ids_per_partition=0,
         sharding_strategy=1,
-        minibatches=True,
+        enable_minibatching=True,
     )
 
   def test_sc_emb_forward_pass_invalid_sharding(self):
@@ -691,7 +691,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=256,
         max_unique_ids_per_partition=256,
         sharding_strategy=2,
-        minibatches=True,
+        enable_minibatching=True,
     )
 
   def test_sc_emb_forward_pass(self):
@@ -789,7 +789,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         sharding_strategy=1,
-        minibatches=True,
+        enable_minibatching=True,
     )
 
     logging.debug("emb_activations: %s", emb_activations)
@@ -845,7 +845,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         sharding_strategy=1,
-        minibatches=True,
+        enable_minibatching=True,
     )
 
     logging.debug("emb_activations: %s", emb_activations)
@@ -876,7 +876,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         sharding_strategy=1,
-        minibatches=True,
+        enable_minibatching=True,
     )
 
     logging.debug("emb_activations: %s", emb_activations)

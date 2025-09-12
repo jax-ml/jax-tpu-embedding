@@ -219,6 +219,7 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
           sample_ids,
           embedding_ids,
           gains,
+          np.int32(1),  # num_minibatches_per_physical_sparse_core
           embedding_table,
           accumulator,
           momentum_buffer,
@@ -231,6 +232,7 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
           use_nesterov,
           max_ids_per_partition=max_ids_per_partition,
           max_unique_ids_per_partition=max_unique_ids_per_partition,
+          enable_minibatching=False,
       )
 
   def _compute_table_grad(
@@ -401,6 +403,7 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
+        np.int32(1),  # num_minibatches_per_physical_sparse_core
         embedding_table_sharded[0],
         accumulator_sharded[0],
         momentum_buffer_sharded[0],
@@ -415,6 +418,7 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         max_unique_ids_per_partition=self.max_unique_ids_per_partition,
         computation_name="adagrad_momentum_optimizer_test_computation",
         sharding_strategy=1,
+        enable_minibatching=False,
     )
 
     updated_table_unsharded = self._unshard_table(

@@ -221,7 +221,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="sgd_test_computation",
             sharding_strategy=1,
-            minibatches=True,
+            enable_minibatching=True,
         )
     )
 
@@ -883,7 +883,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="sgd_test_computation",
             sharding_strategy=1,
-            minibatches=True,
+            enable_minibatching=True,
         )
     )
 
