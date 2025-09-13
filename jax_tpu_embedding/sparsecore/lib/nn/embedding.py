@@ -733,6 +733,7 @@ def tpu_sparse_dense_matmul(
     sharding_strategy: str = "MOD",
     feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
     num_sc_per_device: int | None = None,
+    enable_minibatching: bool = False,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -776,6 +777,7 @@ def tpu_sparse_dense_matmul(
     feature_stacking_strategy: The feature stacking strategy.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
+    enable_minibatching: Whether to enable minibatching. Defaults to `False`.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -839,7 +841,7 @@ def tpu_sparse_dense_matmul(
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy,
             quantization_config=quantization_config_tuple,
-            enable_minibatching=False,
+            enable_minibatching=enable_minibatching,
         )
     )
 
@@ -942,6 +944,7 @@ def tpu_sparse_dense_matmul_grad(
     label: str = "",
     step: jax.Array | int | None = None,
     num_sc_per_device: int | None = None,
+    enable_minibatching: bool = False,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -984,6 +987,7 @@ def tpu_sparse_dense_matmul_grad(
     step: The current step number.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
+    enable_minibatching: Whether to use minibatching. Defaults to `False`.
 
   Returns:
     The updated activation embedding variables.
@@ -1060,7 +1064,7 @@ def tpu_sparse_dense_matmul_grad(
         max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
         computation_name=symbol_name,
         sharding_strategy=sharding_strategy,
-        enable_minibatching=False,
+        enable_minibatching=enable_minibatching,
     )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(
