@@ -41,11 +41,13 @@ pytype_strict_binary(
     srcs = ["preprocess_input_benchmarks.py"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
         pypi_requirement("google_benchmark"),
         pypi_requirement("numpy"),
+        pypi_requirement("portpicker"),
     ],
 )
 
