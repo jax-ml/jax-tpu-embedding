@@ -63,7 +63,7 @@ void RunMinibatchingSync(const SyncTestCase<T>& test_case, int sync_key,
         auto status_or_value = services[host_id]->SyncValue(
             test_case.host_table_values[host_id][table_id], sync_key,
             nodes[host_id]->GetAllReduceInterface());
-        absl::MutexLock lock(&results_mutex);  // NOLINT (b/438618768)
+        absl::MutexLock lock(results_mutex);
         if (!status_or_value.ok()) {
           shared_status.Update(status_or_value.status());
         } else if (table_id == 0) {

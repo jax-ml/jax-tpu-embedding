@@ -170,7 +170,7 @@ class AllReduceSyncKeyCollector : public AllReduceInterface {
   absl::StatusOr<bool> BlockingAllReduce(int sync_key,
                                          bool minibatching_required) override {
     {
-      absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+      absl::MutexLock lock(mutex_);
       sync_keys_.push_back(sync_key);
     }
     return wrapped_->BlockingAllReduce(sync_key, minibatching_required);
@@ -179,14 +179,14 @@ class AllReduceSyncKeyCollector : public AllReduceInterface {
   absl::StatusOr<uint64_t> BlockingAllReduce(
       int sync_key, uint64_t minibatching_split) override {
     {
-      absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+      absl::MutexLock lock(mutex_);
       sync_keys_.push_back(sync_key);
     }
     return wrapped_->BlockingAllReduce(sync_key, minibatching_split);
   }
 
   std::vector<int> GetSyncKeys() {
-    absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+    absl::MutexLock lock(mutex_);
     return std::vector<int>(sync_keys_);
   }
 
@@ -780,7 +780,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
                                   absl::MakeSpan(*input_batches[host_id]),
                                   stacked_tables, options));
       {
-        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        absl::MutexLock lock(mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
       }
       counter.DecrementCount();
@@ -831,7 +831,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
                                   absl::MakeSpan(*input_batches[host_id]),
                                   stacked_tables, options));
       {
-        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        absl::MutexLock lock(mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
       }
       counter.DecrementCount();
@@ -884,7 +884,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
                                   absl::MakeSpan(*input_batches[host_id]),
                                   stacked_tables, options));
       {
-        absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+        absl::MutexLock lock(mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
       }
       counter.DecrementCount();

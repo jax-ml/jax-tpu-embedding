@@ -68,7 +68,7 @@ class MinibatchingSyncService {
   template <typename U = T,
             std::enable_if_t<std::is_same_v<U, MinibatchingSplit>, bool> = true>
   int GetNumMinibatches() {
-    absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+    absl::MutexLock lock(mutex_);
     return shared_value_.count() + 1;
   }
 
@@ -94,7 +94,7 @@ absl::StatusOr<T> MinibatchingSyncService<T>::SyncValue(
   DCHECK_NE(local_reduced_, nullptr);
   DCHECK_NE(global_reduced_, nullptr);
   {
-    absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+    absl::MutexLock lock(mutex_);
     shared_value_ |= table_value;
   }
 

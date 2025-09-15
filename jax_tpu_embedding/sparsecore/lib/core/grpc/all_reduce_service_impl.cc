@@ -46,7 +46,7 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
     ::grpc::CallbackServerContext* context, const AllReduceData* request,
     AllReduceResponse* response) {
   auto* reactor = context->DefaultReactor();
-  absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+  absl::MutexLock lock(mutex_);
 
   // Wait for local state to be finalized.
   while (all_reduce_state_map_.find(request->sync_key()) ==
@@ -87,7 +87,7 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
 absl::StatusOr<std::optional<AllReduceData>>
 AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
                                               const AllReduceData& data) {
-  absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+  absl::MutexLock lock(mutex_);
   auto it = all_reduce_state_map_.find(sync_key);
 
   if (it == all_reduce_state_map_.end()) {
@@ -107,11 +107,11 @@ AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
         all_reduce_state_map_[sync_key].local_contributions_counter.get();
 
     // Wait without mutex to avoid deadlock.
-    mutex_.Unlock();  // NOLINT (b/438618768)
+    mutex_.unlock();
     local_contributions_counter->Wait();
 
     // Lock to update CV.
-    mutex_.Lock();  // NOLINT (b/438618768)
+    mutex_.lock();
     local_reduced_cv_.SignalAll();
 
     return all_reduce_state_map_[sync_key].local_data;
@@ -126,7 +126,7 @@ AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
 void AllReduceServiceImpl::WaitIncomingRPCs(int sync_key) {
   absl::BlockingCounter* incoming_rpc_counter = nullptr;
   {
-    absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+    absl::MutexLock lock(mutex_);
     incoming_rpc_counter =
         all_reduce_state_map_.at(sync_key).incoming_rpc_counter.get();
   }
@@ -139,7 +139,7 @@ void AllReduceServiceImpl::WaitIncomingRPCs(int sync_key) {
 void AllReduceServiceImpl::WaitResults(int sync_key) {
   absl::Barrier* global_results_barrier = nullptr;
   {
-    absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+    absl::MutexLock lock(mutex_);
     global_results_barrier =
         all_reduce_state_map_.at(sync_key).global_results_barrier.get();
   }
@@ -148,7 +148,7 @@ void AllReduceServiceImpl::WaitResults(int sync_key) {
 }
 
 absl::StatusOr<AllReduceData> AllReduceServiceImpl::GetResult(int sync_key) {
-  absl::MutexLock lock(&mutex_);  // NOLINT (b/438618768)
+  absl::MutexLock lock(mutex_);
   auto& state = all_reduce_state_map_[sync_key];
   AllReduceData result = state.local_data;
   if (state.results_counter->DecrementCount()) {

@@ -67,7 +67,7 @@ absl::Status SendLocalData(
         &args->context, &args->request, &args->response,
         [&, args](::grpc::Status s) {
           {
-            absl::MutexLock lock(&mutex);  // NOLINT (b/438618768)
+            absl::MutexLock lock(mutex);
             if (!s.ok() && overall_status.ok()) {
               overall_status = s;
             }

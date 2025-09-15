@@ -359,7 +359,7 @@ PreprocessSparseDenseMatmulInput(
                 /*sync_key=*/options.batch_number * 2,
                 options.all_reduce_interface);
         if (!minibatching_required_or.ok()) {
-          absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
+          absl::MutexLock lock(output_mutex);
           status.Update(minibatching_required_or.status());
           counter.DecrementCount();
           return;
@@ -387,7 +387,7 @@ PreprocessSparseDenseMatmulInput(
                   /*sync_key=*/options.batch_number * 2 + 1,
                   options.all_reduce_interface);
           if (!minibatching_split_or.ok()) {
-            absl::MutexLock lock(&output_mutex);  // NOLINT (b/438618768)
+            absl::MutexLock lock(output_mutex);
             status.Update(minibatching_split_or.status());
             counter.DecrementCount();
             return;
@@ -428,7 +428,7 @@ PreprocessSparseDenseMatmulInput(
 
       stats_per_host.Flatten();
       {
-        absl::MutexLock mutex_lock(&output_mutex);  // NOLINT (b/438618768)
+        absl::MutexLock mutex_lock(output_mutex);
         out.lhs_row_pointers[stacked_table_name.c_str()] =
             std::move(csr_arrays_per_host.row_pointers);
         out.lhs_embedding_ids[stacked_table_name.c_str()] =
