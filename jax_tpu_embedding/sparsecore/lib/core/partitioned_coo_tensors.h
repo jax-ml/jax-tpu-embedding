@@ -60,7 +60,6 @@ class PartitionedCooTensors {
     AdvanceBucketOffsets(target_sc_id, target_bucket_id);
 
     coo_tensors_.push_back(coo_tensor);
-    // TODO: http://b/428790659 - Compute unique ids per bucket.
   }
 
   // Get size of COO tensors for given SC.
