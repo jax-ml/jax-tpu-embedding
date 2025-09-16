@@ -25,14 +25,17 @@ import portpicker
 
 
 def _generate_random_inputs(
-    feature: embedding_spec.FeatureSpec, max_sample_size: int
+    feature: embedding_spec.FeatureSpec,
+    max_sample_size: int,
+    seed: int | None = None,
 ):
   """Generates random inputs and input weights for testing."""
+  rng = np.random.RandomState(seed)
   inputs = []
   inputs_weights = []
   for _ in range(feature.input_shape[0]):
-    num_ids = np.random.randint(1, max_sample_size + 1)
-    ids = np.random.randint(
+    num_ids = rng.randint(1, max_sample_size + 1)
+    ids = rng.randint(
         0, feature.table_spec.vocabulary_size, size=(num_ids,), dtype=np.int32
     )
     inputs.append(ids)
@@ -269,7 +272,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         )
     )
     inputs, inputs_weights = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=10
+        feature=self.feature_spec, max_sample_size=10, seed=2025
     )
 
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
