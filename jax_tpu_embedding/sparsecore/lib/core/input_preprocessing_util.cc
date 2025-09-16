@@ -217,6 +217,26 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
   return RowCombiner::kSum;
 }
 
+int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
+                              std::optional<int64_t> user_provided_buffer_size,
+                              int num_scs_per_device,
+                              const std::string& stacked_table_name) {
+  // Since the suggested size corresponds to only current device (local SCs),
+  // Buffer for each SC should be properly aligned, hence ALIGNMENT *
+  // num_scs_per_device
+  int64_t suggested_value = RoundUpTo<int64_t>(
+      user_provided_buffer_size.value(),
+      TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
+  if (suggested_value > theoretical_max) {
+    LOG(ERROR) << "Suggested Coo Buffer Size is larger than the theoretical "
+                  "max for table "
+               << stacked_table_name << ": " << suggested_value << " vs "
+               << theoretical_max << ". Using the theoretical max instead.";
+    return theoretical_max;
+  }
+  return suggested_value;
+}
+
 int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
@@ -241,12 +261,9 @@ int ComputeCooBufferSizePerDevice(
     LOG_IF(INFO, batch_number % 100 == 0)
         << "Suggested Coo Buffer Size for table " << stacked_table_name << ": "
         << suggested_coo_buffer_size_per_device.value();
-    // Since the suggested size corresponds to only current device (local SCs),
-    // Buffer for each SC should be properly aligned, hence ALIGNMENT *
-    // num_scs_per_device
-    result = RoundUpTo<int64_t>(
-        suggested_coo_buffer_size_per_device.value(),
-        TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
+    result = MayBeUpdateBufferSize(
+        theoretical_max, suggested_coo_buffer_size_per_device,
+        num_scs_per_device, stacked_table_name);
   } else {
     LOG_IF(WARNING, batch_number % 100 == 0)
         << "No Coo Buffer Size provided for table " << stacked_table_name
