@@ -238,6 +238,9 @@ class SingleHostMinibatchingTest(absltest.TestCase):
             max_ids_per_partition=1, max_unique_ids_per_partition=1
         )
     )
+    self.feature_spec = dataclasses.replace(
+        self.feature_spec, input_shape=[jax.device_count() * 4 * 16, 1]
+    )
     inputs, inputs_weights = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=10
     )
@@ -263,7 +266,6 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
     self.assertIn("feature_a", activations)
 
-  @absltest.skip("b/445201323")
   def test_single_host_minibatching_backward_pass(self):
     # Test backward pass with minibatching
     self.feature_spec.table_spec.stacked_table_spec = (
@@ -272,7 +274,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         )
     )
     inputs, inputs_weights = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=10, seed=2025
+        feature=self.feature_spec, max_sample_size=10
     )
 
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
@@ -346,7 +348,7 @@ class MultiHostMinibatchingTest(absltest.TestCase):
 
   def worker(self, host_id: int):
     inputs, inputs_weights = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=10
+        feature=self.feature_spec, max_sample_size=10, seed=2025
     )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],

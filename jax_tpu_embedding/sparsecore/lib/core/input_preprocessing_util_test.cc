@@ -191,7 +191,6 @@ TEST(SortAndGroupTest, Base) {
   expected_sc_0.push_back(CooFormat(1, 2, 1.0));
   expected_sc_0.push_back(CooFormat(0, 3, 1.0));
   expected_sc_0.push_back(CooFormat(1, 3, 1.0));
-  expected_sc_0.push_back(CooFormat(2, 0, 0.0));
 
   std::vector<CooFormat> expected_sc_1;
   expected_sc_1.push_back(CooFormat(2, 0, 1.0));
@@ -202,7 +201,6 @@ TEST(SortAndGroupTest, Base) {
   expected_sc_1.push_back(CooFormat(3, 2, 1.0));
   expected_sc_1.push_back(CooFormat(2, 3, 1.0));
   expected_sc_1.push_back(CooFormat(3, 3, 1.0));
-  expected_sc_1.push_back(CooFormat(4, 0, 0.0));
 
   std::vector<CooFormat> expected_sc_2;
   expected_sc_2.push_back(CooFormat(4, 0, 1.0));
@@ -213,7 +211,6 @@ TEST(SortAndGroupTest, Base) {
   expected_sc_2.push_back(CooFormat(5, 2, 1.0));
   expected_sc_2.push_back(CooFormat(4, 3, 1.0));
   expected_sc_2.push_back(CooFormat(5, 3, 1.0));
-  expected_sc_2.push_back(CooFormat(6, 0, 0.0));
 
   std::vector<CooFormat> expected_sc_3;
   expected_sc_3.push_back(CooFormat(6, 0, 1.0));
@@ -224,7 +221,6 @@ TEST(SortAndGroupTest, Base) {
   expected_sc_3.push_back(CooFormat(7, 2, 1.0));
   expected_sc_3.push_back(CooFormat(6, 3, 1.0));
   expected_sc_3.push_back(CooFormat(7, 3, 1.0));
-  expected_sc_3.push_back(CooFormat(8, 0, 0.0));
 
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
               ElementsAreArray(expected_sc_0));
@@ -276,24 +272,24 @@ TEST(SortAndGroupTest, TwoScs) {
 
   EXPECT_EQ(minibatching_split, 0);
 
-  EXPECT_THAT(
-      coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
-      ElementsAre(
-          CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0), CooFormat(2, 0, 1.0),
-          CooFormat(3, 0, 1.0), CooFormat(0, 2, 1.0), CooFormat(1, 2, 1.0),
-          CooFormat(2, 2, 1.0), CooFormat(3, 2, 1.0), CooFormat(0, 1, 1.0),
-          CooFormat(1, 1, 1.0), CooFormat(2, 1, 1.0), CooFormat(3, 1, 1.0),
-          CooFormat(0, 3, 1.0), CooFormat(1, 3, 1.0), CooFormat(2, 3, 1.0),
-          CooFormat(3, 3, 1.0), CooFormat(4, 0, 0.0)));
-  EXPECT_THAT(
-      coo_tensors_by_id(/*local_sc_id=*/1, /*bucket_id=*/0),
-      ElementsAre(
-          CooFormat(4, 0, 1.0), CooFormat(5, 0, 1.0), CooFormat(6, 0, 1.0),
-          CooFormat(7, 0, 1.0), CooFormat(4, 2, 1.0), CooFormat(5, 2, 1.0),
-          CooFormat(6, 2, 1.0), CooFormat(7, 2, 1.0), CooFormat(4, 1, 1.0),
-          CooFormat(5, 1, 1.0), CooFormat(6, 1, 1.0), CooFormat(7, 1, 1.0),
-          CooFormat(4, 3, 1.0), CooFormat(5, 3, 1.0), CooFormat(6, 3, 1.0),
-          CooFormat(7, 3, 1.0), CooFormat(8, 0, 0.0)));
+  EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
+              ElementsAre(CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0),
+                          CooFormat(2, 0, 1.0), CooFormat(3, 0, 1.0),
+                          CooFormat(0, 2, 1.0), CooFormat(1, 2, 1.0),
+                          CooFormat(2, 2, 1.0), CooFormat(3, 2, 1.0),
+                          CooFormat(0, 1, 1.0), CooFormat(1, 1, 1.0),
+                          CooFormat(2, 1, 1.0), CooFormat(3, 1, 1.0),
+                          CooFormat(0, 3, 1.0), CooFormat(1, 3, 1.0),
+                          CooFormat(2, 3, 1.0), CooFormat(3, 3, 1.0)));
+  EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/1, /*bucket_id=*/0),
+              ElementsAre(CooFormat(4, 0, 1.0), CooFormat(5, 0, 1.0),
+                          CooFormat(6, 0, 1.0), CooFormat(7, 0, 1.0),
+                          CooFormat(4, 2, 1.0), CooFormat(5, 2, 1.0),
+                          CooFormat(6, 2, 1.0), CooFormat(7, 2, 1.0),
+                          CooFormat(4, 1, 1.0), CooFormat(5, 1, 1.0),
+                          CooFormat(6, 1, 1.0), CooFormat(7, 1, 1.0),
+                          CooFormat(4, 3, 1.0), CooFormat(5, 3, 1.0),
+                          CooFormat(6, 3, 1.0), CooFormat(7, 3, 1.0)));
   EXPECT_EQ(stats_per_device.dropped_id_count, 0);
   EXPECT_THAT(stats_per_device.max_ids_per_partition, ElementsAreArray({8, 8}));
   EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
@@ -683,7 +679,6 @@ TEST(SortAndGroupTest, IdDropping) {
   expected_sc_0.push_back(CooFormat(1, 2, 1.0));
   expected_sc_0.push_back(CooFormat(0, 3, 1.0));
   expected_sc_0.push_back(CooFormat(1, 3, 1.0));
-  expected_sc_0.push_back(CooFormat(4, 0, 0.0));
 
   std::vector<CooFormat> expected_sc_1;
   expected_sc_1.push_back(CooFormat(4, 0, 1.0));
@@ -694,7 +689,6 @@ TEST(SortAndGroupTest, IdDropping) {
   expected_sc_1.push_back(CooFormat(5, 2, 1.0));
   expected_sc_1.push_back(CooFormat(4, 3, 1.0));
   expected_sc_1.push_back(CooFormat(5, 3, 1.0));
-  expected_sc_1.push_back(CooFormat(8, 0, 0.0));
 
   std::vector<CooFormat> expected_sc_2;
   expected_sc_2.push_back(CooFormat(8, 0, 1.0));
@@ -705,7 +699,6 @@ TEST(SortAndGroupTest, IdDropping) {
   expected_sc_2.push_back(CooFormat(9, 2, 1.0));
   expected_sc_2.push_back(CooFormat(8, 3, 1.0));
   expected_sc_2.push_back(CooFormat(9, 3, 1.0));
-  expected_sc_2.push_back(CooFormat(12, 0, 0.0));
 
   std::vector<CooFormat> expected_sc_3;
   expected_sc_3.push_back(CooFormat(12, 0, 1.0));
@@ -716,7 +709,6 @@ TEST(SortAndGroupTest, IdDropping) {
   expected_sc_3.push_back(CooFormat(13, 2, 1.0));
   expected_sc_3.push_back(CooFormat(12, 3, 1.0));
   expected_sc_3.push_back(CooFormat(13, 3, 1.0));
-  expected_sc_3.push_back(CooFormat(16, 0, 0.0));
 
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
               ElementsAreArray(expected_sc_0));
@@ -1037,8 +1029,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   for (int i = 0; i < 4; i++) {
     for (int j = 0; j < coo_tensors_by_id.GetNumMinibatches(); j++) {
       auto coo_tensors = coo_tensors_by_id(i, j);
-      if (j == coo_tensors_by_id.GetNumMinibatches() - 1)
-        coo_tensors.remove_suffix(1);  // Ignore the sentinel node.
       EXPECT_TRUE(absl::c_is_sorted(
           coo_tensors, [&](const CooFormat& coo1, const CooFormat& coo2) {
             // Sorted by global SC ID.
@@ -1053,7 +1043,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   EXPECT_EQ(coo_tensors_by_id(0, 0).size(), 16 * 2);
   EXPECT_EQ(coo_tensors_by_id(0, 1).size(), 8 * 2);
   EXPECT_EQ(coo_tensors_by_id(0, 2).size(), 24 * 2);
-  EXPECT_EQ(coo_tensors_by_id(0, 3).size(), 16 * 2 + 1);
+  EXPECT_EQ(coo_tensors_by_id(0, 3).size(), 16 * 2);
 
   const int coo_buffer_size_per_sc = 168;
   const int row_pointers_size = 128;
@@ -1071,24 +1061,24 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
 
   std::array<int, row_pointers_size> expected_row_pointers = {
       // SC0 (Base: 0)
-      8,   16,  24,  32,  32,  32,  32,  32,   // MB0
-      36,  44,  52,  60,  60,  60,  60,  60,   // MB1
-      76,  92,  108, 124, 124, 124, 124, 124,  // MB2
+      8,  16,  24,  32,  32,  32,  32,  32,   // MB0
+      36,  44,  52,  60,  64,  64,  64,  64,   // MB1
+      76,  92, 108, 124, 128, 128, 128, 128,  // MB2
       136, 144, 152, 160, 160, 160, 160, 160,  // MB3
       // SC1 (Base: 160)
       168, 176, 184, 192, 192, 192, 192, 192,  // MB0
-      196, 204, 212, 220, 220, 220, 220, 220,  // MB1
-      236, 252, 268, 284, 284, 284, 284, 284,  // MB2
+      196, 204, 212, 220, 224, 224, 224, 224,  // MB1
+      236, 252, 268, 284, 288, 288, 288, 288,  // MB2
       296, 304, 312, 320, 320, 320, 320, 320,  // MB3
       // SC2 (Base: 320)
       328, 336, 344, 352, 352, 352, 352, 352,  // MB0
-      356, 364, 372, 380, 380, 380, 380, 380,  // MB1
-      396, 412, 428, 444, 444, 444, 444, 444,  // MB2
+      356, 364, 372, 380, 384, 384, 384, 384,  // MB1
+      396, 412, 428, 444, 448, 448, 448, 448,  // MB2
       456, 464, 472, 480, 480, 480, 480, 480,  // MB3
       // SC3 (Base: 480)
       488, 496, 504, 512, 512, 512, 512, 512,  // MB0
-      516, 524, 532, 540, 540, 540, 540, 540,  // MB1
-      556, 572, 588, 604, 604, 604, 604, 604,  // MB2
+      516, 524, 532, 540, 544, 544, 544, 544,  // MB1
+      556, 572, 588, 604, 608, 608, 608, 608,  // MB2
       616, 624, 632, 640, 640, 640, 640, 640,  // MB3
   };
   EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
@@ -1291,7 +1281,7 @@ TEST(InputPreprocessingUtilTest,
   // Row pointers for MB1 start from 4, and since all are dropped, they clamp at
   // the buffer size 6.
   std::array<int, 2 * row_ptrs_size_per_bucket> expected_row_pointers = {
-      4, 4, 4, 4, 6, 6, 6, 6};
+      4, 6, 6, 6, 6, 6, 6, 6};
   EXPECT_THAT(csr_arrays.row_pointers, ElementsAreArray(expected_row_pointers));
 
   // Embedding IDs from MB0 are {0, 0, 0, 0}. MB1 is dropped.

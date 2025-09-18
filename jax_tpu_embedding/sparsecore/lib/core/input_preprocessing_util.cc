@@ -24,7 +24,6 @@
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
-#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -120,19 +119,6 @@ void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
   }
 }
 
-int GetNonSentinelCooCount(absl::Span<const CooFormat> coo_tensors,
-                           int batch_size_per_sc, int local_sc_id) {
-  if (coo_tensors.empty()) {
-    return 0;
-  }
-  const CooFormat& last_coo = coo_tensors.back();
-  // Check if the last element is a sentinel.
-  if (last_coo.IsSentinelNode(batch_size_per_sc, local_sc_id)) {
-    return coo_tensors.size() - 1;
-  }
-  return coo_tensors.size();
-}
-
 // Returns the row pointer value for a given `coo_index`.
 // If minibatching is enabled, it points to the global index in the COO buffer.
 // Otherwise, it's the `coo_index` relative to the beginning of the current
@@ -140,6 +126,26 @@ int GetNonSentinelCooCount(absl::Span<const CooFormat> coo_tensors,
 int GetRowPointer(int coo_index, const BufferFillingOptions& options) {
   if (options.enable_minibatching) return coo_index;
   return coo_index - options.coo_begin;
+}
+
+// Advance last_partition_id to target_partition_id, filling row pointers and
+// padding COO buffer for each partition.
+void AdvanceAndPadPartitions(int& current_partition_id,
+                             const int target_partition_id, int& lhs_row_index,
+                             int& coo_index, int processed,
+                             const BufferFillingOptions& options,
+                             internal::CsrArraysPerDevice& csr_arrays) {
+  DCHECK_LE(current_partition_id, target_partition_id);
+  while (current_partition_id < target_partition_id) {
+    if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
+      return;
+    }
+    csr_arrays.row_pointers[lhs_row_index++] =
+        GetRowPointer(coo_index, options);
+    // Align partition.
+    PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly, csr_arrays);
+    ++current_partition_id;
+  }
 }
 
 // Fill the row pointers buffer from `lhs_row_begin` to `lhs_row_end` and COO
@@ -150,43 +156,20 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
                         int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
-  auto last_sc_id = std::make_pair(options.local_sc_id, 0);
-
-  int total_real_coos = GetNonSentinelCooCount(
-      options.coo_tensors, options.batch_size_per_sc, options.local_sc_id);
-  int written_real_coos = 0;
+  int current_partition_id = 0;
 
   int processed = 0;
   for (const CooFormat& coo_tensor : options.coo_tensors) {
-    const bool is_sentinel = coo_tensor.IsSentinelNode(
-        options.batch_size_per_sc, options.local_sc_id);
-    if (!is_sentinel) {
-      ++processed;
-    }
-    const auto sc_id = std::make_pair(
-        /* local_sc_id= */ coo_tensor.row_id / options.batch_size_per_sc,
-        /* global_sc_id= */ coo_tensor.col_id % options.num_scs);
-    DCHECK_GE(sc_id, last_sc_id) << absl::StrFormat(
-        "Failed: sc_id@(%d, %d) >= last_sc_id@(%d, %d)", sc_id.first,
-        sc_id.second, last_sc_id.first, last_sc_id.second);
-    // Advance last_sc_id to current sc_id.
-    while (last_sc_id < sc_id) {
-      if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
-        break;
-      }
-      csr_arrays.row_pointers[lhs_row_index++] =
-          GetRowPointer(coo_index, options);
-      // Align partition.
-      PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly, csr_arrays);
-      IncrementScId(last_sc_id, options.num_scs, options.num_sc_per_device);
-    }
-    // Terminate at the sentinel node.
-    if (is_sentinel) {
-      break;
-    }
+    ++processed;
+    DCHECK_EQ(coo_tensor.row_id / options.batch_size_per_sc,
+              options.local_sc_id);
+    const int target_partition_id = coo_tensor.col_id % options.num_scs;
+    AdvanceAndPadPartitions(current_partition_id, target_partition_id,
+                            lhs_row_index, coo_index, processed, options,
+                            csr_arrays);
     if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
       dropped_id_count_static_bound +=
-          std::max(0, total_real_coos - written_real_coos);
+          std::max<int>(0, options.coo_tensors.size() - processed + 1);
       break;
     }
 
@@ -195,8 +178,11 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
         coo_tensor.row_id % options.batch_size_per_sc;
     csr_arrays.gains[coo_index] = coo_tensor.gain;
     ++coo_index;
-    ++written_real_coos;
   }
+  // Fill remaining partitions for this SparseCore.
+  AdvanceAndPadPartitions(
+      current_partition_id, /*target_partition_id=*/options.num_scs,
+      lhs_row_index, coo_index, processed, options, csr_arrays);
 
   PadRowPointersBuffer(lhs_row_index,
                        /*padding=*/GetRowPointer(coo_index, options),
