@@ -24,13 +24,16 @@ bazel run -c opt --dynamic_mode=off --copt=-gmlt :preprocess_input_benchmarks --
 --benchmark_filter=all --cpu_profile=/tmp/preprocess.prof
 """
 
+import concurrent
 import sys
 from absl import app
 from absl import flags
 import google_benchmark
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
+from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
+import portpicker
 
 _NUM_FEATURES = flags.DEFINE_integer("num_features", 100, "Number of features.")
 _NUM_SAMPLES = flags.DEFINE_integer("num_samples", 16000, "Number of samples.")
@@ -193,6 +196,56 @@ def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
         num_sc_per_device=4,
         has_leading_dimension=has_leading_dimension,
     )
+
+
+@google_benchmark.register
+@google_benchmark.option.unit(google_benchmark.kMillisecond)
+@google_benchmark.option.iterations(100)
+def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
+  """Benchmark for preprocessing input for sparse-dense matmul with minibatching."""
+  num_hosts = 4
+  ports = [portpicker.pick_unused_port() for _ in range(num_hosts)]
+  all_reduce_interfaces = []
+  for host_id in range(num_hosts):
+    peer_addresses = [
+        f"localhost:{ports[i]}" for i in range(num_hosts) if i != host_id
+    ]
+    all_reduce_interfaces.append(
+        embedding.get_all_reduce_interface(
+            host_id=host_id,
+            host_count=num_hosts,
+            peer_addresses=peer_addresses,
+            minibatching_port=ports[host_id],
+        )
+    )
+
+  def worker(host_id: int, batch_number: int):
+    return pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        _GLOBAL_RAGGED_FEATURES,
+        _GLOBAL_RAGGED_WEIGHTS,
+        _GLOBAL_SPECS,
+        local_device_count=4,
+        global_device_count=16,
+        num_sc_per_device=4,
+        has_leading_dimension=False,
+        enable_minibatching=True,
+        all_reduce_interface=all_reduce_interfaces[host_id],
+        batch_number=batch_number,
+    )
+
+  with concurrent.futures.ThreadPoolExecutor(max_workers=num_hosts) as executor:
+    batch_number = 0
+    while state:
+      for host_id, future in [
+          (host_id, executor.submit(worker, host_id, batch_number))
+          for host_id in range(num_hosts)
+      ]:
+        try:
+          _ = future.result(timeout=60)
+        except concurrent.futures.TimeoutError:
+          print(f"Host {host_id} timed out.")
+
+      batch_number += 1
 
 
 def main(_):

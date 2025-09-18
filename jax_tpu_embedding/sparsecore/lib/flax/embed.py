@@ -80,6 +80,7 @@ class SparseCoreEmbed(nn.Module):
   mesh: jax.sharding.Mesh = None  # type: ignore  # initialized in __post_init__
   # Sharding strategy for embedding tables.
   table_sharding_strategy: str = 'MOD'
+  enable_minibatching: bool = False
 
   num_sc_per_device: int = -1  # Initialized in __post_init__.
 
@@ -130,6 +131,7 @@ class SparseCoreEmbed(nn.Module):
       step: int,
       features: embedding.Nested[np.ndarray],
       features_weights: embedding.Nested[np.ndarray],
+      all_reduce_interface: Any | None = None,
   ) -> embedding.PreprocessedInput:
     """Preprocesses the input for sparse dense matmul.
 
@@ -143,6 +145,7 @@ class SparseCoreEmbed(nn.Module):
         arrays with dtype object (in the ragged tensor case).
       features_weights: The input feature weights. The structure must be
         identical to the features.
+      all_reduce_interface: The all reduce interface for minibatching.
 
     Returns:
       The processed data for embedding lookup.
@@ -156,6 +159,8 @@ class SparseCoreEmbed(nn.Module):
         num_sc_per_device=self.num_sc_per_device,
         sharding_strategy=self.table_sharding_strategy,
         batch_number=step,
+        enable_minibatching=self.enable_minibatching,
+        all_reduce_interface=all_reduce_interface,
     )[0]
 
   def __call__(
@@ -215,6 +220,7 @@ def _emb_lookup(
           global_device_count=embedding_layer.mesh.size,
           feature_specs=embedding_layer.feature_specs,
           sharding_strategy=embedding_layer.table_sharding_strategy,
+          enable_minibatching=embedding_layer.enable_minibatching,
       ),
       mesh=embedding_layer.mesh,
       in_specs=(pd, pt),
@@ -252,6 +258,7 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
           embedding.tpu_sparse_dense_matmul_grad,
           feature_specs=embedding_layer.feature_specs,
           sharding_strategy=embedding_layer.table_sharding_strategy,
+          enable_minibatching=embedding_layer.enable_minibatching,
       ),
       mesh=embedding_layer.mesh,
       in_specs=(pd, pd, pt),
