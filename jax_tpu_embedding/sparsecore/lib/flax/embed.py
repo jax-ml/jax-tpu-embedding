@@ -159,7 +159,7 @@ class SparseCoreEmbed(nn.Module):
     )[0]
 
   def __call__(
-      self, embedding_lookup_inputs: embedding.PreprocessedInput
+      self, embedding_lookup_inputs: EmbeddingLookupInput
   ) -> embedding.Nested[jax.Array]:
     """Computes the embedding activations.
 
@@ -178,7 +178,7 @@ class SparseCoreEmbed(nn.Module):
   def apply_gradient(
       self,
       gradients: embedding.Nested[jax.Array],
-      embedding_lookup_inputs: embedding.PreprocessedInput,
+      embedding_lookup_inputs: EmbeddingLookupInput,
   ) -> Mapping[str, Mapping[str, jax.Array]]:
     """Apply the gradients to the embedding variables.
 
@@ -204,7 +204,7 @@ class SparseCoreEmbed(nn.Module):
 @functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
 def _emb_lookup(
     embedding_layer: SparseCoreEmbed,
-    embedding_lookup_inputs: embedding.PreprocessedInput,
+    embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
   pt = embedding_layer.embedding_table_partition
@@ -228,7 +228,7 @@ def _emb_lookup(
 
 def _emb_lookup_fwd(
     embedding_layer: SparseCoreEmbed,
-    embedding_lookup_inputs: embedding.PreprocessedInput,
+    embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
 ):
   return _emb_lookup(
