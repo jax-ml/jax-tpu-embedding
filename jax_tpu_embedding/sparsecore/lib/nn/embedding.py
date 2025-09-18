@@ -500,8 +500,9 @@ def preprocess_sparse_dense_matmul_input(
     feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
-    all_reduce_interface: Interface to communicate between multiple tasks. This
-      can be generated using the `get_all_reduce_interface` function.
+    all_reduce_interface: Interface to communicate between multiple hosts. This
+      can be generated using the `get_all_reduce_interface` function. Not
+      required for single-host minibatching.
 
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
@@ -510,9 +511,14 @@ def preprocess_sparse_dense_matmul_input(
   tree.assert_same_structure(features, feature_specs)
   tree.assert_same_structure(features_weights, feature_specs)
 
-  if enable_minibatching and all_reduce_interface is None:
+  if (
+      enable_minibatching
+      and all_reduce_interface is None
+      and local_device_count < global_device_count
+  ):
     raise ValueError(
-        "all_reduce_interface must be provided when minibatching is enabled."
+        "all_reduce_interface must be provided when minibatching is enabled for"
+        " multi-host."
     )
 
   *csr_inputs, num_minibatches, stats = (
@@ -599,8 +605,9 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
-    all_reduce_interface: Interface to communicate between multiple tasks. This
-      can be generated using the `get_all_reduce_interface` function.
+    all_reduce_interface: Interface to communicate between multiple hosts. This
+      can be generated using the `get_all_reduce_interface` function. Not
+      required for single-host minibatching.
 
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
@@ -610,9 +617,14 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   tree.assert_same_structure(values, feature_specs)
   tree.assert_same_structure(dense_shapes, feature_specs)
 
-  if enable_minibatching and all_reduce_interface is None:
+  if (
+      enable_minibatching
+      and all_reduce_interface is None
+      and local_device_count < global_device_count
+  ):
     raise ValueError(
-        "all_reduce_interface must be provided when minibatching is enabled."
+        "all_reduce_interface must be provided when minibatching is enabled for"
+        " multi-host."
     )
 
   *csr_inputs, num_minibatches, stats = (

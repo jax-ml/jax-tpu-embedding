@@ -41,18 +41,21 @@ pytype_strict_binary(
     srcs = ["preprocess_input_benchmarks.py"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
         pypi_requirement("google_benchmark"),
         pypi_requirement("numpy"),
+        pypi_requirement("portpicker"),
     ],
 )
 
 # Verify that the benchmarks run for small values of (#features, #samples).
+#
 # This can also be used with benchy:
 # benchy //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks_test
-# (Uses default value for num_features and num_samples ignoring the args below.
+# (Uses default value for num_features and num_samples ignoring the args below.)
 pytype_strict_contrib_test(
     name = "preprocess_input_benchmarks_test",
     srcs = ["preprocess_input_benchmarks.py"],
@@ -64,11 +67,13 @@ pytype_strict_contrib_test(
     main = "preprocess_input_benchmarks.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
         pypi_requirement("google_benchmark"),
         pypi_requirement("numpy"),
+        pypi_requirement("portpicker"),
     ],
 )
 

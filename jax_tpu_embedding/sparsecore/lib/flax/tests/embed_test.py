@@ -14,6 +14,7 @@
 import functools
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import einops
 from flax import linen as nn
 import jax
@@ -26,6 +27,7 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
+import portpicker
 import tree
 
 
@@ -51,148 +53,151 @@ def count_num(arr, num):
   return count
 
 
-class EmbeddingLayerTest(absltest.TestCase):
-  table_spec_a = embedding_spec.TableSpec(
-      vocabulary_size=_VOC_A,
-      embedding_dim=_DIM_A,
-      initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
-      optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
-      combiner='sum',
-      name='table_a',
-      max_ids_per_partition=16,
-      max_unique_ids_per_partition=16,
-  )
-  table_spec_b = embedding_spec.TableSpec(
-      vocabulary_size=_VOC_B,
-      embedding_dim=_DIM_B,
-      initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
-      optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
-      combiner='sum',
-      name='table_b',
-      max_ids_per_partition=16,
-      max_unique_ids_per_partition=16,
-  )
-  table_spec_c = embedding_spec.TableSpec(
-      vocabulary_size=_VOC_C,
-      embedding_dim=_DIM_C,
-      initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
-      optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
-      combiner='sum',
-      name='table_c',
-      max_ids_per_partition=16,
-      max_unique_ids_per_partition=16,
-  )
-  feature_spec_a = embedding_spec.FeatureSpec(
-      table_spec=table_spec_a,
-      input_shape=(_BATCH_SIZE, 1),
-      output_shape=(
-          _BATCH_SIZE,
-          table_spec_a.embedding_dim,
-      ),
-      name='feature_spec_a',
-  )
-  feature_spec_b = embedding_spec.FeatureSpec(
-      table_spec=table_spec_b,
-      input_shape=(_BATCH_SIZE, 1),
-      output_shape=(
-          _BATCH_SIZE,
-          table_spec_b.embedding_dim,
-      ),
-      name='feature_spec_b',
-  )
-  feature_spec_c = embedding_spec.FeatureSpec(
-      table_spec=table_spec_c,
-      input_shape=(_BATCH_SIZE, 1),
-      output_shape=(
-          _BATCH_SIZE,
-          table_spec_c.embedding_dim,
-      ),
-      name='feature_spec_c',
-  )
-  input_tensor = np.array(
-      [
-          np.array([5, 4, 2], dtype=np.int32),
-          np.array([3], dtype=np.int32),
-          np.array([9], dtype=np.int32),
-          np.array([1, 9, 16], dtype=np.int32),
-          np.array([6, 12, 1, 10], dtype=np.int32),
-          np.array([12, 19], dtype=np.int32),
-          np.array([0, 15, 2, 25, 25], dtype=np.int32),
-          np.array([4, 28, 25], dtype=np.int32),
-          np.array([15, 0], dtype=np.int32),
-          np.array([13], dtype=np.int32),
-          np.array([11], dtype=np.int32),
-          np.array([7, 1], dtype=np.int32),
-          np.array([8, 9], dtype=np.int32),
-          np.array([14, 14, 14], dtype=np.int32),
-          np.array([2, 28], dtype=np.int32),
-          np.array([10, 16], dtype=np.int32),
-      ],
-      dtype=object,
-  )
-  input_tensor_table_b = np.array(
-      [
-          np.array([50, 40, 20], dtype=np.int32),
-          np.array([33], dtype=np.int32),
-          np.array([59], dtype=np.int32),
-          np.array([1, 9, 16], dtype=np.int32),
-          np.array([6, 12, 1, 10], dtype=np.int32),
-          np.array([12, 19], dtype=np.int32),
-          np.array([0, 15, 2, 25, 25], dtype=np.int32),
-          np.array([4, 28, 25], dtype=np.int32),
-          np.array([50, 51, 0], dtype=np.int32),
-          np.array([10, 50, 60], dtype=np.int32),
-          np.array([11, 12, 13], dtype=np.int32),
-          np.array([61, 60], dtype=np.int32),
-          np.array([58, 2], dtype=np.int32),
-          np.array([41, 41, 50], dtype=np.int32),
-          np.array([2, 58], dtype=np.int32),
-          np.array([10, 16], dtype=np.int32),
-      ],
-      dtype=object,
-  )
-  input_weights = np.array(
-      [
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0], dtype=np.float32),
-          np.array([1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0], dtype=np.float32),
-          np.array([1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-      ],
-      dtype=object,
-  )
-  input_weights_table_b = np.array(
-      [
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0], dtype=np.float32),
-          np.array([1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-          np.array([1.0, 1.0], dtype=np.float32),
-      ],
-      dtype=object,
-  )
+class EmbeddingLayerTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=_VOC_A,
+        embedding_dim=_DIM_A,
+        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
+        combiner='sum',
+        name='table_a',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    self.table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=_VOC_B,
+        embedding_dim=_DIM_B,
+        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
+        combiner='sum',
+        name='table_b',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    self.table_spec_c = embedding_spec.TableSpec(
+        vocabulary_size=_VOC_C,
+        embedding_dim=_DIM_C,
+        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
+        combiner='sum',
+        name='table_c',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    self.feature_spec_a = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_a,
+        input_shape=(_BATCH_SIZE, 1),
+        output_shape=(
+            _BATCH_SIZE,
+            self.table_spec_a.embedding_dim,
+        ),
+        name='feature_spec_a',
+    )
+    self.feature_spec_b = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_b,
+        input_shape=(_BATCH_SIZE, 1),
+        output_shape=(
+            _BATCH_SIZE,
+            self.table_spec_b.embedding_dim,
+        ),
+        name='feature_spec_b',
+    )
+    self.feature_spec_c = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_c,
+        input_shape=(_BATCH_SIZE, 1),
+        output_shape=(
+            _BATCH_SIZE,
+            self.table_spec_c.embedding_dim,
+        ),
+        name='feature_spec_c',
+    )
+    self.input_tensor = np.array(
+        [
+            np.array([5, 4, 2], dtype=np.int32),
+            np.array([3], dtype=np.int32),
+            np.array([9], dtype=np.int32),
+            np.array([1, 9, 16], dtype=np.int32),
+            np.array([6, 12, 1, 10], dtype=np.int32),
+            np.array([12, 19], dtype=np.int32),
+            np.array([0, 15, 2, 25, 25], dtype=np.int32),
+            np.array([4, 28, 25], dtype=np.int32),
+            np.array([15, 0], dtype=np.int32),
+            np.array([13], dtype=np.int32),
+            np.array([11], dtype=np.int32),
+            np.array([7, 1], dtype=np.int32),
+            np.array([8, 9], dtype=np.int32),
+            np.array([14, 14, 14], dtype=np.int32),
+            np.array([2, 28], dtype=np.int32),
+            np.array([10, 16], dtype=np.int32),
+        ],
+        dtype=object,
+    )
+    self.input_tensor_table_b = np.array(
+        [
+            np.array([50, 40, 20], dtype=np.int32),
+            np.array([33], dtype=np.int32),
+            np.array([59], dtype=np.int32),
+            np.array([1, 9, 16], dtype=np.int32),
+            np.array([6, 12, 1, 10], dtype=np.int32),
+            np.array([12, 19], dtype=np.int32),
+            np.array([0, 15, 2, 25, 25], dtype=np.int32),
+            np.array([4, 28, 25], dtype=np.int32),
+            np.array([50, 51, 0], dtype=np.int32),
+            np.array([10, 50, 60], dtype=np.int32),
+            np.array([11, 12, 13], dtype=np.int32),
+            np.array([61, 60], dtype=np.int32),
+            np.array([58, 2], dtype=np.int32),
+            np.array([41, 41, 50], dtype=np.int32),
+            np.array([2, 58], dtype=np.int32),
+            np.array([10, 16], dtype=np.int32),
+        ],
+        dtype=object,
+    )
+    self.input_weights = np.array(
+        [
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+        ],
+        dtype=object,
+    )
+    self.input_weights_table_b = np.array(
+        [
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+            np.array([1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+            np.array([1.0, 1.0], dtype=np.float32),
+        ],
+        dtype=object,
+    )
 
   def _row_initialize_with_padding(
       self,
@@ -205,7 +210,11 @@ class EmbeddingLayerTest(absltest.TestCase):
     paddings = tuple((0, y - x) for x, y in zip(shape, padded_shape))
     return np.pad(array, paddings, mode='constant', constant_values=pad_value)
 
-  def test_forward_and_backward_with_one_table(self):
+  @parameterized.parameters(
+      dict(testcase_name='_with_minibatching', enable_minibatching=True),
+      dict(testcase_name='_without_minibatching', enable_minibatching=False),
+  )
+  def test_forward_and_backward_with_one_table(self, enable_minibatching: bool):
     devices = jax.devices()
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
 
@@ -215,7 +224,11 @@ class EmbeddingLayerTest(absltest.TestCase):
         global_device_count=jax.device_count(),
         num_sc_per_device=num_sc_per_device,
     )
-    sc_module = embed.SparseCoreEmbed(feature_specs=feature_specs)
+
+    sc_module = embed.SparseCoreEmbed(
+        feature_specs=feature_specs,
+        enable_minibatching=enable_minibatching,
+    )
     step = 42
     embedding_lookup_input = sc_module.preprocess_inputs(
         step,
@@ -437,7 +450,13 @@ class EmbeddingLayerTest(absltest.TestCase):
         params['params'][_EMBED_PARAM]['table_b'][0], expected_grad_table_b
     )
 
-  def test_forward_and_backward_with_table_stacking(self):
+  @parameterized.parameters(
+      dict(testcase_name='_with_minibatching', enable_minibatching=True),
+      dict(testcase_name='_without_minibatching', enable_minibatching=False),
+  )
+  def test_forward_and_backward_with_table_stacking(
+      self, enable_minibatching: bool
+  ):
     devices = jax.devices()
     num_sc_per_device = utils.num_sparsecores_per_device()
     sharding_axis = 'x'
@@ -452,6 +471,7 @@ class EmbeddingLayerTest(absltest.TestCase):
         feature_specs=feature_specs,
         mesh=mesh,
         sharding_axis=sharding_axis,
+        enable_minibatching=enable_minibatching,
     )
     step = 42
     embedding_lookup_input = sc_module.preprocess_inputs(
