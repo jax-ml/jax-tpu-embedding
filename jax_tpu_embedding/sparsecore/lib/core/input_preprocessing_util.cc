@@ -157,10 +157,10 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
   int current_partition_id = 0;
+  int dropped_in_call = 0;
 
   int processed = 0;
   for (const CooFormat& coo_tensor : options.coo_tensors) {
-    ++processed;
     DCHECK_EQ(coo_tensor.row_id / options.batch_size_per_sc,
               options.local_sc_id);
     const int target_partition_id = coo_tensor.col_id % options.num_scs;
@@ -168,8 +168,9 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
                             lhs_row_index, coo_index, processed, options,
                             csr_arrays);
     if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
-      dropped_id_count_static_bound +=
-          std::max<int>(0, options.coo_tensors.size() - processed + 1);
+      dropped_in_call =
+          std::max<int>(0, options.coo_tensors.size() - processed);
+      dropped_id_count_static_bound += dropped_in_call;
       break;
     }
 
@@ -178,6 +179,7 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
         coo_tensor.row_id % options.batch_size_per_sc;
     csr_arrays.gains[coo_index] = coo_tensor.gain;
     ++coo_index;
+    ++processed;
   }
   // Fill remaining partitions for this SparseCore.
   AdvanceAndPadPartitions(
@@ -187,6 +189,8 @@ int FillMinibatchBuffer(const BufferFillingOptions& options,
   PadRowPointersBuffer(lhs_row_index,
                        /*padding=*/GetRowPointer(coo_index, options),
                        options.lhs_row_end, csr_arrays.row_pointers);
+
+  DCHECK_EQ(dropped_in_call + processed, options.coo_tensors.size());
   return coo_index;
 }
 
