@@ -131,7 +131,6 @@ cc_library(
         ":coo_format",
         ":input_preprocessing_threads",
         ":input_preprocessing_util",
-        ":minibatching_sync_service",
         ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/base:core_headers",
@@ -382,35 +381,6 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:traceme",
-    ],
-)
-
-cc_library(
-    name = "minibatching_sync_service",
-    hdrs = ["minibatching_sync_service.h"],
-    deps = [
-        ":all_reduce_interface",
-        ":input_preprocessing_util",
-        "@com_google_absl//absl/base:nullability",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/synchronization",
-        "@tsl//tsl/platform:statusor",
-    ],
-)
-
-cc_test(
-    name = "minibatching_sync_service_test",
-    srcs = ["minibatching_sync_service_test.cc"],
-    deps = [
-        ":input_preprocessing_util",
-        ":minibatching_sync_service",
-        ":minibatching_test_utils",
-        "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_googletest//:gtest_main",
-        "@tsl//tsl/platform:env",
     ],
 )
 

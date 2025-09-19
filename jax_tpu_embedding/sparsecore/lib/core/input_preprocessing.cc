@@ -38,7 +38,6 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/minibatching_sync_service.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "tsl/platform/errors.h"  // from @tsl
@@ -118,6 +117,14 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
 }  // namespace
 
 namespace internal {
+
+inline uint64_t Serialize(MinibatchingSplit value) { return value.to_ullong(); }
+inline MinibatchingSplit Deserialize(uint64_t value) {
+  return MinibatchingSplit(value);
+}
+
+inline bool Serialize(bool value) { return value; }
+inline bool Deserialize(bool value) { return value; }
 
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
