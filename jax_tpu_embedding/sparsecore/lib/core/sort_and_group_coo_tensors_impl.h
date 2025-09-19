@@ -251,9 +251,9 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
                 << ", after drop id: " << grouped_coo_tensors.Size(local_sc_id);
     }
 
-    const int32_t observed_max_ids_per_partition =
+    const int32_t observed_max_ids_per_bucket =
         ids_per_sc_partition_per_bucket.maxCoeff();
-    const int32_t observed_max_unique_ids_per_partition =
+    const int32_t observed_max_unique_ids_per_bucket =
         unique_ids_per_partition_per_bucket.maxCoeff();
 
     if (options.enable_minibatching) {
@@ -291,7 +291,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     // disabled, not when checking if minibatching is required.
     if (!options.enable_minibatching || create_buckets)
       internal::ValidateMaxIdsOrDie(
-          observed_max_ids_per_partition, observed_max_unique_ids_per_partition,
+          observed_max_ids_per_bucket, observed_max_unique_ids_per_bucket,
           max_ids_per_partition, max_unique_ids_per_partition,
           stacked_table_name, allow_id_dropping);
   }

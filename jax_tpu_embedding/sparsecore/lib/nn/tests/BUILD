@@ -231,9 +231,12 @@ pytype_strict_contrib_test(
         "requires-tpu",
     ],
     deps = [
+        ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
+        pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
