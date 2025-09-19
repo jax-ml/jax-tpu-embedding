@@ -14,7 +14,7 @@
 from absl.testing import absltest
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.core.primitives import local_sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.lib.core.primitives import local_sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
@@ -45,15 +45,15 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         .astype(np.float32)
     )
 
-    self.tpu_local_sparse_dense_matmul_csr = jax.named_call(
-        local_sparse_dense_matmul_csr.tpu_local_sparse_dense_matmul_csr_primitive.bind,
-        name="local_tpu_sparse_dense_matmul_csr",
+    self.tpu_local_sparse_dense_matmul = jax.named_call(
+        local_sparse_dense_matmul.tpu_local_sparse_dense_matmul_primitive.bind,
+        name="tpu_local_sparse_dense_matmul",
     )
 
   def test_sc_emb_forward_pass_invalid_input_dtypes(self):
     with self.subTest("invalid_local_embedding_ids_type"):
       with self.assertRaises(ValueError):
-        self.tpu_local_sparse_dense_matmul_csr(
+        self.tpu_local_sparse_dense_matmul(
             self.embedding_ids.astype(jnp.float64),
             self.sample_ids,
             self.gains,
@@ -63,7 +63,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
 
     with self.subTest("invalid_local_sample_ids_type"):
       with self.assertRaises(ValueError):
-        self.tpu_local_sparse_dense_matmul_csr(
+        self.tpu_local_sparse_dense_matmul(
             self.embedding_ids,
             self.sample_ids.astype(jnp.float32),
             self.gains,
@@ -73,7 +73,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
 
     with self.subTest("invalid_gains_type"):
       with self.assertRaises(ValueError):
-        self.tpu_local_sparse_dense_matmul_csr(
+        self.tpu_local_sparse_dense_matmul(
             self.embedding_ids,
             self.sample_ids,
             self.gains.astype(jnp.int32),
@@ -83,7 +83,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
 
     with self.subTest("invalid_emb_table_type"):
       with self.assertRaises(ValueError):
-        self.tpu_local_sparse_dense_matmul_csr(
+        self.tpu_local_sparse_dense_matmul(
             self.embedding_ids,
             self.sample_ids,
             self.gains,
@@ -95,7 +95,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     with self.subTest("invalid_sample_id_shape"):
       ids = self.embedding_ids.reshape(4, 4)
       with self.assertRaises(ValueError):
-        self.tpu_local_sparse_dense_matmul_csr(
+        self.tpu_local_sparse_dense_matmul(
             ids,
             self.sample_ids,
             self.gains,
@@ -105,8 +105,8 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
 
   def test_sc_emb_forward_pass(self):
     # Do the embedding lookup.
-    emb_activations = self.tpu_local_sparse_dense_matmul_csr(
-        jnp.asarray(self.embedding_ids, dtype=jnp.int64),
+    emb_activations = self.tpu_local_sparse_dense_matmul(
+        jnp.asarray(self.embedding_ids, dtype=jnp.int32),
         jnp.asarray(self.sample_ids, dtype=jnp.int32),
         jnp.asarray(self.gains, dtype=jnp.float32),
         jnp.asarray(self.emb_table, dtype=jnp.float32),

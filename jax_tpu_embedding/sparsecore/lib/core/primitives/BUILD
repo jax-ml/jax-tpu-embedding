@@ -37,8 +37,8 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
-    name = "local_sparse_dense_matmul_csr",
-    srcs = ["local_sparse_dense_matmul_csr.py"],
+    name = "local_sparse_dense_matmul",
+    srcs = ["local_sparse_dense_matmul.py"],
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
