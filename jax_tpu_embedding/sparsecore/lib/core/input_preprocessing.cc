@@ -331,8 +331,8 @@ void CheckBufferUsage(int max_required_buffer_size_per_device,
 }
 
 void MergeStats(
-    absl::flat_hash_map<std::string, Eigen::RowVectorXi>& current_stats,
-    const absl::flat_hash_map<std::string, Eigen::RowVectorXi>& other_stats) {
+    absl::flat_hash_map<std::string, RowVectorXi>& current_stats,
+    const absl::flat_hash_map<std::string, RowVectorXi>& other_stats) {
   for (const auto& [table_name, other_values] : other_stats) {
     auto it = current_stats.find(table_name);
     if (it == current_stats.end()) {
