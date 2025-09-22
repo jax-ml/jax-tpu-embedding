@@ -139,18 +139,6 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
             96);
 }
 
-TEST(InputPreprocessingUtilTest, IncrementScId) {
-  std::pair<int, int> sc_id = {0, 0};
-  IncrementScId(sc_id, /*num_scs=*/4, /*num_scs_per_device=*/2);
-  EXPECT_THAT(sc_id, Pair(0, 1));
-  IncrementScId(sc_id, /*num_scs=*/4, /*num_scs_per_device=*/2);
-  EXPECT_THAT(sc_id, Pair(0, 2));
-  IncrementScId(sc_id, /*num_scs=*/4, /*num_scs_per_device=*/2);
-  EXPECT_THAT(sc_id, Pair(0, 3));
-  IncrementScId(sc_id, /*num_scs=*/4, /*num_scs_per_device=*/2);
-  EXPECT_THAT(sc_id, Pair(1, 0));
-}
-
 TEST(SortAndGroupTest, Base) {
   std::vector<CooFormat> coo_formats;
 

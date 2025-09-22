@@ -295,9 +295,6 @@ int ComputeCooBufferSizePerDevice(
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
     int batch_number = 0);
 
-void IncrementScId(std::pair<int, int>& sc_id, int num_scs,
-                   int num_scs_per_device);
-
 int MaxIdsPerPartitionForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
