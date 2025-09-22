@@ -254,19 +254,6 @@ int ComputeCooBufferSizePerDevice(
   return static_cast<int>(result);
 }
 
-void IncrementScId(std::pair<int, int>& sc_id, const int num_scs,
-                   const int num_scs_per_device) {
-  CHECK(sc_id.first < num_scs_per_device)
-      << "Invalid SC ID tuple increment " << sc_id.first << ", "
-      << sc_id.second;
-  if (sc_id.second < num_scs - 1) {
-    ++sc_id.second;
-    return;
-  }
-  ++sc_id.first;
-  sc_id.second = 0;
-}
-
 int MaxIdsPerPartitionForStackedTables(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
   int max_ids_per_partition = stacked_table_metadata[0].max_ids_per_partition;
