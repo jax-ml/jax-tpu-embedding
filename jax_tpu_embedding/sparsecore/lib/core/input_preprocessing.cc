@@ -569,10 +569,7 @@ PreprocessSparseDenseMatmulInput(
     counter.Wait();
   }
 
-  out.num_minibatches =
-      options.enable_minibatching && global_minibatching_required
-          ? global_minibatching_split.count() + 1
-          : 1;
+  out.num_minibatches = global_minibatching_split.count() + 1;
   DCHECK(options.enable_minibatching || out.num_minibatches == 1)
       << "Minibatching is not enabled but num_minibatches is not 1.";
 
