@@ -351,6 +351,7 @@ void MergeStats(
 absl::StatusOr<bool> SyncMinibatchingRequired(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::Span<const TableState> table_states) {
+  tsl::profiler::TraceMe traceme("SyncMinibatchingRequired");
   if (!options.enable_minibatching) {
     return false;
   }
