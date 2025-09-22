@@ -277,7 +277,7 @@ void FillLocalDeviceBuffer(
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::CsrArraysPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
-  tsl::profiler::TraceMe t("FillRowPointers");
+  tsl::profiler::TraceMe t("FillLocalDeviceBuffer");
   const int num_sc_per_device = options.num_sc_per_device;
   const int num_scs = options.GetNumScs();
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
