@@ -61,6 +61,6 @@ pytype_strict_library(
     ],
 )
 
-# copybara:comment_begin(internal)
-exports_files(srcs = ["METADATA"])
-# copybara:comment_end
+# copybara:uncomment_begin(internal)
+# exports_files(srcs = ["METADATA"])
+# copybara:uncomment_end
