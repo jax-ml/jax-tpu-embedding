@@ -29,7 +29,7 @@
 namespace jax_sc_embedding {
 
 // Arbitrarily chosen, forever-unchanging hash key required by HighwayHash.
-static constexpr highwayhash::HHKey kHighwayHashKey = {
+inline constexpr highwayhash::HHKey kHighwayHashKey = {
     0x4451e30f87db9609ULL,
     0xca7358a1fd2737f8ULL,
     0x4b2c991fcee4fdeaULL,
