@@ -163,13 +163,18 @@ class ShakespeareTest(absltest.TestCase):
         for i, device in enumerate(self.devices)
     ]
     sharding = NamedSharding(self.mesh, P('device', None))
-    self.embedding_variables[self.shakespeare_table_spec.name] = tuple([
-        jax.make_array_from_single_device_arrays(
-            shape=(_VOCAB_SIZE.value, _EMBEDDING_SIZE.value),
-            sharding=sharding,
-            arrays=self.embedding_variables[self.shakespeare_table_spec.name],
+    self.embedding_variables[self.shakespeare_table_spec.name] = (
+        embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(_VOCAB_SIZE.value, _EMBEDDING_SIZE.value),
+                sharding=sharding,
+                arrays=self.embedding_variables[
+                    self.shakespeare_table_spec.name
+                ],
+            ),
+            slot=(),
         )
-    ])
+    )
     # Construct the model.
     self.model = ShakespeareSpmdModel(
         vocab_size=_VOCAB_SIZE.value,
