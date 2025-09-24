@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
+import functools
 from unittest import mock
 
 from absl.testing import absltest
 import jax
 from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
+from jax_tpu_embedding.sparsecore.lib.core import test_utils
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
@@ -258,17 +260,26 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         preprocessed_input.lhs_row_pointers["table_b"],
         np.concatenate((first_half_b_row_pointers, [])),
     )
-    np.testing.assert_equal(
+    expected_embedding_ids = np.concatenate((first_half_b_embedding_ids, []))
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        1,
+        4,
+        preprocessed_input.lhs_row_pointers["table_b"],
+    )
+    assert_equal_coo_buffer(
         preprocessed_input.lhs_embedding_ids["table_b"],
-        np.concatenate((first_half_b_embedding_ids, [])),
+        expected_embedding_ids,
     )
-    np.testing.assert_equal(
+    expected_sample_ids = np.concatenate((first_half_b_sample_ids, []))
+    assert_equal_coo_buffer(
         preprocessed_input.lhs_sample_ids["table_b"],
-        np.concatenate((first_half_b_sample_ids, [])),
+        expected_sample_ids,
     )
-    np.testing.assert_equal(
+    expected_gains = np.concatenate((first_half_b_weights, []))
+    assert_equal_coo_buffer(
         preprocessed_input.lhs_gains["table_b"],
-        np.concatenate((first_half_b_weights, [])),
+        expected_gains,
     )
 
   def test_preprocess_sparse_dense_matmul_input_for_two_features(self):
@@ -354,36 +365,61 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         preprocessed_input.lhs_row_pointers["table_b"],
         np.concatenate((first_half_b_row_pointers, second_half_b_row_pointers)),
     )
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        2,
+        4,
+    )
 
-    np.testing.assert_equal(
+    expected_sample_ids_a = np.concatenate(
+        (first_half_a_sample_ids, second_half_a_sample_ids)
+    )
+    assert_equal_coo_buffer(
+        preprocessed_input.lhs_row_pointers["table_a"],
         preprocessed_input.lhs_sample_ids["table_a"],
-        np.concatenate((first_half_a_sample_ids, second_half_a_sample_ids)),
+        expected_sample_ids_a,
     )
-    np.testing.assert_equal(
+    expected_sample_ids_b = np.concatenate(
+        (first_half_b_sample_ids, second_half_b_sample_ids)
+    )
+    assert_equal_coo_buffer(
+        preprocessed_input.lhs_row_pointers["table_b"],
         preprocessed_input.lhs_sample_ids["table_b"],
-        np.concatenate((first_half_b_sample_ids, second_half_b_sample_ids)),
+        expected_sample_ids_b,
     )
 
-    np.testing.assert_equal(
+    expected_embedding_ids_a = np.concatenate(
+        (first_half_a_embedding_ids, second_half_a_embedding_ids)
+    )
+    assert_equal_coo_buffer(
+        preprocessed_input.lhs_row_pointers["table_a"],
         preprocessed_input.lhs_embedding_ids["table_a"],
-        np.concatenate(
-            (first_half_a_embedding_ids, second_half_a_embedding_ids)
-        ),
+        expected_embedding_ids_a,
     )
-    np.testing.assert_equal(
+    expected_embedding_ids_b = np.concatenate(
+        (first_half_b_embedding_ids, second_half_b_embedding_ids)
+    )
+    assert_equal_coo_buffer(
+        preprocessed_input.lhs_row_pointers["table_b"],
         preprocessed_input.lhs_embedding_ids["table_b"],
-        np.concatenate(
-            (first_half_b_embedding_ids, second_half_b_embedding_ids)
-        ),
+        expected_embedding_ids_b,
     )
 
-    np.testing.assert_equal(
-        preprocessed_input.lhs_gains["table_a"],
-        np.concatenate((first_half_a_weights, second_half_a_weights)),
+    expected_gains_a = np.concatenate(
+        (first_half_a_weights, second_half_a_weights)
     )
-    np.testing.assert_equal(
+    assert_equal_coo_buffer(
+        preprocessed_input.lhs_row_pointers["table_a"],
+        preprocessed_input.lhs_gains["table_a"],
+        expected_gains_a,
+    )
+    expected_gains_b = np.concatenate(
+        (first_half_b_weights, second_half_b_weights)
+    )
+    assert_equal_coo_buffer(
+        preprocessed_input.lhs_row_pointers["table_b"],
         preprocessed_input.lhs_gains["table_b"],
-        np.concatenate((first_half_b_weights, second_half_b_weights)),
+        expected_gains_b,
     )
 
   def test_preprocess_sparse_dense_matmul_input_for_two_features_with_leading_dim(
@@ -473,36 +509,57 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         preprocessed_input.lhs_row_pointers["table_b"],
         np.array([first_half_b_row_pointers, second_half_b_row_pointers])
     )
+    assert_coo_buffer_equal = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        2,
+        4,
+    )
 
-    np.testing.assert_equal(
+    expected_sample_ids_a = np.array(
+        [first_half_a_sample_ids, second_half_a_sample_ids]
+    )
+    assert_coo_buffer_equal(
+        preprocessed_input.lhs_row_pointers["table_a"],
         preprocessed_input.lhs_sample_ids["table_a"],
-        np.array([first_half_a_sample_ids, second_half_a_sample_ids])
+        expected_sample_ids_a,
     )
-    np.testing.assert_equal(
+    expected_sample_ids_b = np.array(
+        [first_half_b_sample_ids, second_half_b_sample_ids]
+    )
+    assert_coo_buffer_equal(
+        preprocessed_input.lhs_row_pointers["table_b"],
         preprocessed_input.lhs_sample_ids["table_b"],
-        np.array([first_half_b_sample_ids, second_half_b_sample_ids])
+        expected_sample_ids_b,
     )
 
-    np.testing.assert_equal(
+    expected_embedding_ids_a = np.array(
+        [first_half_a_embedding_ids, second_half_a_embedding_ids]
+    )
+    assert_coo_buffer_equal(
+        preprocessed_input.lhs_row_pointers["table_a"],
         preprocessed_input.lhs_embedding_ids["table_a"],
-        np.array(
-            [first_half_a_embedding_ids, second_half_a_embedding_ids]
-        ),
+        expected_embedding_ids_a,
     )
-    np.testing.assert_equal(
+    expected_embedding_ids_b = np.array(
+        [first_half_b_embedding_ids, second_half_b_embedding_ids]
+    )
+    assert_coo_buffer_equal(
+        preprocessed_input.lhs_row_pointers["table_b"],
         preprocessed_input.lhs_embedding_ids["table_b"],
-        np.array(
-            [first_half_b_embedding_ids, second_half_b_embedding_ids]
-        ),
+        expected_embedding_ids_b,
     )
 
-    np.testing.assert_equal(
+    expected_gains_a = np.array([first_half_a_weights, second_half_a_weights])
+    assert_coo_buffer_equal(
+        preprocessed_input.lhs_row_pointers["table_a"],
         preprocessed_input.lhs_gains["table_a"],
-        np.array([first_half_a_weights, second_half_a_weights])
+        expected_gains_a,
     )
-    np.testing.assert_equal(
+    expected_gains_b = np.array([first_half_b_weights, second_half_b_weights])
+    assert_coo_buffer_equal(
+        preprocessed_input.lhs_row_pointers["table_b"],
         preprocessed_input.lhs_gains["table_b"],
-        np.array([first_half_b_weights, second_half_b_weights])
+        expected_gains_b,
     )
 
 

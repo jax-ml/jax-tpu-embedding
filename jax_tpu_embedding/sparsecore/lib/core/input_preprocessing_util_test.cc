@@ -34,8 +34,10 @@
 namespace jax_sc_embedding {
 namespace {
 
+using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
+using ::testing::Eq;
 using ::testing::IsNan;
 using ::testing::NanSensitiveFloatEq;
 using ::testing::Pair;
@@ -758,84 +760,77 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   };
   EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
 
-  std::array<int, 4 * 40> expected_embedding_ids = {
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-  };
+  EXPECT_THAT(
+      csr_array.embedding_ids,
+      ElementsAre(
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _));
+  EXPECT_THAT(
+      csr_array.sample_ids,
+      ElementsAre(
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _));
+  EXPECT_THAT(
+      csr_array.gains,
+      ElementsAre(
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          _, _, _, _, _, _, _, _,                                      //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          _, _, _, _, _, _, _, _,                                      //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          _, _, _, _, _, _, _, _,                                      //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          _, _, _, _, _, _, _, _));
 
-  EXPECT_THAT(csr_array.embedding_ids,
-              ElementsAreArray(expected_embedding_ids));
-
-  std::array<int, 4 * 40> expected_sample_ids = {
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-  };
-  EXPECT_THAT(csr_array.sample_ids, ElementsAreArray(expected_sample_ids));
-
-  auto expected_gains = ElementsAre(
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan(),                                                     //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan(),                                                     //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan(),                                                     //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan()  //
-  );
   EXPECT_EQ(dropped_static_bound, 0);
-  EXPECT_THAT(csr_array.gains, expected_gains);
 }
 
 TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
@@ -890,84 +885,76 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   };
   EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
 
-  std::array<int, 4 * 40> expected_embedding_ids = {
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       0,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-  };
-
-  EXPECT_THAT(csr_array.embedding_ids,
-              ElementsAreArray(expected_embedding_ids));
-
-  std::array<int, 4 * 40> expected_sample_ids = {
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      0,       1,       INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-      INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
-  };
-  EXPECT_THAT(csr_array.sample_ids, ElementsAreArray(expected_sample_ids));
-
-  auto expected_gains = ElementsAre(
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan(),  //
-      IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
-      IsNan()  //
-  );
+  EXPECT_THAT(
+      csr_array.embedding_ids,
+      ElementsAre(
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _));
+  EXPECT_THAT(
+      csr_array.sample_ids,
+      ElementsAre(
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _));
+  EXPECT_THAT(
+      csr_array.gains,
+      ElementsAre(
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _,                                      //
+          _, _, _, _, _, _, _, _));
   EXPECT_EQ(stats_per_device.dropped_id_count, 0);
-  EXPECT_THAT(csr_array.gains, expected_gains);
 }
 
 TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
@@ -1132,11 +1119,12 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
         .setOnes();
   }
 
-  EXPECT_THAT(csr_array.embedding_ids,
-              ElementsAreArray(expected_embedding_ids));
-  EXPECT_THAT(csr_array.sample_ids, ElementsAreArray(expected_sample_ids));
-  EXPECT_THAT(csr_array.gains,
-              Pointwise(NanSensitiveFloatEq(), expected_gains));
+  EXPECT_THAT(absl::MakeSpan(csr_array.embedding_ids).subspan(0, 640),
+              Pointwise(Eq(), expected_embedding_ids.segment(0, 640)));
+  EXPECT_THAT(absl::MakeSpan(csr_array.sample_ids).subspan(0, 640),
+              Pointwise(Eq(), expected_sample_ids.segment(0, 640)));
+  EXPECT_THAT(absl::MakeSpan(csr_array.gains).subspan(0, 640),
+              Pointwise(NanSensitiveFloatEq(), expected_gains.segment(0, 640)));
   EXPECT_EQ(stats_per_device.dropped_id_count, 0);
 }
 

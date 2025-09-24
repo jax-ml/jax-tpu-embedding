@@ -109,8 +109,11 @@ enum class PadType {
 //   `csr`: CSR arrays to be padded.
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
                   internal::CsrArraysPerDevice& csr) {
-  while ((pad_type == PadType::kPadToEnd ||
-          coo_index % TPU_VECTOR_REGISTER_ALIGMENT_SIZE != 0) &&
+  if (pad_type == PadType::kPadToEnd) {
+    coo_index = coo_end;
+    return;
+  }
+  while (coo_index % TPU_VECTOR_REGISTER_ALIGMENT_SIZE != 0 &&
          coo_index < coo_end) {
     csr.embedding_ids[coo_index] = INT_MAX;
     csr.sample_ids[coo_index] = INT_MAX;

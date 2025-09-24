@@ -244,6 +244,7 @@ pytype_strict_contrib_test(
     deps = [
         ":constants",
         ":pybind_input_preprocessing",
+        ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -262,6 +263,7 @@ pytype_strict_contrib_test(
     shard_count = 10,
     deps = [
         ":pybind_input_preprocessing",
+        ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
@@ -286,6 +288,12 @@ pytype_strict_library(
         ":pybind_input_preprocessing",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
     ],
+)
+
+pytype_strict_library(
+    name = "test_utils",
+    srcs = ["test_utils.py"],
+    deps = [pypi_requirement("numpy")],
 )
 
 cc_library(

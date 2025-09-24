@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
+import functools
 import math
 
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
+from jax_tpu_embedding.sparsecore.lib.core import test_utils
 from jax_tpu_embedding.sparsecore.lib.core.pybind_input_preprocessing import ShardingStrategy
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
@@ -170,9 +172,18 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     )
 
     np.testing.assert_equal(row_pointers, row_pointers_raw)
-    np.testing.assert_equal(embedding_ids, embedding_ids_raw)
-    np.testing.assert_equal(sample_ids, sample_ids_raw)
-    np.testing.assert_equal(gains, gains_raw)
+    stack_name = "one_table_to_rule_them_all"
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        self.local_device_count,
+        self.num_sc_per_device,
+        row_pointers[stack_name],
+    )
+    assert_equal_coo_buffer(
+        embedding_ids[stack_name], embedding_ids_raw[stack_name]
+    )
+    assert_equal_coo_buffer(sample_ids[stack_name], sample_ids_raw[stack_name])
+    assert_equal_coo_buffer(gains[stack_name], gains_raw[stack_name])
 
 
 class InputPreprocessingTableStackingTest(parameterized.TestCase):
@@ -350,14 +361,17 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         ),
     )
     batch_number = 42
+    local_device_count = 1
+    global_device_count = 2
+    num_sc_per_device = 4
     (row_pointers, embedding_ids, sample_ids, gains, *_) = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [feature_spec_1, feature_spec_2],
-            local_device_count=1,
-            global_device_count=2,
-            num_sc_per_device=4,
+            local_device_count=local_device_count,
+            global_device_count=global_device_count,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -413,8 +427,17 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
           },
       )
 
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers["one_table_to_rule_them_all"],
+    )
+
     with self.subTest("embedding_ids"):
-      expected_embedding_ids = np.full((512,), 2**31 - 1, dtype=np.int32)
+      expected_embedding_ids = np.full(
+          (512,), constants.PADDING_VALUE, dtype=np.int32
+      )
       expected_embedding_ids[0] = 0
       expected_embedding_ids[1] = 0
       expected_embedding_ids[2] = 0
@@ -509,17 +532,15 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[312] = 4
       expected_embedding_ids[313] = 4
 
-      if has_leading_dimension:
-        embedding_ids["one_table_to_rule_them_all"] = embedding_ids[
-            "one_table_to_rule_them_all"
-        ].reshape(-1)
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
           embedding_ids["one_table_to_rule_them_all"],
           expected_embedding_ids,
       )
 
     with self.subTest("sample_ids"):
-      expected_sample_ids = np.full((512,), 2**31 - 1, dtype=np.int32)
+      expected_sample_ids = np.full(
+          (512,), constants.PADDING_VALUE, dtype=np.int32
+      )
       expected_sample_ids[0] = 0
       expected_sample_ids[1] = 1
       expected_sample_ids[2] = 2
@@ -613,11 +634,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_sample_ids[305] = 2
       expected_sample_ids[312] = 1
       expected_sample_ids[313] = 2
-      if has_leading_dimension:
-        sample_ids["one_table_to_rule_them_all"] = sample_ids[
-            "one_table_to_rule_them_all"
-        ].reshape(-1)
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
           sample_ids["one_table_to_rule_them_all"],
           expected_sample_ids,
       )
@@ -717,11 +734,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_gains[305] = 1.0
       expected_gains[312] = 1.0
       expected_gains[313] = 1.0
-      if has_leading_dimension:
-        gains["one_table_to_rule_them_all"] = gains[
-            "one_table_to_rule_them_all"
-        ].reshape(-1)
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
           gains["one_table_to_rule_them_all"],
           expected_gains,
       )
@@ -934,14 +947,17 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
 
     # Preprocess inputs for the stacked features.
     batch_number += 1
+    local_device_count = 1
+    global_device_count = 1
+    num_sc_per_device = 4
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, input_features_a2],
             [self.input_weights_a, input_weights_a2],
             [self.feature_spec_a, feature_spec_a2],
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
+            local_device_count=local_device_count,
+            global_device_count=global_device_count,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -950,21 +966,35 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         )
     )
     np.testing.assert_equal(row_pointers, stacked_row_pointers)
-    np.testing.assert_equal(embedding_ids, stacked_embedding_ids)
-    np.testing.assert_equal(sample_ids, stacked_sample_ids)
-    np.testing.assert_equal(gains, stacked_gains)
+    stack_name = "one_table_to_rule_them_all"
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers[stack_name],
+    )
+    assert_equal_coo_buffer(
+        embedding_ids[stack_name], stacked_embedding_ids[stack_name]
+    )
+    assert_equal_coo_buffer(
+        sample_ids[stack_name], stacked_sample_ids[stack_name]
+    )
+    assert_equal_coo_buffer(gains[stack_name], stacked_gains[stack_name])
 
   @parameterized.parameters(False, True)
   def test_table_stacking_single_chip(self, has_leading_dimension):
     batch_number = 42
+    local_device_count = 1
+    global_device_count = 1
+    num_sc_per_device = 4
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
+            local_device_count=local_device_count,
+            global_device_count=global_device_count,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1079,21 +1109,33 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         )
     )
     np.testing.assert_equal(row_pointers, s_row_pointers)
-    np.testing.assert_equal(embedding_ids, s_embedding_ids)
-    np.testing.assert_equal(sample_ids, s_sample_ids)
-    np.testing.assert_equal(gains, s_gains)
+    stack_name = "one_table_to_rule_them_all"
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers[stack_name],
+    )
+    assert_equal_coo_buffer(
+        embedding_ids[stack_name], s_embedding_ids[stack_name]
+    )
+    assert_equal_coo_buffer(sample_ids[stack_name], s_sample_ids[stack_name])
+    assert_equal_coo_buffer(gains[stack_name], s_gains[stack_name])
 
   @parameterized.parameters(False, True)
   def test_table_stacking_multi_chip(self, has_leading_dimension):
     batch_number = 42
+    local_device_count = 2
+    global_device_count = 2
+    num_sc_per_device = 4
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features_a, self.input_features_b],
             [self.input_weights_a, self.input_weights_b],
             [self.feature_spec_a, self.feature_spec_b],
-            local_device_count=2,
-            global_device_count=2,
-            num_sc_per_device=4,
+            local_device_count=local_device_count,
+            global_device_count=global_device_count,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1187,8 +1229,16 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
           },
       )
 
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers["one_table_to_rule_them_all"],
+    )
     with self.subTest("embedding_ids"):
-      expected_embedding_ids = np.full((1024,), 2**31 - 1, dtype=np.int32)
+      expected_embedding_ids = np.full(
+          (1024,), constants.PADDING_VALUE, dtype=np.int32
+      )
       expected_embedding_ids[0] = 0
       expected_embedding_ids[1] = 0
       expected_embedding_ids[2] = 1
@@ -1282,17 +1332,14 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_embedding_ids[936] = 4
       expected_embedding_ids[944] = 4
       expected_embedding_ids[952] = 4
-      if has_leading_dimension:
-        embedding_ids["one_table_to_rule_them_all"] = embedding_ids[
-            "one_table_to_rule_them_all"
-        ].reshape(-1)
-      np.testing.assert_equal(
-          embedding_ids["one_table_to_rule_them_all"],
-          expected_embedding_ids,
+      assert_equal_coo_buffer(
+          embedding_ids["one_table_to_rule_them_all"], expected_embedding_ids
       )
 
     with self.subTest("sample_ids"):
-      expected_sample_ids = np.full((1024,), 2**31 - 1, dtype=np.int32)
+      expected_sample_ids = np.full(
+          (1024,), constants.PADDING_VALUE, dtype=np.int32
+      )
       expected_sample_ids[0] = 0
       expected_sample_ids[1] = 1
       expected_sample_ids[2] = 1
@@ -1388,14 +1435,11 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_sample_ids[936] = 0
       expected_sample_ids[944] = 0
       expected_sample_ids[952] = 0
-      if has_leading_dimension:
-        sample_ids["one_table_to_rule_them_all"] = sample_ids[
-            "one_table_to_rule_them_all"
-        ].reshape(-1)
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
           sample_ids["one_table_to_rule_them_all"],
           expected_sample_ids,
       )
+
     with self.subTest("gains"):
       expected_gains = np.full((1024,), np.nan, dtype=np.float32)
       expected_gains[0] = 2.0
@@ -1491,11 +1535,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
       expected_gains[936] = 1.0
       expected_gains[944] = 1.0
       expected_gains[952] = 1.0
-      if has_leading_dimension:
-        gains["one_table_to_rule_them_all"] = gains[
-            "one_table_to_rule_them_all"
-        ].reshape(-1)
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
           gains["one_table_to_rule_them_all"],
           expected_gains,
       )
@@ -1674,15 +1714,17 @@ class InputPreprocessingTest(parameterized.TestCase):
   def test_correct_input_preprocessing_single_column(
       self, has_leading_dimension
   ):
+    local_device_count = 1
+    num_sc_per_device = 4
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.singleton_input_features],
             [self.singleton_input_weights],
             [self.singleton_input_feature_spec],
-            local_device_count=1,
+            local_device_count=local_device_count,
             global_device_count=1,
-            num_sc_per_device=4,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
@@ -1818,31 +1860,40 @@ class InputPreprocessingTest(parameterized.TestCase):
         row_pointers[self.singleton_input_table_spec.name],
         expected_lhs_row_pointers,
     )
-    np.testing.assert_equal(
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers[self.singleton_input_table_spec.name],
+    )
+    assert_equal_coo_buffer(
         sample_ids[self.singleton_input_table_spec.name],
         expected_lhs_local_sample_ids,
     )
-    np.testing.assert_equal(
+    assert_equal_coo_buffer(
         embedding_ids[self.singleton_input_table_spec.name],
         expected_lhs_local_embedding_ids,
     )
-    np.testing.assert_equal(
-        gains[self.singleton_input_table_spec.name], expected_lhs_gains
+    assert_equal_coo_buffer(
+        gains[self.singleton_input_table_spec.name],
+        expected_lhs_gains,
     )
 
   @parameterized.parameters(False, True)
   def test_correct_input_preprocessing_multiple_columns(
       self, has_leading_dimension
   ):
+    local_device_count = 1
+    num_sc_per_device = 4
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
-            local_device_count=1,
+            local_device_count=local_device_count,
             global_device_count=1,
-            num_sc_per_device=4,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1894,6 +1945,12 @@ class InputPreprocessingTest(parameterized.TestCase):
       np.testing.assert_equal(
           row_pointers[self.table_spec.name], expected_lhs_row_pointers
       )
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers[self.table_spec.name],
+    )
     coo_buffer_size = 32 * 4 * 4
     with self.subTest(name="EmbeddingIdsEqaulity"):
       coo_buffer_size_per_sc = coo_buffer_size // 4
@@ -1945,8 +2002,9 @@ class InputPreprocessingTest(parameterized.TestCase):
         embedding_ids[self.table_spec.name] = embedding_ids[
             self.table_spec.name
         ].reshape(-1)
-      np.testing.assert_equal(
-          embedding_ids[self.table_spec.name], expected_lhs_local_embedding_ids
+      assert_equal_coo_buffer(
+          embedding_ids[self.table_spec.name],
+          expected_lhs_local_embedding_ids,
       )
 
     with self.subTest(name="SampleIdsEqaulity"):
@@ -1997,8 +2055,9 @@ class InputPreprocessingTest(parameterized.TestCase):
         sample_ids[self.table_spec.name] = sample_ids[
             self.table_spec.name
         ].reshape(-1)
-      np.testing.assert_equal(
-          sample_ids[self.table_spec.name], expected_lhs_local_sample_ids
+      assert_equal_coo_buffer(
+          sample_ids[self.table_spec.name],
+          expected_lhs_local_sample_ids,
       )
 
     with self.subTest(name="GainsEqualityTest"):
@@ -2049,7 +2108,7 @@ class InputPreprocessingTest(parameterized.TestCase):
 
       if has_leading_dimension:
         gains[self.table_spec.name] = gains[self.table_spec.name].reshape(-1)
-      np.testing.assert_equal(gains[self.table_spec.name], expected_lhs_gains)
+      assert_equal_coo_buffer(gains[self.table_spec.name], expected_lhs_gains)
 
   @parameterized.parameters(False, True)
   def test_mean_combiner(self, has_leading_dimension):
@@ -2099,14 +2158,16 @@ class InputPreprocessingTest(parameterized.TestCase):
         ),
     )
     batch_number = 42
-    _, _, _, gains, *_ = (
+    local_device_count = 1
+    num_sc_per_device = 4
+    row_pointers, _, _, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features],
             [self.input_weights],
             [feature_spec],
-            local_device_count=1,
+            local_device_count=local_device_count,
             global_device_count=1,
-            num_sc_per_device=4,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -2115,6 +2176,13 @@ class InputPreprocessingTest(parameterized.TestCase):
     )
 
     coo_buffer_size = 32 * 4 * 4
+
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers["one_table_to_rule_them_all"],
+    )
 
     with self.subTest(name="GainsEqualityTest"):
       coo_buffer_size_per_sc = coo_buffer_size // 4
@@ -2166,7 +2234,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         gains["one_table_to_rule_them_all"] = gains[
             "one_table_to_rule_them_all"
         ].reshape(-1)
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
           gains["one_table_to_rule_them_all"], expected_lhs_gains
       )
 
@@ -2174,6 +2242,8 @@ class InputPreprocessingTest(parameterized.TestCase):
       self,
   ):
     # Outputs with leading dimension (pmap)
+    local_device_count = 2
+    num_sc_per_device = 4
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
@@ -2189,9 +2259,9 @@ class InputPreprocessingTest(parameterized.TestCase):
                 self.singleton_input_feature_spec,
                 self.ragged_input_feature_spec,
             ],
-            local_device_count=2,
+            local_device_count=local_device_count,
             global_device_count=4,
-            num_sc_per_device=4,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=True,
             allow_id_dropping=False,
@@ -2574,19 +2644,28 @@ class InputPreprocessingTest(parameterized.TestCase):
       expected_singleton_table_embedding_ids[1, 768] = 0
       expected_singleton_table_embedding_ids[1, 776] = 0
 
-      np.testing.assert_equal(
+      assert_equal_coo_buffer = functools.partial(
+          test_utils.assert_equal_coo_buffer,
+          local_device_count,
+          num_sc_per_device,
+      )
+      assert_equal_coo_buffer(
+          row_pointers[self.singleton_input_table_spec.name],
           embedding_ids[self.singleton_input_table_spec.name],
           expected_singleton_table_embedding_ids,
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers[self.ragged_input_table_spec.name],
           embedding_ids[self.ragged_input_table_spec.name],
           expected_ragged_table_embedding_ids,
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers_flattened[self.singleton_input_table_spec.name],
           embedding_ids_flattened[self.singleton_input_table_spec.name],
           np.ravel(expected_singleton_table_embedding_ids),
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers_flattened[self.ragged_input_table_spec.name],
           embedding_ids_flattened[self.ragged_input_table_spec.name],
           np.ravel(expected_ragged_table_embedding_ids),
       )
@@ -2648,19 +2727,23 @@ class InputPreprocessingTest(parameterized.TestCase):
       expected_singleton_table_sample_ids[1, 520] = 1
       expected_singleton_table_sample_ids[1, 768] = 1
       expected_singleton_table_sample_ids[1, 776] = 0
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers[self.singleton_input_table_spec.name],
           sample_ids[self.singleton_input_table_spec.name],
           expected_singleton_table_sample_ids,
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers[self.ragged_input_table_spec.name],
           sample_ids[self.ragged_input_table_spec.name],
           expected_ragged_table_sample_ids,
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers_flattened[self.singleton_input_table_spec.name],
           sample_ids_flattened[self.singleton_input_table_spec.name],
           np.ravel(expected_singleton_table_sample_ids),
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers_flattened[self.ragged_input_table_spec.name],
           sample_ids_flattened[self.ragged_input_table_spec.name],
           np.ravel(expected_ragged_table_sample_ids),
       )
@@ -2723,19 +2806,23 @@ class InputPreprocessingTest(parameterized.TestCase):
       expected_singleton_table_gains[1, 768] = 1.0
       expected_singleton_table_gains[1, 776] = 1.0
 
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers[self.singleton_input_table_spec.name],
           gains[self.singleton_input_table_spec.name],
           expected_singleton_table_gains,
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers[self.ragged_input_table_spec.name],
           gains[self.ragged_input_table_spec.name],
           expected_ragged_table_gains,
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers_flattened[self.singleton_input_table_spec.name],
           gains_flattened[self.singleton_input_table_spec.name],
           np.ravel(expected_singleton_table_gains),
       )
-      np.testing.assert_equal(
+      assert_equal_coo_buffer(
+          row_pointers_flattened[self.ragged_input_table_spec.name],
           gains_flattened[self.ragged_input_table_spec.name],
           np.ravel(expected_ragged_table_gains),
       )
@@ -2817,14 +2904,17 @@ class InputPreprocessingTest(parameterized.TestCase):
       input_weights = np.array(input_weights, dtype=np.float32)
 
     batch_number = 42
+    local_device_count = 1
+    global_device_count = 1
+    num_sc_per_device = 4
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [input_features],
             [input_weights],
             [feature_spec],
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=4,
+            local_device_count=local_device_count,
+            global_device_count=global_device_count,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
             has_leading_dimension=False,
             allow_id_dropping=False,
@@ -2864,15 +2954,17 @@ class InputPreprocessingTest(parameterized.TestCase):
     np.testing.assert_array_equal(
         row_pointers["table"], expected_row_pointers["table"]
     )
-    np.testing.assert_array_equal(
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers["table"],
+    )
+    assert_equal_coo_buffer(
         embedding_ids["table"], expected_embedding_ids["table"]
     )
-    np.testing.assert_array_equal(
-        sample_ids["table"], expected_sample_ids["table"]
-    )
-    np.testing.assert_allclose(
-        gains["table"], expected_gains["table"], rtol=1e-5
-    )
+    assert_equal_coo_buffer(sample_ids["table"], expected_sample_ids["table"])
+    assert_equal_coo_buffer(gains["table"], expected_gains["table"])
 
 
 class MinibatchingNodeTest(absltest.TestCase):

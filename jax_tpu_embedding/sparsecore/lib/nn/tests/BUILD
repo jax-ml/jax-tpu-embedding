@@ -28,6 +28,7 @@ pytype_strict_contrib_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/core:test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),
