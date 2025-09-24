@@ -846,7 +846,7 @@ def tpu_sparse_dense_matmul(
             sample_id,
             gain,
             num_minibatches,
-            embedding_variable.table,
+            embedding_variable[0],  # [0] is the embedding table
             device_batch_size=stacked_table.total_sample_count
             // global_device_count,
             max_ids_per_partition=stacked_table.max_ids_per_partition,

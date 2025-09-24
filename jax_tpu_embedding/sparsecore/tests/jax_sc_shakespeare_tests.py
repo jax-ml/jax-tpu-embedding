@@ -128,14 +128,13 @@ class ShakespeareTest(absltest.TestCase):
         for i, device in enumerate(devices)
     ]
     sharding = NamedSharding(mesh, P('x', None))
-    embedding_variables[model.table_name] = embedding.EmbeddingVariables(
-        table=jax.make_array_from_single_device_arrays(
+    embedding_variables[model.table_name] = tuple([
+        jax.make_array_from_single_device_arrays(
             shape=(_VOCAB_SIZE.value, _EMBEDDING_SIZE.value),
             sharding=sharding,
             arrays=embedding_variables[model.table_name],
-        ),
-        slot=(),
-    )
+        )
+    ])
 
     # Define the forward pass function.
     loss_grad_fn = jax.value_and_grad(
