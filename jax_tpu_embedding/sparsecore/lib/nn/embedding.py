@@ -707,7 +707,7 @@ def _get_activation_for_feature(
 StackingStrategy = pybind_input_preprocessing.FeatureStackingStrategy
 
 
-def _unstack_embedding_activations(
+def unstack_embedding_activations(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
@@ -746,6 +746,7 @@ def tpu_sparse_dense_matmul(
     feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
+    perform_unstacking: bool = True,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -790,6 +791,8 @@ def tpu_sparse_dense_matmul(
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
     enable_minibatching: Whether to enable minibatching. Defaults to `False`.
+    perform_unstacking: If True, returns per-feature activations by unstacking
+      the results. If False, returns raw stacked activations.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -857,13 +860,17 @@ def tpu_sparse_dense_matmul(
         )
     )
 
-  return _unstack_embedding_activations(
-      activations,
-      feature_specs,
-      global_device_count,
-      num_sc_per_device,
-      feature_stacking_strategy,
-  )
+  if perform_unstacking:
+
+    activations = unstack_embedding_activations(
+        activations,
+        feature_specs,
+        global_device_count,
+        num_sc_per_device,
+        feature_stacking_strategy,
+    )
+
+  return activations
 
 
 def _verify_input_batch_size(
@@ -879,7 +886,7 @@ def _verify_input_batch_size(
     )
 
 
-def _stack_embedding_gradients(
+def stack_embedding_gradients(
     activation_gradients: Nested[jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     num_sc_per_device: int,
@@ -957,6 +964,7 @@ def tpu_sparse_dense_matmul_grad(
     step: jax.Array | int | None = None,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
+    perform_stacking: bool = True,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -1000,6 +1008,8 @@ def tpu_sparse_dense_matmul_grad(
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
     enable_minibatching: Whether to use minibatching. Defaults to `False`.
+    perform_stacking: If True, expects per-feature gradients and stacks them
+      internally. If False, assumes activation_gradients are already stacked.
 
   Returns:
     The updated activation embedding variables.
@@ -1021,19 +1031,26 @@ def tpu_sparse_dense_matmul_grad(
 
   # Verify the input structures and lengths.
   assert lhs_row_pointers.keys() == embedding_variables.keys()
-  # Activations match the feature specs structure
-  tree.assert_same_structure(feature_specs, activation_gradients)
 
   stacked_table_specs = get_stacked_table_specs(feature_specs)
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
-  gradients = _stack_embedding_gradients(
-      activation_gradients,
-      feature_specs,
-      num_sc_per_device,
-      feature_stacking_strategy,
-  )
+
+  if perform_stacking:
+    # Activations match the feature specs structure
+    tree.assert_same_structure(feature_specs, activation_gradients)
+
+    gradients = stack_embedding_gradients(
+        activation_gradients,
+        feature_specs,
+        num_sc_per_device,
+        feature_stacking_strategy,
+    )
+  else:
+    assert isinstance(activation_gradients, Mapping)
+    gradients = activation_gradients
+
   assert lhs_row_pointers.keys() == gradients.keys()
 
   # Casting to int since primitives requires JSON serializable value.
@@ -1063,6 +1080,11 @@ def tpu_sparse_dense_matmul_grad(
     optimizer_primitive = stack_table_spec.optimizer.get_optimizer_primitive()
 
     flatten_variables, treedef = jax.tree.flatten(embedding_variable)
+    extra_kwargs = {}
+    if isinstance(stack_table_spec.optimizer, embedding_spec.FTRLOptimizerSpec):
+      extra_kwargs["multiply_linear_by_learning_rate"] = (
+          stack_table_spec.optimizer.multiply_linear_by_learning_rate
+      )
     updated_variables = optimizer_primitive.bind(
         row_pointer,
         embedding_id,
@@ -1077,6 +1099,7 @@ def tpu_sparse_dense_matmul_grad(
         computation_name=symbol_name,
         sharding_strategy=sharding_strategy,
         enable_minibatching=enable_minibatching,
+        **extra_kwargs,
     )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(
