@@ -113,6 +113,7 @@ pytype_strict_contrib_test(
     ],
     args = [
         # TPU chip configuration,
+        "--xla_sc_pack_quantization_compute=true",
     ],
     env = {
         "XLA_FLAGS": "--xla_dump_to=sponge",

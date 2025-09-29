@@ -1413,6 +1413,93 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         "related_item activations do not match",
     )
 
+  def test_sparse_dense_matmul_quantized(self):
+    devices = jax.devices()[:1]
+    mesh = jax.sharding.Mesh(devices, "x")
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+
+    quantized_table_spec = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=32,
+        initializer=lambda: jnp.zeros((32, 32), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="quantized_table",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=embedding_spec.QuantizationConfig(
+            min_value=0.0, max_value=15.0, num_buckets=256
+        ),
+    )
+
+    quantized_feature_spec = embedding_spec.FeatureSpec(
+        table_spec=quantized_table_spec,
+        input_shape=(16, 1),
+        output_shape=(16, quantized_table_spec.embedding_dim),
+        name="quantized_feature",
+    )
+
+    feature_specs = {"quantized_feature": quantized_feature_spec}
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
+    )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {"quantized_feature": self.input_tensor},
+        {"quantized_feature": self.input_weights},
+        feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        batch_number=batch_number,
+    )
+
+    embedding_variables = {}
+    embedding_variables["quantized_table"] = tuple([
+        _create_embedding_variable_for_jit(
+            [VariableInfo((32, 32), 0)], devices, mesh
+        )
+    ])
+
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        global_device_count=mesh.size,
+    )
+    sparse_matmul = jax.jit(tpu_sparse_dense_matmul_fn, static_argnums=[2])
+
+    # Grab HLO to verify u8 types are used for real quantization.
+    compiled = sparse_matmul.lower(
+        preprocessed_inputs,
+        embedding_variables,
+        tuple(tree.flatten(feature_specs)),
+    ).compile()
+    hlo = compiled.as_text()
+    self.assertIn("u8", hlo)
+
+    activations = sparse_matmul(
+        preprocessed_inputs,
+        embedding_variables,
+        tuple(tree.flatten(feature_specs)),
+    )
+
+    q_min, q_max = 0.0, 15.0
+    expected_activations_flat = [
+        np.sum(np.clip(row, q_min, q_max)) for row in self.input_tensor
+    ]
+    expected_emb_activations = np.array(
+        [[val] * 32 for val in expected_activations_flat], dtype=np.float32
+    )
+
+    self.assertLen(activations, 1)
+    # The quantization and dequantization can introduce small errors.
+    np.testing.assert_allclose(
+        activations[0], expected_emb_activations, atol=0.5
+    )
+
 
 if __name__ == "__main__":
   absltest.main()
