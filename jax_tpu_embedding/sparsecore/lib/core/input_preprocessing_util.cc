@@ -253,7 +253,9 @@ int ComputeCooBufferSizePerDevice(
                                         << stacked_table_name << ": " << result;
   // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
-  CHECK(result > 0 && result < INT_MAX);
+  CHECK(result > 0 && result < INT_MAX)
+      << "Computed Coo Buffer Size (" << result << ") for table "
+      << stacked_table_name << " is out of the valid range (0, INT_MAX).";
   return static_cast<int>(result);
 }
 
