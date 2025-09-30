@@ -20,6 +20,7 @@ from jax_tpu_embedding.sparsecore.lib.flax import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 
+
 shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
 
@@ -38,6 +39,7 @@ class Model(nn.Module):
   feature_name: str = 'shakespeare_feature'
   mesh: jax.sharding.Mesh | None = None
   sharding_axis: str = 'sparsecore_sharding'
+  enable_pipelining: bool = False
 
   def add_sharding_constraint(self, x: jax.Array, names: tuple[str | None]):
     # Add a sharding constraint to the array.
@@ -66,6 +68,7 @@ class Model(nn.Module):
         feature_specs=self.feature_specs,
         mesh=self.mesh,
         sharding_axis=self.sharding_axis,
+        enable_pipelining=self.enable_pipelining,
     )(embedding_lookup_inputs)
 
     # Unpack the activations.
