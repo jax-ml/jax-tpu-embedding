@@ -16,7 +16,7 @@
 import collections
 import functools
 import hashlib
-from typing import Callable, Dict, Mapping, Sequence, TypeAlias, TypeVar
+from typing import Callable, Mapping, Sequence, TypeAlias, TypeVar
 
 from absl import logging
 import jax
@@ -588,7 +588,7 @@ def _unstack_and_unshard_stacked_table(
     stacked_table: jax.Array,
     stacked_table_specs: embedding_spec_pb2.StackedTableSpecProto,
     donate: bool = False,
-) -> Dict[str, jax.Array]:
+) -> Mapping[str, jax.Array]:
   """Unstack and unshard the stacked table."""
 
   stacked_table_sharding = stacked_table.sharding
@@ -696,10 +696,10 @@ def _unstack_and_unshard_stacked_table(
 
 
 def unstack_and_unshard_stacked_tables(
-    stacked_tables: Dict[str, jax.Array],
+    stacked_tables: Mapping[str, jax.Array],
     embedding_specs: embedding_spec_pb2.EmbeddingSpecProto,
     donate: bool = False,
-) -> Dict[str, jax.Array]:
+) -> Mapping[str, jax.Array]:
   """Unstack and unshard the stacked tables.
 
   Args:
@@ -729,7 +729,7 @@ def unstack_and_unshard_stacked_tables(
 
 
 def _stack_and_shard_feature_table(
-    feature_tables: Dict[str, jax.Array],
+    feature_tables: Mapping[str, jax.Array],
     stacked_table_specs: embedding_spec_pb2.StackedTableSpecProto,
     delete_input: bool = False,
 ) -> jax.Array:
@@ -816,10 +816,10 @@ def _stack_and_shard_feature_table(
 
 
 def stack_and_shard_feature_tables(
-    feature_tables: Dict[str, jax.Array],
+    feature_tables: Mapping[str, jax.Array],
     embedding_specs: embedding_spec_pb2.EmbeddingSpecProto,
     delete_input: bool = False,
-) -> Dict[str, jax.Array]:
+) -> Mapping[str, jax.Array]:
   """Stack and shard the feature tables and return the stacked tables.
 
   This function can be run on both TPU or CPU backends. The stacked tables will
