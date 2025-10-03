@@ -137,7 +137,6 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_a",
-        suggested_coo_buffer_size_per_device=8192,
     )
     self.feature_spec = embedding_spec.FeatureSpec(
         table_spec=self.table_spec,
@@ -404,7 +403,6 @@ class MultiHostMinibatchingTest(absltest.TestCase):
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_a",
-        suggested_coo_buffer_size_per_device=16384,
     )
     self.feature_spec = embedding_spec.FeatureSpec(
         table_spec=self.table_spec,

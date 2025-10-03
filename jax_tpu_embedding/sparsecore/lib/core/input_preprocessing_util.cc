@@ -210,10 +210,29 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
   return RowCombiner::kSum;
 }
 
+int64_t MayBeUpdateBufferSize(
+    int64_t theoretical_max,
+    std::optional<int64_t> suggested_coo_buffer_size_per_device,
+    int num_scs_per_device, absl::string_view stacked_table_name) {
+  // Since the suggested size corresponds to only current device (local SCs),
+  // Buffer for each SC should be properly aligned, hence ALIGNMENT *
+  // num_scs_per_device
+  int64_t suggested_value = RoundUpTo<int64_t>(
+      suggested_coo_buffer_size_per_device.value(),
+      TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
+  CHECK(suggested_value <= theoretical_max)
+      << "Suggested Coo Buffer Size is larger than the theoretical "
+         "max for table "
+      << stacked_table_name << ": " << suggested_value << " vs "
+      << theoretical_max
+      << ". Adjust the suggested size or the max_ids_per_partition values.";
+  return suggested_value;
+}
+
 int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    const int batch_number) {
+    const int batch_number, bool use_minibatching) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
   const std::optional<int> suggested_coo_buffer_size_per_device =
@@ -222,7 +241,8 @@ int ComputeCooBufferSizePerDevice(
   const int64_t max_ids_rounded_up = RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
   const int64_t theoretical_max =
-      max_ids_rounded_up * num_scs_per_device * num_scs;
+      max_ids_rounded_up * num_scs_per_device * num_scs *
+      (use_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
   const std::string& stacked_table_name = stacked_table_metadata[0].name;
   LOG_IF(INFO, batch_number % 100 == 0)
       << "Theoretical Max for table " << stacked_table_name << ": "
@@ -234,12 +254,9 @@ int ComputeCooBufferSizePerDevice(
     LOG_IF(INFO, batch_number % 100 == 0)
         << "Suggested Coo Buffer Size for table " << stacked_table_name << ": "
         << suggested_coo_buffer_size_per_device.value();
-    // Since the suggested size corresponds to only current device (local SCs),
-    // Buffer for each SC should be properly aligned, hence ALIGNMENT *
-    // num_scs_per_device
-    result = RoundUpTo<int64_t>(
-        suggested_coo_buffer_size_per_device.value(),
-        TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
+    result = MayBeUpdateBufferSize(
+        theoretical_max, suggested_coo_buffer_size_per_device,
+        num_scs_per_device, stacked_table_name);
   } else {
     LOG_IF(WARNING, batch_number % 100 == 0)
         << "No Coo Buffer Size provided for table " << stacked_table_name
