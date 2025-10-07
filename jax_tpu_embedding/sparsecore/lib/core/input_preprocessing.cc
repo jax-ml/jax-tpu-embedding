@@ -134,7 +134,8 @@ struct TableState {
         stacked_table_metadata(metadata),
         coo_buffer_size_per_device(
             ComputeCooBufferSizePerDevice(num_scs, options.num_sc_per_device,
-                                          metadata, options.batch_number)),
+                                          metadata, options.batch_number,
+                                          options.enable_minibatching)),
         csr_arrays_per_host(options.local_device_count,
                             row_pointers_size_per_bucket *
                                 (options.enable_minibatching

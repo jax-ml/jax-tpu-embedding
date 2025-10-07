@@ -713,11 +713,9 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
   // Also increase buffer size.
   stacked_table_metadata_[0].max_ids_per_partition = 5;
   stacked_table_metadata_[0].max_unique_ids_per_partition = 2;
-  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 2048;
 
   stacked_table_metadata_[1].max_ids_per_partition = 5;
   stacked_table_metadata_[1].max_unique_ids_per_partition = 6;
-  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 2048;
 
   auto input_batches =
       CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
@@ -799,8 +797,6 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
-  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 8192;
-  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 8192;
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
@@ -850,8 +846,6 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
-  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = 8192;
-  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = 8192;
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 

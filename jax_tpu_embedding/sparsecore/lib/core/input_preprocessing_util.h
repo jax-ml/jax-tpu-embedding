@@ -293,7 +293,7 @@ struct StackedTableMetadata {
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
-    int batch_number = 0);
+    int batch_number = 0, bool use_minibatching = false);
 
 int MaxIdsPerPartitionForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);

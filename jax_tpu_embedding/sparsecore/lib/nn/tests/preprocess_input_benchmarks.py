@@ -81,6 +81,7 @@ def generate_feature_specs(num_features: int, num_samples: int):
             total_sample_count=num_samples,
             max_ids_per_partition=1024,
             max_unique_ids_per_partition=1024,
+            suggested_coo_buffer_size_per_device=4096,
         ),
     )
     feature_spec = embedding_spec.FeatureSpec(
