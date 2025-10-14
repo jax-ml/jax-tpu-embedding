@@ -156,7 +156,7 @@ def _verify_feature_specs(
 ) -> None:
   """Ensures all the fields in the feature specs are correctly defined."""
   visited_feature_names = set()
-  for feature_spec in tree.flatten(feature_specs):
+  for feature_spec in jax.tree.leaves(feature_specs):
     if feature_spec.name in visited_feature_names:
       raise ValueError(f"Feature spec {feature_spec.name} is already defined.")
     visited_feature_names.add(feature_spec.name)
@@ -166,7 +166,7 @@ def _verify_feature_specs(
 def _verify_table_specs(table_specs: Nested[embedding_spec.TableSpec]) -> None:
   """Ensures all the fields in the table specs are correctly defined."""
   visited_table_names = set()
-  for table_spec in tree.flatten(table_specs):
+  for table_spec in jax.tree.leaves(table_specs):
     if table_spec.name in visited_table_names:
       raise ValueError(f"Table spec {table_spec.name} is already defined.")
     visited_table_names.add(table_spec.name)
@@ -212,7 +212,7 @@ def get_table_specs(
   _verify_feature_specs(feature_specs)
   table_specs = {
       feature_spec.table_spec.name: feature_spec.table_spec
-      for feature_spec in tree.flatten(feature_specs)
+      for feature_spec in jax.tree.leaves(feature_specs)
   }
   _verify_table_specs(table_specs)
   return table_specs
@@ -239,14 +239,14 @@ def get_stacked_table_specs(
   _verify_feature_specs(feature_specs)
   if any(
       not feature_spec.table_spec.is_stacked()
-      for feature_spec in tree.flatten(feature_specs)
+      for feature_spec in jax.tree.leaves(feature_specs)
   ):
     raise ValueError(
         "embedding.prepare_feature_specs_for_training was not called"
     )
   stacked_table_specs: list[embedding_spec.StackedTableSpec] = [
       feature_spec.table_spec.stacked_table_spec
-      for feature_spec in tree.flatten(feature_specs)
+      for feature_spec in jax.tree.leaves(feature_specs)
   ]
   return {
       stacked_table_specs.stack_name: stacked_table_specs
@@ -281,7 +281,7 @@ def prepare_feature_specs_for_training(
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   not_stacked = [
       feature
-      for feature in tree.flatten(feature_specs)
+      for feature in jax.tree.leaves(feature_specs)
       if not feature.table_spec.is_stacked()
   ]
   # Amongst the not explicitly stacked features, collect the ones that point
@@ -365,7 +365,7 @@ def prepare_feature_specs_for_training(
         feature,
     )
 
-  for feature in tree.flatten(feature_specs):
+  for feature in jax.tree.leaves(feature_specs):
     _populate_stacking_info_in_features(feature)
 
 
@@ -523,9 +523,9 @@ def preprocess_sparse_dense_matmul_input(
 
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-          tree.flatten(features),
-          tree.flatten(features_weights),
-          tree.flatten(feature_specs),
+          jax.tree.leaves(features),
+          jax.tree.leaves(features_weights),
+          jax.tree.leaves(feature_specs),
           local_device_count,
           global_device_count,
           num_sc_per_device=num_sc_per_device,
@@ -629,10 +629,10 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
 
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
-          tree.flatten(indices),
-          tree.flatten(values),
-          tree.flatten(dense_shapes),
-          tree.flatten(feature_specs),
+          jax.tree.leaves(indices),
+          jax.tree.leaves(values),
+          jax.tree.leaves(dense_shapes),
+          jax.tree.leaves(feature_specs),
           local_device_count,
           global_device_count,
           num_sc_per_device=num_sc_per_device,
@@ -897,7 +897,8 @@ def stack_embedding_gradients(
       str, list[tuple[embedding_spec.FeatureSpec, jax.Array]]
   ] = collections.defaultdict(list)
   for gradient, feature in zip(
-      tree.flatten(activation_gradients), tree.flatten(feature_specs)
+      jax.tree.leaves(activation_gradients),
+      jax.tree.leaves(feature_specs),
   ):
     if feature.id_transformation is None:
       raise ValueError(
@@ -1310,7 +1311,7 @@ def init_embedding_variables(
     )
 
   stacks = collections.defaultdict(list)
-  for table_spec in tree.flatten(table_specs):
+  for table_spec in jax.tree.leaves(table_specs):
     stacks[table_spec.setting_in_stack.stack_name].append(table_spec)
 
   # Make sure the table specs are sorted by their position in the stack
@@ -1372,7 +1373,7 @@ def create_proto_from_feature_specs(
       str, dict[str, embedding_spec_pb2.TableSpecProto]
   ] = collections.defaultdict(dict)
   # Traverse the feature specs and create the StackedTableSpecProto.
-  for feature in tree.flatten(feature_specs):
+  for feature in jax.tree.leaves(feature_specs):
     current_stack_name = feature.table_spec.stacked_table_spec.stack_name
     current_table_name = feature.table_spec.name
     if current_stack_name not in stacked_table_specs:
