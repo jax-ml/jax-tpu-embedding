@@ -14,14 +14,17 @@
 """Methods for table stacking."""
 
 import collections
-import functools
+from collections.abc import Mapping
 import hashlib
-from typing import Callable, Dict, Mapping, Sequence, TypeAlias, TypeVar
+import typing
+from typing import Any, Callable, Sequence, TypeAlias, TypeVar
 
 from absl import logging
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import StackedTableSpec
+from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import TableSpec
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 import numpy as np
 import tree
@@ -30,6 +33,305 @@ import tree
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = Callable[[str, int], int]
+# Any to support tf.Ragged without needing an explicit TF dependency.
+ArrayLike: TypeAlias = jax.Array | np.ndarray | Any  # type: ignore
+Shape: TypeAlias = tuple[int, ...]
+
+
+def _next_largest_multiple(value: int, multiple: int) -> int:
+  return ((value + multiple - 1) // multiple) * multiple
+
+
+def _default_stacked_table_spec(
+    table_spec: TableSpec, num_shards: int, batch_size: int
+) -> StackedTableSpec:
+  return StackedTableSpec(
+      stack_name=table_spec.name,
+      stack_vocab_size=_next_largest_multiple(
+          table_spec.vocabulary_size, 8 * num_shards
+      ),
+      stack_embedding_dim=_next_largest_multiple(table_spec.embedding_dim, 8),
+      optimizer=table_spec.optimizer,
+      combiner=table_spec.combiner,
+      total_sample_count=batch_size,
+      max_ids_per_partition=table_spec.max_ids_per_partition,
+      max_unique_ids_per_partition=table_spec.max_unique_ids_per_partition,
+  )
+
+
+def _get_stacked_table_spec(
+    table_spec: TableSpec, num_shards: int, batch_size: int = 0
+) -> StackedTableSpec:
+  return table_spec.stacked_table_spec or _default_stacked_table_spec(
+      table_spec, num_shards, batch_size
+  )
+
+
+def _pad_table(
+    table_spec: TableSpec,
+    table_values: jax.Array,
+    num_shards: int,
+    pad_value: jnp.float32 = jnp.nan,
+) -> jax.Array:
+  """Adds appropriate padding to a table to prepare for stacking.
+
+  Args:
+      table_spec: Table specification describing the table to pad.
+      table_values: Table values array to pad.
+      num_shards: Number of shards in the table (typically `global_device_count
+        * num_sc_per_device`).
+      pad_value: Value to use for padding.
+
+  Returns:
+      Padded table values.
+  """
+  vocabulary_size = table_spec.vocabulary_size
+  embedding_dim = table_spec.embedding_dim
+  padded_vocabulary_size = _next_largest_multiple(
+      vocabulary_size, 8 * num_shards
+  )
+  stack_embedding_dim = _get_stacked_table_spec(
+      table_spec, num_shards
+  ).stack_embedding_dim
+  return jnp.pad(
+      table_values,
+      (
+          (0, padded_vocabulary_size - vocabulary_size),
+          (0, stack_embedding_dim - embedding_dim),
+      ),
+      constant_values=pad_value,
+  )
+
+
+def _stack_and_shard_table(
+    stacked_table: jax.Array,
+    table_spec: TableSpec,
+    table: jax.Array,
+    num_shards: int,
+    pad_value: jnp.float32,
+) -> jax.Array:
+  """Stacks and shards a single table for use in sparsecore lookups."""
+  padded_values = _pad_table(table_spec, table, num_shards, pad_value)
+  sharded_padded_vocabulary_size = padded_values.shape[0] // num_shards
+  stack_embedding_dim = stacked_table.shape[-1]
+
+  # Mod-shard vocabulary across devices.
+  sharded_values = jnp.swapaxes(
+      padded_values.reshape(-1, num_shards, stack_embedding_dim),
+      0,
+      1,
+  )
+
+  # Rotate shards.
+  setting_in_stack = table_spec.setting_in_stack
+  rotated_values = jnp.roll(
+      sharded_values, setting_in_stack.shard_rotation, axis=0
+  )
+
+  # Insert table into the stack.
+  table_row = setting_in_stack.row_offset_in_shard
+  output_stacked_table = stacked_table.at[
+      :, table_row : (table_row + sharded_padded_vocabulary_size), :
+  ].set(rotated_values)
+
+  return output_stacked_table
+
+
+def stack_and_shard_tables(
+    table_specs: Nested[TableSpec],
+    tables: Nested[ArrayLike],
+    num_shards: int,
+    pad_value: jnp.float32 = jnp.nan,
+) -> dict[str, Nested[jax.Array]]:
+  """Stacks and shards tables for use in sparsecore lookups.
+
+  Args:
+      table_specs: Nested collection of unstacked table specifications.
+      tables: Table values corresponding to the table_specs.
+      num_shards: Number of shards in the table (typically `global_device_count
+        * num_sc_per_device`).
+      pad_value: Value to use for padding.
+
+  Returns:
+      A mapping of stacked table names to stacked table values.
+  """
+
+  # Gather stacked table information.
+  stacked_table_map: dict[
+      str,
+      tuple[StackedTableSpec, list[TableSpec]],
+  ] = {}
+
+  def collect_stacked_tables(table_spec: TableSpec) -> None:
+    stacked_table_spec = _get_stacked_table_spec(table_spec, num_shards)
+    stacked_table_name = stacked_table_spec.stack_name
+    if stacked_table_name not in stacked_table_map:
+      stacked_table_map[stacked_table_name] = (stacked_table_spec, [])
+    stacked_table_map[stacked_table_name][1].append(table_spec)
+
+  jax.tree.map(collect_stacked_tables, table_specs)
+
+  table_map: dict[str, Nested[jax.Array]] = {}
+
+  def collect_tables(table_spec: TableSpec, table: Nested[jax.Array]) -> None:
+    table_map[table_spec.name] = table
+
+  jax.tree.map(collect_tables, table_specs, tables)
+
+  stacked_tables: dict[str, Nested[jax.Array]] = {}
+  for (
+      stacked_table_spec,
+      table_specs,
+  ) in stacked_table_map.values():
+    stack_vocab_size = stacked_table_spec.stack_vocab_size
+    sharded_vocab_size = stack_vocab_size // num_shards
+    stack_embedding_dim = stacked_table_spec.stack_embedding_dim
+
+    # Allocate initial buffer.  The stacked table will be divided among
+    # shards by splitting the vocabulary dimension:
+    #   [ v, e ] -> [s, v/s, e]
+    stacked_table_tree = jax.tree.map(
+        lambda _, sharded_vocab_size=sharded_vocab_size, stack_embedding_dim=stack_embedding_dim: jnp.zeros(
+            shape=(num_shards, sharded_vocab_size, stack_embedding_dim),
+            dtype=jnp.float32,
+        ),
+        table_map[table_specs[0].name],
+    )
+
+    for table_spec in table_specs:
+      table_tree = table_map[table_spec.name]
+      stacked_table_tree = jax.tree.map(
+          lambda stacked_table, table, table_spec=table_spec: _stack_and_shard_table(
+              stacked_table,
+              table_spec,
+              table,
+              num_shards,
+              pad_value,
+          ),
+          stacked_table_tree,
+          table_tree,
+      )
+
+    stacked_tables[stacked_table_spec.stack_name] = stacked_table_tree
+
+  return stacked_tables
+
+
+# jax.jit with in_shardings only supports positional arguments, so these
+# arguments cannot be keyword-only.
+def _unshard_and_unstack_single_table(
+    stacked_table_shard: jax.Array,
+    sharded_vocab_size: int,
+    row_offset_in_shard: int,
+    shard_rotation: int,
+    vocab_size: int,
+    embedding_dim: int,
+) -> jax.Array:
+  """Un-rotates, un-mod-shards, and un-pads a table shard."""
+  stack_embedding_dim = stacked_table_shard.shape[-1]
+  # Extract padded values from the stacked table.
+  padded_values = stacked_table_shard[
+      :, row_offset_in_shard : (row_offset_in_shard + sharded_vocab_size), :
+  ]
+  # Un-rotate shards.
+  padded_values = jnp.roll(padded_values, -shard_rotation, axis=0)
+  # Un-mod-shard.
+  padded_values = jnp.swapaxes(padded_values, 0, 1).reshape(
+      -1, stack_embedding_dim
+  )
+  # Un-pad.
+  return padded_values[:vocab_size, :embedding_dim]
+
+
+def _unshard_and_unstack_table(
+    table_spec: TableSpec,
+    stacked_table_tree: Nested[jax.Array],
+    num_shards: int,
+) -> Nested[jax.Array]:
+  """Unshards and unstacks a single table."""
+  sharded_vocabulary_size = (
+      _next_largest_multiple(table_spec.vocabulary_size, 8 * num_shards)
+      // num_shards
+  )
+  setting_in_stack = table_spec.setting_in_stack
+
+  def _unshard_leaf(stacked_table: jax.Array) -> jax.Array:
+    stacked_table = stacked_table.reshape(
+        num_shards, -1, stacked_table.shape[-1]
+    )
+    return _unshard_and_unstack_single_table(
+        stacked_table,
+        sharded_vocab_size=sharded_vocabulary_size,
+        row_offset_in_shard=setting_in_stack.row_offset_in_shard,
+        shard_rotation=setting_in_stack.shard_rotation,
+        vocab_size=table_spec.vocabulary_size,
+        embedding_dim=table_spec.embedding_dim,
+    )
+
+  return jax.tree_util.tree_map(
+      _unshard_leaf,
+      stacked_table_tree,
+  )
+
+
+def _get_stack_name_from_table_spec(table_spec: TableSpec) -> str:
+  """Returns the stack name associated with a single TableSpec."""
+  if table_spec.stacked_table_spec:
+    return table_spec.stacked_table_spec.stack_name
+  return table_spec.name
+
+
+def unshard_and_unstack_tables(
+    table_specs: Nested[TableSpec],
+    stacked_tables: Mapping[str, Nested[jax.Array]],
+    num_shards: int,
+) -> Nested[jax.Array]:
+  """Unshards and unstacks a collection of tables.
+
+  Args:
+      table_specs: Nested collection of unstacked table specifications.
+      stacked_tables: Mapping of stacked table names to stacked table values.
+      num_shards: Number of shards in the table (typically `global_device_count
+        * num_sc_per_device`).
+
+  Returns:
+      A mapping of table names to unstacked table values.
+  """
+  return jax.tree.map(
+      lambda table_spec: _unshard_and_unstack_table(
+          table_spec,
+          stacked_tables[_get_stack_name_from_table_spec(table_spec)],
+          num_shards,
+      ),
+      table_specs,
+  )
+
+
+def get_table_stacks(
+    table_specs: Nested[TableSpec],
+) -> dict[str, list[TableSpec]]:
+  """Extracts lists of tables that are stacked together.
+
+  Args:
+      table_specs: Nested collection of table specifications.
+
+  Returns:
+      A mapping of stacked table names to lists of table specifications for
+      each stack.
+  """
+  stacked_table_specs: dict[str, list[TableSpec]] = collections.defaultdict(
+      list
+  )
+  flat_table_specs, _ = jax.tree.flatten(table_specs)
+  for table_spec in flat_table_specs:
+    table_spec = typing.cast(TableSpec, table_spec)
+    stacked_table_spec = table_spec.stacked_table_spec
+    if stacked_table_spec is not None:
+      stacked_table_specs[stacked_table_spec.stack_name].append(table_spec)
+    else:
+      stacked_table_specs[table_spec.name].append(table_spec)
+
+  return stacked_table_specs
 
 
 def get_default_limits(name: str, batch_size: int) -> int:
@@ -44,11 +346,6 @@ def get_default_limits(name: str, batch_size: int) -> int:
   """
   del name, batch_size
   return 256
-
-
-def _next_largest_multiple(number: int, divisor: int) -> int:
-  """Returns the next largest multiple of y that is greater than x."""
-  return number if number % divisor == 0 else (number // divisor + 1) * divisor
 
 
 def round_up_dim_and_vocab_size(
@@ -588,7 +885,7 @@ def _unstack_and_unshard_stacked_table(
     stacked_table: jax.Array,
     stacked_table_specs: embedding_spec_pb2.StackedTableSpecProto,
     donate: bool = False,
-) -> Dict[str, jax.Array]:
+) -> dict[str, jax.Array]:
   """Unstack and unshard the stacked table."""
 
   stacked_table_sharding = stacked_table.sharding
@@ -606,44 +903,18 @@ def _unstack_and_unshard_stacked_table(
     # to save memory
     stacked_table.delete()
 
-  @functools.partial(
-      jax.jit,
+  unstack_and_unshard_fn = jax.jit(
+      _unshard_and_unstack_single_table,
       static_argnames=(
-          "row_offset",
-          "chunk_size",
-          "rotation",
-          "stack_embedding_dim",
+          "sharded_vocab_size",
+          "row_offset_in_shard",
+          "shard_rotation",
           "vocab_size",
           "embedding_dim",
       ),
       in_shardings=stacked_table_sharding,
       out_shardings=stacked_table_sharding,
   )
-  def _unstack_and_unshard(
-      stacked_table_3d,
-      row_offset,
-      chunk_size,
-      rotation,
-      stack_embedding_dim,
-      vocab_size,
-      embedding_dim,
-  ):
-    # From each shard get the chunk for 'this' table
-    shards = stacked_table_3d[:, row_offset : row_offset + chunk_size, :]
-
-    # Undo the shard rotation (note '-' for reverse direction)
-    shards = jnp.roll(shards, -rotation, axis=0)
-
-    # Undo the mod sharding
-    un_mod_shard = shards.transpose((1, 0, 2))
-
-    # Remove the first dimension
-    ret = un_mod_shard.reshape(-1, stack_embedding_dim)
-
-    # Remove paddings
-    ret = ret[:vocab_size, :embedding_dim]
-
-    return ret
 
   logging.info(
       "unstack_and_unshard_stacked_table: num_sparse_cores: %s,"
@@ -674,12 +945,11 @@ def _unstack_and_unshard_stacked_table(
         embedding_dim,
     )
 
-    ret[table_setting_in_stack.table_name] = _unstack_and_unshard(
+    ret[table_setting_in_stack.table_name] = unstack_and_unshard_fn(
         stacked_table_3d,
-        row_offset,
         chunk_size,
+        row_offset,
         rotation,
-        stack_embedding_dim,
         vocab_size,
         embedding_dim,
     )
@@ -696,10 +966,10 @@ def _unstack_and_unshard_stacked_table(
 
 
 def unstack_and_unshard_stacked_tables(
-    stacked_tables: Dict[str, jax.Array],
+    stacked_tables: dict[str, jax.Array],
     embedding_specs: embedding_spec_pb2.EmbeddingSpecProto,
     donate: bool = False,
-) -> Dict[str, jax.Array]:
+) -> dict[str, jax.Array]:
   """Unstack and unshard the stacked tables.
 
   Args:
@@ -729,7 +999,7 @@ def unstack_and_unshard_stacked_tables(
 
 
 def _stack_and_shard_feature_table(
-    feature_tables: Dict[str, jax.Array],
+    feature_tables: dict[str, jax.Array],
     stacked_table_specs: embedding_spec_pb2.StackedTableSpecProto,
     delete_input: bool = False,
 ) -> jax.Array:
@@ -816,10 +1086,10 @@ def _stack_and_shard_feature_table(
 
 
 def stack_and_shard_feature_tables(
-    feature_tables: Dict[str, jax.Array],
+    feature_tables: dict[str, jax.Array],
     embedding_specs: embedding_spec_pb2.EmbeddingSpecProto,
     delete_input: bool = False,
-) -> Dict[str, jax.Array]:
+) -> dict[str, jax.Array]:
   """Stack and shard the feature tables and return the stacked tables.
 
   This function can be run on both TPU or CPU backends. The stacked tables will
