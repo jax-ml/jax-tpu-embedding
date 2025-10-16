@@ -369,7 +369,7 @@ def run_model():
       global_emb_sharding,
   )
   @partial(
-      utils.jit_with_dump,
+      jax.jit,
       static_argnums=(0, 1, 2, 3),
       out_shardings=(
           None,

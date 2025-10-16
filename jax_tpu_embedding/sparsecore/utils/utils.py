@@ -13,9 +13,6 @@
 # limitations under the License.
 """Utilities for examples."""
 
-import logging
-import os
-
 from absl import flags
 import jax
 
@@ -53,37 +50,6 @@ def num_sparsecores_per_device(device: jax.Device | None = None):
     raise ValueError(f'Unknown sparsecore count for device kind: {device_kind}')
 
   return NUM_SC_PER_DEVICE_MAP[device_kind]
-
-
-def jit_with_dump(fn, name=None, source_info=None, *jit_args, **jit_kwargs):
-  """A wrapper for a jitted function that dumps the jaxpr to a file."""
-  jitted_fn = jax.jit(fn, *jit_args, **jit_kwargs)
-  dirname = (
-      os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
-      if _DUMP_DIR.value == 'sponge'
-      else _DUMP_DIR.value
-  )
-  dir_list = [dirname] if dirname else []
-  if name is None:
-    name = fn.__name__
-
-  make_jaxpr_param_list = ('static_argnums',)
-  make_jaxpr_params = {
-      k: jit_kwargs[k] for k in make_jaxpr_param_list if k in jit_kwargs
-  }
-
-  def call(*args, **kwargs):
-    if dir_list:
-      jaxpr = jax.make_jaxpr(fn, **make_jaxpr_params)(*args, **kwargs)
-      dump_path = os.path.join(dir_list[0], f'jaxpr_{name}.txt')
-      logging.info('Writing %s Jaxpr to %s', name, dump_path)
-      with open(dump_path, 'w') as f:
-        f.write(jaxpr.pretty_print(source_info=source_info))
-      # Only dump for the first time
-      dir_list.clear()
-    return jitted_fn(*args, **kwargs)
-
-  return call
 
 
 def tree_summary(tree):
