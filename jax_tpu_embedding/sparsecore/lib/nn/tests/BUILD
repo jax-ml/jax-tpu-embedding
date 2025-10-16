@@ -146,7 +146,7 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
     ],
     env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
+        # "XLA_FLAGS": "--xla_dump_to=sponge",
         "JAX_TRACEBACK_FILTERING": "off",
     },
     main = "tpu_sparse_dense_matmul_grad_test.py",
