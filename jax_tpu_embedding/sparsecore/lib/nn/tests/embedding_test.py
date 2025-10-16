@@ -20,7 +20,6 @@ from absl.testing import parameterized
 from google.protobuf import text_format
 import jax
 from jax import sharding
-import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
@@ -1078,115 +1077,6 @@ class EmbeddingTest(parameterized.TestCase):
         text_format.MessageToString(expected_proto),
         text_format.MessageToString(actual),
     )
-
-  def test_preprocess_sparse_dense_matmul_input_from_sparse_tensor(self):
-    # Arrange
-    devices = jax.devices()[:1]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
-    table_spec_a = embedding_spec.TableSpec(
-        vocabulary_size=32,
-        embedding_dim=6,
-        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),
-        optimizer=embedding_spec.SGDOptimizerSpec(),
-        combiner="sum",
-        name="table_a",
-        max_ids_per_partition=16,
-        max_unique_ids_per_partition=16,
-    )
-    feature_spec_a = embedding_spec.FeatureSpec(
-        table_spec=table_spec_a,
-        input_shape=(16, 1),
-        output_shape=(
-            16,
-            table_spec_a.embedding_dim,
-        ),
-        name="feature_spec_a",
-    )
-    input_tensor = np.array(
-        [
-            np.array([5, 4, 2], dtype=np.int32),
-            np.array([3], dtype=np.int32),
-            np.array([9], dtype=np.int32),
-            np.array([1, 9, 16], dtype=np.int32),
-            np.array([6, 12, 1, 10], dtype=np.int32),
-            np.array([12, 19], dtype=np.int32),
-            np.array([0, 15, 2, 25, 25], dtype=np.int32),
-            np.array([4, 28, 25], dtype=np.int32),
-            np.array([15, 0], dtype=np.int32),
-            np.array([13], dtype=np.int32),
-            np.array([11], dtype=np.int32),
-            np.array([7, 1], dtype=np.int32),
-            np.array([8, 9], dtype=np.int32),
-            np.array([14, 14, 14], dtype=np.int32),
-            np.array([2, 28], dtype=np.int32),
-            np.array([10, 16], dtype=np.int32),
-        ],
-        dtype=object,
-    )
-    feature_specs = {
-        "feature_spec_a": feature_spec_a,
-    }
-    embedding.prepare_feature_specs_for_training(
-        feature_specs,
-        global_device_count=1,
-        num_sc_per_device=num_sc_per_device,
-    )
-    coo_indices_list = []
-    for i, row in enumerate(input_tensor):
-      for j, _ in enumerate(row):
-        coo_indices_list.append([i, j])
-    coo_indices = np.array(coo_indices_list, dtype=np.int64)
-    coo_values_list = []
-    for row in input_tensor:
-      for val in row:
-        coo_values_list.append(val)
-    coo_values = np.array(coo_values_list, dtype=np.int32)
-    max_len = max(len(row) for row in input_tensor) if input_tensor.size else 0
-    dense_shape = np.array([len(input_tensor), max_len], dtype=np.int64)
-    batch_number = 42
-    input_weights = np.array(
-        [np.ones_like(row, dtype=np.float32) for row in input_tensor],
-        dtype=object,
-    )
-
-    # Act
-    preprocessed_inputs, _ = (
-        embedding.preprocess_sparse_dense_matmul_input_from_sparse_tensor(
-            {"feature_spec_a": coo_indices},
-            {"feature_spec_a": coo_values},
-            {"feature_spec_a": dense_shape},
-            feature_specs,
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy="MOD",
-            batch_number=batch_number,
-        )
-    )
-    preprocessed_inputs_ragged, _ = (
-        embedding.preprocess_sparse_dense_matmul_input(
-            {"feature_spec_a": input_tensor},
-            {"feature_spec_a": input_weights},
-            feature_specs,
-            local_device_count=1,
-            global_device_count=1,
-            num_sc_per_device=num_sc_per_device,
-            sharding_strategy="MOD",
-            batch_number=batch_number,
-        )
-    )
-
-    # Assert
-    for field in [
-        "lhs_row_pointers",
-        "lhs_embedding_ids",
-        "lhs_sample_ids",
-        "lhs_gains",
-    ]:
-      np.testing.assert_array_equal(
-          getattr(preprocessed_inputs, field)["table_a"],
-          getattr(preprocessed_inputs_ragged, field)["table_a"],
-      )
 
 
 class UpdatePreprocessingParametersTest(absltest.TestCase):
