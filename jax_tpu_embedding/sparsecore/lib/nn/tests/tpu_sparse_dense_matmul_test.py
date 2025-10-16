@@ -27,7 +27,6 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
-import tree
 
 
 StackingStrategy = embedding.StackingStrategy
@@ -195,7 +194,7 @@ class ErrorHandlingTest(absltest.TestCase):
     tpu_sparse_dense_matmul = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         global_device_count=1,
-        feature_specs=tuple(tree.flatten(feature_specs)),
+        feature_specs=tuple(jax.tree.leaves(feature_specs)),
         sharding_strategy="MOD",
     )
     sparse_matmul = jax.jit(tpu_sparse_dense_matmul)
@@ -206,7 +205,7 @@ class ErrorHandlingTest(absltest.TestCase):
     # The static buffer size is 64.
     # This means we will get only 64 activations back.
     row_sum = 0
-    for act in tree.flatten(activations):
+    for act in jax.tree.leaves(activations):
       # Each row should have homogenous elements so add up the first element
       # of each row.
       for i in range(act.shape[0]):
@@ -427,7 +426,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )(
           preprocessed_inputs,
           embedding_variables,
-          tuple(tree.flatten(feature_specs)),
+          tuple(jax.tree.leaves(feature_specs)),
       )
     else:
       embedding_variables["table_a"] = embedding.EmbeddingVariables(
@@ -444,7 +443,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = functools.partial(
           tpu_sparse_dense_matmul_fn,
-          feature_specs=tuple(tree.flatten(feature_specs)),
+          feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
 
       sharded_matmul = shard_map.shard_map(
@@ -556,7 +555,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )(
           preprocessed_inputs,
           embedding_variables,
-          tuple(tree.flatten(feature_specs)),
+          tuple(jax.tree.leaves(feature_specs)),
       )
     else:
       embedding_variables["table_a_table_aa"] = embedding.EmbeddingVariables(
@@ -572,7 +571,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = functools.partial(
           tpu_sparse_dense_matmul_fn,
-          feature_specs=tuple(tree.flatten(feature_specs)),
+          feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
 
       sharded_matmul = shard_map.shard_map(
@@ -712,7 +711,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )(
           preprocessed_inputs,
           embedding_variables,
-          tuple(tree.flatten(feature_specs)),
+          tuple(jax.tree.leaves(feature_specs)),
       )
     else:
       embedding_variables["table_a"] = embedding.EmbeddingVariables(
@@ -731,7 +730,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       activations = sparse_matmul(
           preprocessed_inputs,
           embedding_variables,
-          tuple(tree.flatten(feature_specs)),
+          tuple(jax.tree.leaves(feature_specs)),
       )
     expected_emb_activations = np.array(
         [
@@ -826,7 +825,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )(
           preprocessed_inputs,
           embedding_variables,
-          tuple(tree.flatten(feature_specs)),
+          tuple(jax.tree.leaves(feature_specs)),
       )
     else:
       embedding_variables["table_a"] = embedding.EmbeddingVariables(
@@ -843,7 +842,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = functools.partial(
           tpu_sparse_dense_matmul_fn,
-          feature_specs=tuple(tree.flatten(feature_specs)),
+          feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
       sharded_matmul = shard_map.shard_map(
           sharded_matmul,
@@ -1363,7 +1362,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )(
           preprocessed_inputs,
           embedding_variables,
-          tuple(tree.flatten(feature_specs)),
+          tuple(jax.tree.leaves(feature_specs)),
       )
     else:
       embedding_variables["country_table_language_table_related_item_table"] = (
@@ -1384,7 +1383,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       )
       sharded_matmul = functools.partial(
           tpu_sparse_dense_matmul_fn,
-          feature_specs=tuple(tree.flatten(feature_specs)),
+          feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
 
       sharded_matmul = shard_map.shard_map(
@@ -1493,7 +1492,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     compiled = sparse_matmul.lower(
         preprocessed_inputs,
         embedding_variables,
-        tuple(tree.flatten(feature_specs)),
+        tuple(jax.tree.leaves(feature_specs)),
     ).compile()
     hlo = compiled.as_text()
     self.assertIn("u8", hlo)
@@ -1501,7 +1500,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     activations = sparse_matmul(
         preprocessed_inputs,
         embedding_variables,
-        tuple(tree.flatten(feature_specs)),
+        tuple(jax.tree.leaves(feature_specs)),
     )
 
     q_min, q_max = 0.0, 15.0

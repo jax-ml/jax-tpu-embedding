@@ -51,7 +51,6 @@ tpu_py_strict_test(
         pypi_requirement("numpy"),
         pypi_requirement("optax"),
         pypi_requirement("orbax/checkpoint"),
-        pypi_requirement("tree"),
     ],
 )
 
@@ -84,7 +83,6 @@ pytype_strict_binary(
         pypi_requirement("numpy"),
         pypi_requirement("optax"),
         pypi_requirement("orbax/checkpoint"),
-        pypi_requirement("tree"),
     ],
 )
 
@@ -116,7 +114,6 @@ tpu_py_strict_test(
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
         pypi_requirement("optax"),
-        pypi_requirement("tree"),
     ],
 )
 
@@ -145,6 +142,5 @@ pytype_strict_binary(
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
         pypi_requirement("optax"),
-        pypi_requirement("tree"),
     ],
 )

@@ -21,7 +21,6 @@ load("@pypi//:requirements.bzl", "requirement")
 _PYPI_PACKAGE_MAP = {
     "absl": "absl_py",
     "google/protobuf": "protobuf",
-    "tree": "dm-tree",
 }
 
 def pypi_requirement(dep):

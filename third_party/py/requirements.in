@@ -2,7 +2,6 @@
 absl-py
 flax @ https://github.com/google/flax/archive/e2134af.zip
 numpy
-dm-tree
 # Pre-release of JAX required for SparseCore TPUs.
 jax[tpu] --pre
 portpicker

@@ -39,7 +39,6 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
-import tree
 
 
 np.set_printoptions(threshold=np.inf)
@@ -252,8 +251,7 @@ def run_model():
   vlog3('train_state is %s', train_state)
 
   table_specs = {
-      f.table_spec.name: f.table_spec
-      for f in tree.flatten(feature_specs)
+      f.table_spec.name: f.table_spec for f in jax.tree.leaves(feature_specs)
   }
   emb_variables = embedding.init_embedding_variables(
       jax.random.key(13), table_specs, global_emb_sharding, num_sc_per_device

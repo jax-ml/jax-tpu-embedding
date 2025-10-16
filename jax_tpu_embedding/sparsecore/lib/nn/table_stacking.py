@@ -27,7 +27,6 @@ from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import StackedTableSpec
 from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import TableSpec
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 import numpy as np
-import tree
 
 
 T: TypeAlias = TypeVar("T")
@@ -594,7 +593,7 @@ def _stack_feature_specs(
   """Updated the feature spec based on provided groups and stacking logic."""
 
   table_name_to_feature_spec = {
-      f.table_spec.name: f for f in tree.flatten(features)
+      f.table_spec.name: f for f in jax.tree.leaves(features)
   }
   logging.info("Creating stack: %s with tables: %s", stack_name, table_names)
   table_name_to_setting_in_stack = _compute_table_to_setting_in_stack(
@@ -609,7 +608,7 @@ def _stack_feature_specs(
   # Get the features for which the table is stacked in this group.
   stacked_features = [
       feature
-      for feature in tree.flatten(features)
+      for feature in jax.tree.leaves(features)
       if feature.table_spec.name in table_names
   ]
   stack_sample_count = 0
@@ -681,7 +680,7 @@ def _stack_feature_specs(
         feature.id_transformation,
     )
 
-  for feature in tree.flatten(features):
+  for feature in jax.tree.leaves(features):
     _update_feature(feature)
 
 
@@ -757,7 +756,7 @@ def stack_tables(
   """
   if not stack_name:
     stack_name = _get_stack_name(table_names)
-  flatten_features = tree.flatten(features)
+  flatten_features = jax.tree.leaves(features)
   tables_in_group = {
       feature.table_spec.name: feature.table_spec
       for feature in flatten_features
@@ -853,7 +852,7 @@ def auto_stack_tables(
     activation_mem_bytes_limit: If the activation memory usage is larger than
       this limit, the table will not be stacked. Default is 2MB.
   """
-  flatten_features = tree.flatten(features)
+  flatten_features = jax.tree.leaves(features)
   flatten_tables = {
       feature.table_spec.name: feature.table_spec
       for feature in flatten_features

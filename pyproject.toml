@@ -15,7 +15,6 @@ classifiers = [  # List of https://pypi.org/classifiers/
 ]
 dependencies = [
     'absl-py',
-    'dm-tree',
     'einops',
     'flax',
     'jax',

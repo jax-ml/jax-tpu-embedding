@@ -134,7 +134,6 @@ pytype_strict_contrib_test(
         pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
-        pypi_requirement("tree"),
     ],
 )
 

@@ -43,7 +43,6 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
-import tree
 
 
 np.set_printoptions(threshold=np.inf)
@@ -357,7 +356,7 @@ def run_model():
 
   if emb_variables is None:
     table_specs = {
-        f.table_spec.name: f.table_spec for f in tree.flatten(feature_specs)
+        f.table_spec.name: f.table_spec for f in jax.tree.leaves(feature_specs)
     }
     emb_variables = embedding.init_embedding_variables(
         jax.random.key(13), table_specs, global_emb_sharding, num_sc_per_device

@@ -35,7 +35,6 @@ tpu_py_strict_test(
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
-        pypi_requirement("tree"),
     ],
 )
 

@@ -27,7 +27,6 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
-import tree
 
 
 _VOC_A = 31
@@ -415,7 +414,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     # Updates params with the new embedding variables.
     assert len(params_updates) == 1
-    tree.assert_same_structure(
+    embedding._assert_same_structure(
         params_updates[_EMBED_PARAM], params['params'][_EMBED_PARAM].value
     )
     params['params'] = params['params'] | params_updates
@@ -613,7 +612,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     # Updates params with the new embedding variables.
     assert len(params_updates) == 1
-    tree.assert_same_structure(
+    embedding._assert_same_structure(
         params_updates[_EMBED_PARAM], params['params'][_EMBED_PARAM].value
     )
     params['params'] = params['params'] | params_updates

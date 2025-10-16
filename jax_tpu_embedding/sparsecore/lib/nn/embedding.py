@@ -16,6 +16,7 @@
 import collections
 import dataclasses
 import functools
+import textwrap
 from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union
 import warnings
 
@@ -33,7 +34,6 @@ from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
-import tree
 
 
 if jax.__version_info__ >= (0, 6, 3):
@@ -50,6 +50,17 @@ T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = Union[T, Sequence[T], Mapping[str, T]]
 LimitsCallable: TypeAlias = table_stacking.LimitsCallable
 get_default_limits = table_stacking.get_default_limits
+
+
+def _assert_same_structure(a, b, a_name: str = "a", b_name: str = "b"):
+  """Asserts that two structures have the same nested structure."""
+  a_paths = [path for path, _ in jax.tree_util.tree_leaves_with_path(a)]
+  b_paths = [path for path, _ in jax.tree_util.tree_leaves_with_path(b)]
+  if a_paths != b_paths:
+    raise ValueError(textwrap.dedent(f"""\
+        Pytree structures of {a_name} and {b_name} do not match.
+        {a_name}: {jax.tree.structure(a)}
+        {b_name}: {jax.tree.structure(b)}"""))
 
 
 class EmbeddingVariablesInitializer(NamedTuple):
@@ -508,8 +519,10 @@ def preprocess_sparse_dense_matmul_input(
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
-  tree.assert_same_structure(features, feature_specs)
-  tree.assert_same_structure(features_weights, feature_specs)
+  _assert_same_structure(features, feature_specs, "features", "feature_specs")
+  _assert_same_structure(
+      features_weights, feature_specs, "features_weights", "feature_specs"
+  )
 
   if (
       enable_minibatching
@@ -613,9 +626,11 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
-  tree.assert_same_structure(indices, feature_specs)
-  tree.assert_same_structure(values, feature_specs)
-  tree.assert_same_structure(dense_shapes, feature_specs)
+  _assert_same_structure(indices, feature_specs, "indices", "feature_specs")
+  _assert_same_structure(values, feature_specs, "values", "feature_specs")
+  _assert_same_structure(
+      dense_shapes, feature_specs, "dense_shapes", "feature_specs"
+  )
 
   if (
       enable_minibatching
@@ -897,8 +912,7 @@ def stack_embedding_gradients(
       str, list[tuple[embedding_spec.FeatureSpec, jax.Array]]
   ] = collections.defaultdict(list)
   for gradient, feature in zip(
-      jax.tree.leaves(activation_gradients),
-      jax.tree.leaves(feature_specs),
+      jax.tree.leaves(activation_gradients), jax.tree.leaves(feature_specs)
   ):
     if feature.id_transformation is None:
       raise ValueError(
@@ -1040,7 +1054,12 @@ def tpu_sparse_dense_matmul_grad(
 
   if perform_stacking:
     # Activations match the feature specs structure
-    tree.assert_same_structure(feature_specs, activation_gradients)
+    _assert_same_structure(
+        feature_specs,
+        activation_gradients,
+        "feature_specs",
+        "activation_gradients",
+    )
 
     gradients = stack_embedding_gradients(
         activation_gradients,
