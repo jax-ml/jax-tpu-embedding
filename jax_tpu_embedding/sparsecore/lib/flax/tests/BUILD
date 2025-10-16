@@ -44,7 +44,7 @@ tpu_py_strict_test(
         "autograd_test.py",
     ],
     env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
+        # "XLA_FLAGS": "--xla_dump_to=sponge",
         "JAX_TRACEBACK_FILTERING": "off",
     },
     deps = [

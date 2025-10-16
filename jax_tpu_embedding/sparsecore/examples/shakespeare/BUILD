@@ -28,7 +28,7 @@ tpu_py_strict_test(
         # "--vmodule=jax_sc_shakespeare_jit=1",
     ],
     env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
+        # "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     main = "jax_sc_shakespeare_jit.py",
     deps = [
@@ -95,7 +95,7 @@ tpu_py_strict_test(
         # "--vmodule=jax_sc_shakespeare_pmap=1",
     ],
     env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
+        # "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     main = "jax_sc_shakespeare_pmap.py",
     deps = [
