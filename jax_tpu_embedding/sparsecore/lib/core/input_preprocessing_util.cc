@@ -250,7 +250,7 @@ int ComputeCooBufferSizePerDevice(
   const std::string& stacked_table_name = stacked_table_metadata[0].name;
   LOG_IF(INFO, batch_number % 100 == 0)
       << "Theoretical Max for table " << stacked_table_name << ": "
-      << theoretical_max << "( max_ids_rounded_up: " << max_ids_rounded_up
+      << theoretical_max << " (max_ids_rounded_up: " << max_ids_rounded_up
       << " num_scs_per_device: " << num_scs_per_device
       << " num_scs: " << num_scs << ")";
   // We do not take the min of `suggested_coo_buffer_size_per_device` and
