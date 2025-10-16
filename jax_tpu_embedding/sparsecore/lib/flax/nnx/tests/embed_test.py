@@ -11,22 +11,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import functools
-
 from absl.testing import absltest
 from absl.testing import parameterized
 import einops
-from flax import linen as nn
+from flax import nnx
 import jax
 import jax.numpy as jnp
+from jax.sharding import Mesh  # pylint: disable=g-importing-member
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
-from jax.sharding import PartitionSpec as P  # pylint: disable=g-importing-member
-from jax_tpu_embedding.sparsecore.lib.flax import embed
+from jax.sharding import PartitionSpec  # pylint: disable=g-importing-member
+from jax_tpu_embedding.sparsecore.lib.flax.nnx import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
+import portpicker
 
 
 _VOC_A = 31
@@ -37,8 +37,6 @@ _DIM_B = 15
 _DIM_C = 6
 _BATCH_SIZE = 16
 _PAD_VALUE = -1
-
-_EMBED_PARAM = embed.EMBEDDING_PARAM_NAME
 
 
 def count_num(arr, num):
@@ -196,6 +194,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
         ],
         dtype=object,
     )
+    self.port = portpicker.pick_unused_port()
 
   @parameterized.named_parameters(
       dict(testcase_name='_with_minibatching', enable_minibatching=True),
@@ -204,6 +203,9 @@ class EmbeddingLayerTest(parameterized.TestCase):
   def test_forward_and_backward_with_one_table(self, enable_minibatching: bool):
     devices = jax.devices()
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    sharding_axis = 'x'
+    mesh = Mesh(devices, sharding_axis)
+    data_sharding = NamedSharding(mesh, PartitionSpec(sharding_axis))
 
     feature_specs = (self.feature_spec_a, self.feature_spec_b)
     embedding.prepare_feature_specs_for_training(
@@ -214,13 +216,31 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     sc_module = embed.SparseCoreEmbed(
         feature_specs=feature_specs,
+        sharding_axis=sharding_axis,
+        mesh=mesh,
+        rngs=nnx.Rngs(params=1337),
         enable_minibatching=enable_minibatching,
     )
     step = 42
-    embedding_lookup_input = sc_module.preprocess_inputs(
-        step,
+    all_reduce_interface = None
+    if enable_minibatching:
+      all_reduce_interface = embedding.get_all_reduce_interface(
+          peer_addresses=[], minibatching_port=self.port
+      )
+    embedding_lookup_input = embedding.preprocess_sparse_dense_matmul_input(
         (self.input_tensor, self.input_tensor_table_b),
         (self.input_weights, self.input_weights_table_b),
+        feature_specs,
+        local_device_count=jax.local_device_count(),
+        global_device_count=jax.device_count(),
+        num_sc_per_device=num_sc_per_device,
+        batch_number=step,
+        enable_minibatching=enable_minibatching,
+        all_reduce_interface=all_reduce_interface,
+    )[0]
+    embedding_lookup_input = jax.tree.map(
+        lambda x: jax.make_array_from_process_local_data(data_sharding, x),
+        embedding_lookup_input,
     )
 
     padded_vocab_a = (
@@ -236,11 +256,12 @@ class EmbeddingLayerTest(parameterized.TestCase):
         self.feature_spec_b.table_spec.setting_in_stack.padded_embedding_dim
     )
 
+    # Here, we construct the embedding tables manually to control the row values
+    # so we can verify the activations.
     device_count = len(devices)
     emb_table_a = test_utils.row_initialize_with_padding(
         self.feature_spec_a.table_spec, pad_value=_PAD_VALUE
     )
-
     emb_table_a_sharded = einops.rearrange(
         emb_table_a,
         '(v c s) f -> c (s v) f',
@@ -273,7 +294,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
         )
         for i, local_device in enumerate(devices)
     ]
-    sharding = NamedSharding(sc_module.mesh, P(sc_module.sharding_axis, None))
+    sharding = NamedSharding(mesh, PartitionSpec(sharding_axis, None))
     embedding_variables['table_a'] = embedding.EmbeddingVariables(
         table=jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_a, padded_dim_a),
@@ -290,44 +311,12 @@ class EmbeddingLayerTest(parameterized.TestCase):
         ),
         slot=embedding_spec.SGDSlotVariables(),
     )
+    sc_module.embedding_table.value = embedding_variables
 
-    var_spec = jax.eval_shape(
-        sc_module.init,
-        jax.random.PRNGKey(0),
-        embedding_lookup_input,
-    )
+    def _emb_lookup(*args, **kwargs):
+      return embed.embedding_lookup(*args, **kwargs)
 
-    out_sharding = nn.get_sharding(var_spec, sc_module.mesh)
-
-    params = jax.jit(
-        sc_module.init,
-        in_shardings=(
-            NamedSharding(sc_module.mesh, P()),
-            NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
-        ),
-        out_shardings=out_sharding,
-    )(
-        jax.random.PRNGKey(0),
-        embedding_lookup_input,
-    )
-
-    # Replace the embedding variables in params with the ones we created.
-    def check_shape(a, b):
-      assert a.shape == b.shape
-
-    jax.tree.map(
-        check_shape,
-        params['params'][_EMBED_PARAM].value,
-        embedding_variables,
-    )
-    params['params'][_EMBED_PARAM] = params['params'][
-        _EMBED_PARAM
-    ].replace_boxed(embedding_variables)
-
-    activations = jax.jit(sc_module.apply)(
-        params,
-        embedding_lookup_input,
-    )
+    activations = nnx.jit(_emb_lookup)(sc_module, embedding_lookup_input)
 
     # Check the activation correctness.
     expected_emb_activations = np.broadcast_to(
@@ -394,20 +383,13 @@ class EmbeddingLayerTest(parameterized.TestCase):
         ),
     )
 
-    params_updates = jax.jit(
-        functools.partial(sc_module.apply, method=sc_module.apply_gradient),
-    )(
-        params,
-        activations_grad,
-        embedding_lookup_input,
-    )
+    m_update_g = {'embedding_table': sc_module.embedding_table.copy()}
+    unused_ = embedding_lookup_input
+    g = ((m_update_g, unused_), activations_grad)
+    res = (sc_module, embedding_lookup_input)
 
-    # Updates params with the new embedding variables.
-    assert len(params_updates) == 1
-    embedding._assert_same_structure(
-        params_updates[_EMBED_PARAM], params['params'][_EMBED_PARAM].value
-    )
-    params['params'] = params['params'] | params_updates
+    (grads, _) = nnx.jit(embed.embedding_lookup_bwd)(res, g)
+    nnx.update(sc_module, grads)
 
     expected_grad_table_a = np.full(
         (padded_vocab_a, padded_dim_a), _PAD_VALUE, dtype=np.float32
@@ -432,10 +414,10 @@ class EmbeddingLayerTest(parameterized.TestCase):
           (1, _DIM_B), new_col_id, dtype=np.float32
       )
     np.testing.assert_equal(
-        params['params'][_EMBED_PARAM]['table_a'][0], expected_grad_table_a
+        sc_module.embedding_table.value['table_a'][0], expected_grad_table_a
     )
     np.testing.assert_equal(
-        params['params'][_EMBED_PARAM]['table_b'][0], expected_grad_table_b
+        sc_module.embedding_table.value['table_b'][0], expected_grad_table_b
     )
 
   @parameterized.named_parameters(
@@ -448,7 +430,9 @@ class EmbeddingLayerTest(parameterized.TestCase):
     devices = jax.devices()
     num_sc_per_device = utils.num_sparsecores_per_device()
     sharding_axis = 'x'
-    mesh = jax.sharding.Mesh(devices, sharding_axis)
+    mesh = Mesh(devices, sharding_axis)
+    data_sharding = NamedSharding(mesh, PartitionSpec(sharding_axis))
+
     feature_specs = (self.feature_spec_a, self.feature_spec_c)
     embedding.auto_stack_tables(
         feature_specs,
@@ -459,13 +443,29 @@ class EmbeddingLayerTest(parameterized.TestCase):
         feature_specs=feature_specs,
         mesh=mesh,
         sharding_axis=sharding_axis,
+        rngs=nnx.Rngs(params=1337),
         enable_minibatching=enable_minibatching,
     )
     step = 42
-    embedding_lookup_input = sc_module.preprocess_inputs(
-        step,
+    all_reduce_interface = None
+    if enable_minibatching:
+      all_reduce_interface = embedding.get_all_reduce_interface(
+          peer_addresses=[], minibatching_port=self.port
+      )
+    embedding_lookup_input = embedding.preprocess_sparse_dense_matmul_input(
         (self.input_tensor, self.input_tensor),
         (self.input_weights, self.input_weights),
+        feature_specs,
+        local_device_count=jax.local_device_count(),
+        global_device_count=jax.device_count(),
+        num_sc_per_device=num_sc_per_device,
+        batch_number=step,
+        enable_minibatching=enable_minibatching,
+        all_reduce_interface=all_reduce_interface,
+    )[0]
+    embedding_lookup_input = jax.tree.map(
+        lambda x: jax.make_array_from_process_local_data(data_sharding, x),
+        embedding_lookup_input,
     )
     padded_vocab_a = (
         self.feature_spec_a.table_spec.setting_in_stack.padded_vocab_size
@@ -480,10 +480,10 @@ class EmbeddingLayerTest(parameterized.TestCase):
     stacked_embedding_dim = padded_dim_a
 
     emb_table_a = test_utils.row_initialize_with_padding(
-        self.feature_spec_a.table_spec, pad_value=_PAD_VALUE
+        self.table_spec_a, pad_value=_PAD_VALUE
     )
     emb_table_c = test_utils.row_initialize_with_padding(
-        self.feature_spec_c.table_spec, offset=200, pad_value=_PAD_VALUE
+        self.table_spec_c, offset=200, pad_value=_PAD_VALUE
     )
     embedding_variables = {}
     sharded_stacked_tables = (
@@ -501,7 +501,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
         )
         for i, local_device in enumerate(devices)
     ]
-    sharding = NamedSharding(mesh, P('x', None))
+    sharding = NamedSharding(mesh, PartitionSpec(sharding_axis, None))
     embedding_variables['table_a_table_c'] = embedding.EmbeddingVariables(
         table=jax.make_array_from_single_device_arrays(
             shape=(stacked_vocab_size, padded_dim_a),
@@ -511,43 +511,13 @@ class EmbeddingLayerTest(parameterized.TestCase):
         slot=embedding_spec.SGDSlotVariables(),
     )
 
-    var_spec = jax.eval_shape(
-        sc_module.init,
-        jax.random.PRNGKey(0),
-        embedding_lookup_input,
-    )
-
-    out_sharding = nn.get_sharding(var_spec, mesh)
-
-    params = jax.jit(
-        sc_module.init,
-        in_shardings=(
-            NamedSharding(mesh, P()),
-            NamedSharding(mesh, P(sharding_axis)),
-        ),
-        out_shardings=out_sharding,
-    )(
-        jax.random.PRNGKey(0),
-        embedding_lookup_input,
-    )
-
     # Replace the embedding variables in params with the ones we created.
-    def check_shape(a, b):
-      assert a.shape == b.shape
+    sc_module.embedding_table.value = embedding_variables
 
-    jax.tree.map(
-        check_shape,
-        params['params'][_EMBED_PARAM].value,
-        embedding_variables,
-    )
-    params['params'][_EMBED_PARAM] = params['params'][
-        _EMBED_PARAM
-    ].replace_boxed(embedding_variables)
+    def _emb_lookup(*args, **kwargs):
+      return embed.embedding_lookup(*args, **kwargs)
 
-    activations = jax.jit(sc_module.apply)(
-        params,
-        embedding_lookup_input,
-    )
+    activations = nnx.jit(_emb_lookup)(sc_module, embedding_lookup_input)
 
     # Check the activation correctness.
     expected_emb_activations = np.broadcast_to(
@@ -587,20 +557,13 @@ class EmbeddingLayerTest(parameterized.TestCase):
         ),
     )
 
-    params_updates = jax.jit(
-        functools.partial(sc_module.apply, method=sc_module.apply_gradient),
-    )(
-        params,
-        activations_grad,
-        embedding_lookup_input,
-    )
+    m_update_g = {'embedding_table': sc_module.embedding_table.copy()}
+    unused_ = embedding_lookup_input
+    g = ((m_update_g, unused_), activations_grad)
+    res = (sc_module, embedding_lookup_input)
 
-    # Updates params with the new embedding variables.
-    assert len(params_updates) == 1
-    embedding._assert_same_structure(
-        params_updates[_EMBED_PARAM], params['params'][_EMBED_PARAM].value
-    )
-    params['params'] = params['params'] | params_updates
+    (grads, _) = nnx.jit(embed.embedding_lookup_bwd)(res, g)
+    nnx.update(sc_module, grads)
 
     expected_grad_table_ac = np.full(
         (stacked_vocab_size, stacked_embedding_dim),
@@ -623,7 +586,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
       )
 
     np.testing.assert_equal(
-        params['params'][_EMBED_PARAM]['table_a_table_c'][0],
+        sc_module.embedding_table.value['table_a_table_c'][0],
         expected_grad_table_ac,
     )
 
