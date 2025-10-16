@@ -144,3 +144,36 @@ pytype_strict_binary(
         pypi_requirement("optax"),
     ],
 )
+
+tpu_py_strict_test(
+    name = "jax_sc_shakespeare_pipelined_jit_test",
+    srcs = ["jax_sc_shakespeare_pipelined_jit_test.py"],
+    args = [
+        # "--vmodule=jax_sc_shakespeare_pipelined_jit_test=1",
+    ],
+    env = {
+        "XLA_FLAGS": "--xla_dump_to=sponge",
+    },
+    main = "jax_sc_shakespeare_pipelined_jit_test.py",
+    tags = [
+        "requires-net:external",  # For xprof uploading.
+    ],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_pipelining_utils",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("clu:metrics"),
+        pypi_requirement("clu:parameter_overview"),
+        pypi_requirement("flax:core"),
+        pypi_requirement("jax"),
+        pypi_requirement("jax:experimental"),
+        pypi_requirement("optax"),
+    ],
+)

@@ -70,6 +70,19 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "embedding_pipelining_utils",
+    srcs = [
+        "embedding_pipelining_utils.py",
+    ],
+    deps = [
+        ":embedding",
+        ":embedding_spec",
+        pypi_requirement("flax:core"),
+        pypi_requirement("jax"),
+    ],
+)
+
+pytype_strict_library(
     name = "nn",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
