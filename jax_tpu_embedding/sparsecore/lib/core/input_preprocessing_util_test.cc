@@ -18,7 +18,6 @@
 #include <climits>
 #include <cmath>
 #include <functional>
-#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
