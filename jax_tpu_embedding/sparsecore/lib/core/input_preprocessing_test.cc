@@ -13,14 +13,18 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "fuzztest/fuzztest.h"
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
@@ -38,7 +42,6 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
-#include "tsl/platform/test.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
 
 namespace jax_sc_embedding {
@@ -928,6 +931,170 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
       absl::flat_hash_set<int>(sync_keys.begin(), sync_keys.end());
   EXPECT_THAT(sync_keys_set, SizeIs(kBatchCount * 2));
 }
+
+void PreprocessingOutputIsValid(
+    std::tuple<
+        std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
+        std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
+        std::vector<std::vector<int64_t>>>
+        samples,
+    int num_sc_per_device, int max_ids_per_partition,
+    int max_unique_ids_per_partition) {
+  auto create_input_batch =
+      [](const std::vector<std::vector<int64_t>>& samples_in) {
+        std::vector<int64_t> values;
+        std::vector<int32_t> row_splits;
+        row_splits.push_back(0);
+        for (const auto& sample_ids : samples_in) {
+          for (const auto& id : sample_ids) {
+            values.push_back(id);
+          }
+          row_splits.push_back(values.size());
+        }
+
+        using InputBatch =
+            RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
+        return std::make_unique<InputBatch>(values, row_splits);
+      };
+
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(create_input_batch(std::get<0>(samples)));
+  input_batches.push_back(create_input_batch(std::get<1>(samples)));
+  input_batches.push_back(create_input_batch(std::get<2>(samples)));
+  input_batches.push_back(create_input_batch(std::get<3>(samples)));
+  input_batches.push_back(create_input_batch(std::get<4>(samples)));
+
+  const int kGlobalDeviceCount = 1;
+  const int kBatchSize = std::get<0>(samples).size();
+  const int kNumScs = num_sc_per_device * kGlobalDeviceCount;
+
+  const int kTable0Vocab = 1000001;
+  const int kTable1Vocab = 10001;
+  const int kTable2Vocab = 101;
+  const int kTable3Vocab = 11;
+  const int kTable4Vocab = 3;
+
+  auto round_up = [&](int value, int multiple) {
+    return (value + multiple - 1) / multiple * multiple;
+  };
+
+  const int table0_padded = round_up(kTable0Vocab, 8 * kNumScs);
+  const int table1_padded = round_up(kTable1Vocab, 8 * kNumScs);
+  const int table2_padded = round_up(kTable2Vocab, 8 * kNumScs);
+  const int table3_padded = round_up(kTable3Vocab, 8 * kNumScs);
+  const int table4_padded = round_up(kTable4Vocab, 8 * kNumScs);
+
+  std::vector<StackedTableMetadata> stacked_table_metadata = {
+      StackedTableMetadata(
+          /*name=*/"table_0",
+          /*feature_index=*/0, max_ids_per_partition,
+          max_unique_ids_per_partition, /*row_offset=*/0,
+          /*col_offset=*/0, /*col_shift=*/0, kBatchSize,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+          RowCombiner::kSum, kTable0Vocab),
+      StackedTableMetadata(
+          /*name=*/"table_1",
+          /*feature_index=*/1, max_ids_per_partition,
+          max_unique_ids_per_partition, /*row_offset=*/kBatchSize,
+          /*col_offset=*/table0_padded,
+          /*col_shift=*/1, kBatchSize,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+          RowCombiner::kSum, kTable1Vocab),
+      StackedTableMetadata(
+          /*name=*/"table_2",
+          /*feature_index=*/2, max_ids_per_partition,
+          max_unique_ids_per_partition, /*row_offset=*/2 * kBatchSize,
+          /*col_offset=*/table0_padded + table1_padded,
+          /*col_shift=*/2, kBatchSize,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+          RowCombiner::kSum, kTable2Vocab),
+      StackedTableMetadata(
+          /*name=*/"table_3",
+          /*feature_index=*/3, max_ids_per_partition,
+          max_unique_ids_per_partition, /*row_offset=*/3 * kBatchSize,
+          /*col_offset=*/table0_padded + table1_padded + table2_padded,
+          /*col_shift=*/3, kBatchSize,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+          RowCombiner::kSum, kTable3Vocab),
+      StackedTableMetadata(
+          /*name=*/"table_4",
+          /*feature_index=*/4, max_ids_per_partition,
+          max_unique_ids_per_partition, /*row_offset=*/4 * kBatchSize,
+          /*col_offset=*/
+          table0_padded + table1_padded + table2_padded + table3_padded,
+          /*col_shift=*/0, kBatchSize,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+          RowCombiner::kSum, kTable4Vocab),
+  };
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"stacked_table", stacked_table_metadata}});
+
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = kGlobalDeviceCount,
+      .num_sc_per_device = num_sc_per_device,
+      .allow_id_dropping = true,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
+      .enable_minibatching = true};
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  const int total_padded_vocab = table0_padded + table1_padded + table2_padded +
+                                 table3_padded + table4_padded;
+  const int table_shard_size = total_padded_vocab / kNumScs;
+  const auto& row_pointers = output.lhs_row_pointers.at("stacked_table");
+  const auto& embedding_ids = output.lhs_embedding_ids.at("stacked_table");
+  const int32_t num_minibatches = output.num_minibatches;
+  const int32_t row_pointers_unpadded_size =
+      num_minibatches * kNumScs * num_sc_per_device;
+
+  int32_t previous_start_index = 0;
+  for (int32_t i = 0; i < row_pointers_unpadded_size; ++i) {
+    ASSERT_GE(row_pointers.data()[i], previous_start_index);
+    for (int32_t j = previous_start_index; j < row_pointers.data()[i]; ++j) {
+      if (embedding_ids.data()[j] != INT_MAX) {
+        EXPECT_LT(embedding_ids.data()[j], table_shard_size);
+      }
+    }
+    previous_start_index =
+        RoundUpTo(row_pointers.data()[i], TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+  }
+}
+
+FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValid)
+    .WithDomains(
+        fuzztest::TupleOf(
+            /*samples[0]=*/fuzztest::VectorOf(
+                fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 1000000))
+                    .WithMaxSize(10))
+                .WithSize(128),
+            /*samples[1]=*/
+            fuzztest::VectorOf(
+                fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 10000))
+                    .WithMaxSize(5))
+                .WithSize(128),
+            /*samples[2]=*/
+            fuzztest::VectorOf(
+                fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 100))
+                    .WithMaxSize(20))
+                .WithSize(128),
+            /*samples[3]=*/
+            fuzztest::VectorOf(
+                fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 10))
+                    .WithMaxSize(1))
+                .WithSize(128),
+            /*samples[4]=*/
+            fuzztest::VectorOf(fuzztest::VectorOf(fuzztest::InRange<int64_t>(0,
+                                                                             2))
+                                   .WithMaxSize(15))
+                .WithSize(128)),
+        /*num_sc_per_device=*/fuzztest::ElementOf<int>({1, 2, 4, 8}),
+        /*max_ids_per_partition=*/fuzztest::InRange(1, 1024),
+        /*max_unique_ids_per_partition=*/fuzztest::InRange(1, 1024));
 
 }  // namespace
 }  // namespace jax_sc_embedding

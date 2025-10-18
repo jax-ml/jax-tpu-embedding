@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
 #include <bitset>
+#include <climits>
 #include <cstdint>
 #include <limits>
 #include <optional>
