@@ -13,6 +13,7 @@ classifiers = [  # List of https://pypi.org/classifiers/
     'Programming Language :: Python :: 3.12',
     'Programming Language :: Python :: 3.13',
 ]
+keywords = ["jax", "tpu", "embedding", "sparsecore", "machine learning", "sparse tensor", "distributed computing"]
 dependencies = [
     'absl-py',
     'einops',
@@ -26,8 +27,9 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-homepage = "https://github.com/jax-ml/jax_tpu_embedding"
-repository = "https://github.com/jax-ml/jax_tpu_embedding"
+homepage = "https://github.com/jax-ml/jax-tpu-embedding"
+repository = "https://github.com/jax-ml/jax-tpu-embedding"
+issue_tracker = "https://github.com/jax-ml/jax-tpu-embedding/issues"
 
 [build-system]
 requires = ["setuptools"]
