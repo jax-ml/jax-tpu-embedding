@@ -583,75 +583,95 @@ class LaPropOptimizerSpec(OptimizerSpec):
 class FeatureIdTransformation:
   """Transformation to apply to the input feature ids."""
 
-  # Applicable in case of feature stacking, which means more than one feature
-  # points to the same table. The `row_offset` specifies the number of samples
-  # this feature is offset. For example, if feature A, B and C refer to the same
-  # table and have input batch size 16, the row_offset for feature A is 0,
-  # feature B is 16 and feature C is 32.
   row_offset: int = 0
-  # Applicable in case of table stacking. When tables (embedding tables)
-  # corresponding to multiple features are stacked then `col_offset` defines the
-  # offset for the embedding of this feature in the stacked table.
-  # For example Feature A has a table with embedding vocab 128 and Feature A
-  # and feature B are stacked then the `col_offset` for feature B is 128
+  """Applicable in case of feature stacking, which means more than one feature
+  points to the same table. The `row_offset` specifies the number of samples
+  this feature is offset. For example, if feature A, B and C refer to the same
+  table and have input batch size 16, the row_offset for feature A is 0,
+  feature B is 16 and feature C is 32."""
   col_offset: int = 0
-  # Applicable in case of table stacking. When tables (embedding tables)
-  # corresponding to multiple features are stacked then `col_shift` defines how
-  # embedding table shards are shifted (aka rotated) on the device.
+  """Applicable in case of table stacking. When tables (embedding tables)
+  corresponding to multiple features are stacked then `col_offset` defines the
+  offset for the embedding of this feature in the stacked table.
+  For example Feature A has a table with embedding vocab 128 and Feature A
+  and feature B are stacked then the `col_offset` for feature B is 128."""
   col_shift: int = 0
+  """Applicable in case of table stacking. When tables (embedding tables)
+  corresponding to multiple features are stacked then `col_shift` defines how
+  embedding table shards are shifted (aka rotated) on the device."""
 
 
 @dataclasses.dataclass(eq=True, frozen=True, kw_only=True)
 class TableSettingInStack:
-  """Placement of the table shard relative to the shard of the stack."""
+  """Placement of the table shard relative to the shard of the stack.
+
+  Describes how an individual embedding table is incorporated into a larger
+  "stacked table" and how this stacked table is distributed across SparseCores.
+  When multiple tables are stacked, they are concatenated along the vocabulary
+  dimension to form one logical table, which is then MOD-sharded across all
+  SparseCores.
+  """
 
   stack_name: str
+  """The name of the stacked table this table belongs to. Multiple tables can
+  share the same `stack_name` if they are stacked together. If a table is not
+  stacked with others, `stack_name` will be the table's own name."""
   padded_vocab_size: int
+  """The total vocabulary size of this table across all shards, padded such
+  that it can be evenly divided by `8 * num_sparsecore`, where
+  `num_sparsecore` is the total number of SparseCores across all
+  devices. Each SparseCore shard stores `padded_vocab_size / num_sparsecore`
+  rows of this table's vocabulary."""
   padded_embedding_dim: int
-  row_offset_in_shard: int = 0  # Position of first row of this table in stack
+  """The embedding dimension of this table, padded to be a multiple of 8 for
+  hardware alignment."""
+  row_offset_in_shard: int = 0
+  """When tables are stacked, their vocabulary rows are concatenated within each
+  SparseCore shard. This field indicates the starting row index for this
+  table's vocabulary within each shard. For example, if Table A has 100 rows
+  per shard and Table B is stacked after A, Table A will have
+  `row_offset_in_shard=0` and Table B will have `row_offset_in_shard=100`."""
   shard_rotation: int = 0
+  """Shard rotation offset for MOD-sharding. When no rotation is applied,
+  vocabulary ID `i` is assigned to shard `i % num_shards`. With a shard
+  rotation `r` for a table, ID `i` is assigned to shard `(i % num_shards + r)
+  % num_shards`. This mechanism helps to distribute load by changing shard
+  assignments, especially when stacking tables with different access
+  patterns."""
 
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, kw_only=True)
 class TableSpec:
-  """Specifies one embedding table.
-
-  Attributes:
-    name: Name of the table.
-    vocabulary_size: The total number of unique embedding IDs. This is the
-      number of rows in the embedding table.
-    embedding_dim: The number of columns in the embedding table.
-    initializer: An initializer for the embedding table. See
-      [jax.nn.initializers](https://docs.jax.dev/en/latest/jax.nn.initializers.html)
-      for more details.
-    optimizer: An optimizer for the embedding table.
-    combiner: The aggregation function to compute activations for each sample.
-      For example, sum or mean.
-    max_ids_per_partition: The maximum number of embedding IDs that can be
-      packed into a single partition.
-    max_unique_ids_per_partition: The maximum number of unique embedding IDs
-      that can be packed into a single partition.
-    suggested_coo_buffer_size_per_device: The minimum size of the input buffer
-      that the preprocessing should try to create.
-    quantization_config: Quantization config (min, max, num_buckets) which
-      represent the float range and number of discrete integer buckets to use
-      for quantization.
-  """
+  """Specifies one embedding table."""
 
   name: str
+  """Name of the table."""
   vocabulary_size: int
+  """The total number of unique embedding IDs. This is the number of rows in
+  the embedding table."""
   embedding_dim: int
+  """The number of columns in the embedding table."""
   initializer: CallableTableInitializer
+  """An initializer for the embedding table. See
+  [jax.nn.initializers](https://docs.jax.dev/en/latest/jax.nn.initializers.html)
+  for more details."""
   optimizer: OptimizerSpec
+  """An optimizer for the embedding table."""
   combiner: str
+  """The aggregation function to compute activations for each sample. For
+  example, sum or mean."""
   max_ids_per_partition: int = 256
+  """The maximum number of embedding IDs that can be packed into a single
+  partition."""
   max_unique_ids_per_partition: int = 256
-  # The minimum size of the input buffer that the preprocessing should try to
-  # create.
+  """The maximum number of unique embedding IDs that can be packed into a
+  single partition."""
   suggested_coo_buffer_size_per_device: int | None = None
-  # Quantization config (min, max, num_buckets) which represent the float
-  # range and number of discrete integer buckets to use for quantization.
+  """The minimum size of the input buffer that the preprocessing should try to
+  create."""
   quantization_config: QuantizationConfig | None = None
+  """Quantization config (min, max, num_buckets) which represent the float
+  range and number of discrete integer buckets to use for quantization."""
 
   # This points to the stacked table spec which this table belongs to.
   # If this is None, this table is the top-most table.
@@ -705,27 +725,23 @@ class TableSpec:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, kw_only=True)
 class FeatureSpec:
-  """Specification for one embedding feature.
-
-  Attributes:
-    name: Name of the feature.
-    table_spec: The table spec for the feature.
-    input_shape: The shape of the input jax array, this is [batch_size,
-      feature_valency]. The second element can be omitted for ragged input.
-    output_shape: The expected shape of the output activation jax array, this is
-      [batch_size, embedding_dim]
-  """
+  """Specification for one embedding feature."""
 
   name: str
+  """Name of the feature."""
   table_spec: TableSpec
-  # The shape of the input jax array.
+  """The table spec for the feature."""
   input_shape: Sequence[int]
-  # The expected shape of the output activation jax array.
+  """The shape of the input jax array, this is [batch_size, feature_valency].
+  The second element can be omitted for ragged input."""
   output_shape: Sequence[int]
+  """The expected shape of the output activation jax array, this is
+  [batch_size, embedding_dim]."""
   # The transformation to apply to the input feature.
   _id_transformation: FeatureIdTransformation | None = dataclasses.field(
       default=None, compare=False
   )
+  """The transformation to apply to the input feature."""
 
   @property
   def id_transformation(self) -> FeatureIdTransformation:
@@ -745,19 +761,32 @@ class StackedTableSpec:
   """Spec for a stacked table that is a combination of multiple tables."""
 
   stack_name: str
+  """The name of the stacked table."""
   stack_vocab_size: int
+  """The total vocabulary size of all tables in the stack, after padding of
+  each table's vocabulary to be divisible by `8 * num_sparsecore`."""
   stack_embedding_dim: int
+  """The embedding dimension of tables in the stack, after padding to be
+  divisible by 8."""
   optimizer: OptimizerSpec
+  """The optimizer used for all tables in the stack."""
   combiner: str
+  """The combiner used for all tables in the stack."""
   total_sample_count: int
+  """The total batch size of all features that point to tables in this
+  stack."""
   max_ids_per_partition: int = 256
+  """The maximum number of IDs per partition for lookups from this stack."""
   max_unique_ids_per_partition: int = 256
-  # The minimum size of the input buffer that the preprocessing should try to
-  # create.
+  """The maximum number of unique IDs per partition for lookups from this
+  stack."""
   suggested_coo_buffer_size_per_device: int | None = None
-  # Quantization config (min, max, num_buckets) which represent the float
-  # range and number of discrete integer buckets to use for quantization.
+  """The minimum size of the input buffer that the preprocessing should try to
+  create for this stack."""
   quantization_config: QuantizationConfig | None = None
+  """Quantization config (min, max, num_buckets) which represent the float
+  range and number of discrete integer buckets to use for quantization for this
+  stack."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
