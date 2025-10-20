@@ -33,6 +33,7 @@
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
@@ -932,6 +933,40 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
   EXPECT_THAT(sync_keys_set, SizeIs(kBatchCount * 2));
 }
 
+void ValidateCooId(int embedding_id, int sample_id, int64_t table_shard_size,
+                   int batch_size_per_sc) {
+  EXPECT_GE(embedding_id, 0);
+  EXPECT_LE(embedding_id, table_shard_size);
+  EXPECT_GE(sample_id, 0);
+  EXPECT_LT(sample_id, batch_size_per_sc);
+}
+
+// Validates a slice of COO buffer data described by a sequence of row
+// pointers.
+// `row_pointers_slice`: A slice of row pointers for this validation.
+// `embedding_ids_slice`: Slice of embedding_ids corresponding to this
+// partition.
+// `sample_ids_slice`: Slice of sample_ids corresponding to this partition.
+void ValidateMinibatchOrSparseCoreSlice(
+    const Eigen::Ref<const RowVectorXi>& row_pointers_slice,
+    const Eigen::Ref<const RowVectorXi>& embedding_ids_slice,
+    const Eigen::Ref<const RowVectorXi>& sample_ids_slice,
+    int64_t table_shard_size, int batch_size_per_sc) {
+  int32_t start_index = 0;
+  for (int i = 0; i < row_pointers_slice.size(); ++i) {
+    int end_index = row_pointers_slice(i);
+    ASSERT_GE(end_index, start_index);
+    ASSERT_LE(end_index, embedding_ids_slice.size());
+    for (int j = start_index; j < end_index; ++j) {
+      if (embedding_ids_slice(j) != INT_MAX) {
+        ValidateCooId(embedding_ids_slice(j), sample_ids_slice(j),
+                      table_shard_size, batch_size_per_sc);
+      }
+    }
+    start_index = RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+  }
+}
+
 void PreprocessingOutputIsValid(
     std::tuple<
         std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
@@ -939,7 +974,9 @@ void PreprocessingOutputIsValid(
         std::vector<std::vector<int64_t>>>
         samples,
     int num_sc_per_device, int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition) {
+    int max_unique_ids_per_partition,
+    FeatureStackingStrategy feature_stacking_strategy,
+    bool enable_minibatching) {
   auto create_input_batch =
       [](const std::vector<std::vector<int64_t>>& samples_in) {
         std::vector<int64_t> values;
@@ -998,8 +1035,8 @@ void PreprocessingOutputIsValid(
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
-      .enable_minibatching = true,
+      .feature_stacking_strategy = feature_stacking_strategy,
+      .enable_minibatching = enable_minibatching,
       .batch_number = 42};
 
   TF_ASSERT_OK_AND_ASSIGN(
@@ -1018,19 +1055,25 @@ void PreprocessingOutputIsValid(
   const int batch_size_per_sc =
       CeilOfRatio(kBatchSize * kTableVocabs.size(), num_sc_per_device);
 
-  int32_t previous_start_index = 0;
-  for (int32_t i = 0; i < row_pointers_unpadded_size; ++i) {
-    ASSERT_GE(row_pointers.data()[i], previous_start_index);
-    for (int32_t j = previous_start_index; j < row_pointers.data()[i]; ++j) {
-      if (embedding_ids.data()[j] != INT_MAX) {
-        EXPECT_GE(embedding_ids.data()[j], 0);
-        EXPECT_LE(embedding_ids.data()[j], table_shard_size);
-        EXPECT_GE(sample_ids.data()[j], 0);
-        EXPECT_LT(sample_ids.data()[j], batch_size_per_sc);
-      }
+  if (options.enable_minibatching) {
+    ValidateMinibatchOrSparseCoreSlice(
+        row_pointers.row(0).head(row_pointers_unpadded_size),
+        embedding_ids.row(0), sample_ids.row(0), table_shard_size,
+        batch_size_per_sc);
+  } else {
+    const int coo_buffer_size_per_sc = embedding_ids.cols() / num_sc_per_device;
+    const int row_pointers_size_per_bucket =
+        row_pointers.cols() / num_sc_per_device;
+    for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
+      ValidateMinibatchOrSparseCoreSlice(
+          row_pointers.row(0).segment(sc_id * row_pointers_size_per_bucket,
+                                      kNumScs),
+          embedding_ids.row(0).segment(sc_id * coo_buffer_size_per_sc,
+                                       coo_buffer_size_per_sc),
+          sample_ids.row(0).segment(sc_id * coo_buffer_size_per_sc,
+                                    coo_buffer_size_per_sc),
+          table_shard_size, batch_size_per_sc);
     }
-    previous_start_index =
-        RoundUpTo(row_pointers.data()[i], TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
   }
 }
 
@@ -1066,7 +1109,12 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValid)
         /*global_device_count=*/
         fuzztest::ElementOf<int>({1, 2, 4, 8, 16, 32, 64, 128}),
         /*max_ids_per_partition=*/fuzztest::InRange(1, 1024),
-        /*max_unique_ids_per_partition=*/fuzztest::InRange(1, 1024));
+        /*max_unique_ids_per_partition=*/fuzztest::InRange(1, 1024),
+        /*feature_stacking_strategy=*/
+        fuzztest::ElementOf<FeatureStackingStrategy>(
+            {FeatureStackingStrategy::kStackThenSplit,
+             FeatureStackingStrategy::kSplitThenStack}),
+        /*enable_minibatching=*/fuzztest::Arbitrary<bool>());
 
 }  // namespace
 }  // namespace jax_sc_embedding
