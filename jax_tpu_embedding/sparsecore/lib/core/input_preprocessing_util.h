@@ -276,7 +276,9 @@ struct StackedTableMetadata {
   int max_ids_per_partition;
   int max_unique_ids_per_partition;
   std::optional<int> suggested_coo_buffer_size_per_device;
+  // Global row offset for this feature across all devices.
   int row_offset;
+  // Global column offset for this feature across all devices.
   int col_offset;
   int col_shift;
 
