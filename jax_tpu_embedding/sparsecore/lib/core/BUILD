@@ -308,6 +308,7 @@ cc_library(
         ":sparse_csr_input_stream",
         ":unity_weights_stream",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 

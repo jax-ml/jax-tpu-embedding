@@ -14,8 +14,10 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_RAGGED_TENSOR_INPUT_BATCH_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_RAGGED_TENSOR_INPUT_BATCH_H_
 #include <cstdint>
+#include <limits>
 
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/strings/string_view.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
@@ -63,16 +65,21 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
   // This class represents a batch of input data encoded using row offsets,
   // similar to how RaggedTensor uses row offsets as described in
   // https://www.tensorflow.org/guide/ragged_tensor#tfraggedtensorfrom_row_splits.
-  RaggedTensorInputBatch(EmbeddingIdsView embedding_ids,
-                         RowOffsetsView row_offsets)
-      : embedding_ids_(embedding_ids), row_offsets_(row_offsets) {}
+  RaggedTensorInputBatch(
+      EmbeddingIdsView embedding_ids, RowOffsetsView row_offsets,
+      absl::string_view table_name = "unknown_table_name",
+      int64_t max_vocab_id = std::numeric_limits<int64_t>::max())
+      : embedding_ids_(embedding_ids),
+        row_offsets_(row_offsets),
+        table_name_(table_name),
+        max_vocab_id_(max_vocab_id) {}
 
   int64_t size() const override { return row_offsets_.size() - 1; }
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          ExtractedCooTensors& coo_tensors) override {
     SparseCsrInputBatchStream<int64_t, EmbeddingIdsView, RowOffsetsView>
         values_stream(embedding_ids_, row_offsets_, options.slice_start,
-                      options.slice_end);
+                      options.slice_end, table_name_, max_vocab_id_);
     UnityWeightsStream weights_stream(values_stream);
 
     ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
@@ -81,6 +88,8 @@ class RaggedTensorInputBatch : public AbstractInputBatch {
  private:
   EmbeddingIdsView embedding_ids_;
   RowOffsetsView row_offsets_;
+  absl::string_view table_name_;
+  int64_t max_vocab_id_;
 };
 
 // deduction guide for compiler
