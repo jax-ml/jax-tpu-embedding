@@ -287,9 +287,11 @@ struct StackedTableMetadata {
 
   RowCombiner row_combiner;
 
-  // The vocabulary size of the table. Any embedding IDs that are larger than
-  // this value are considered invalid.
+  // The maximum valid physical row index in the stacked table on a SparseCore
+  // shard.
   int max_col_id;
+
+  bool operator==(const StackedTableMetadata& other) const = default;
 };
 
 int ComputeCooBufferSizePerDevice(
