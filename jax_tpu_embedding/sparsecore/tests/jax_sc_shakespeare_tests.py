@@ -19,7 +19,6 @@ from absl import logging
 from absl.testing import absltest
 import einops
 import jax
-from jax.experimental import shard_map
 import jax.numpy as jnp
 from jax.sharding import NamedSharding
 from jax.sharding import PartitionSpec as P
@@ -157,7 +156,7 @@ class ShakespeareTest(absltest.TestCase):
         feature_specs=feature_specs,
         sharding_strategy='MOD',
     )
-    sparse_matmul = shard_map.shard_map(
+    sparse_matmul = jax.shard_map(
         sharded_matmul,
         mesh=mesh,
         in_specs=(
@@ -165,7 +164,7 @@ class ShakespeareTest(absltest.TestCase):
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0]),
-        check_rep=False,
+        check_vma=False,
     )
     sparse_matmul = jax.jit(sparse_matmul)
 
@@ -174,7 +173,7 @@ class ShakespeareTest(absltest.TestCase):
         feature_specs=feature_specs,
         sharding_strategy='MOD',
     )
-    sparse_grad_update = shard_map.shard_map(
+    sparse_grad_update = jax.shard_map(
         sharded_grad_update,
         mesh=mesh,
         in_specs=(
@@ -183,7 +182,7 @@ class ShakespeareTest(absltest.TestCase):
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0], None),
-        check_rep=False,
+        check_vma=False,
     )
     sparse_grad_update = jax.jit(sparse_grad_update)
     step = 0

@@ -32,7 +32,6 @@ else:
   DLL = layout.DeviceLocalLayout  # type: ignore
 Layout = layout.Format
 LogicalNames = typing.LogicalNames
-shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
 EmbeddingLookupInput = embedding.PreprocessedInput
 
@@ -216,7 +215,7 @@ def _emb_lookup(
 ):
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
-  return shard_map(
+  return jax.shard_map(
       functools.partial(
           embedding.tpu_sparse_dense_matmul,
           global_device_count=embedding_layer.mesh.size,
@@ -227,7 +226,7 @@ def _emb_lookup(
       mesh=embedding_layer.mesh,
       in_specs=(pd, pt),
       out_specs=pd,
-      check_rep=False,
+      check_vma=False,
   )(
       embedding_lookup_inputs,
       emb_table,
@@ -255,7 +254,7 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
 
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
-  emb_table_grads = shard_map(
+  emb_table_grads = jax.shard_map(
       functools.partial(
           embedding.tpu_sparse_dense_matmul_grad,
           feature_specs=embedding_layer.feature_specs,
@@ -265,7 +264,7 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
       mesh=embedding_layer.mesh,
       in_specs=(pd, pd, pt),
       out_specs=pt,
-      check_rep=False,
+      check_vma=False,
   )(
       gradients,
       embedding_lookups,

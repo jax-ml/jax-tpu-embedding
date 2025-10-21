@@ -28,7 +28,6 @@ import flax
 from flax import linen as nn
 import jax
 from jax.experimental.layout import Format
-from jax.experimental.shard_map import shard_map
 import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import NamedSharding
@@ -398,12 +397,12 @@ def run_model():
           feature_specs=feature_specs,
           sharding_strategy='MOD',
       )
-      tpu_sparse_dense_matmul = shard_map(
-          f=tpu_sparse_dense_matmul,
+      tpu_sparse_dense_matmul = jax.shard_map(
+          tpu_sparse_dense_matmul,
           mesh=mesh,
           in_specs=(pd, pe),
           out_specs=pd,
-          check_rep=False,
+          check_vma=False,
       )
       emb_act = tpu_sparse_dense_matmul(
           preprocessed_inputs,
@@ -440,12 +439,12 @@ def run_model():
           feature_specs=feature_specs,
           sharding_strategy='MOD',
       )
-      tpu_sparse_dense_matmul_grad = shard_map(
-          f=tpu_sparse_dense_matmul_grad,
+      tpu_sparse_dense_matmul_grad = jax.shard_map(
+          tpu_sparse_dense_matmul_grad,
           mesh=mesh,
           in_specs=(pd, pd, pe),
           out_specs=pe,
-          check_rep=False,
+          check_vma=False,
       )
       emb_variables = tpu_sparse_dense_matmul_grad(
           emb_grad,

@@ -348,12 +348,12 @@ def get_default_sc_fwd_function(
         feature_specs=feature_specs,
         sharding_strategy='MOD',
     )
-    tpu_sparse_dense_matmul = jax.experimental.shard_map.shard_map(
-        f=tpu_sparse_dense_matmul,
+    tpu_sparse_dense_matmul = jax.shard_map(
+        tpu_sparse_dense_matmul,
         mesh=global_mesh,
         in_specs=(pd, pe),
         out_specs=pd,
-        check_rep=False,
+        check_vma=False,
     )
     emb_act = tpu_sparse_dense_matmul(sparse_inputs, embedding_variables)
     return emb_act, None
@@ -401,12 +401,12 @@ def get_default_sc_bwd_function(
         feature_specs=feature_specs,
         sharding_strategy='MOD',
     )
-    tpu_sparse_dense_matmul_grad = jax.experimental.shard_map.shard_map(
-        f=tpu_sparse_dense_matmul_grad,
+    tpu_sparse_dense_matmul_grad = jax.shard_map(
+        tpu_sparse_dense_matmul_grad,
         mesh=global_mesh,
         in_specs=(pd, pd, pe),
         out_specs=pe,
-        check_rep=False,
+        check_vma=False,
     )
     updated_embedding_variables = tpu_sparse_dense_matmul_grad(
         emb_grad, sparse_inputs, embedding_variables

@@ -21,7 +21,6 @@ from absl.testing import absltest
 import einops
 import flax.linen as nn
 import jax
-from jax.experimental import shard_map
 # pylint: disable-next=g-importing-member
 from jax.lax import with_sharding_constraint
 import jax.numpy as jnp
@@ -217,12 +216,12 @@ class ShakespeareTest(absltest.TestCase):
         feature_specs=(self.shakespeare_feature,),
         sharding_strategy='MOD',
     )
-    self.sparse_matmul = shard_map.shard_map(
+    self.sparse_matmul = jax.shard_map(
         sharded_matmul,
         mesh=self.mesh,
         in_specs=(P('device'), P('device', None)),
         out_specs=P('device'),
-        check_rep=False,
+        check_vma=False,
     )
 
     sharded_grad_update = functools.partial(
@@ -230,12 +229,12 @@ class ShakespeareTest(absltest.TestCase):
         feature_specs=(self.shakespeare_feature,),
         sharding_strategy='MOD',
     )
-    self.sparse_grad_update = shard_map.shard_map(
+    self.sparse_grad_update = jax.shard_map(
         sharded_grad_update,
         mesh=self.mesh,
         in_specs=(P('device'), P('device'), P('device', None)),
         out_specs=P('device', None),
-        check_rep=False,
+        check_vma=False,
     )
 
   def test_spmd_shakespeare_model_convergence(self):

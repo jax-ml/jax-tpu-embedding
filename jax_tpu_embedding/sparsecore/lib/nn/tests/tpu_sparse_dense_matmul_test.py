@@ -18,7 +18,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import einops
 import jax
-from jax.experimental import shard_map
 import jax.numpy as jnp
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
 from jax.sharding import PartitionSpec as P  # pylint: disable=g-importing-member
@@ -446,7 +445,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
 
-      sharded_matmul = shard_map.shard_map(
+      sharded_matmul = jax.shard_map(
           sharded_matmul,
           mesh=mesh,
           in_specs=(
@@ -454,7 +453,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
-          check_rep=False,
+          check_vma=False,
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
@@ -574,7 +573,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
 
-      sharded_matmul = shard_map.shard_map(
+      sharded_matmul = jax.shard_map(
           sharded_matmul,
           mesh=mesh,
           in_specs=(
@@ -582,7 +581,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
-          check_rep=False,
+          check_vma=False,
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
@@ -844,7 +843,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           tpu_sparse_dense_matmul_fn,
           feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
-      sharded_matmul = shard_map.shard_map(
+      sharded_matmul = jax.shard_map(
           sharded_matmul,
           mesh=mesh,
           in_specs=(
@@ -852,7 +851,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
-          check_rep=False,
+          check_vma=False,
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(
@@ -1386,7 +1385,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
           feature_specs=tuple(jax.tree.leaves(feature_specs)),
       )
 
-      sharded_matmul = shard_map.shard_map(
+      sharded_matmul = jax.shard_map(
           sharded_matmul,
           mesh=mesh,
           in_specs=(
@@ -1394,7 +1393,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
               P(mesh.axis_names[0], None),
           ),
           out_specs=P(mesh.axis_names[0]),
-          check_rep=False,
+          check_vma=False,
       )
       sharded_matmul = jax.jit(sharded_matmul)
       activations = sharded_matmul(

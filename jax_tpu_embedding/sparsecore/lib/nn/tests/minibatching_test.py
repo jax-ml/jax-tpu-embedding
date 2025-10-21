@@ -16,8 +16,8 @@ import concurrent
 import dataclasses
 
 from absl.testing import absltest
+import jax
 from jax import numpy as jnp
-from jax.experimental import shard_map
 import jax.sharding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -165,22 +165,22 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         self.embedding_var_sharding,
     )
     self.sharded_lookup = jax.jit(
-        shard_map.shard_map(
+        jax.shard_map(
             self._lookup,
             mesh=self.mesh,
             in_specs=(self.pd, self.pe),
             out_specs=(self.pd),
-            check_rep=False,
+            check_vma=False,
         ),
         in_shardings=(self.data_sharding, self.embedding_var_sharding),
     )
     self.sharded_update = jax.jit(
-        shard_map.shard_map(
+        jax.shard_map(
             self._update,
             mesh=self.mesh,
             in_specs=(self.pd, self.pd, self.pe),
             out_specs=(self.pe),
-            check_rep=False,
+            check_vma=False,
         ),
         in_shardings=(
             self.data_sharding,

@@ -18,7 +18,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import einops
 import jax
-from jax.experimental import shard_map
 import jax.numpy as jnp
 from jax.sharding import NamedSharding
 from jax.sharding import PartitionSpec as P
@@ -643,7 +642,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         sharding_strategy="MOD",
         feature_stacking_strategy=feature_stacking_strategy,
     )
-    sharded_grad_update = shard_map.shard_map(
+    sharded_grad_update = jax.shard_map(
         sharded_grad_update,
         mesh=mesh,
         in_specs=(
@@ -652,7 +651,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0], None),
-        check_rep=False,
+        check_vma=False,
     )
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(
@@ -901,7 +900,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         sharding_strategy="MOD",
         feature_stacking_strategy=feature_stacking_strategy,
     )
-    sharded_grad_update = shard_map.shard_map(
+    sharded_grad_update = jax.shard_map(
         sharded_grad_update,
         mesh=mesh,
         in_specs=(
@@ -910,7 +909,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             P(mesh.axis_names[0], None),
         ),
         out_specs=P(mesh.axis_names[0], None),
-        check_rep=False,
+        check_vma=False,
     )
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(
@@ -1130,7 +1129,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
           step=step,
       )
 
-    sharded_grad_update = shard_map.shard_map(
+    sharded_grad_update = jax.shard_map(
         sharded_grad_update,
         mesh=mesh,
         in_specs=(
@@ -1140,7 +1139,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             P(),  # Step is replicated.
         ),
         out_specs=P(mesh.axis_names[0], None),
-        check_rep=False,
+        check_vma=False,
     )
     sharded_grad_update = jax.jit(sharded_grad_update)
 

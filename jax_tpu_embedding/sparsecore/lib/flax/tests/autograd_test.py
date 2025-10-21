@@ -30,7 +30,6 @@ import numpy as np
 import optax
 
 
-shard_map = jax.experimental.shard_map.shard_map
 Nested = embedding.Nested
 
 FLAGS = flags.FLAGS

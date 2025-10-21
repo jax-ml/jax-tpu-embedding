@@ -24,7 +24,6 @@ from absl import logging
 import einops
 from flax import struct
 import jax
-from jax.experimental import shard_map
 from jax.experimental.layout import Format
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
@@ -777,7 +776,7 @@ def tpu_sparse_dense_matmul(
       sharding_strategy="MOD",
       feature_stacking_strategy=StackingStrategy.SPLIT_THEN_STACK,
   )
-  sparse_matmul = shard_map.shard_map(
+  sparse_matmul = jax.shard_map(
       sparse_matmul,
       mesh=mesh,
       in_specs=(
@@ -785,7 +784,7 @@ def tpu_sparse_dense_matmul(
           P(mesh.axis_names[0]),
       ),
       out_specs=P(mesh.axis_names[0]),
-      check_rep=False,
+      check_vma=False,
   )
   sparse_matmul = jax.jit(sparse_matmul)
   activations = sparse_matmul(
@@ -990,7 +989,7 @@ def tpu_sparse_dense_matmul_grad(
       feature_specs=feature_specs,
       sharding_strategy="MOD",
   )
-  grad_update = shard_map.shard_map(
+  grad_update = jax.shard_map(
       grad_update,
       mesh=mesh,
       in_specs=(
@@ -999,7 +998,7 @@ def tpu_sparse_dense_matmul_grad(
           P(mesh.axis_names[0]),
       ),
       out_specs=P(mesh.axis_names[0]),
-      check_rep=False,
+      check_vma=False,
   )
 
   grad_update = jax.jit(grad_update)
@@ -1227,7 +1226,7 @@ def _init_stacked_embedding_table(
 
   if not use_pmap:
     embedding_table = jax.jit(
-        shard_map.shard_map(
+        jax.shard_map(
             init_func,
             mesh=global_sharding.mesh,
             in_specs=P(sharding_axis),
