@@ -77,10 +77,10 @@ void GetColIdIsCorrect(int embedding_id, int col_shift,
 }
 
 FUZZ_TEST(InputPreprocessingUtilTest, GetColIdIsCorrect)
-    .WithDomains(/*embedding_id=*/fuzztest::InRange(0, 1000000),
-                 /*col_shift=*/fuzztest::InRange(0, 1000000),
-                 /*col_offset_per_shard=*/fuzztest::InRange(0, 1000000),
-                 /*num_scs_bit=*/fuzztest::InRange(0, 10));
+    .WithDomains(/*embedding_id=*/fuzztest::InRange(0, 100000000),
+                 /*col_shift=*/fuzztest::InRange(0, 64),
+                 /*col_offset_per_shard=*/fuzztest::InRange(0, 600000),
+                 /*num_scs_bit=*/fuzztest::InRange(0, 9));
 
 TEST(InputPreprocessingUtilTest, CeilOfRatio) {
   EXPECT_EQ(CeilOfRatio(/*numerator=*/1, /*denominator=*/1), 1);
