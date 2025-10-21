@@ -42,23 +42,25 @@ _DEVICE_ERR_STR = (
 )
 
 
-# TODO(b/369729914): Refactor according to internal link:unit-testing-practices#
 class EmbeddingTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()
 
-  def assert_all_shards_shape(self, shards, expected_shape):
-    for shard in shards:
-      self.assertEqual(shard.data.shape, expected_shape)
+  def assert_all_shards_shape(self, shards, expected_shape, expected_len=None):
+    if expected_len is not None:
+      self.assertLen(shards, expected_len)
+    for i, shard in enumerate(shards):
+      with self.subTest(name=f"shard_{i}_shape"):
+        self.assertEqual(shard.data.shape, expected_shape)
 
-  def assert_all_shards_data(self, shards, expected_data):
-    for shard in shards:
-      np.testing.assert_array_equal(shard.data, expected_data)
-
-  def assert_len_shards(self, shards, expected_len):
-    self.assertLen(shards, expected_len)
+  def assert_all_shards_data(self, shards, expected_data, expected_len=None):
+    if expected_len is not None:
+      self.assertLen(shards, expected_len)
+    for i, shard in enumerate(shards):
+      with self.subTest(name=f"shard_{i}_data"):
+        np.testing.assert_array_equal(shard.data, expected_data)
 
   def test_get_valid_table_specs(self):
     table_spec = embedding_spec.TableSpec(
@@ -420,35 +422,29 @@ class EmbeddingTest(parameterized.TestCase):
     self.assertLen(
         jax.tree.leaves(embedding_variables["table_a"]), emb_var_count
     )
-    for variable in jax.tree.leaves(embedding_variables["table_a"]):
-      self.assertEqual(variable.shape, (vocab_size_a, embedding_dim))
-
-      self.assertEqual(
-          len(variable.addressable_shards),
-          len(devices),
-      )
-
-      for shard in variable.addressable_shards:
-        self.assertEqual(
-            shard.data.shape,
+    for i, variable in enumerate(
+        jax.tree.leaves(embedding_variables["table_a"])
+    ):
+      with self.subTest(name=f"table_a_variable_{i}"):
+        self.assertEqual(variable.shape, (vocab_size_a, embedding_dim))
+        self.assert_all_shards_shape(
+            variable.addressable_shards,
             (vocab_size_a // len(devices), embedding_dim),
+            expected_len=len(devices),
         )
 
     self.assertLen(
         jax.tree.leaves(embedding_variables["table_b"]), emb_var_count
     )
-    for variable in jax.tree.leaves(embedding_variables["table_b"]):
-      self.assertEqual(variable.shape, (vocab_size_b, embedding_dim))
-
-      self.assertEqual(
-          len(variable.addressable_shards),
-          len(devices),
-      )
-
-      for shard in variable.addressable_shards:
-        self.assertEqual(
-            shard.data.shape,
+    for i, variable in enumerate(
+        jax.tree.leaves(embedding_variables["table_b"])
+    ):
+      with self.subTest(name=f"table_b_variable_{i}"):
+        self.assertEqual(variable.shape, (vocab_size_b, embedding_dim))
+        self.assert_all_shards_shape(
+            variable.addressable_shards,
             (vocab_size_b // len(devices), embedding_dim),
+            expected_len=len(devices),
         )
 
   @parameterized.parameters(
@@ -545,19 +541,17 @@ class EmbeddingTest(parameterized.TestCase):
     self.assertLen(
         jax.tree.leaves(embedding_variables["table_a_table_b"]), emb_var_count
     )
-    for variable in jax.tree.leaves(embedding_variables):
-      self.assertEqual(
-          variable.shape,
-          (
-              jax.device_count(),
-              (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
-              16,
-          ),
-      )
-      self.assertEqual(
-          len(variable.addressable_shards),
-          len(devices),
-      )
+    for i, variable in enumerate(jax.tree.leaves(embedding_variables)):
+      with self.subTest(name=f"variable_{i}"):
+        self.assertEqual(
+            variable.shape,
+            (
+                jax.device_count(),
+                (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
+                16,
+            ),
+        )
+        self.assertLen(variable.addressable_shards, len(devices))
 
     self.assert_all_shards_shape(
         embedding_variables["table_a_table_b"].table.addressable_shards,
@@ -566,10 +560,12 @@ class EmbeddingTest(parameterized.TestCase):
             (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
             16,
         ),
+        expected_len=len(devices),
     )
     self.assert_all_shards_data(
         embedding_variables["table_a_table_b"].table.addressable_shards,
         expected_device_shard,
+        expected_len=len(devices),
     )
 
   @parameterized.parameters(
@@ -665,27 +661,25 @@ class EmbeddingTest(parameterized.TestCase):
     self.assertLen(
         jax.tree.leaves(embedding_variables["table_a_table_b"]), emb_var_count
     )
-    for variable in jax.tree.leaves(embedding_variables):
-      self.assertEqual(
-          variable.shape,
-          (padded_vocab_size_a + padded_vocab_size_b, embedding_dim),
-      )
+    for i, variable in enumerate(jax.tree.leaves(embedding_variables)):
+      with self.subTest(name=f"variable_{i}"):
+        self.assertEqual(
+            variable.shape,
+            (padded_vocab_size_a + padded_vocab_size_b, embedding_dim),
+        )
 
-      self.assertEqual(
-          len(variable.addressable_shards),
-          len(devices),
-      )
-
-      self.assert_all_shards_shape(
-          variable.addressable_shards,
-          (
-              (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
-              16,
-          ),
-      )
+        self.assert_all_shards_shape(
+            variable.addressable_shards,
+            (
+                (padded_vocab_size_a + padded_vocab_size_b) // len(devices),
+                16,
+            ),
+            expected_len=len(devices),
+        )
     self.assert_all_shards_data(
         embedding_variables["table_a_table_b"].table.addressable_shards,
         expected_device_shard,
+        expected_len=len(devices),
     )
 
   @parameterized.parameters(
