@@ -155,9 +155,9 @@ void AdvanceAndPadPartitions(int& current_partition_id,
 // Fill the row pointers buffer from `lhs_row_begin` to `lhs_row_end` and COO
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
-int FillMinibatchBuffer(const BufferFillingOptions& options,
-                        internal::CsrArraysPerDevice& csr_arrays,
-                        int& dropped_id_count_static_bound) {
+int FillBufferSegment(const BufferFillingOptions& options,
+                      internal::CsrArraysPerDevice& csr_arrays,
+                      int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
   int current_partition_id = 0;
@@ -328,7 +328,8 @@ void FillLocalDeviceBuffer(
           options.enable_minibatching
               ? coo_buffer_size                      // use whole buffer
               : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
-      coo_begin = FillMinibatchBuffer(
+      // Fill Minibatch or SparseCore slice.
+      coo_begin = FillBufferSegment(
           {
               .local_sc_id = local_sc_id,
               .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
