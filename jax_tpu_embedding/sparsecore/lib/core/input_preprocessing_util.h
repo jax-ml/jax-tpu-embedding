@@ -19,7 +19,6 @@
 #include <limits>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
@@ -33,13 +32,13 @@
 
 namespace jax_sc_embedding {
 
-// TPU_VECTOR_REGISTER_ALIGMENT_SIZE represents the required alignment for data
+// TPU_VECTOR_REGISTER_ALIGNMENT_SIZE represents the required alignment for data
 // loaded into TPU vector registers, which are typically 8 sublanes x 128 lanes.
 // Data dimensions, specially the second most minor, must be padded to be
 // multiples of this value to ensure efficient TPU processing and avoid memory
 // inefficiency. This alignment is enforced by XLA. This applies to most current
 // generations of TPUs (v2, v3, v4, v5, v6).
-inline constexpr int TPU_VECTOR_REGISTER_ALIGMENT_SIZE = 8;
+inline constexpr int TPU_VECTOR_REGISTER_ALIGNMENT_SIZE = 8;
 
 // numpy uses row major order, while eigen defaults to column major.
 template <typename T>
@@ -227,21 +226,6 @@ struct ExtractedCooTensors {
       : batch_size_for_device(batch_size_for_device),
         coo_tensors_per_sc(num_sc_per_device, 0) {}
 };
-
-// Rounds up the given value to the next multiple of the given alignment.
-// This is equivalent to ceil(value / align) * align, but implemented in an
-// integer-safe way.
-template <typename T, typename U>
-static inline auto RoundUpTo(T value, U align) {
-  return (value + align - 1) / align * align;
-}
-
-inline unsigned int CeilOfRatio(unsigned int numerator,
-                                unsigned int denominator) {
-  // Note: Unsigned values allow better compiler optimizations.  This precise
-  // form is used because it cannot overflow.
-  return numerator == 0 ? 0 : (numerator - 1) / denominator + 1;
-}
 
 // TODO(b/357664103): Converge towards a more compatible interface between the
 // python representation and the c++ representation.

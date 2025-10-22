@@ -31,6 +31,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_splits_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
+#include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
@@ -125,7 +126,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   const std::vector<CooFormat>& coo_tensors = extracted_coo_tensors.coo_tensors;
   const int num_sc_per_device = options.num_sc_per_device;
   bool allow_id_dropping = options.allow_id_dropping;
-  const int batch_size_per_sc = CeilOfRatio(
+  const int batch_size_per_sc = xla::CeilOfRatio(
       extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
   const uint32_t global_sc_count = options.GetNumScs();
   const int num_sc_bits = absl::bit_width(global_sc_count - 1);
@@ -233,7 +234,11 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     auto partition_sizes =
         ids_per_sc_partition_per_bucket.rowwise().sum().array();
     stats.required_buffer_size[local_sc_id] +=
-        RoundUpTo(partition_sizes, TPU_VECTOR_REGISTER_ALIGMENT_SIZE).sum();
+        partition_sizes
+            .unaryExpr([](int val) {
+              return xla::RoundUpTo(val, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+            })
+            .sum();
 
     if (VLOG_IS_ON(2)) {
       LOG(INFO) << "Observed ids per partition/sparsecore"

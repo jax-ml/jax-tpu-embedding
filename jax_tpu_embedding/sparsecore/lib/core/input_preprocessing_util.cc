@@ -19,7 +19,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <utility>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
@@ -29,6 +28,7 @@
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
+#include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
@@ -114,7 +114,7 @@ void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
     coo_index = coo_end;
     return;
   }
-  while (coo_index % TPU_VECTOR_REGISTER_ALIGMENT_SIZE != 0 &&
+  while (coo_index % TPU_VECTOR_REGISTER_ALIGNMENT_SIZE != 0 &&
          coo_index < coo_end) {
     csr.embedding_ids[coo_index] = INT_MAX;
     csr.sample_ids[coo_index] = INT_MAX;
@@ -218,9 +218,9 @@ int64_t MayBeUpdateBufferSize(
   // Since the suggested size corresponds to only current device (local SCs),
   // Buffer for each SC should be properly aligned, hence ALIGNMENT *
   // num_scs_per_device
-  int64_t suggested_value = RoundUpTo<int64_t>(
+  int64_t suggested_value = xla::RoundUpTo<int64_t>(
       suggested_coo_buffer_size_per_device.value(),
-      TPU_VECTOR_REGISTER_ALIGMENT_SIZE * num_scs_per_device);
+      TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_scs_per_device);
   CHECK(suggested_value <= theoretical_max)
       << "Suggested Coo Buffer Size is larger than the theoretical "
          "max for table "
@@ -239,8 +239,8 @@ int ComputeCooBufferSizePerDevice(
   const std::optional<int> suggested_coo_buffer_size_per_device =
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
 
-  const int64_t max_ids_rounded_up = RoundUpTo<int64_t>(
-      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+  const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
+      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   // If minibatching is enabled, `theoretical_max` is multiplied by
   // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
   // core are packed into a single buffer.

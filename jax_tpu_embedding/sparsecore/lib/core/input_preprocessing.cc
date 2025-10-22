@@ -40,6 +40,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "tsl/platform/statusor.h"  // from @tsl
+#include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
@@ -59,7 +60,7 @@ void ExtractCooTensorsForSingleFeatureSlice(
       input_batches[feature_index];
   const int num_samples = curr_batch->size();
 
-  const int batch_size_per_slice = CeilOfRatio(
+  const int batch_size_per_slice = xla::CeilOfRatio(
       extracted_coo_tensors.batch_size_for_device, feature_slices_per_device);
 
   CHECK_GT(feature_slices_per_device, 0);
@@ -443,8 +444,8 @@ void FillDeviceBuffersForTable(
       grouped_coo_tensors.Merge(global_minibatching_split);
     }
 
-    const int batch_size_per_sc =
-        CeilOfRatio(state.batch_size_for_device, options.num_sc_per_device);
+    const int batch_size_per_sc = xla::CeilOfRatio(state.batch_size_for_device,
+                                                   options.num_sc_per_device);
     const int coo_buffer_size_per_sc =
         state.coo_buffer_size_per_device / options.num_sc_per_device;
     internal::CsrArraysPerDevice csr_arrays_per_device =
@@ -498,7 +499,7 @@ PreprocessSparseDenseMatmulInput(
 
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
-      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
 
   std::vector<TableState> table_states;
   for (const auto& [stacked_table_name, stacked_table_metadata] :

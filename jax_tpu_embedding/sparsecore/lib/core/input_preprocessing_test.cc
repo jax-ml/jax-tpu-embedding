@@ -44,6 +44,7 @@
 #include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
+#include "xla/util.h"  // from @xla
 
 namespace jax_sc_embedding {
 namespace {
@@ -963,7 +964,7 @@ void ValidateMinibatchOrSparseCoreSlice(
                       table_shard_size, batch_size_per_sc);
       }
     }
-    start_index = RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGMENT_SIZE);
+    start_index = xla::RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   }
 }
 
@@ -1052,8 +1053,8 @@ void PreprocessingOutputIsValid(
   const int32_t num_minibatches = output.num_minibatches;
   const int32_t row_pointers_unpadded_size =
       num_minibatches * kNumScs * num_sc_per_device;
-  const int batch_size_per_sc =
-      CeilOfRatio(kBatchSize * kTableVocabs.size(), num_sc_per_device);
+  const int batch_size_per_sc = xla::CeilOfRatio<int>(
+      kBatchSize * kTableVocabs.size(), num_sc_per_device);
 
   if (options.enable_minibatching) {
     ValidateMinibatchOrSparseCoreSlice(

@@ -63,6 +63,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
         "@tsl//tsl/profiler/lib:traceme",
+        "@xla//xla:util",
     ],
 )
 
@@ -144,6 +145,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@tsl//tsl/platform:statusor",
         "@tsl//tsl/profiler/lib:traceme",
+        "@xla//xla:util",
     ],
 )
 
@@ -172,6 +174,7 @@ cc_test(
         "@eigen_archive//:eigen3",
         "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:statusor",
+        "@xla//xla:util",
     ],
 )
 
@@ -389,6 +392,7 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@highway//hwy/contrib/sort:vqsort",
         "@tsl//tsl/profiler/lib:traceme",
+        "@xla//xla:util",
     ],
 )
 

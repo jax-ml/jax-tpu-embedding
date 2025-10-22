@@ -39,7 +39,6 @@ using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::IsNan;
 using ::testing::NanSensitiveFloatEq;
-using ::testing::Pair;
 using ::testing::Pointwise;
 
 TEST(InputPreprocessingUtilTest, ColIds) {
@@ -81,14 +80,6 @@ FUZZ_TEST(InputPreprocessingUtilTest, GetColIdIsCorrect)
                  /*col_shift=*/fuzztest::InRange(0, 64),
                  /*col_offset_per_shard=*/fuzztest::InRange(0, 600000),
                  /*num_scs_bit=*/fuzztest::InRange(0, 9));
-
-TEST(InputPreprocessingUtilTest, CeilOfRatio) {
-  EXPECT_EQ(CeilOfRatio(/*numerator=*/1, /*denominator=*/1), 1);
-  EXPECT_EQ(CeilOfRatio(/*numerator=*/4, /*denominator=*/2), 2);
-  EXPECT_EQ(CeilOfRatio(/*numerator=*/3, /*denominator=*/2), 2);
-  EXPECT_EQ(CeilOfRatio(/*numerator=*/10, /*denominator=*/4), 3);
-  EXPECT_EQ(CeilOfRatio(/*numerator=*/0, /*denominator=*/3), 0);
-}
 
 TEST(InputPreprocessingUtilTest, MaxIdsPerPartitionForStackedTables) {
   std::vector<StackedTableMetadata> stacked_table_metadata;
