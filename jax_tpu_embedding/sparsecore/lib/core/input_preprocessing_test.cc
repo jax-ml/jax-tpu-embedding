@@ -13,6 +13,7 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 
+#include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -952,16 +953,23 @@ void ValidateMinibatchOrSparseCoreSlice(
     const Eigen::Ref<const RowVectorXi>& row_pointers_slice,
     const Eigen::Ref<const RowVectorXi>& embedding_ids_slice,
     const Eigen::Ref<const RowVectorXi>& sample_ids_slice,
-    int64_t table_shard_size, int batch_size_per_sc) {
+    int64_t table_shard_size, int batch_size_per_sc, int max_ids_per_partition,
+    int max_unique_ids_per_partition) {
   int32_t start_index = 0;
   for (int i = 0; i < row_pointers_slice.size(); ++i) {
     int end_index = row_pointers_slice(i);
     ASSERT_GE(end_index, start_index);
     ASSERT_LE(end_index, embedding_ids_slice.size());
+    int ids_count = 0;
+    absl::flat_hash_set<int> unique_ids;
     for (int j = start_index; j < end_index; ++j) {
       if (embedding_ids_slice(j) != INT_MAX) {
         ValidateCooId(embedding_ids_slice(j), sample_ids_slice(j),
                       table_shard_size, batch_size_per_sc);
+        ids_count++;
+        unique_ids.insert(embedding_ids_slice(j));
+        // ASSERT_LE(ids_count, max_ids_per_partition);
+        // ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
       }
     }
     start_index = xla::RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
@@ -978,6 +986,9 @@ void PreprocessingOutputIsValid(
     int max_unique_ids_per_partition,
     FeatureStackingStrategy feature_stacking_strategy,
     bool enable_minibatching) {
+  // Max unique ids should be less than or equal to max ids.
+  max_unique_ids_per_partition =
+      std::min(max_unique_ids_per_partition, max_ids_per_partition);
   auto create_input_batch =
       [](const std::vector<std::vector<int64_t>>& samples_in) {
         std::vector<int64_t> values;
@@ -1060,7 +1071,7 @@ void PreprocessingOutputIsValid(
     ValidateMinibatchOrSparseCoreSlice(
         row_pointers.row(0).head(row_pointers_unpadded_size),
         embedding_ids.row(0), sample_ids.row(0), table_shard_size,
-        batch_size_per_sc);
+        batch_size_per_sc, max_ids_per_partition, max_unique_ids_per_partition);
   } else {
     const int coo_buffer_size_per_sc = embedding_ids.cols() / num_sc_per_device;
     const int row_pointers_size_per_bucket =
@@ -1073,7 +1084,8 @@ void PreprocessingOutputIsValid(
                                        coo_buffer_size_per_sc),
           sample_ids.row(0).segment(sc_id * coo_buffer_size_per_sc,
                                     coo_buffer_size_per_sc),
-          table_shard_size, batch_size_per_sc);
+          table_shard_size, batch_size_per_sc, max_ids_per_partition,
+          max_unique_ids_per_partition);
     }
   }
 }

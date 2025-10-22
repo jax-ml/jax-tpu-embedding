@@ -202,14 +202,21 @@ void CreateMinibatchingBucketsForTable(
   state.stats_per_host.dropped_id_count = 0;
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    internal::StatsPerDevice stats_per_device =
-        state.stats_per_host.GetStatsPerDevice(local_device);
+    // Note: We create a dummy stats object here because we don't want to
+    // overwrite the stats from the first pass, which are authoritative.
+    // The only stat we care about from this second pass is the number of
+    // dropped IDs.
+    StatsPerHost dummy_stats_host(
+        /*local_device_count=*/1, options.GetNumScs(),
+        options.num_sc_per_device);
+    internal::StatsPerDevice dummy_stats =
+        dummy_stats_host.GetStatsPerDevice(0);
     state.partitioned_coo_tensors_per_device[local_device] =
         SortAndGroupCooTensorsPerLocalDevice(
             state.extracted_coo_tensors_per_device[local_device],
-            state.stacked_table_metadata[0], options, stats_per_device,
+            state.stacked_table_metadata[0], options, dummy_stats,
             state.table_minibatching_split);
-    state.stats_per_host.dropped_id_count += stats_per_device.dropped_id_count;
+    state.stats_per_host.dropped_id_count += dummy_stats.dropped_id_count;
   }
 }
 

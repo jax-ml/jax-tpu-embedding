@@ -135,7 +135,16 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   const int max_unique_ids_per_partition =
       stacked_table_metadata.max_unique_ids_per_partition;
   const absl::string_view stacked_table_name = stacked_table_metadata.name;
-  // Minibatching is enabled and we need to create buckets for minibatching.
+  // This function can be called in two passes for minibatching. The logic for
+  // stats collection and ID dropping depends on the pass.
+  //
+  // Pass 1: Check if minibatching is required (`create_buckets` is false).
+  // - No IDs are dropped.
+  // - Stats are collected on all observed IDs to compute splits.
+  //
+  // Pass 2: Create buckets (`create_buckets` is true).
+  // - A dummy stats object is used (stats are not re-computed).
+  // - IDs may be dropped if they exceed capacity.
   const bool create_buckets = options.enable_minibatching &&
                               (std::is_same_v<SplitType, MinibatchingSplit>);
 
@@ -193,36 +202,45 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
               : 0;
       const uint32_t row_id = coo_tensor.row_id;
 
-      if (bucket_id != prev_bucket_id || col_id != prev_col_id) {
-        unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) += 1;
-      }
-
       // If the row ids and col ids are both same as the previous one,
       // dedup the id by adding the gains.
       if (col_id == prev_col_id && row_id == prev_row_id) {
         grouped_coo_tensors.MergeWithLastCoo(coo_tensor);
       } else {
+        const bool is_new_col =
+            (bucket_id != prev_bucket_id || col_id != prev_col_id);
+        // For stats, we need to count this ID if it is not a duplicate.
         ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) += 1;
-        // If either max_unique_ids_per_partition or max_ids_per_partition is
-        // exceeded, we drop the id. For minibatching, if even the smallest
-        // bucket exceeds the capacity, we drop the id, since minibatching can't
-        // help us.
-        const bool over_capacity =
-            unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) >
-                max_unique_ids_per_partition ||
-            ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) >
-                max_ids_per_partition;
-        if (over_capacity) {
+        if (is_new_col) {
+          unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) += 1;
+        }
+
+        // We do NOT drop IDs when minibatching is enabled and we are in the
+        // first pass (`create_buckets=false`), as we need to detect limit
+        // overflows to decide if minibatching is required. So, we only check if
+        // limits would be exceeded in cases where we might drop an ID.
+        bool would_exceed_limits = false;
+        if (!options.enable_minibatching || create_buckets) {
+          would_exceed_limits =
+              (ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) >
+               max_ids_per_partition) ||
+              (is_new_col &&
+               (unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) >
+                max_unique_ids_per_partition));
+        }
+
+        // If adding the ID would exceed limits and ID dropping is allowed, drop
+        // it.
+        if (would_exceed_limits && allow_id_dropping) {
           // Dropped id.
           ++stats.dropped_id_count;
-          continue;
         } else {
           grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
+          prev_col_id = col_id;
+          prev_row_id = row_id;
+          prev_bucket_id = bucket_id;
         }
       }
-      prev_col_id = col_id;
-      prev_row_id = row_id;
-      prev_bucket_id = bucket_id;
     }
     grouped_coo_tensors.FillRemainingScBuckets();
 
