@@ -963,14 +963,13 @@ void ValidateMinibatchOrSparseCoreSlice(
     int ids_count = 0;
     absl::flat_hash_set<int> unique_ids;
     for (int j = start_index; j < end_index; ++j) {
-      if (embedding_ids_slice(j) != INT_MAX) {
-        ValidateCooId(embedding_ids_slice(j), sample_ids_slice(j),
-                      table_shard_size, batch_size_per_sc);
-        ids_count++;
-        unique_ids.insert(embedding_ids_slice(j));
-        // ASSERT_LE(ids_count, max_ids_per_partition);
-        // ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
-      }
+      ASSERT_NE(embedding_ids_slice(j), INT_MAX);
+      ValidateCooId(embedding_ids_slice(j), sample_ids_slice(j),
+                    table_shard_size, batch_size_per_sc);
+      ids_count++;
+      unique_ids.insert(embedding_ids_slice(j));
+      ASSERT_LE(ids_count, max_ids_per_partition);
+      ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
     }
     start_index = xla::RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   }

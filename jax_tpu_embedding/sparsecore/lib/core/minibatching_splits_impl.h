@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_MINIBATCHING_SPLITS_IMPL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_MINIBATCHING_SPLITS_IMPL_H_
 
+#include <algorithm>
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
@@ -72,6 +73,7 @@ std::bitset<N - 1> ComputeMinibatchingSplit(
       const int val_right = unique_ids_per_bucket[i + subtree_size / 2];
       if (val_left + val_right > max_unique_ids_per_partition) {
         split.set(split_index);
+        unique_ids_per_bucket[i] = std::max(val_left, val_right);
       } else {
         unique_ids_per_bucket[i] += val_right;
       }
