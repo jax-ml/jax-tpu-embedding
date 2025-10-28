@@ -236,10 +236,10 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
           ++stats.dropped_id_count;
         } else {
           grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
-          prev_col_id = col_id;
-          prev_row_id = row_id;
-          prev_bucket_id = bucket_id;
         }
+        prev_col_id = col_id;
+        prev_row_id = row_id;
+        prev_bucket_id = bucket_id;
       }
     }
     grouped_coo_tensors.FillRemainingScBuckets();
