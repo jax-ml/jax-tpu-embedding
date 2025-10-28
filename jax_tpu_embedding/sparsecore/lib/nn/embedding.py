@@ -24,7 +24,6 @@ from absl import logging
 import einops
 from flax import struct
 import jax
-from jax.experimental.layout import Format
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
@@ -34,11 +33,6 @@ from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
-
-if jax.__version_info__ >= (0, 6, 3):
-  from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
-else:
-  from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top  # type: ignore
 
 ArrayLike = jnp.ndarray | np.typing.ArrayLike
 
@@ -1232,12 +1226,8 @@ def _init_stacked_embedding_table(
             in_specs=P(sharding_axis),
             out_specs=global_sharding.spec,
         ),
-        out_shardings=Format(
-            DLL(
-                major_to_minor=(0, 1),
-                tiling=((8,),),
-            ),
-            global_sharding,
+        out_shardings=utils.embedding_table_format(
+            global_sharding.mesh, global_sharding.spec
         ),
     )(
         rng,

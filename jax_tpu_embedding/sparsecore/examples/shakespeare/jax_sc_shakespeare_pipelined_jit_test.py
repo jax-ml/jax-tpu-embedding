@@ -32,7 +32,6 @@ from clu import parameter_overview
 import flax
 from flax import linen as nn
 import jax
-from jax.experimental import layout as jax_layout
 import jax.numpy as jnp
 from jax.sharding import Mesh  # pylint: disable=g-importing-member
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
@@ -254,9 +253,8 @@ class EmbeddingPipelineTest(absltest.TestCase):
     )
     self.global_sharding = NamedSharding(self.global_mesh, self.pd)
     self.global_emb_sharding = NamedSharding(self.global_mesh, self.pe)
-    self.global_emb_layout = jax_layout.Format(
-        jax_layout.Layout(major_to_minor=(0, 1), tiling=((8,),)),
-        self.global_emb_sharding,
+    self.global_emb_layout = utils.embedding_table_format(
+        self.global_emb_sharding.mesh, self.global_emb_sharding.spec
     )
     self.replicated_sharding = NamedSharding(self.global_mesh, P())
 

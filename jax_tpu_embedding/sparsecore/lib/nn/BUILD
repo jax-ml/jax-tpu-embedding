@@ -52,7 +52,6 @@ pytype_strict_library(
         pypi_requirement("einops"),
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
-        pypi_requirement("jax/experimental:layout"),
         pypi_requirement("numpy"),
     ],
 )

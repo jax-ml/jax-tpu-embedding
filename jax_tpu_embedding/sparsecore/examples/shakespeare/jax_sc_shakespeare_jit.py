@@ -27,7 +27,6 @@ from clu import parameter_overview
 import flax
 from flax import linen as nn
 import jax
-from jax.experimental.layout import Format
 import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import NamedSharding
@@ -46,11 +45,6 @@ import orbax.checkpoint as ocp
 
 np.set_printoptions(threshold=np.inf)
 Nested = embedding.Nested
-
-if jax.__version_info__ >= (0, 6, 3):
-  from jax.experimental.layout import Layout as DLL  # pylint: disable=g-import-not-at-top
-else:
-  from jax.experimental.layout import DeviceLocalLayout as DLL  # pylint: disable=g-import-not-at-top  # type: ignore
 
 
 @flax.struct.dataclass
@@ -350,7 +344,8 @@ def run_model():
         emb_variables = {}
         for k, v in restored['emb_variables'].items():
           emb_variables[k] = embedding.EmbeddingVariables(
-              table=v['table'], slot=v['slot'],
+              table=v['table'],
+              slot=v['slot'],
           )
 
   if emb_variables is None:
@@ -360,13 +355,10 @@ def run_model():
     emb_variables = embedding.init_embedding_variables(
         jax.random.key(13), table_specs, global_emb_sharding, num_sc_per_device
     )
-  emb_var_outsharding = Format(
-      DLL(
-          major_to_minor=(0, 1),
-          tiling=((8,),),
-      ),
-      global_emb_sharding,
+  emb_var_outsharding = utils.embedding_table_format(
+      global_emb_sharding.mesh, global_emb_sharding.spec
   )
+
   @partial(
       jax.jit,
       static_argnums=(0, 1, 2, 3),
@@ -555,9 +547,7 @@ def run_model():
     if (step + 1) % _LOSS_RESET_FREQUENCY.value == 0:
       train_metrics = None
       loaded_stats = fdo_client.load()
-      jax.experimental.multihost_utils.sync_global_devices(
-          'FDO_load_barrier'
-      )
+      jax.experimental.multihost_utils.sync_global_devices('FDO_load_barrier')
 
       embedding.update_preprocessing_parameters(
           feature_specs, loaded_stats, num_sc_per_device

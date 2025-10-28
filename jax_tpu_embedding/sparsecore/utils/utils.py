@@ -15,6 +15,12 @@
 
 from absl import flags
 import jax
+from jax.experimental import layout
+
+if jax.__version_info__ >= (0, 6, 3):
+  Layout = layout.Layout
+else:
+  Layout = layout.DeviceLocalLayout  # type: ignore
 
 
 _DUMP_DIR = flags.DEFINE_string(
@@ -32,7 +38,7 @@ def num_sparsecores_per_device(device: jax.Device | None = None):
 
   Args:
     device: JAX device to check.  If None, queries the first device in
-            jax.devices().
+      jax.devices().
 
   Returns:
     Number of sparsecores.
@@ -55,3 +61,16 @@ def num_sparsecores_per_device(device: jax.Device | None = None):
 def tree_summary(tree):
   """Returns the shape and dtype of each leaf in the tree."""
   return jax.tree.map(lambda x: (x.shape, x.dtype), tree)
+
+
+def embedding_table_format(
+    mesh: jax.sharding.Mesh, partition_spec: jax.sharding.PartitionSpec
+) -> jax.sharding.Sharding:
+  """Returns the layout format of the embedding table."""
+  return layout.Format(  # pytype: disable=bad-return-type
+      Layout(
+          major_to_minor=(0, 1),
+          tiling=((8,),),
+      ),
+      jax.sharding.NamedSharding(mesh, partition_spec),
+  )

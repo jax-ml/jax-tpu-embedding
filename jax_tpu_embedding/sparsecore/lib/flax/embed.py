@@ -19,18 +19,12 @@ from typing import Any, Callable, Mapping, TypeVar
 from flax import linen as nn
 from flax import typing
 import jax
-from jax.experimental import layout
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-if jax.__version_info__ >= (0, 6, 3):
-  DLL = layout.Layout
-else:
-  DLL = layout.DeviceLocalLayout  # type: ignore
-Layout = layout.Format
 LogicalNames = typing.LogicalNames
 Nested = embedding.Nested
 EmbeddingLookupInput = embedding.PreprocessedInput
@@ -45,13 +39,7 @@ class WithSparseCoreLayout(nn.Partitioned[A]):
 
   def get_sharding(self, _: jax.sharding.Mesh) -> jax.sharding.Sharding:
     assert self.mesh is not None
-    return Layout(  # pytype: disable=bad-return-type
-        DLL(
-            major_to_minor=(0, 1),
-            tiling=((8,),),
-        ),
-        jax.sharding.NamedSharding(self.mesh, self.get_partition_spec()),
-    )
+    return utils.embedding_table_format(self.mesh, self.get_partition_spec())
 
 
 def with_sparsecore_layout(
