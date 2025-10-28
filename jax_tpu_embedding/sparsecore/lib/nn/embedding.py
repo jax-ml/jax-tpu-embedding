@@ -553,7 +553,7 @@ def preprocess_sparse_dense_matmul_input(
 
   minibatches_arr = np.full(local_device_count, num_minibatches)
   if has_leading_dimension:
-    minibatches_arr.reshape(local_device_count, 1)
+    minibatches_arr = minibatches_arr.reshape(local_device_count, 1)
 
   return (
       PreprocessedInput(SparseDenseMatmulInput(*csr_inputs), minibatches_arr),
@@ -662,7 +662,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
 
   minibatches_arr = np.full(local_device_count, num_minibatches)
   if has_leading_dimension:
-    minibatches_arr.reshape(local_device_count, 1)
+    minibatches_arr = minibatches_arr.reshape(local_device_count, 1)
 
   return (
       PreprocessedInput(SparseDenseMatmulInput(*csr_inputs), minibatches_arr),
