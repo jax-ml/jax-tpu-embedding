@@ -18,6 +18,7 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
@@ -40,7 +41,10 @@ class PartitionedCooTensors {
         bucket_offsets_(),
         curr_sc_id_(0),
         curr_bucket_id_(0),
-        merged_(false) {
+        merged_(false),
+        dedup_col_id_(std::numeric_limits<uint32_t>::max()),
+        dedup_row_id_(std::numeric_limits<uint32_t>::max()),
+        dedup_bucket_id_(-1) {
     coo_tensors_.reserve(reserve_count);
     bucket_offsets_.reserve(1 + num_sc_per_device * bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
@@ -54,12 +58,25 @@ class PartitionedCooTensors {
     last.gain += coo_tensor.gain;
   }
 
+  bool MaybeMerge(int bucket_id, const CooFormat& coo_tensor) {
+    if (bucket_id == dedup_bucket_id_ && coo_tensor.col_id == dedup_col_id_ &&
+        coo_tensor.row_id == dedup_row_id_) {
+      CHECK(!coo_tensors_.empty());
+      MergeWithLastCoo(coo_tensor);
+      return true;
+    }
+    return false;
+  }
+
   // Add Coo tensor for given SC and bucket. Similar to std::vector::push_back.
   void Add(int target_sc_id, int target_bucket_id,
            const CooFormat& coo_tensor) {
     AdvanceBucketOffsets(target_sc_id, target_bucket_id);
 
     coo_tensors_.push_back(coo_tensor);
+    dedup_bucket_id_ = target_bucket_id;
+    dedup_col_id_ = coo_tensor.col_id;
+    dedup_row_id_ = coo_tensor.row_id;
   }
 
   // Get size of COO tensors for given SC.
@@ -217,6 +234,11 @@ class PartitionedCooTensors {
   int curr_bucket_id_;
   // Merged into minibatches?
   bool merged_;
+  // For deduplication, we track the properties of the last ID that was *not*
+  // dropped.
+  uint32_t dedup_col_id_;
+  uint32_t dedup_row_id_;
+  int dedup_bucket_id_;
 };
 
 }  // namespace jax_sc_embedding

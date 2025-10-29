@@ -644,7 +644,7 @@ TEST(SortAndGroupTest, IdDropping) {
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
-  EXPECT_THAT(stats_per_device.dropped_id_count, 32);
+  EXPECT_THAT(stats_per_device.dropped_id_count, 56);
   EXPECT_THAT(stats_per_device.max_ids_per_partition,
               ElementsAreArray({4, 4, 4, 4}));
   EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
@@ -653,9 +653,9 @@ TEST(SortAndGroupTest, IdDropping) {
   EXPECT_THAT(stats_per_device.required_buffer_size,
               ElementsAreArray({32, 32, 32, 32}));
 
-  // Note that sample 2, 3, 6, 7, 10, 11, 14, 15 are dropped.
-  // It's unclear how embedding activations will be constructed without these
-  // samples at this unit test level.
+  // With the corrected cumulative dropping logic, SC0 fills the capacity
+  // for each partition. As a result, all IDs destined for the same partitions
+  // from SC1, SC2, and SC3 are dropped.
   std::vector<CooFormat> expected_sc_0;
   expected_sc_0.push_back(CooFormat(0, 0, 1.0));
   expected_sc_0.push_back(CooFormat(1, 0, 1.0));
@@ -666,44 +666,14 @@ TEST(SortAndGroupTest, IdDropping) {
   expected_sc_0.push_back(CooFormat(0, 3, 1.0));
   expected_sc_0.push_back(CooFormat(1, 3, 1.0));
 
-  std::vector<CooFormat> expected_sc_1;
-  expected_sc_1.push_back(CooFormat(4, 0, 1.0));
-  expected_sc_1.push_back(CooFormat(5, 0, 1.0));
-  expected_sc_1.push_back(CooFormat(4, 1, 1.0));
-  expected_sc_1.push_back(CooFormat(5, 1, 1.0));
-  expected_sc_1.push_back(CooFormat(4, 2, 1.0));
-  expected_sc_1.push_back(CooFormat(5, 2, 1.0));
-  expected_sc_1.push_back(CooFormat(4, 3, 1.0));
-  expected_sc_1.push_back(CooFormat(5, 3, 1.0));
-
-  std::vector<CooFormat> expected_sc_2;
-  expected_sc_2.push_back(CooFormat(8, 0, 1.0));
-  expected_sc_2.push_back(CooFormat(9, 0, 1.0));
-  expected_sc_2.push_back(CooFormat(8, 1, 1.0));
-  expected_sc_2.push_back(CooFormat(9, 1, 1.0));
-  expected_sc_2.push_back(CooFormat(8, 2, 1.0));
-  expected_sc_2.push_back(CooFormat(9, 2, 1.0));
-  expected_sc_2.push_back(CooFormat(8, 3, 1.0));
-  expected_sc_2.push_back(CooFormat(9, 3, 1.0));
-
-  std::vector<CooFormat> expected_sc_3;
-  expected_sc_3.push_back(CooFormat(12, 0, 1.0));
-  expected_sc_3.push_back(CooFormat(13, 0, 1.0));
-  expected_sc_3.push_back(CooFormat(12, 1, 1.0));
-  expected_sc_3.push_back(CooFormat(13, 1, 1.0));
-  expected_sc_3.push_back(CooFormat(12, 2, 1.0));
-  expected_sc_3.push_back(CooFormat(13, 2, 1.0));
-  expected_sc_3.push_back(CooFormat(12, 3, 1.0));
-  expected_sc_3.push_back(CooFormat(13, 3, 1.0));
-
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/0, /*bucket_id=*/0),
               ElementsAreArray(expected_sc_0));
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/1, /*bucket_id=*/0),
-              ElementsAreArray(expected_sc_1));
+              ElementsAreArray(std::vector<CooFormat>{}));
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/2, /*bucket_id=*/0),
-              ElementsAreArray(expected_sc_2));
+              ElementsAreArray(std::vector<CooFormat>{}));
   EXPECT_THAT(coo_tensors_by_id(/*local_sc_id=*/3, /*bucket_id=*/0),
-              ElementsAreArray(expected_sc_3));
+              ElementsAreArray(std::vector<CooFormat>{}));
 }
 
 TEST(InputPreprocessingUtilTest, FillBuffer) {

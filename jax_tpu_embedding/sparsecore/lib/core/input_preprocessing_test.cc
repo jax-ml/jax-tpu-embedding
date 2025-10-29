@@ -59,6 +59,22 @@ using ::testing::Eq;
 using ::testing::Gt;
 using ::testing::SizeIs;
 
+std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
+    const std::vector<std::vector<int64_t>>& samples) {
+  std::vector<int64_t> values;
+  std::vector<int32_t> row_splits;
+  row_splits.push_back(0);
+  for (const auto& sample_ids : samples) {
+    for (const auto& id : sample_ids) {
+      values.push_back(id);
+    }
+    row_splits.push_back(values.size());
+  }
+  using InputBatch =
+      RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
+  return std::make_unique<InputBatch>(values, row_splits);
+}
+
 class TableStackingTest : public ::testing::Test {
   using InputBatch =
       RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
@@ -994,26 +1010,9 @@ void RunPreprocessingOutputIsValidTest(
       std::min(max_unique_ids_per_partition, max_ids_per_partition);
   ASSERT_GT(samples_per_table.size(), 0);
   ASSERT_GT(samples_per_table[0].size(), 0);
-  auto create_input_batch =
-      [](const std::vector<std::vector<int64_t>>& samples_in) {
-        std::vector<int64_t> values;
-        std::vector<int32_t> row_splits;
-        row_splits.push_back(0);
-        for (const auto& sample_ids : samples_in) {
-          for (const auto& id : sample_ids) {
-            values.push_back(id);
-          }
-          row_splits.push_back(values.size());
-        }
-
-        using InputBatch =
-            RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
-        return std::make_unique<InputBatch>(values, row_splits);
-      };
-
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   for (const auto& table_samples : samples_per_table) {
-    input_batches.push_back(create_input_batch(table_samples));
+    input_batches.push_back(CreateInputBatchFromSamples(table_samples));
   }
 
   const int kGlobalDeviceCount = global_device_count;
@@ -1194,6 +1193,132 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
              FeatureStackingStrategy::kSplitThenStack}),
         // Domain for enable_minibatching
         fuzztest::Arbitrary<bool>());
+
+void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
+                         int num_sc_per_device, int global_device_count,
+                         FeatureStackingStrategy feature_stacking_strategy) {
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples(samples));
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables;
+
+  int observed_max_ids;
+  int observed_max_unique_ids;
+
+  PreprocessSparseDenseMatmulInputOptions options_allow_dropping{
+      .local_device_count = 1,
+      .global_device_count = global_device_count,
+      .num_sc_per_device = num_sc_per_device,
+      .allow_id_dropping = true,
+      .feature_stacking_strategy = feature_stacking_strategy,
+      .enable_minibatching = false,
+      .batch_number = 1};
+  PreprocessSparseDenseMatmulInputOptions options_no_dropping{
+      .local_device_count = 1,
+      .global_device_count = global_device_count,
+      .num_sc_per_device = num_sc_per_device,
+      .allow_id_dropping = false,
+      .feature_stacking_strategy = feature_stacking_strategy,
+      .enable_minibatching = false,
+      .batch_number = 1};
+
+  // Run with large max_ids to get stats.
+  {
+    constexpr int kInitialMaxIds = 4096;
+    std::vector<StackedTableMetadata> stacked_table_metadata;
+    stacked_table_metadata.push_back(StackedTableMetadata(
+        /*name=*/"table_0",
+        /*feature_index=*/0, /*max_ids_per_partition=*/kInitialMaxIds,
+        /*max_unique_ids_per_partition=*/kInitialMaxIds, /*row_offset=*/0,
+        /*col_offset=*/0, /*col_shift=*/0, input_batches[0]->size()));
+    stacked_tables["stacked_table"] = stacked_table_metadata;
+
+    absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables,
+                                         options_allow_dropping);
+    ASSERT_TRUE(result.ok());
+
+    const SparseDenseMatmulInputStats& stats = result->stats;
+    observed_max_ids =
+        stats.max_ids_per_partition.at("stacked_table").maxCoeff();
+    observed_max_unique_ids =
+        stats.max_unique_ids_per_partition.at("stacked_table").maxCoeff();
+  }
+
+  // Run with exact stats, expect no id dropping.
+  {
+    StackedTableMetadata& table_metadata =
+        stacked_tables.at("stacked_table")[0];
+    table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);
+    table_metadata.max_unique_ids_per_partition =
+        std::max(1, observed_max_unique_ids);
+    absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables, options_no_dropping);
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result->stats.dropped_id_count.at("stacked_table"), 0);
+  }
+
+  // Run with reduced max_ids, expect id dropping if there were any ids.
+  if (observed_max_ids > 0) {
+    StackedTableMetadata& table_metadata =
+        stacked_tables.at("stacked_table")[0];
+    table_metadata.max_ids_per_partition = std::max(1, observed_max_ids - 1);
+    table_metadata.max_unique_ids_per_partition =
+        std::max(1, observed_max_unique_ids);
+    absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables,
+                                         options_allow_dropping);
+    ASSERT_TRUE(result.ok());
+    EXPECT_GT(result->stats.dropped_id_count.at("stacked_table"), 0);
+    EXPECT_EQ(
+        result->stats.max_ids_per_partition.at("stacked_table").maxCoeff(),
+        observed_max_ids);
+    EXPECT_EQ(result->stats.max_unique_ids_per_partition.at("stacked_table")
+                  .maxCoeff(),
+              observed_max_unique_ids);
+  }
+
+  // Run with reduced max_unique_ids, expect id dropping if there were any ids.
+  if (observed_max_unique_ids > 0) {
+    StackedTableMetadata& table_metadata =
+        stacked_tables.at("stacked_table")[0];
+    table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);
+    table_metadata.max_unique_ids_per_partition =
+        std::max(1, observed_max_unique_ids - 1);
+    absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables,
+                                         options_allow_dropping);
+    ASSERT_TRUE(result.ok());
+    EXPECT_GT(result->stats.dropped_id_count.at("stacked_table"), 0);
+    EXPECT_EQ(
+        result->stats.max_ids_per_partition.at("stacked_table").maxCoeff(),
+        observed_max_ids);
+    EXPECT_EQ(result->stats.max_unique_ids_per_partition.at("stacked_table")
+                  .maxCoeff(),
+              observed_max_unique_ids);
+  }
+}
+
+FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)
+    .WithDomains(
+        // Domain for samples
+        fuzztest::VectorOf(fuzztest::VectorOf(fuzztest::InRange<int64_t>(0,
+                                                                         10000))
+                               .WithMaxSize(100))
+            .WithSize(32),
+        // Domain for num_sc_per_device
+        fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for global_device_count
+        fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for feature_stacking_strategy
+        fuzztest::ElementOf<FeatureStackingStrategy>(
+            {FeatureStackingStrategy::kStackThenSplit,
+             FeatureStackingStrategy::kSplitThenStack}));
 
 }  // namespace
 }  // namespace jax_sc_embedding
