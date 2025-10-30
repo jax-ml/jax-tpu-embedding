@@ -170,6 +170,125 @@ inline void LogSparseCoreStats(
   }
 }
 
+struct LocalSparseCoreTensorGroupingContext {
+  const std::vector<uint64_t>& keys;
+  const std::vector<CooFormat>& coo_tensors;
+  const StackedTableMetadata& stacked_table_metadata;
+  const PreprocessSparseDenseMatmulInputOptions& options;
+  const bool create_buckets;
+  const int32_t local_sc_id;
+
+  // Outputs.
+  PartitionedCooTensors& grouped_coo_tensors;
+  MatrixXi& ids_per_sc_partition_per_bucket;
+  MatrixXi& unique_ids_per_partition_per_bucket;
+  StatsPerDevice& stats;
+  MatrixXi& kept_ids_per_sc_partition_per_bucket;
+  MatrixXi& kept_unique_ids_per_partition_per_bucket;
+};
+
+inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
+    LocalSparseCoreTensorGroupingContext context) {
+  // Unpack context for readability.
+  const PreprocessSparseDenseMatmulInputOptions& options = context.options;
+  const StackedTableMetadata& stacked_table_metadata =
+      context.stacked_table_metadata;
+  const std::vector<CooFormat>& coo_tensors = context.coo_tensors;
+  PartitionedCooTensors& grouped_coo_tensors = context.grouped_coo_tensors;
+  StatsPerDevice& stats = context.stats;
+  MatrixXi& observed_ids = context.ids_per_sc_partition_per_bucket;
+  MatrixXi& observed_unique_ids = context.unique_ids_per_partition_per_bucket;
+  MatrixXi& kept_ids = context.kept_ids_per_sc_partition_per_bucket;
+  MatrixXi& kept_unique_ids = context.kept_unique_ids_per_partition_per_bucket;
+
+  const bool allow_id_dropping = options.allow_id_dropping;
+  const uint32_t global_sc_count = options.GetNumScs();
+  const int max_ids_per_partition =
+      stacked_table_metadata.max_ids_per_partition;
+  const int max_unique_ids_per_partition =
+      stacked_table_metadata.max_unique_ids_per_partition;
+  uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
+  uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
+  uint32_t prev_bucket_id = 0;
+  // Tracks whether the current unique `col_id` should be dropped for exceeding
+  // capacity. This decision is sticky for all tensors with the same `col_id`
+  // within the same bucket.
+  bool dropping_current_unique_col_id = false;
+  for (const uint64_t key : context.keys) {
+    // Step 1: Unpack key to get tensor coordinates.
+    const uint32_t index = key & CooFormat::kIndexMask;
+    const CooFormat& coo_tensor = coo_tensors[index];
+    const uint32_t col_id = coo_tensor.col_id;
+    const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
+    const uint32_t bucket_id =
+        context.create_buckets
+            ? coo_tensor.GetBucketId(options.minibatching_bucketing_hash_fn)
+            : 0;
+    const uint32_t row_id = coo_tensor.row_id;
+
+    // Step 2: Handle duplicates.
+    // An ID that is a duplicate of a previously non-dropped ID is merged.
+    // It does not count as a new ID for stats and does not go through dropping
+    // logic.
+    if (grouped_coo_tensors.MaybeMerge(bucket_id, coo_tensor)) {
+      continue;
+    }
+    // If the ID is a duplicate of the last seen ID, it must have been dropped
+    // (otherwise it would have been merged above), so drop this one too.
+    if (bucket_id == prev_bucket_id && col_id == prev_col_id &&
+        row_id == prev_row_id) {
+      ++stats.dropped_id_count;
+      continue;
+    }
+
+    // Step 3: Update observed statistics for the new ID.
+    // We have a new column if the bucket_id changes (we can't dedupe across
+    // bucket boundaries) or if the col_id changes within the same bucket. Note
+    // that multiple col_ids can map to the same bucket.
+    const bool is_new_col =
+        (bucket_id != prev_bucket_id || col_id != prev_col_id);
+    // Update observed stats. These are never decremented and are used for
+    // reporting.
+    observed_ids(global_sc_id, bucket_id) += 1;
+    if (is_new_col) {
+      observed_unique_ids(global_sc_id, bucket_id) += 1;
+      dropping_current_unique_col_id =
+          (kept_unique_ids(global_sc_id, bucket_id) + 1) >
+          max_unique_ids_per_partition;
+    }
+
+    // Step 4: Determine if the ID should be dropped based on capacity limits.
+    // We do NOT drop IDs when minibatching is enabled and we are in the
+    // first pass (`create_buckets=false`), as we need to detect limit
+    // overflows to decide if minibatching is required.
+    const bool can_drop_id =
+        !options.enable_minibatching || context.create_buckets;
+    const bool exceeds_ids_limit =
+        (kept_ids(global_sc_id, bucket_id) + 1) > max_ids_per_partition;
+
+    // Step 5: Add ID to result or drop it.
+    if (can_drop_id && allow_id_dropping &&
+        (exceeds_ids_limit || dropping_current_unique_col_id)) {
+      // Dropped id.
+      ++stats.dropped_id_count;
+    } else {
+      grouped_coo_tensors.Add(context.local_sc_id, bucket_id, coo_tensor);
+      // Update kept counts.
+      kept_ids(global_sc_id, bucket_id) += 1;
+      if (is_new_col) {
+        kept_unique_ids(global_sc_id, bucket_id) += 1;
+      }
+    }
+
+    // Step 6: Update state for next iteration.
+    // This must be done regardless of whether the ID was dropped to ensure
+    // correct stats collection for subsequent IDs.
+    prev_col_id = col_id;
+    prev_row_id = row_id;
+    prev_bucket_id = bucket_id;
+  }
+}
+
 }  // namespace internal
 
 // Sorts and groups the provided COO tensors in this hierarchy: Local SC ->
@@ -219,6 +338,12 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       coo_tensors.size(), num_sc_per_device, global_sc_count, bucket_count);
 
   uint32_t coo_tensor_index = 0;
+  // These counters track the number of IDs that are actually kept (not dropped)
+  // for each partition and bucket across all local SCs for this device.
+  MatrixXi kept_ids_per_sc_partition_per_bucket =
+      MatrixXi::Zero(global_sc_count, bucket_count);
+  MatrixXi kept_unique_ids_per_partition_per_bucket =
+      MatrixXi::Zero(global_sc_count, bucket_count);
 
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
@@ -250,62 +375,24 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     DCHECK(expected_keys_size == 0 || keys.size() == expected_keys_size);
     hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
 
-    uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
-    uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
-    uint32_t prev_bucket_id = 0;
-    for (const uint64_t key : keys) {
-      uint32_t index = key & CooFormat::kIndexMask;
+    internal::GroupAndDeduplicateCooTensorsForLocalSparseCore({
+        .keys = keys,
+        .coo_tensors = coo_tensors,
+        .stacked_table_metadata = stacked_table_metadata,
+        .options = options,
+        .create_buckets = create_buckets,
+        .local_sc_id = local_sc_id,
+        .grouped_coo_tensors = grouped_coo_tensors,
+        .ids_per_sc_partition_per_bucket = ids_per_sc_partition_per_bucket,
+        .unique_ids_per_partition_per_bucket =
+            unique_ids_per_partition_per_bucket,
+        .stats = stats,
+        .kept_ids_per_sc_partition_per_bucket =
+            kept_ids_per_sc_partition_per_bucket,
+        .kept_unique_ids_per_partition_per_bucket =
+            kept_unique_ids_per_partition_per_bucket,
+    });
 
-      const CooFormat& coo_tensor = coo_tensors[index];
-      const uint32_t col_id = coo_tensor.col_id;
-      const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
-      const uint32_t bucket_id =
-          create_buckets
-              ? coo_tensor.GetBucketId(options.minibatching_bucketing_hash_fn)
-              : 0;
-      const uint32_t row_id = coo_tensor.row_id;
-
-      // If the row ids and col ids are both same as the previous one,
-      // dedup the id by adding the gains.
-      if (col_id == prev_col_id && row_id == prev_row_id) {
-        grouped_coo_tensors.MergeWithLastCoo(coo_tensor);
-        continue;
-      }
-
-      const bool is_new_col =
-          (bucket_id != prev_bucket_id || col_id != prev_col_id);
-      // For stats, we need to count this ID if it is not a duplicate.
-      ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) += 1;
-      if (is_new_col) {
-        unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) += 1;
-      }
-
-      // We do NOT drop IDs when minibatching is enabled and we are in the
-      // first pass (`create_buckets=false`), as we need to detect limit
-      // overflows to decide if minibatching is required.
-      const bool can_drop_id = !options.enable_minibatching || create_buckets;
-
-      const bool exceeds_ids_limit =
-          ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) >
-          max_ids_per_partition;
-      const bool exceeds_unique_ids_limit =
-          is_new_col &&
-          unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) >
-              max_unique_ids_per_partition;
-      const bool would_exceed_limits =
-          exceeds_ids_limit || exceeds_unique_ids_limit;
-
-      // If ID dropping is allowed and limits would be exceeded, drop the ID.
-      if (can_drop_id && would_exceed_limits && allow_id_dropping) {
-        // Dropped id.
-        ++stats.dropped_id_count;
-      } else {
-        grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
-        prev_col_id = col_id;
-        prev_row_id = row_id;
-        prev_bucket_id = bucket_id;
-      }
-    }  // end key loop
     grouped_coo_tensors.FillRemainingScBuckets();
 
     // Update global max using this device's values.
