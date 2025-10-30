@@ -1205,6 +1205,8 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
 
   int observed_max_ids;
   int observed_max_unique_ids;
+  int required_buffer_size_per_device;
+  constexpr int kInitialMaxIds = 4096;
 
   PreprocessSparseDenseMatmulInputOptions options_allow_dropping{
       .local_device_count = 1,
@@ -1225,7 +1227,6 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
 
   // Run with large max_ids to get stats.
   {
-    constexpr int kInitialMaxIds = 4096;
     std::vector<StackedTableMetadata> stacked_table_metadata;
     stacked_table_metadata.push_back(StackedTableMetadata(
         /*name=*/"table_0",
@@ -1245,6 +1246,9 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
         stats.max_ids_per_partition.at("stacked_table").maxCoeff();
     observed_max_unique_ids =
         stats.max_unique_ids_per_partition.at("stacked_table").maxCoeff();
+    required_buffer_size_per_device =
+        stats.required_buffer_sizes.at("stacked_table").maxCoeff() *
+        num_sc_per_device;
   }
 
   // Run with exact stats, expect no id dropping.
@@ -1254,6 +1258,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);
     table_metadata.max_unique_ids_per_partition =
         std::max(1, observed_max_unique_ids);
+    table_metadata.suggested_coo_buffer_size_per_device = std::nullopt;
     absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
         PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                          stacked_tables, options_no_dropping);
@@ -1268,6 +1273,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids - 1);
     table_metadata.max_unique_ids_per_partition =
         std::max(1, observed_max_unique_ids);
+    table_metadata.suggested_coo_buffer_size_per_device = std::nullopt;
     absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
         PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                          stacked_tables,
@@ -1289,6 +1295,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);
     table_metadata.max_unique_ids_per_partition =
         std::max(1, observed_max_unique_ids - 1);
+    table_metadata.suggested_coo_buffer_size_per_device = std::nullopt;
     absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
         PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                          stacked_tables,
@@ -1301,6 +1308,44 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
     EXPECT_EQ(result->stats.max_unique_ids_per_partition.at("stacked_table")
                   .maxCoeff(),
               observed_max_unique_ids);
+  }
+
+  // Run with suggested_coo_buffer_size_per_device = observed buffer size.
+  // Expect no id dropping.
+  {
+    StackedTableMetadata& table_metadata =
+        stacked_tables.at("stacked_table")[0];
+    table_metadata.max_ids_per_partition = kInitialMaxIds;
+    table_metadata.max_unique_ids_per_partition = kInitialMaxIds;
+    table_metadata.suggested_coo_buffer_size_per_device =
+        std::max(1, required_buffer_size_per_device);
+    absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables, options_no_dropping);
+    ASSERT_TRUE(result.ok());
+    EXPECT_EQ(result->stats.dropped_id_count.at("stacked_table"), 0);
+  }
+
+  // Run with suggested_coo_buffer_size_per_device less than observed buffer
+  // size. Expect id dropping if buffer size is reduced enough to be less than
+  // required amount due to alignment.
+  const int kDeviceCooBufferAlignment =
+      TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_sc_per_device;
+  if (required_buffer_size_per_device > kDeviceCooBufferAlignment) {
+    StackedTableMetadata& table_metadata =
+        stacked_tables.at("stacked_table")[0];
+    table_metadata.max_ids_per_partition = kInitialMaxIds;
+    table_metadata.max_unique_ids_per_partition = kInitialMaxIds;
+    // Set suggested size so that after alignment it's guaranteed to be less
+    // than observed_required_buffer_size for at least one SC.
+    table_metadata.suggested_coo_buffer_size_per_device =
+        required_buffer_size_per_device - kDeviceCooBufferAlignment;
+    absl::StatusOr<PreprocessSparseDenseMatmulOutput> result =
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables,
+                                         options_allow_dropping);
+    ASSERT_TRUE(result.ok());
+    EXPECT_GT(result->stats.dropped_id_count.at("stacked_table"), 0);
   }
 }
 
