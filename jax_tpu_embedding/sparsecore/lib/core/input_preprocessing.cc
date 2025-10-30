@@ -321,7 +321,7 @@ void CheckBufferUsage(int max_required_buffer_size_per_device,
     const int64_t buffer_shortfall =
         std::max(int64_t{0}, required_buffer_bytes - coo_buffer_bytes);
 
-    LOG_IF(WARNING, batch_number % 100 == 0) << absl::StrFormat(
+    LOG_IF(WARNING, batch_number % 10000 == 0) << absl::StrFormat(
         "Required usage %.2f%% (%d bytes) of computed/given buffer size "
         "(%d bytes) for stacked table %s (Wasted space: %d bytes, "
         "Buffer shortfall: %d bytes)",

@@ -248,11 +248,11 @@ int ComputeCooBufferSizePerDevice(
       max_ids_rounded_up * num_scs_per_device * num_scs *
       (use_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
   const std::string& stacked_table_name = stacked_table_metadata[0].name;
-  LOG_IF(INFO, batch_number % 100 == 0)
-      << "Theoretical Max for table " << stacked_table_name << ": "
-      << theoretical_max << " (max_ids_rounded_up: " << max_ids_rounded_up
-      << " num_scs_per_device: " << num_scs_per_device
-      << " num_scs: " << num_scs << ")";
+  VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
+                       << ": " << theoretical_max
+                       << " (max_ids_rounded_up: " << max_ids_rounded_up
+                       << " num_scs_per_device: " << num_scs_per_device
+                       << " num_scs: " << num_scs << ")";
   // We do not take the min of `suggested_coo_buffer_size_per_device` and
   // `theoretical_max` because `theoretical_max` is dynamic and depends on
   // `max_ids_per_partition`. Taking the min could cause unexpected changes in
@@ -261,14 +261,14 @@ int ComputeCooBufferSizePerDevice(
   // `suggested_coo_buffer_size_per_device` is larger than `theoretical_max`.
   int64_t computed_coo_buffer_size_per_device = theoretical_max;
   if (suggested_coo_buffer_size_per_device.has_value()) {
-    LOG_IF(INFO, batch_number % 100 == 0)
-        << "Suggested Coo Buffer Size for table " << stacked_table_name << ": "
-        << suggested_coo_buffer_size_per_device.value();
+    VLOG_EVERY_N(2, 10007) << "Suggested Coo Buffer Size for table "
+                         << stacked_table_name << ": "
+                         << suggested_coo_buffer_size_per_device.value();
     computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
         theoretical_max, suggested_coo_buffer_size_per_device,
         num_scs_per_device, stacked_table_name);
   } else {
-    LOG_IF(WARNING, batch_number % 100 == 0)
+    LOG_IF(WARNING, batch_number % 10000 == 0)
         << "No Coo Buffer Size provided for table " << stacked_table_name
         << ", the default value (" << theoretical_max
         << ") may be too "
@@ -276,9 +276,9 @@ int ComputeCooBufferSizePerDevice(
            "the sparse dense matmul preprocessing API and update using "
            "`embedding.update_preprocessing_parameters`. ";
   }
-  LOG_IF(INFO, batch_number % 100 == 0)
-      << "Computed Coo Buffer Size for table " << stacked_table_name << ": "
-      << computed_coo_buffer_size_per_device;
+  VLOG_EVERY_N(2, 10007) << "Computed Coo Buffer Size for table "
+                       << stacked_table_name << ": "
+                       << computed_coo_buffer_size_per_device;
   // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
   CHECK(computed_coo_buffer_size_per_device > 0 &&
