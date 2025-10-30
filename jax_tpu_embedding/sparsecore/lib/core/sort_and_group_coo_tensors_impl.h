@@ -107,6 +107,69 @@ inline void UpdateMaxIdsPerPartition(BlockRow<int>& global_max,
       global_max.cwiseMax(local_max_per_bucket.rowwise().sum().transpose());
 }
 
+template <typename SplitType>
+inline void UpdateMinibatchingSplit(
+    MatrixXi& ids_per_sc_partition_per_bucket,
+    MatrixXi& unique_ids_per_partition_per_bucket,
+    const int32_t global_sc_count, const int32_t max_ids_per_partition,
+    const int32_t max_unique_ids_per_partition, SplitType& minibatching_split) {
+  // This works both when minibatching is required and not. In the former
+  // case we have bool which tells us if minibatching is required,
+  // in the latter case it is std::bitset<64> which tells us the exact
+  // splits.
+  for (int global_sc_id = 0; global_sc_id < global_sc_count; ++global_sc_id) {
+    auto ids_per_bucket =
+        ids_per_sc_partition_per_bucket.row(global_sc_id).array();
+    auto unique_ids_per_bucket =
+        unique_ids_per_partition_per_bucket.row(global_sc_id).array();
+    if constexpr (std::is_same_v<SplitType, MinibatchingSplit>) {
+      // The arrays must be mutable as ComputeMinibatchingSplit modifies them.
+      // absl::Makespan works because the array would be row-major and
+      // values would be contiguous in memory.
+      static_assert(decltype(ids_per_bucket)::IsRowMajor);
+      static_assert(decltype(unique_ids_per_bucket)::IsRowMajor);
+      // NOTE: ComputeSplit modifies the span, but we have already updated
+      // the output stats.
+      minibatching_split |= ComputeMinibatchingSplit(
+          absl::MakeSpan(ids_per_bucket.data(), ids_per_bucket.size()),
+          max_ids_per_partition);
+      minibatching_split |=
+          ComputeMinibatchingSplit(absl::MakeSpan(unique_ids_per_bucket.data(),
+                                                  unique_ids_per_bucket.size()),
+                                   max_unique_ids_per_partition);
+    } else {
+      minibatching_split |=
+          unique_ids_per_bucket.maxCoeff() > max_unique_ids_per_partition ||
+          ids_per_bucket.maxCoeff() > max_ids_per_partition;
+    }
+  }
+}
+
+inline void LogSparseCoreStats(
+    const int32_t local_sc_id, const absl::string_view stacked_table_name,
+    const MatrixXi& ids_per_sc_partition_per_bucket,
+    const MatrixXi& unique_ids_per_partition_per_bucket, const size_t keys_size,
+    const PartitionedCooTensors& grouped_coo_tensors) {
+  if (VLOG_IS_ON(2)) {
+    LOG(INFO) << "For table " << stacked_table_name << " on local SparseCore "
+              << local_sc_id
+              << ": Observed ids per global SparseCore partition: "
+              << ids_per_sc_partition_per_bucket.rowwise().sum();
+
+    LOG(INFO) << "For table " << stacked_table_name << " on local SparseCore "
+              << local_sc_id
+              << ": Observed unique ids per global SparseCore partition: "
+              << unique_ids_per_partition_per_bucket.rowwise().sum();
+
+    LOG(INFO) << "For table " << stacked_table_name << " on local SparseCore "
+              << local_sc_id << ": Total number of ids processed: " << keys_size
+              << ", total after deduplication: "
+              << ids_per_sc_partition_per_bucket.sum()
+              << ", total after drop id: "
+              << grouped_coo_tensors.Size(local_sc_id);
+  }
+}
+
 }  // namespace internal
 
 // Sorts and groups the provided COO tensors in this hierarchy: Local SC ->
@@ -206,42 +269,43 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       // dedup the id by adding the gains.
       if (col_id == prev_col_id && row_id == prev_row_id) {
         grouped_coo_tensors.MergeWithLastCoo(coo_tensor);
-      } else {
-        const bool is_new_col =
-            (bucket_id != prev_bucket_id || col_id != prev_col_id);
-        // For stats, we need to count this ID if it is not a duplicate.
-        ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) += 1;
-        if (is_new_col) {
-          unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) += 1;
-        }
-
-        // We do NOT drop IDs when minibatching is enabled and we are in the
-        // first pass (`create_buckets=false`), as we need to detect limit
-        // overflows to decide if minibatching is required. So, we only check if
-        // limits would be exceeded in cases where we might drop an ID.
-        bool would_exceed_limits = false;
-        if (!options.enable_minibatching || create_buckets) {
-          would_exceed_limits =
-              (ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) >
-               max_ids_per_partition) ||
-              (is_new_col &&
-               (unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) >
-                max_unique_ids_per_partition));
-        }
-
-        // If adding the ID would exceed limits and ID dropping is allowed, drop
-        // it.
-        if (would_exceed_limits && allow_id_dropping) {
-          // Dropped id.
-          ++stats.dropped_id_count;
-        } else {
-          grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
-          prev_col_id = col_id;
-          prev_row_id = row_id;
-          prev_bucket_id = bucket_id;
-        }
+        continue;
       }
-    }
+
+      const bool is_new_col =
+          (bucket_id != prev_bucket_id || col_id != prev_col_id);
+      // For stats, we need to count this ID if it is not a duplicate.
+      ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) += 1;
+      if (is_new_col) {
+        unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) += 1;
+      }
+
+      // We do NOT drop IDs when minibatching is enabled and we are in the
+      // first pass (`create_buckets=false`), as we need to detect limit
+      // overflows to decide if minibatching is required.
+      const bool can_drop_id = !options.enable_minibatching || create_buckets;
+
+      const bool exceeds_ids_limit =
+          ids_per_sc_partition_per_bucket(global_sc_id, bucket_id) >
+          max_ids_per_partition;
+      const bool exceeds_unique_ids_limit =
+          is_new_col &&
+          unique_ids_per_partition_per_bucket(global_sc_id, bucket_id) >
+              max_unique_ids_per_partition;
+      const bool would_exceed_limits =
+          exceeds_ids_limit || exceeds_unique_ids_limit;
+
+      // If ID dropping is allowed and limits would be exceeded, drop the ID.
+      if (can_drop_id && would_exceed_limits && allow_id_dropping) {
+        // Dropped id.
+        ++stats.dropped_id_count;
+      } else {
+        grouped_coo_tensors.Add(local_sc_id, bucket_id, coo_tensor);
+        prev_col_id = col_id;
+        prev_row_id = row_id;
+        prev_bucket_id = bucket_id;
+      }
+    }  // end key loop
     grouped_coo_tensors.FillRemainingScBuckets();
 
     // Update global max using this device's values.
@@ -258,21 +322,9 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
             })
             .sum();
 
-    if (VLOG_IS_ON(2)) {
-      LOG(INFO) << "Observed ids per partition/sparsecore"
-                << " for table " << stacked_table_name << ": "
-                << ids_per_sc_partition_per_bucket.rowwise().sum();
-
-      LOG(INFO) << "Observed unique ids per partition/sparsecore"
-                << " for table " << stacked_table_name << ": "
-                << unique_ids_per_partition_per_bucket.rowwise().sum();
-
-      LOG(INFO) << "Total number of ids for table " << stacked_table_name
-                << " on SparseCore" << local_sc_id << ": " << keys.size()
-                << ", after deduplication: "
-                << ids_per_sc_partition_per_bucket.sum()
-                << ", after drop id: " << grouped_coo_tensors.Size(local_sc_id);
-    }
+    internal::LogSparseCoreStats(
+        local_sc_id, stacked_table_name, ids_per_sc_partition_per_bucket,
+        unique_ids_per_partition_per_bucket, keys.size(), grouped_coo_tensors);
 
     const int32_t observed_max_ids_per_bucket =
         ids_per_sc_partition_per_bucket.maxCoeff();
@@ -280,34 +332,10 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
         unique_ids_per_partition_per_bucket.maxCoeff();
 
     if (options.enable_minibatching) {
-      // This works both when minibatching is required and not. In the former
-      // case we have bool which tells us if minibatching is required,
-      // in the latter case it is std::bitset<64> which tells us the exact
-      // splits.
-      for (int global_sc_id = 0; global_sc_id < global_sc_count;
-           ++global_sc_id) {
-        auto ids_per_bucket =
-            ids_per_sc_partition_per_bucket.row(global_sc_id).array();
-        auto unique_ids_per_bucket =
-            unique_ids_per_partition_per_bucket.row(global_sc_id).array();
-        if constexpr (std::is_same_v<SplitType, MinibatchingSplit>) {
-          // absl::Makespan works because the array would be row-major and
-          // values would be contiguous in memory.
-          static_assert(decltype(ids_per_bucket)::IsRowMajor);
-          static_assert(decltype(unique_ids_per_bucket)::IsRowMajor);
-          // NOTE: ComputeSplit modifies the span, but we have already updated
-          // the output stats.
-          minibatching_split |= internal::ComputeMinibatchingSplit(
-              absl::MakeSpan(ids_per_bucket), max_ids_per_partition);
-          minibatching_split |= internal::ComputeMinibatchingSplit(
-              absl::MakeSpan(unique_ids_per_bucket),
-              max_unique_ids_per_partition);
-        } else {
-          minibatching_split |=
-              unique_ids_per_bucket.maxCoeff() > max_unique_ids_per_partition ||
-              ids_per_bucket.maxCoeff() > max_ids_per_partition;
-        }
-      }
+      internal::UpdateMinibatchingSplit(
+          ids_per_sc_partition_per_bucket, unique_ids_per_partition_per_bucket,
+          global_sc_count, max_ids_per_partition, max_unique_ids_per_partition,
+          minibatching_split);
     }
 
     // Only validate if creating minibatching buckets or when minibatching is
@@ -317,7 +345,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
           observed_max_ids_per_bucket, observed_max_unique_ids_per_bucket,
           max_ids_per_partition, max_unique_ids_per_partition,
           stacked_table_name, allow_id_dropping);
-  }
+  }  // end local_sc_id loop
 
   return grouped_coo_tensors;
 }
