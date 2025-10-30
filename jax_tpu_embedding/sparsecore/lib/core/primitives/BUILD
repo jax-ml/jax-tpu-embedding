@@ -32,6 +32,9 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -43,6 +46,9 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -58,6 +64,10 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -73,6 +83,10 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -88,6 +102,10 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -101,6 +119,10 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -116,6 +138,10 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -131,6 +157,10 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
@@ -143,6 +173,11 @@ pytype_strict_library(
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
     ],
 )
 
@@ -156,6 +191,9 @@ pytype_strict_library(
         pypi_requirement("jax"),
         pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )
