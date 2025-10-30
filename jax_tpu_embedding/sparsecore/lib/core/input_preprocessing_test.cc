@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -935,10 +936,10 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
   EXPECT_THAT(sync_keys_set, SizeIs(kBatchCount * 2));
 }
 
-void ValidateCooId(int embedding_id, int sample_id, int64_t table_shard_size,
+void ValidateCooId(int embedding_id, int sample_id, int64_t total_padded_vocab,
                    int batch_size_per_sc) {
   EXPECT_GE(embedding_id, 0);
-  EXPECT_LE(embedding_id, table_shard_size);
+  EXPECT_LT(embedding_id, total_padded_vocab);
   EXPECT_GE(sample_id, 0);
   EXPECT_LT(sample_id, batch_size_per_sc);
 }
@@ -953,8 +954,8 @@ void ValidateMinibatchOrSparseCoreSlice(
     const Eigen::Ref<const RowVectorXi>& row_pointers_slice,
     const Eigen::Ref<const RowVectorXi>& embedding_ids_slice,
     const Eigen::Ref<const RowVectorXi>& sample_ids_slice,
-    int64_t table_shard_size, int batch_size_per_sc, int max_ids_per_partition,
-    int max_unique_ids_per_partition) {
+    int64_t total_padded_vocab, int batch_size_per_sc,
+    int max_ids_per_partition, int max_unique_ids_per_partition) {
   int32_t start_index = 0;
   for (int i = 0; i < row_pointers_slice.size(); ++i) {
     int end_index = row_pointers_slice(i);
@@ -962,12 +963,18 @@ void ValidateMinibatchOrSparseCoreSlice(
     ASSERT_LE(end_index, embedding_ids_slice.size());
     int ids_count = 0;
     absl::flat_hash_set<int> unique_ids;
+    absl::flat_hash_set<std::pair<int, int>> seen_ids;
     for (int j = start_index; j < end_index; ++j) {
-      ASSERT_NE(embedding_ids_slice(j), INT_MAX);
-      ValidateCooId(embedding_ids_slice(j), sample_ids_slice(j),
-                    table_shard_size, batch_size_per_sc);
+      const int sample_id = sample_ids_slice(j);
+      const int embedding_id = embedding_ids_slice(j);
+      ASSERT_NE(embedding_id, INT_MAX);
+      ValidateCooId(embedding_id, sample_id, total_padded_vocab,
+                    batch_size_per_sc);
+      EXPECT_TRUE(seen_ids.insert({sample_id, embedding_id}).second)
+          << "Duplicate (row_id, col_id) found: (" << sample_id << ", "
+          << embedding_id << ")";
       ids_count++;
-      unique_ids.insert(embedding_ids_slice(j));
+      unique_ids.insert(embedding_id);
       ASSERT_LE(ids_count, max_ids_per_partition);
       ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
     }
@@ -975,19 +982,18 @@ void ValidateMinibatchOrSparseCoreSlice(
   }
 }
 
-void PreprocessingOutputIsValid(
-    std::tuple<
-        std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
-        std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
-        std::vector<std::vector<int64_t>>>
-        samples,
-    int num_sc_per_device, int global_device_count, int max_ids_per_partition,
+void RunPreprocessingOutputIsValidTest(
+    absl::Span<const std::vector<std::vector<int64_t>>> samples_per_table,
+    absl::Span<const int> table_vocabs, int num_sc_per_device,
+    int global_device_count, int max_ids_per_partition,
     int max_unique_ids_per_partition,
     FeatureStackingStrategy feature_stacking_strategy,
     bool enable_minibatching) {
   // Max unique ids should be less than or equal to max ids.
   max_unique_ids_per_partition =
       std::min(max_unique_ids_per_partition, max_ids_per_partition);
+  ASSERT_GT(samples_per_table.size(), 0);
+  ASSERT_GT(samples_per_table[0].size(), 0);
   auto create_input_batch =
       [](const std::vector<std::vector<int64_t>>& samples_in) {
         std::vector<int64_t> values;
@@ -1006,26 +1012,19 @@ void PreprocessingOutputIsValid(
       };
 
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
-  std::apply(
-      [&](const auto&... table_samples) {
-        (input_batches.push_back(create_input_batch(table_samples)), ...);
-      },
-      samples);
+  for (const auto& table_samples : samples_per_table) {
+    input_batches.push_back(create_input_batch(table_samples));
+  }
 
   const int kGlobalDeviceCount = global_device_count;
   const int kBatchSize = input_batches[0]->size();
   const int kNumScs = num_sc_per_device * kGlobalDeviceCount;
 
-  const std::vector<int> kTableVocabs = {400000000, 400000000, 400000000,
-                                         400000000, 100000000};
-
-  auto round_up = [&](int value, int multiple) {
-    return (value + multiple - 1) / multiple * multiple;
-  };
+  CHECK_EQ(samples_per_table.size(), table_vocabs.size());
 
   std::vector<StackedTableMetadata> stacked_table_metadata;
   int64_t current_col_offset = 0;
-  for (int i = 0; i < kTableVocabs.size(); ++i) {
+  for (int i = 0; i < table_vocabs.size(); ++i) {
     stacked_table_metadata.push_back(StackedTableMetadata(
         /*name=*/absl::StrCat("table_", i),
         /*feature_index=*/i, max_ids_per_partition,
@@ -1034,8 +1033,8 @@ void PreprocessingOutputIsValid(
         /*col_offset=*/static_cast<int>(current_col_offset),
         /*col_shift=*/i % 4, kBatchSize,
         /*suggested_coo_buffer_size_per_device=*/std::nullopt,
-        RowCombiner::kSum, kTableVocabs[i] - 1));
-    current_col_offset += round_up(kTableVocabs[i], 8 * kNumScs);
+        RowCombiner::kSum, table_vocabs[i] - 1));
+    current_col_offset += xla::RoundUpTo(table_vocabs[i], 8 * kNumScs);
   }
 
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
@@ -1064,7 +1063,7 @@ void PreprocessingOutputIsValid(
   const int32_t row_pointers_unpadded_size =
       num_minibatches * kNumScs * num_sc_per_device;
   const int batch_size_per_sc = xla::CeilOfRatio<int>(
-      kBatchSize * kTableVocabs.size(), num_sc_per_device);
+      kBatchSize * table_vocabs.size(), num_sc_per_device);
 
   if (options.enable_minibatching) {
     ValidateMinibatchOrSparseCoreSlice(
@@ -1089,44 +1088,112 @@ void PreprocessingOutputIsValid(
   }
 }
 
-FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValid)
+void PreprocessingOutputIsValidComplex(
+    std::tuple<
+        std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
+        std::vector<std::vector<int64_t>>, std::vector<std::vector<int64_t>>,
+        std::vector<std::vector<int64_t>>>
+        samples_tuple,
+    absl::Span<const int> table_vocabs, int num_sc_per_device,
+    int global_device_count, int max_ids_per_partition,
+    int max_unique_ids_per_partition,
+    FeatureStackingStrategy feature_stacking_strategy,
+    bool enable_minibatching) {
+  std::vector<std::vector<std::vector<int64_t>>> samples_vector;
+  std::apply(
+      [&](const auto&... table_samples) {
+        (samples_vector.push_back(table_samples), ...);
+      },
+      samples_tuple);
+  RunPreprocessingOutputIsValidTest(
+      samples_vector, table_vocabs, num_sc_per_device, global_device_count,
+      max_ids_per_partition, max_unique_ids_per_partition,
+      feature_stacking_strategy, enable_minibatching);
+}
+
+FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
     .WithDomains(
+        // Domain for samples_tuple
         fuzztest::TupleOf(
             /*samples[0]=*/
             fuzztest::VectorOf(
                 fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 399999999))
-                    .WithMaxSize(10))
+                    .WithMaxSize(1000))
                 .WithSize(128),
             /*samples[1]=*/
             fuzztest::VectorOf(
                 fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 399999999))
-                    .WithMaxSize(5))
+                    .WithMaxSize(1000))
                 .WithSize(128),
             /*samples[2]=*/
             fuzztest::VectorOf(
                 fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 399999999))
-                    .WithMaxSize(20))
+                    .WithMaxSize(1000))
                 .WithSize(128),
             /*samples[3]=*/
             fuzztest::VectorOf(
                 fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 399999999))
-                    .WithMaxSize(1))
+                    .WithMaxSize(1000))
                 .WithSize(128),
             /*samples[4]=*/
             fuzztest::VectorOf(
                 fuzztest::VectorOf(fuzztest::InRange<int64_t>(0, 99999999))
-                    .WithMaxSize(15))
+                    .WithMaxSize(1000))
                 .WithSize(128)),
-        /*num_sc_per_device=*/fuzztest::ElementOf<int>({1, 2, 4}),
-        /*global_device_count=*/
+        // Domain for table_vocabs
+        fuzztest::Just(std::vector<int>{400000000, 400000000, 400000000,
+                                        400000000, 100000000}),
+        // Domain for num_sc_per_device
+        fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for global_device_count
         fuzztest::ElementOf<int>({1, 2, 4, 8, 16, 32, 64, 128}),
-        /*max_ids_per_partition=*/fuzztest::InRange(1, 1024),
-        /*max_unique_ids_per_partition=*/fuzztest::InRange(1, 1024),
-        /*feature_stacking_strategy=*/
+        // Domain for max_ids_per_partition
+        fuzztest::InRange(1, 1024),
+        // Domain for max_unique_ids_per_partition
+        fuzztest::InRange(1, 1024),
+        // Domain for feature_stacking_strategy
         fuzztest::ElementOf<FeatureStackingStrategy>(
             {FeatureStackingStrategy::kStackThenSplit,
              FeatureStackingStrategy::kSplitThenStack}),
-        /*enable_minibatching=*/fuzztest::Arbitrary<bool>());
+        // Domain for enable_minibatching
+        fuzztest::Arbitrary<bool>());
+
+void PreprocessingOutputIsValidSimple(
+    std::vector<std::vector<int64_t>> samples,
+    absl::Span<const int> table_vocabs, int num_sc_per_device,
+    int global_device_count, int max_ids_per_partition,
+    int max_unique_ids_per_partition,
+    FeatureStackingStrategy feature_stacking_strategy,
+    bool enable_minibatching) {
+  RunPreprocessingOutputIsValidTest(
+      {samples}, table_vocabs, num_sc_per_device, global_device_count,
+      max_ids_per_partition, max_unique_ids_per_partition,
+      feature_stacking_strategy, enable_minibatching);
+}
+
+FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
+    .WithDomains(
+        // Domain for samples
+        fuzztest::VectorOf(fuzztest::VectorOf(fuzztest::InRange<int64_t>(0,
+                                                                         10000))
+                               .WithMaxSize(100))
+            .WithSize(32),
+        // Domain for table_vocabs
+        fuzztest::Just(std::vector<int>{10001}),
+        // Domain for num_sc_per_device
+        fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for global_device_count
+        fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for max_ids_per_partition
+        fuzztest::InRange(1, 128),
+        // Domain for max_unique_ids_per_partition
+        fuzztest::InRange(1, 128),
+        // Domain for feature_stacking_strategy
+        fuzztest::ElementOf<FeatureStackingStrategy>(
+            {FeatureStackingStrategy::kStackThenSplit,
+             FeatureStackingStrategy::kSplitThenStack}),
+        // Domain for enable_minibatching
+        fuzztest::Arbitrary<bool>());
 
 }  // namespace
 }  // namespace jax_sc_embedding
