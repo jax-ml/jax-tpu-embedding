@@ -662,13 +662,31 @@ class TableSpec:
   example, sum or mean."""
   max_ids_per_partition: int = 256
   """The maximum number of embedding IDs that can be packed into a single
-  partition."""
+  partition.
+
+  Note: If this table is stacked, updating this parameter after stacking
+  will not propagate FDO parameters to `StackedTableSpec`. If you need to
+  update these parameters after stacking, please use
+  `embedding.update_preprocessing_parameters`.
+  """
   max_unique_ids_per_partition: int = 256
   """The maximum number of unique embedding IDs that can be packed into a
-  single partition."""
+  single partition.
+
+  Note: If this table is stacked, updating this parameter after stacking
+  will not propagate FDO parameters to `StackedTableSpec`. If you need to
+  update these parameters after stacking, please use
+  `embedding.update_preprocessing_parameters`.
+  """
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
-  create."""
+  create.
+
+  Note: If this table is stacked, updating this parameter after stacking
+  will not propagate FDO parameters to `StackedTableSpec`. If you need to
+  update these parameters after stacking, please use
+  `embedding.update_preprocessing_parameters`.
+  """
   quantization_config: QuantizationConfig | None = None
   """Quantization config (min, max, num_buckets) which represent the float
   range and number of discrete integer buckets to use for quantization."""
