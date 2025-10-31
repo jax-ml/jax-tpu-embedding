@@ -12,40 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
-load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = EXTERNAL_USERS,
-)
-
-pytype_strict_library(
-    name = "embed",
-    srcs = [
-        "embed.py",
-    ],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//jax_tpu_embedding/sparsecore/utils",
-        pypi_requirement("flax:core"),
-        pypi_requirement("jax"),
-        pypi_requirement("jax/experimental:layout"),
-        pypi_requirement("numpy"),
-    ],
-)
-
-pytype_strict_library(
-    name = "embed_optimizer",
-    srcs = [
-        "embed_optimizer.py",
-    ],
-    deps = [
-        ":embed",
-        pypi_requirement("jax"),
-        pypi_requirement("optax"),
-    ],
 )
 
 # Library target.
@@ -54,7 +25,7 @@ pytype_strict_library(
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
     deps = [
-        ":embed",  # buildcleaner: keep
-        ":embed_optimizer",  # buildcleaner: keep
+        "//jax_tpu_embedding/sparsecore/lib/flax/linen",  # buildcleaner: keep
+        "//jax_tpu_embedding/sparsecore/lib/flax/nnx",  # buildcleaner: keep
     ],
 )

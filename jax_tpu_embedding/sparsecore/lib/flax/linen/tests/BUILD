@@ -23,7 +23,7 @@ tpu_py_strict_test(
     name = "embed_test",
     srcs = ["embed_test.py"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/flax:embed",
+        "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/lib/nn/tests:test_utils",
@@ -50,7 +50,7 @@ tpu_py_strict_test(
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_model",
-        "//jax_tpu_embedding/sparsecore/lib/flax:embed_optimizer",
+        "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed_optimizer",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/utils",
@@ -69,7 +69,7 @@ tpu_py_strict_test(
     name = "embed_optimizer_test",
     srcs = ["embed_optimizer_test.py"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/flax:embed_optimizer",
+        "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed_optimizer",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("flax:core"),

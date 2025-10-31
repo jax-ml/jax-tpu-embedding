@@ -22,7 +22,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as shakespeare_data
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import flax_model as shakespeare_model
-from jax_tpu_embedding.sparsecore.lib.flax import embed_optimizer
+from jax_tpu_embedding.sparsecore.lib.flax.linen import embed_optimizer
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils

@@ -17,7 +17,7 @@ from typing import Any
 
 import jax
 from jax import numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.flax import embed
+from jax_tpu_embedding.sparsecore.lib.flax.linen import embed
 import optax
 
 
