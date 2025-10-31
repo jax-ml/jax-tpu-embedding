@@ -32,6 +32,7 @@ namespace jax_sc_embedding {
 
 class PartitionedCooTensors {
  public:
+  PartitionedCooTensors() : PartitionedCooTensors(0, 0, 0, 1) {}
   PartitionedCooTensors(int reserve_count, int num_sc_per_device,
                         uint32_t global_sc_count, int bucket_count_per_sc = 1)
       : coo_tensors_(),

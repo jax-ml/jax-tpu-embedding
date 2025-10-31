@@ -20,8 +20,11 @@ namespace jax_sc_embedding {
 namespace {
 
 TEST(InputPreprocessingThreadsTest, CreateThreadPool) {
-  tsl::thread::ThreadPool* pool = PreprocessingThreadPool();
-  EXPECT_NE(pool, nullptr);
+  tsl::thread::ThreadPool* device_pool = DeviceProcessingThreadPool();
+  EXPECT_NE(device_pool, nullptr);
+  tsl::thread::ThreadPool* table_pool = TableProcessingThreadPool();
+  EXPECT_NE(table_pool, nullptr);
+  EXPECT_NE(device_pool, table_pool);
 }
 
 }  // namespace

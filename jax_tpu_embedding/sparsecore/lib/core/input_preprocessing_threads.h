@@ -18,8 +18,20 @@
 
 namespace jax_sc_embedding {
 
-// Global thread pool for all computations done by input preprocessing.
-tsl::thread::ThreadPool* PreprocessingThreadPool();
+// We use two separate thread pools to handle nested parallelism in input
+// preprocessing. Table-level tasks are scheduled onto
+// TableProcessingThreadPool, and each of these tasks may schedule multiple
+// device-level tasks onto DeviceProcessingThreadPool. If a single pool were
+// used, it could lead to deadlock: if all threads in the pool were occupied by
+// table-level tasks blocked waiting for device-level tasks to complete, no
+// threads would be available to run the device-level tasks, and the system
+// would hang. Using separate pools prevents this issue.
+
+// Thread pool for device-level computations in input preprocessing.
+tsl::thread::ThreadPool* DeviceProcessingThreadPool();
+
+// Thread pool for table-level computations in input preprocessing.
+tsl::thread::ThreadPool* TableProcessingThreadPool();
 
 }  // namespace jax_sc_embedding
 
