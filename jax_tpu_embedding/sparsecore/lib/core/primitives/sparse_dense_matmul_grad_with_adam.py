@@ -27,10 +27,10 @@ import json
 from typing import Tuple
 
 import jax
+from jax._src.lib.mlir import ir
+from jax._src.lib.mlir.dialects import func as func_dialect
+from jax._src.lib.mlir.dialects import hlo
 import jax.extend as jex
-from jax.extend.mlir import ir
-from jax.extend.mlir.dialects import func as func_dialect
-from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
 from jax_tpu_embedding.sparsecore.lib.core import constants

@@ -18,9 +18,9 @@ import json
 
 import jax
 from jax import core
+from jax._src.lib.mlir import ir
+from jax._src.lib.mlir.dialects import hlo
 import jax.extend as jex
-from jax.extend.mlir import ir
-from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
 import jax.numpy as jnp
