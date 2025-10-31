@@ -18,7 +18,9 @@ from typing import Sequence
 from absl.testing import absltest
 import einops
 import jax
-import numpy
+import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+import numpy as np
 
 
 def round_up_to_multiple(number: int, factor: int) -> int:
@@ -28,7 +30,7 @@ def round_up_to_multiple(number: int, factor: int) -> int:
 
 def row_id_initializer(
     shape: Sequence[int],
-    dtype: jax.typing.DTypeLike = jax.numpy.float32,
+    dtype: jax.typing.DTypeLike = jnp.float32,
     offset: int = 0,
 ) -> jax.Array:
   """An initializer for an array where row values are function of row id.
@@ -44,19 +46,19 @@ def row_id_initializer(
    A jax.Array for testing.
   """
   return (
-      jax.numpy.ones(shape, dtype=dtype)
-      * jax.numpy.arange(offset, offset + shape[0], dtype=dtype)[:, None]
+      jnp.ones(shape, dtype=dtype)
+      * jnp.arange(offset, offset + shape[0], dtype=dtype)[:, None]
   )
 
 
 def formatted_array2string(arr: jax.Array) -> str:
   """Force float-like values to be formatted with 6 decimal places."""
-  return numpy.array2string(arr, formatter={"float_kind": lambda x: "%.6f" % x})
+  return np.array2string(arr, formatter={"float_kind": lambda x: "%.6f" % x})
 
 
 def row_col_id_initializer_value(
     leading_value: int, row: int, col: int
-) -> jax.numpy.float32:
+) -> jnp.float32:
   """Returns the value for row_col_id_initializer."""
   return leading_value + row / 1000.0 + col / 1000000.0
 
@@ -68,7 +70,7 @@ def row_col_id_initializer(
 
   def create_array(leading_value, shape):
     rows, cols = shape
-    result = jax.numpy.zeros(shape, dtype=jax.numpy.float32)
+    result = jnp.zeros(shape, dtype=jnp.float32)
     for i in range(rows):
       for j in range(cols):
         col_value = j
@@ -92,7 +94,7 @@ def row_col_id_initializer(
 
 def row_id_with_offset_initializer_value(
     offset_value: int, row: int
-) -> jax.numpy.float32:
+) -> jnp.float32:
   """Returns the value for row_col_id_initializer."""
   return offset_value + row
 
@@ -104,7 +106,7 @@ def row_id_with_offset_initializer(
 
   def create_array(offset_value, shape):
     rows, cols = shape
-    result = jax.numpy.zeros(shape, dtype=jax.numpy.float32)
+    result = jnp.zeros(shape, dtype=jnp.float32)
     for i in range(rows):
       for j in range(cols):
         result = result.at[i, j].set(
@@ -132,7 +134,7 @@ def rotate_sharded_table(
   Return:
    A rotated jax.Array.
   """
-  return jax.numpy.roll(embedding_table, shift=rotation, axis=0)
+  return jnp.roll(embedding_table, shift=rotation, axis=0)
 
 
 def create_per_device_sharded_stacked_tables(
@@ -164,12 +166,12 @@ def create_per_device_sharded_stacked_tables(
       )
       for emb_table in emb_tables
   ]
-  rotations = numpy.arange(0, len(emb_tables)) * rotation
+  rotations = np.arange(0, len(emb_tables)) * rotation
   rotated_tables = [
       rotate_sharded_table(emb_table, rot)
       for emb_table, rot in zip(mod_sharded_tables, rotations)
   ]
-  sharded_stacked = jax.numpy.concatenate(rotated_tables, axis=1)
+  sharded_stacked = jnp.concatenate(rotated_tables, axis=1)
 
   return sharded_stacked.reshape(num_devices, -1, dim)
 
@@ -194,3 +196,22 @@ def skip_if_tpu_unavailable(f):
       raise e
 
   return wrapper
+
+
+def row_initialize_with_padding(
+    table_spec: embedding_spec.TableSpec,
+    offset: int = 0,
+    pad_value: float = -1,
+) -> jax.Array:
+  """Initializes an embedding table with padding."""
+  shape = (
+      table_spec.vocabulary_size,
+      table_spec.embedding_dim,
+  )
+  padded_shape = (
+      table_spec.setting_in_stack.padded_vocab_size,
+      table_spec.setting_in_stack.padded_embedding_dim,
+  )
+  array = row_id_initializer(shape=shape, offset=offset)
+  paddings = tuple((0, y - x) for x, y in zip(shape, padded_shape))
+  return np.pad(array, paddings, mode="constant", constant_values=pad_value)

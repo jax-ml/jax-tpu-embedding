@@ -20,25 +20,6 @@ package(
 )
 
 tpu_py_strict_test(
-    name = "embed_test",
-    srcs = ["embed_test.py"],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/lib/flax:embed",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//jax_tpu_embedding/sparsecore/lib/nn/tests:test_utils",
-        "//jax_tpu_embedding/sparsecore/utils",
-        "//third_party/jax:tpu_support",
-        pypi_requirement("absl/testing:absltest"),
-        pypi_requirement("absl/testing:parameterized"),
-        pypi_requirement("einops"),
-        pypi_requirement("flax:core"),
-        pypi_requirement("jax"),
-        pypi_requirement("numpy"),
-    ],
-)
-
-tpu_py_strict_test(
     name = "autograd_test",
     srcs = [
         "autograd_test.py",
@@ -49,8 +30,8 @@ tpu_py_strict_test(
     },
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_model",
-        "//jax_tpu_embedding/sparsecore/lib/flax:embed_optimizer",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_nnx_model",
+        "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/utils",
@@ -58,7 +39,7 @@ tpu_py_strict_test(
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
-        pypi_requirement("flax:core"),
+        pypi_requirement("flax/nnx"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
         pypi_requirement("optax"),
@@ -66,14 +47,25 @@ tpu_py_strict_test(
 )
 
 tpu_py_strict_test(
-    name = "embed_optimizer_test",
-    srcs = ["embed_optimizer_test.py"],
+    name = "embed_test",
+    srcs = ["embed_test.py"],
+    env = {
+        # "XLA_FLAGS": "--xla_dump_to=sponge",
+        "JAX_TRACEBACK_FILTERING": "off",
+    },
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/flax:embed_optimizer",
+        "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/lib/nn/tests:test_utils",
+        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/testing:absltest"),
-        pypi_requirement("flax:core"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("einops"),
+        pypi_requirement("flax/nnx"),
         pypi_requirement("jax"),
-        pypi_requirement("optax"),
+        pypi_requirement("numpy"),
+        pypi_requirement("portpicker"),
     ],
 )
