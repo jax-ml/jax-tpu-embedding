@@ -21,53 +21,43 @@ package(
 )
 
 pytype_strict_library(
-    name = "dataset",
+    name = "embed",
     srcs = [
-        "dataset.py",
+        "embed.py",
     ],
     deps = [
-        pypi_requirement("absl/logging"),
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
+        pypi_requirement("flax:core"),
+        pypi_requirement("jax"),
+        pypi_requirement("jax/experimental:layout"),
         pypi_requirement("numpy"),
     ],
 )
 
 pytype_strict_library(
-    name = "model",
+    name = "embed_optimizer",
     srcs = [
-        "model.py",
+        "embed_optimizer.py",
     ],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("flax:core"),
+        ":embed",
         pypi_requirement("jax"),
         pypi_requirement("optax"),
     ],
 )
 
+# Library target.
 pytype_strict_library(
-    name = "flax_model",
-    srcs = [
-        "flax_model.py",
+    name = "linen",
+    srcs = ["__init__.py"],
+    visibility = [
+        "//jax_tpu_embedding/sparsecore/lib:__pkg__",
+        "//jax_tpu_embedding/sparsecore/lib/flax:__pkg__",
     ],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("flax:core"),
-        pypi_requirement("jax"),
-    ],
-)
-
-pytype_strict_library(
-    name = "flax_nnx_model",
-    srcs = [
-        "flax_nnx_model.py",
-    ],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("flax/nnx"),
-        pypi_requirement("jax"),
+        ":embed",  # buildcleaner: keep
+        ":embed_optimizer",  # buildcleaner: keep
     ],
 )
