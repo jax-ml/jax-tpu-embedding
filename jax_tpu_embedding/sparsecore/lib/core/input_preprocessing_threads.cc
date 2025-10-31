@@ -28,11 +28,14 @@ namespace jax_sc_embedding {
 namespace {
 
 constexpr char kScEnv[] = "SPARSECORE_INPUT_PREPROCESSING_THREADS";
-constexpr char kScPool[] = "SparseCoreInputPreprocessingThreadPool";
+constexpr char kDevicePool[] = "SparseCoreDeviceProcessingThreadPool";
+constexpr char kTablePool[] = "SparseCoreTableProcessingThreadPool";
 
 // Returns at least one but the minimum of NumSchedulableCPUs() and the value
 // specified by the environment variable
 // `SPARSECORE_INPUT_PREPROCESSING_THREADS`.
+// NOTE: This size applies to *each* thread pool (Device and Table). If the env
+// var is set to N, 2*N threads may be created in total.
 int GetThreadPoolSize() {
   int num_threads = tsl::port::NumSchedulableCPUs();
   if (const char* env = std::getenv(kScEnv); env != nullptr) {
@@ -46,14 +49,30 @@ int GetThreadPoolSize() {
 
 }  // namespace
 
-tsl::thread::ThreadPool* PreprocessingThreadPool() {
+tsl::thread::ThreadPool* DeviceProcessingThreadPool() {
   static tsl::thread::ThreadPool* pool = []() {
     const int num_threads = GetThreadPoolSize();
     DCHECK_GE(num_threads, 1);
-    LOG(INFO) << "Creating thread pool for SparseCore input preprocessing: "
+    LOG(INFO) << "Creating device processing thread pool for SparseCore input "
+                 "preprocessing: "
               << num_threads << " threads";
     auto thread_pool = new tsl::thread::ThreadPool(
-        tsl::Env::Default(), tsl::ThreadOptions(), kScPool, num_threads,
+        tsl::Env::Default(), tsl::ThreadOptions(), kDevicePool, num_threads,
+        /*low_latency_hint=*/false);
+    return thread_pool;
+  }();
+  return pool;
+}
+
+tsl::thread::ThreadPool* TableProcessingThreadPool() {
+  static tsl::thread::ThreadPool* pool = []() {
+    const int num_threads = GetThreadPoolSize();
+    DCHECK_GE(num_threads, 1);
+    LOG(INFO) << "Creating table processing thread pool for SparseCore input "
+                 "preprocessing: "
+              << num_threads << " threads";
+    auto thread_pool = new tsl::thread::ThreadPool(
+        tsl::Env::Default(), tsl::ThreadOptions(), kTablePool, num_threads,
         /*low_latency_hint=*/false);
     return thread_pool;
   }();
