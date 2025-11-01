@@ -2923,10 +2923,12 @@ class InputPreprocessingTest(parameterized.TestCase):
     )
 
     # Compute expected by re-adjusting the weights using a "sum" combiner.
-    table_spec.combiner = "sum"
-    table_spec.stacked_table_spec = None
+    table_spec_for_expectation = dataclasses.replace(table_spec, combiner="sum")
+    feature_spec_for_expectation = dataclasses.replace(
+        feature_spec, table_spec=table_spec_for_expectation
+    )
     embedding.prepare_feature_specs_for_training(
-        feature_spec,
+        feature_spec_for_expectation,
         global_device_count=1,
         num_sc_per_device=4,
     )
@@ -2941,7 +2943,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         [input_features],
         [input_weights],
-        [feature_spec],
+        [feature_spec_for_expectation],
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=4,
