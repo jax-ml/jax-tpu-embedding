@@ -1,11 +1,10 @@
 name: Build and test
 
 on:
-  # Only run workflow on pushes to main (includes PR merge), and on
-  # opened pull-requests.
   push:
     branches:
     - main
+    - test-cache-save # Add this line to trigger on pushes to this branch
   pull_request:
 
 jobs:
@@ -28,13 +27,10 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           . tools/install_bazelisk.sh
 
-      # Load different caches depending on if this is a pull-request or merge.
-      # If merge (or push commit), use a read-write cache based on the python
-      #    version, branch, and commit-sha.
-      # If pull-request, use a read-only cache based on the target python
-      #    version, branch, and PR base sha.
+      # This step handles both restore and the post-job save.
+      # It runs on pushes to 'main' or 'test-cache-save'.
       - if: github.event_name != 'pull_request'
-        name: Mount bazel cache (main)
+        name: Mount bazel cache (main/test-save) - Restore & Save
         uses: actions/cache@v4
         with:
           path: "/home/runner/.cache/bazel"
@@ -44,8 +40,9 @@ jobs:
             bazel-py3.10-
             bazel-
 
+      # This step is only for pull requests and does NOT trigger a save.
       - if: github.event_name == 'pull_request'
-        name: Mount bazel cache (pull-request)
+        name: Mount bazel cache (pull-request) - Restore
         uses: actions/cache/restore@v4
         with:
           path: "/home/runner/.cache/bazel"
@@ -65,8 +62,44 @@ jobs:
           export HERMETIC_PYTHON_VERSION=3.10
           bazel run //tools:build_wheel
 
-
       - name: Run CPU tests
         run: |
           export HERMETIC_PYTHON_VERSION=3.10
           bazel test --build_tests_only --test_tag_filters=-requires-tpu --test_output=errors --keep_going //...
+
+      # --- START: Cleanup Steps to Free Disk Space Before Cache Save ---
+      # These steps will run because github.event_name is 'push' when on 'test-cache-save'.
+      - name: Debug Disk Space Before Cleanup
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "--- Disk Usage BEFORE Cleanup ---"
+          df -h
+          echo ""
+          echo "--- Size of /home/runner/.cache/bazel before cleanup ---"
+          sudo du -h /home/runner/.cache/bazel | sort -rh | head -n 20
+          echo ""
+          echo "--- Largest directories in workspace (${{ github.workspace }}) ---"
+          sudo du -h ${{ github.workspace }} | sort -rh | head -n 20
+
+      - name: Perform Bazel Clean Expunge
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Running bazel clean --expunge to reduce the size of the Bazel cache..."
+          cd ${{ github.workspace }}
+          bazel clean --expunge
+          echo "bazel clean --expunge completed."
+
+      - name: Debug Disk Space After Cleanup
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "--- Disk Usage AFTER Cleanup ---"
+          df -h
+          echo ""
+          echo "--- Size of /home/runner/.cache/bazel after expunge ---"
+          sudo du -h /home/runner/.cache/bazel | sort -rh | head -n 20
+          echo ""
+          echo "--- Largest directories in workspace (${{ github.workspace }}) after expunge ---"
+          sudo du -h ${{ github.workspace }} | sort -rh | head -n 20
+      # --- END: Cleanup Steps ---
+
+      # The 'Post Mount bazel cache (main/test-save) - Restore & Save' action runs automatically AFTER all these steps.
