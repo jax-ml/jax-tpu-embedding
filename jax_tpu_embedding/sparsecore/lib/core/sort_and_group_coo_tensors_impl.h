@@ -338,16 +338,16 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       coo_tensors.size(), num_sc_per_device, global_sc_count, bucket_count);
 
   uint32_t coo_tensor_index = 0;
-  // These counters track the number of IDs that are actually kept (not dropped)
-  // for each partition and bucket across all local SCs for this device.
-  MatrixXi kept_ids_per_sc_partition_per_bucket =
-      MatrixXi::Zero(global_sc_count, bucket_count);
-  MatrixXi kept_unique_ids_per_partition_per_bucket =
-      MatrixXi::Zero(global_sc_count, bucket_count);
 
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
        ++local_sc_id) {
+    // These counters track the number of IDs that are actually kept (not
+    // dropped) for each partition and bucket for this device.
+    MatrixXi kept_ids_per_sc_partition_per_bucket =
+        MatrixXi::Zero(global_sc_count, bucket_count);
+    MatrixXi kept_unique_ids_per_partition_per_bucket =
+        MatrixXi::Zero(global_sc_count, bucket_count);
     MatrixXi ids_per_sc_partition_per_bucket =
         MatrixXi::Zero(global_sc_count, bucket_count);
     MatrixXi unique_ids_per_partition_per_bucket =
