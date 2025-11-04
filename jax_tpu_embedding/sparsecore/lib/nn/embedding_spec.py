@@ -19,7 +19,7 @@ import abc
 import collections
 import dataclasses
 import inspect
-from typing import Callable, Sequence, TypeAlias
+from typing import Any, Callable, Sequence, TypeAlias
 
 from flax import struct
 import jax
@@ -673,6 +673,52 @@ class TableSpec:
   """Quantization config (min, max, num_buckets) which represent the float
   range and number of discrete integer buckets to use for quantization."""
 
+  _initialized: bool = dataclasses.field(
+      init=False, default=False, compare=False
+  )
+
+  def __setattr__(self, name: str, value: Any):
+    # These attributes are allowed to be modified after stacking because
+    # they are part of the stacking process itself (which sets
+    # `stacked_table_spec` and `setting_in_stack`), or are used to update
+    # stacking-related parameters like buffer sizes via replacing the
+    # StackedTableSpec.
+    allowed_after_stacking = (
+        "_stacked_table_spec",
+        "_setting_in_stack",
+        "stacked_table_spec",
+        "setting_in_stack",
+    )
+    fdo_params = (
+        "max_ids_per_partition",
+        "max_unique_ids_per_partition",
+        "suggested_coo_buffer_size_per_device",
+    )
+    # Check if __post_init__ has run and if this is a stacked table
+    if (
+        name not in allowed_after_stacking
+        and self._initialized
+        and self.is_stacked()
+    ):
+      if name in fdo_params:
+        raise AttributeError(
+            f"Cannot update parameter '{name}' on TableSpec '{self.name}' "
+            "after it has been stacked. If you are trying to update FDO "
+            "parameters like 'max_ids_per_partition', use "
+            "embedding.update_preprocessing_parameters() to update the "
+            "StackedTableSpec instead."
+        )
+      else:
+        raise AttributeError(
+            f"Cannot update parameter '{name}' on TableSpec '{self.name}' "
+            "after it has been stacked. If you need to modify non-FDO "
+            "parameters for a stacked table, create a new table spec using "
+            "`dataclasses.replace(table_spec, ...)` and feature spec using "
+            "`dataclasses.replace(feature_spec, table_spec=new_table_spec)` "
+            "and then re-prepare feature specs for training."
+        )
+    super().__setattr__(name, value)
+
   # This points to the stacked table spec which this table belongs to.
   # If this is None, this table is the top-most table.
   _stacked_table_spec: StackedTableSpec | None = dataclasses.field(
@@ -721,6 +767,7 @@ class TableSpec:
           row_offset_in_shard=0,
           shard_rotation=0,
       )
+    object.__setattr__(self, "_initialized", True)
 
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, kw_only=True)

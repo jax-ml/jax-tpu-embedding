@@ -101,7 +101,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     indices_tensor = [sparse_tensor.indices]
     values_tensor = [sparse_tensor.values]
     dense_shape_tensor = [sparse_tensor.dense_shape]
-    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (
         row_pointers_sparse,
@@ -148,7 +147,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
           dtype=np.int32,
       )
 
-    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     local_device_count = 4
     global_device_count = 4
@@ -246,7 +244,6 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     numpy_features = np.array(numpy_features, dtype=object)
     numpy_weights = np.array(numpy_weights, dtype=object)
 
-    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     local_device_count = 4
     global_device_count = 4
@@ -1374,7 +1371,6 @@ class MeanCombinerTest(parameterized.TestCase):
     indices_tensor = [sparse_tensor.indices]
     values_tensor = [sparse_tensor.values]
     dense_shape_tensor = [sparse_tensor.dense_shape]
-    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     (
         row_pointers_sparse,
@@ -1420,7 +1416,6 @@ class MeanCombinerTest(parameterized.TestCase):
           ],
           dtype=np.int32,
       )
-    self.feature_spec.table_spec.suggested_coo_buffer_size_per_device = 64
     batch_number = 42
     local_device_count = 4
     global_device_count = 4
