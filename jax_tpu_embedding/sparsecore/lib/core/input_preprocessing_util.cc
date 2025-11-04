@@ -69,7 +69,7 @@ struct BufferFillingOptions {
 bool ValidIndices(int row_index, int coo_offset, int processed,
                   const BufferFillingOptions& options) {
   if (row_index >= options.lhs_row_end || coo_offset >= options.coo_end) {
-    LOG_EVERY_N(ERROR, 100)
+    LOG_EVERY_N(WARNING, 100)
         << "The static buffer size might be too small for the current "
            "batch. IDs may be dropped! "
         << "Stopping row pointer filling for local SparseCore ID "
