@@ -39,7 +39,10 @@ pytype_strict_library(
 pytype_strict_library(
     name = "nnx",
     srcs = ["__init__.py"],
-    visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
+    visibility = [
+        "//jax_tpu_embedding/sparsecore/lib:__pkg__",
+        "//jax_tpu_embedding/sparsecore/lib/flax:__pkg__",
+    ],
     deps = [
         ":embed",  # buildcleaner: keep
     ],

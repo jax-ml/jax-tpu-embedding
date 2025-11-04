@@ -16,7 +16,7 @@
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.flax import embed
+from jax_tpu_embedding.sparsecore.lib.flax.linen import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 

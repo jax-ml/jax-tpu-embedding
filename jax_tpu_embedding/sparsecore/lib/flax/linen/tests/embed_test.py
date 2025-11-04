@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
 from jax.sharding import PartitionSpec as P  # pylint: disable=g-importing-member
-from jax_tpu_embedding.sparsecore.lib.flax import embed
+from jax_tpu_embedding.sparsecore.lib.flax.linen import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils

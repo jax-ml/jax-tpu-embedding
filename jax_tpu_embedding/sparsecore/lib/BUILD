@@ -27,6 +27,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/core",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/fdo",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/flax",  # buildcleaner: keep
+        "//jax_tpu_embedding/sparsecore/lib/flax/linen",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/flax/nnx",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/nn",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/proto",  # buildcleaner: keep

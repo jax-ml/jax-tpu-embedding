@@ -18,7 +18,7 @@ from absl.testing import absltest
 from flax import struct
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.flax import embed_optimizer
+from jax_tpu_embedding.sparsecore.lib.flax.linen import embed_optimizer
 import optax
 
 
