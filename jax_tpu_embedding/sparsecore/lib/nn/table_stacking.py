@@ -564,14 +564,22 @@ def _get_limits_for_stack(
   if len(table_names) == 1:
     # If the stack has only one table, then use the max_ids_per_partition of
     # that table's spec.
+    table_spec = table_name_to_feature_spec[table_names[0]].table_spec
     return (
-        table_name_to_feature_spec[
-            table_names[0]
-        ].table_spec.max_ids_per_partition,
-        table_name_to_feature_spec[
-            table_names[0]
-        ].table_spec.max_unique_ids_per_partition,
+        table_spec.max_ids_per_partition,
+        table_spec.max_unique_ids_per_partition,
     )
+  logging.warning(
+      "Stacking multiple tables together: %s\n\nThe `max_ids_per_partition` and"
+      " `max_unique_ids_per_partition` from individual `TableSpec`s will be"
+      " ignored. Instead, default limits (max_ids=%d, max_unique_ids=%d) will"
+      " be used for the `StackedTableSpec`. To override these limits, please"
+      " use `embedding.update_preprocessing_parameters` to update the FDO"
+      " parameters on `StackedTableSpec` after stacking.",
+      table_names,
+      default_max_ids_per_partition,
+      default_max_unique_ids_per_partition,
+  )
   return (
       default_max_ids_per_partition,
       default_max_unique_ids_per_partition,
