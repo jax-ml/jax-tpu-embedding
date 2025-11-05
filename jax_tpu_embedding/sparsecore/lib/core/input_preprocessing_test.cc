@@ -1011,7 +1011,11 @@ void RunPreprocessingOutputIsValidTest(
   ASSERT_GT(samples_per_table.size(), 0);
   ASSERT_GT(samples_per_table[0].size(), 0);
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  int64_t total_input_ids = 0;
   for (const auto& table_samples : samples_per_table) {
+    for (const auto& sample : table_samples) {
+      total_input_ids += sample.size();
+    }
     input_batches.push_back(CreateInputBatchFromSamples(table_samples));
   }
 
@@ -1085,6 +1089,16 @@ void RunPreprocessingOutputIsValidTest(
           max_unique_ids_per_partition);
     }
   }
+  const MatrixXf& gains = output.lhs_gains.at("stacked_table");
+  double present_gains = 0;
+  for (int i = 0; i < gains.size(); ++i) {
+    if (embedding_ids.coeff(i) != INT_MAX) {
+      present_gains += gains.coeff(i);
+    }
+  }
+  EXPECT_EQ(static_cast<int64_t>(round(present_gains)) +
+                output.stats.TotalDroppedIdCount(),
+            total_input_ids);
 }
 
 void PreprocessingOutputIsValidComplex(
