@@ -11,17 +11,39 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Simple benchmarks for preprocessing input for sparse-dense matmul.
+r"""Simple benchmarks for preprocessing input for sparse-dense matmul.
 
 Example usage:
 
 On perflab comparing against HEAD:
-benchy --perflab --runs=10 --reference=srcfs --benchmark_filter=all
-:preprocess_input_benchmarks
+benchy --perflab --runs=10 --reference=srcfs --benchmark_filter=all \
+:preprocess_input_benchmarks.par
 
 Or locally:
-bazel run -c opt --dynamic_mode=off --copt=-gmlt :preprocess_input_benchmarks --
+bazel run -c opt --dynamic_mode=off --copt=-gmlt :preprocess_input_benchmarks -- \
 --benchmark_filter=all --cpu_profile=/tmp/preprocess.prof
+
+The --benchmark_filter flag uses a regex to select benchmarks. For parameterized
+benchmarks, the name is typically formatted as:
+`[benchmark_name]/[param1]:[value1]/[param2]:[value2]`.
+Boolean parameters are often represented as 0 for False and 1 for True.
+
+For example, to run only the `sparse_coo` benchmarks:
+`--benchmark_filter=preprocess_input_benchmark_sparse_coo`
+
+To run only the `sparse_coo` benchmark where `has_leading_dimension` is `False`:
+`--benchmark_filter='preprocess_input_benchmark_sparse_coo/has_leading_dimension:0'`
+
+To run all benchmarks across all suites where `has_leading_dimension` is `False`:
+`--benchmark_filter='/has_leading_dimension:0'`
+
+To upload the profile to pprof:
+pprof -flame /tmp/preprocess.prof
+
+To only view profiles for C++ preprocessing and functions it calls, use
+`-show_from=jax_sc_embedding::PreprocessSparseDenseMatmulInput` and for
+extraction use `-show_from='jax_sc_embedding::ExtractCooTensors'` and so on.
+(See https://github.com/google/pprof/blob/main/doc/README.md for more details.)
 """
 
 import concurrent
@@ -81,7 +103,6 @@ def generate_feature_specs(num_features: int, num_samples: int):
             total_sample_count=num_samples,
             max_ids_per_partition=1024,
             max_unique_ids_per_partition=1024,
-            suggested_coo_buffer_size_per_device=4096,
         ),
     )
     feature_spec = embedding_spec.FeatureSpec(
@@ -154,6 +175,25 @@ def generate_sparse_coo_inputs_for_feature_spec(
   return all_indices_tensors, all_values_tensors, all_dense_shape_tensors
 
 
+def apply_fdo_stats(stats_cc):
+  """Applies FDO adjustment to benchmark specs from stats."""
+  stats = embedding.SparseDenseMatmulInputStats.from_cc(stats_cc)
+  fdo_headroom = 1.2
+  for stat_dict in [
+      stats.max_ids_per_partition,
+      stats.max_unique_ids_per_partition,
+      stats.required_buffer_size_per_sc,
+  ]:
+    for table_name, value in stat_dict.items():
+      stat_dict[table_name] = np.array(
+          [int(np.ceil(np.max(value) * fdo_headroom))]
+      )
+  assert _GLOBAL_SPECS is not None
+  embedding.update_preprocessing_parameters(
+      _GLOBAL_SPECS, stats, num_sc_per_device=4
+  )
+
+
 @google_benchmark.register
 @google_benchmark.option.unit(google_benchmark.kMillisecond)
 @google_benchmark.option.arg_names(["ragged", "has_leading_dimension"])
@@ -166,8 +206,11 @@ def preprocess_input_benchmark(state: google_benchmark.State):
     features, feature_weights = _GLOBAL_RAGGED_FEATURES, _GLOBAL_RAGGED_WEIGHTS
   else:
     features, feature_weights = _GLOBAL_DENSE_FEATURES, _GLOBAL_DENSE_WEIGHTS
+  batch_num = 0
   while state:
-    _ = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+    if batch_num == 0:
+      state.pause_timing()
+    *_, stats_cc = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
         features,
         feature_weights,
         _GLOBAL_SPECS,
@@ -175,7 +218,13 @@ def preprocess_input_benchmark(state: google_benchmark.State):
         global_device_count=16,
         num_sc_per_device=4,
         has_leading_dimension=has_leading_dimension,
+        batch_number=batch_num,
+        allow_id_dropping=False,
     )
+    if batch_num == 0:
+      apply_fdo_stats(stats_cc)
+      state.resume_timing()
+    batch_num += 1
 
 
 @google_benchmark.register
@@ -186,17 +235,28 @@ def preprocess_input_benchmark(state: google_benchmark.State):
 def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   has_leading_dimension = state.range(0)
+  batch_num = 0
   while state:
-    _ = pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
-        _GLOBAL_RAGGED_INDICES,
-        _GLOBAL_RAGGED_VALUES,
-        _GLOBAL_RAGGED_DENSE_SHAPES,
-        _GLOBAL_SPECS,
-        local_device_count=4,
-        global_device_count=16,
-        num_sc_per_device=4,
-        has_leading_dimension=has_leading_dimension,
+    if batch_num == 0:
+      state.pause_timing()
+    *_, stats_cc = (
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+            _GLOBAL_RAGGED_INDICES,
+            _GLOBAL_RAGGED_VALUES,
+            _GLOBAL_RAGGED_DENSE_SHAPES,
+            _GLOBAL_SPECS,
+            local_device_count=4,
+            global_device_count=16,
+            num_sc_per_device=4,
+            has_leading_dimension=has_leading_dimension,
+            batch_number=batch_num,
+            allow_id_dropping=False,
+        )
     )
+    if batch_num == 0:
+      apply_fdo_stats(stats_cc)
+      state.resume_timing()
+    batch_num += 1
 
 
 @google_benchmark.register
@@ -232,21 +292,34 @@ def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
         enable_minibatching=True,
         all_reduce_interface=all_reduce_interfaces[host_id],
         batch_number=batch_number,
+        allow_id_dropping=False,
     )
 
   with concurrent.futures.ThreadPoolExecutor(max_workers=num_hosts) as executor:
-    batch_number = 0
+    batch_num = 0
     while state:
-      for host_id, future in [
-          (host_id, executor.submit(worker, host_id, batch_number))
+      state.items_processed = (
+          num_hosts  # Since we use the same CPU for all hosts.
+      )
+      if batch_num == 0:
+        state.pause_timing()
+      futures = [
+          (host_id, executor.submit(worker, host_id, batch_num))
           for host_id in range(num_hosts)
-      ]:
+      ]
+      stats_cc = None
+      for host_id, future in futures:
         try:
-          _ = future.result(timeout=60)
+          # All inputs are the same, so just use the last updated stats.
+          *_, stats_cc = future.result(timeout=60)
         except concurrent.futures.TimeoutError:
           print(f"Host {host_id} timed out.")
-
-      batch_number += 1
+          return
+      if batch_num == 0:
+        assert stats_cc is not None
+        apply_fdo_stats(stats_cc)
+        state.resume_timing()
+      batch_num += 1
 
 
 def main(_):
