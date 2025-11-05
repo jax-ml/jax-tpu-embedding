@@ -342,6 +342,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   // Loop over scs for this device.
   for (int32_t local_sc_id = 0; local_sc_id < options.num_sc_per_device;
        ++local_sc_id) {
+    grouped_coo_tensors.ResetDedupState();
     // These counters track the number of IDs that are actually kept (not
     // dropped) for each partition and bucket for this device.
     MatrixXi kept_ids_per_sc_partition_per_bucket =

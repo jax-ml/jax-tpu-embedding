@@ -970,8 +970,10 @@ void ValidateMinibatchOrSparseCoreSlice(
     const Eigen::Ref<const RowVectorXi>& row_pointers_slice,
     const Eigen::Ref<const RowVectorXi>& embedding_ids_slice,
     const Eigen::Ref<const RowVectorXi>& sample_ids_slice,
+    const Eigen::Ref<const RowVectorXf>& gains_slice,
     int64_t total_padded_vocab, int batch_size_per_sc,
-    int max_ids_per_partition, int max_unique_ids_per_partition) {
+    int max_ids_per_partition, int max_unique_ids_per_partition,
+    int64_t& total_ids_in_slice) {
   int32_t start_index = 0;
   for (int i = 0; i < row_pointers_slice.size(); ++i) {
     int end_index = row_pointers_slice(i);
@@ -983,6 +985,7 @@ void ValidateMinibatchOrSparseCoreSlice(
     for (int j = start_index; j < end_index; ++j) {
       const int sample_id = sample_ids_slice(j);
       const int embedding_id = embedding_ids_slice(j);
+      const float gain = gains_slice(j);
       ASSERT_NE(embedding_id, INT_MAX);
       ValidateCooId(embedding_id, sample_id, total_padded_vocab,
                     batch_size_per_sc);
@@ -990,6 +993,9 @@ void ValidateMinibatchOrSparseCoreSlice(
           << "Duplicate (row_id, col_id) found: (" << sample_id << ", "
           << embedding_id << ")";
       ids_count++;
+      // Since each ID has gain 1, with deduping, we can use this as proxy for
+      // total ids.
+      total_ids_in_slice += static_cast<int64_t>(gain);
       unique_ids.insert(embedding_id);
       ASSERT_LE(ids_count, max_ids_per_partition);
       ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
@@ -1059,46 +1065,48 @@ void RunPreprocessingOutputIsValidTest(
 
   const int64_t total_padded_vocab = current_col_offset;
   const int64_t table_shard_size = total_padded_vocab / kNumScs;
+
   const MatrixXi& row_pointers = output.lhs_row_pointers.at("stacked_table");
   const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("stacked_table");
   const MatrixXi& sample_ids = output.lhs_sample_ids.at("stacked_table");
+  const MatrixXf& gains = output.lhs_gains.at("stacked_table");
+
   const int32_t num_minibatches = output.num_minibatches;
-  const int32_t row_pointers_unpadded_size =
-      num_minibatches * kNumScs * num_sc_per_device;
+
   const int batch_size_per_sc = xla::CeilOfRatio<int>(
       kBatchSize * table_vocabs.size(), num_sc_per_device);
 
+  int64_t total_present_ids = 0;
   if (options.enable_minibatching) {
+    const int32_t row_pointers_size =
+        num_minibatches *
+        std::max(kNumScs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE) *
+        num_sc_per_device;
     ValidateMinibatchOrSparseCoreSlice(
-        row_pointers.row(0).head(row_pointers_unpadded_size),
-        embedding_ids.row(0), sample_ids.row(0), table_shard_size,
-        batch_size_per_sc, max_ids_per_partition, max_unique_ids_per_partition);
+        row_pointers.row(0).head(row_pointers_size), embedding_ids.row(0),
+        sample_ids.row(0), gains.row(0), table_shard_size, batch_size_per_sc,
+        max_ids_per_partition, max_unique_ids_per_partition, total_present_ids);
   } else {
     const int coo_buffer_size_per_sc = embedding_ids.cols() / num_sc_per_device;
     const int row_pointers_size_per_bucket =
         row_pointers.cols() / num_sc_per_device;
     for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
+      const int row_pointers_offset = sc_id * row_pointers_size_per_bucket;
+      const int coo_buffer_offset = sc_id * coo_buffer_size_per_sc;
       ValidateMinibatchOrSparseCoreSlice(
-          row_pointers.row(0).segment(sc_id * row_pointers_size_per_bucket,
-                                      kNumScs),
-          embedding_ids.row(0).segment(sc_id * coo_buffer_size_per_sc,
+          row_pointers.row(0).segment(row_pointers_offset,
+                                      row_pointers_size_per_bucket),
+          embedding_ids.row(0).segment(coo_buffer_offset,
                                        coo_buffer_size_per_sc),
-          sample_ids.row(0).segment(sc_id * coo_buffer_size_per_sc,
-                                    coo_buffer_size_per_sc),
+          sample_ids.row(0).segment(coo_buffer_offset, coo_buffer_size_per_sc),
+          gains.row(0).segment(coo_buffer_offset, coo_buffer_size_per_sc),
           table_shard_size, batch_size_per_sc, max_ids_per_partition,
-          max_unique_ids_per_partition);
+          max_unique_ids_per_partition, total_present_ids);
     }
   }
-  const MatrixXf& gains = output.lhs_gains.at("stacked_table");
-  double present_gains = 0;
-  for (int i = 0; i < gains.size(); ++i) {
-    if (embedding_ids.coeff(i) != INT_MAX) {
-      present_gains += gains.coeff(i);
-    }
-  }
-  EXPECT_EQ(static_cast<int64_t>(round(present_gains)) +
-                output.stats.TotalDroppedIdCount(),
-            total_input_ids);
+  EXPECT_EQ(total_present_ids + output.stats.TotalDroppedIdCount(),
+            total_input_ids)
+      << "Dropped ID count: " << output.stats.TotalDroppedIdCount();
 }
 
 void PreprocessingOutputIsValidComplex(
@@ -1281,7 +1289,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   }
 
   // Run with reduced max_ids, expect id dropping if there were any ids.
-  if (observed_max_ids > 0) {
+  if (observed_max_ids > 1) {
     StackedTableMetadata& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids - 1);
@@ -1303,7 +1311,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   }
 
   // Run with reduced max_unique_ids, expect id dropping if there were any ids.
-  if (observed_max_unique_ids > 0) {
+  if (observed_max_unique_ids > 1) {
     StackedTableMetadata& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);

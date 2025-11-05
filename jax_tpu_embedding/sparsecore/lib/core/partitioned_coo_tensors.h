@@ -68,6 +68,12 @@ class PartitionedCooTensors {
     return false;
   }
 
+  void ResetDedupState() {
+    dedup_col_id_ = std::numeric_limits<uint32_t>::max();
+    dedup_row_id_ = std::numeric_limits<uint32_t>::max();
+    dedup_bucket_id_ = -1;
+  }
+
   // Add Coo tensor for given SC and bucket. Similar to std::vector::push_back.
   void Add(int target_sc_id, int target_bucket_id,
            const CooFormat& coo_tensor) {
