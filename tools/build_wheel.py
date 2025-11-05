@@ -11,6 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# Copyright 2024 The JAX SC Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Build script for pip wheel."""
 
 from collections.abc import Sequence
@@ -22,6 +35,7 @@ import sys
 from absl import app
 from absl import flags
 from absl import logging
+import packaging.tags
 
 
 _OUTPUT_DIR = flags.DEFINE_string(
@@ -200,6 +214,53 @@ def run_auditwheel_repair(
   return auditwheel_info['wheel']
 
 
+def run_wheel_tags(bdist_path: str, python_tag: str, abi_tag: str) -> str:
+  """Runs `wheel tags` on the provided wheel file.
+
+  Args:
+    bdist_path: full path of the original binary distribution wheel.
+    python_tag: python tag, e.g. cp310.
+    abi_tag: abi tag, e.g. cp310.
+
+  Returns:
+    The repaired wheel name.
+
+  Raises:
+    subprocess.CalledProcessError: if the command fails.
+    RuntimeError: if we fail to parse the output of the command.
+  """
+  logging.info(
+      'Running wheel tags on %s with tags %s-%s',
+      bdist_path,
+      python_tag,
+      abi_tag,
+  )
+  process = run_process(
+      [
+          sys.executable,
+          '-m',
+          'wheel',
+          'tags',
+          '--python-tag',
+          python_tag,
+          '--abi-tag',
+          abi_tag,
+          '--remove',
+          bdist_path,
+      ],
+  )
+  stdout = process.stdout
+  logging.debug(stdout)
+
+  wheel_tags_info = re.search(r'(?P<wheel>[\S]+\.whl)', stdout)
+  if not wheel_tags_info:
+    raise RuntimeError(
+        f'Unable to determine repaired wheel from auditwheel output:\n {stdout}'
+    )
+
+  return wheel_tags_info['wheel']
+
+
 def main(argv: Sequence[str]) -> None:
   del argv
 
@@ -228,6 +289,11 @@ def main(argv: Sequence[str]) -> None:
       logging.debug('Removing unrepaired wheel: %s', bdist_path)
       os.remove(bdist_path)
       bdist_path = repaired_path
+
+  # Run `wheel` to set the python and abi tags.
+  tags = next(packaging.tags.sys_tags())
+  bdist = run_wheel_tags(bdist_path, tags.interpreter, tags.abi)
+  bdist_path = os.path.join(output_dir, bdist)
 
   logging.info('Final wheel: %s', bdist_path)
 

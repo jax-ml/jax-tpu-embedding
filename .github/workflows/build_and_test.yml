@@ -8,9 +8,14 @@ on:
     - main
   pull_request:
 
+permissions:
+  contents: read      # Lets the job check out your code
+  actions: write      # Lets the job write (save) the cache
+
 jobs:
   build-and-test-cpu:
-    runs-on: ubuntu-24.04
+    runs-on: linux-x86-n4-16
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
     steps:
       - uses: actions/checkout@v4
 
@@ -18,55 +23,67 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
 
       - name: Display Python version
         run: python -c "import sys; print(sys.version)"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          . tools/install_bazelisk.sh
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
+          bash tools/install_bazelisk.sh
 
-      # Load different caches depending on if this is a pull-request or merge.
-      # If merge (or push commit), use a read-write cache based on the python
-      #    version, branch, and commit-sha.
-      # If pull-request, use a read-only cache based on the target python
-      #    version, branch, and PR base sha.
-      - if: github.event_name != 'pull_request'
-        name: Mount bazel cache (main)
-        uses: actions/cache@v4
-        with:
-          path: "/home/runner/.cache/bazel"
-          key: bazel-py3.10-${{ github.ref_name }}-${{ github.sha }}
-          restore-keys: |
-            bazel-py3.10-${{ github.ref_name }}
-            bazel-py3.10-
-            bazel-
-
+      # --- FOR PULL REQUESTS ---
+      # Restore the cache from the main branch's base commit.
       - if: github.event_name == 'pull_request'
         name: Mount bazel cache (pull-request)
         uses: actions/cache/restore@v4
         with:
-          path: "/home/runner/.cache/bazel"
+          path: "/__w/.cache/bazel"
           key: bazel-py3.10-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
           restore-keys: |
             bazel-py3.10-${{ github.base_ref }}
             bazel-py3.10-
             bazel-
 
+      # --- FOR MAIN PUSHES AND MERGES ---
+      # Restore the cache from the previous commit.
+      - if: github.event_name != 'pull_request'
+        name: Mount bazel cache (main)
+        uses: actions/cache/restore@v4
+        with:
+          path: "/__w/.cache/bazel"
+          # Try to find the cache from the exact commit *before* this push
+          key: bazel-py3.10-${{ github.ref_name }}-${{ github.event.before }}
+          # Fall back to the most recent cache for the main branch
+          restore-keys: |
+            bazel-py3.10-${{ github.ref_name }}
+            bazel-py3.10-
+            bazel-
+
       - name: Build all targets
         run: |
           export HERMETIC_PYTHON_VERSION=3.10
-          bazel build //... --build_tag_filters=-oss_exclude
+          bazel build --config=public_cache //... --build_tag_filters=-oss_exclude
 
-      - name: Build pip wheel
+      - name: Build wheel
         run: |
           export HERMETIC_PYTHON_VERSION=3.10
-          bazel run //tools:build_wheel
-
+          bazel run --config=public_cache //tools:build_wheel
 
       - name: Run CPU tests
         run: |
           export HERMETIC_PYTHON_VERSION=3.10
-          bazel test --build_tests_only --test_tag_filters=-requires-tpu --test_output=errors --keep_going //...
+          bazel test --config=public_cache --build_tests_only --test_tag_filters=-requires-tpu --test_output=errors --keep_going //...
+
+      - name: Check disk space
+        run: |
+          df -h --total
+          du -sh /__w/.cache/bazel
+
+      # --- SAVE NEW CACHE ---
+      - name: Save bazel cache (main)
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: "/__w/.cache/bazel"
+          key: bazel-py3.10-${{ github.ref_name }}-${{ github.sha }}

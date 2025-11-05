@@ -9,7 +9,9 @@ portpicker
 # Build utilities.
 auditwheel
 build
+packaging
 setuptools
+wheel
 
 # Testing.
 clu

@@ -37,6 +37,8 @@ py_binary(
         requirement("absl_py"),
         requirement("auditwheel"),
         requirement("build"),
+        requirement("packaging"),
         requirement("setuptools"),
+        requirement("wheel"),
     ],
 )
