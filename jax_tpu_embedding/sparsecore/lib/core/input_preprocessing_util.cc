@@ -68,10 +68,14 @@ struct BufferFillingOptions {
 // Check if the current indexes are valid within the buffer sizes.
 bool ValidIndices(int row_index, int coo_offset, int processed,
                   const BufferFillingOptions& options) {
+  if (processed == options.coo_tensors.size() &&
+      coo_offset == options.coo_end) {
+    return true;
+  }
   if (row_index >= options.lhs_row_end || coo_offset >= options.coo_end) {
     LOG_EVERY_N(WARNING, 100)
-        << "The static buffer size might be too small for the current "
-           "batch. IDs may be dropped! "
+        << "The static buffer is too small for the current "
+           "batch. IDs will be dropped! "
         << "Stopping row pointer filling for local SparseCore ID "
         << options.local_sc_id << " at row index: " << row_index
         << " and coo offset: " << coo_offset
