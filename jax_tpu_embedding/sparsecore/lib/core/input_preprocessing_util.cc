@@ -211,15 +211,15 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
   return RowCombiner::kSum;
 }
 
-int64_t MayBeUpdateBufferSize(
-    int64_t theoretical_max,
-    std::optional<int64_t> suggested_coo_buffer_size_per_device,
-    int num_scs_per_device, absl::string_view stacked_table_name) {
+int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
+                              int64_t suggested_coo_buffer_size_per_device,
+                              int num_scs_per_device,
+                              absl::string_view stacked_table_name) {
   // Since the suggested size corresponds to only current device (local SCs),
   // Buffer for each SC should be properly aligned, hence ALIGNMENT *
   // num_scs_per_device
   int64_t suggested_value = xla::RoundUpTo<int64_t>(
-      suggested_coo_buffer_size_per_device.value(),
+      suggested_coo_buffer_size_per_device,
       TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_scs_per_device);
   CHECK(suggested_value <= theoretical_max)
       << "Suggested Coo Buffer Size is larger than the theoretical "
@@ -265,7 +265,7 @@ int ComputeCooBufferSizePerDevice(
                          << stacked_table_name << ": "
                          << suggested_coo_buffer_size_per_device.value();
     computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
-        theoretical_max, suggested_coo_buffer_size_per_device,
+        theoretical_max, suggested_coo_buffer_size_per_device.value(),
         num_scs_per_device, stacked_table_name);
   } else {
     LOG_IF(WARNING, batch_number % 10000 == 0)
