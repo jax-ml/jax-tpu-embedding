@@ -251,7 +251,7 @@ int ComputeCooBufferSizePerDevice(
   const int64_t theoretical_max =
       max_ids_rounded_up * num_scs_per_device * num_scs *
       (use_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
-  const std::string& stacked_table_name = stacked_table_metadata[0].name;
+  absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                        << ": " << theoretical_max
                        << " (max_ids_rounded_up: " << max_ids_rounded_up

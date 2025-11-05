@@ -232,7 +232,7 @@ struct ExtractedCooTensors {
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;
   StackedTableMetadata(
-      std::string_view name, int feature_index, int max_ids_per_partition,
+      absl::string_view name, int feature_index, int max_ids_per_partition,
       int max_unique_ids_per_partition, int row_offset, int col_offset,
       int col_shift, int batch_size,
       std::optional<int> suggested_coo_buffer_size_per_device = std::nullopt,

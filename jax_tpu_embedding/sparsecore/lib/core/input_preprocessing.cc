@@ -116,7 +116,7 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
 // devices. This includes extracted COO tensors, partitioned COO tensors,
 // CSR arrays, and statistics.
 struct TableState {
-  std::string_view stacked_table_name;
+  absl::string_view stacked_table_name;
   absl::Span<const StackedTableMetadata> stacked_table_metadata;
   int coo_buffer_size_per_device;
   CsrArraysPerHost csr_arrays_per_host;
@@ -127,16 +127,15 @@ struct TableState {
   std::vector<ExtractedCooTensors> extracted_coo_tensors_per_device;
   std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
 
-  TableState(const std::string& name,
+  TableState(absl::string_view name,
              absl::Span<const StackedTableMetadata> metadata,
              const PreprocessSparseDenseMatmulInputOptions& options,
              int num_scs, int row_pointers_size_per_bucket)
       : stacked_table_name(name),
         stacked_table_metadata(metadata),
-        coo_buffer_size_per_device(
-            ComputeCooBufferSizePerDevice(num_scs, options.num_sc_per_device,
-                                          metadata, options.batch_number,
-                                          options.enable_minibatching)),
+        coo_buffer_size_per_device(ComputeCooBufferSizePerDevice(
+            num_scs, options.num_sc_per_device, metadata, options.batch_number,
+            options.enable_minibatching)),
         csr_arrays_per_host(options.local_device_count,
                             row_pointers_size_per_bucket *
                                 (options.enable_minibatching
