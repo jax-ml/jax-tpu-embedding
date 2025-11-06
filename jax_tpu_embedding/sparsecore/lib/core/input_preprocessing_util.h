@@ -86,9 +86,7 @@ struct CsrArraysPerHost {
       : row_pointers(local_device_count, row_pointers_size_per_device),
         embedding_ids(local_device_count, coo_buffer_size_per_device),
         sample_ids(local_device_count, coo_buffer_size_per_device),
-        gains(local_device_count, coo_buffer_size_per_device) {
-    row_pointers.setConstant(coo_buffer_size_per_device);
-  }
+        gains(local_device_count, coo_buffer_size_per_device) {}
 
   internal::CsrArraysPerDevice GetCsrArraysPerDevice(int local_device_id)
       ABSL_ATTRIBUTE_LIFETIME_BOUND {

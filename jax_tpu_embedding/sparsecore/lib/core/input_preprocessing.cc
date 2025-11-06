@@ -508,6 +508,7 @@ PreprocessSparseDenseMatmulInput(
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
 
   std::vector<TableState> table_states;
+  table_states.reserve(stacked_tables.size());
   for (const auto& [stacked_table_name, stacked_table_metadata] :
        stacked_tables) {
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
