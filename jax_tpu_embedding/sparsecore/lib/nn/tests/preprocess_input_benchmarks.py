@@ -178,7 +178,7 @@ def generate_sparse_coo_inputs_for_feature_spec(
 def apply_fdo_stats(stats_cc):
   """Applies FDO adjustment to benchmark specs from stats."""
   stats = embedding.SparseDenseMatmulInputStats.from_cc(stats_cc)
-  fdo_headroom = 1.2
+  fdo_headroom = 2.0
   for stat_dict in [
       stats.max_ids_per_partition,
       stats.max_unique_ids_per_partition,
