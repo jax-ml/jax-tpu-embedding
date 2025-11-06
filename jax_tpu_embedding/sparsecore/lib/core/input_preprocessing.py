@@ -234,7 +234,6 @@ def preprocess_sparse_dense_matmul_input(
   )
 
 
-# TODO: b/343986969 - Optimize the size of the tensor.
 def _coo_buffer_tensor_size(
     max_ids_per_partition: int, num_scs: int, num_scs_per_device: int
 ) -> int:
