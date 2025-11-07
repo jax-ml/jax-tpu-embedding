@@ -19,8 +19,11 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/strings/str_join.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
@@ -31,15 +34,16 @@ namespace rpc {
 class GrpcAllReduceInterface final : public AllReduceInterface {
  public:
   GrpcAllReduceInterface(std::vector<std::string> peer_addresses, int task_id,
-                         int num_tasks, int all_reduce_port,
-                         AllReduceServiceImpl* local_service,
+                         int num_tasks, AllReduceServiceImpl* local_service,
                          int threads_per_task = 1)
       : peer_addresses_(peer_addresses),
         task_id_(task_id),
         num_tasks_(num_tasks),
         threads_per_task_(threads_per_task),
-        all_reduce_port_(all_reduce_port),
         local_service_(local_service) {
+    VLOG(2) << "GrpcAllReduceInterface created with task_id: " << task_id
+              << " num_tasks: " << num_tasks
+              << " peer_addresses: " << absl::StrJoin(peer_addresses, ",");
     CHECK_EQ(peer_addresses_.size(), num_tasks_ - 1);
     SetUp();
   }
@@ -66,10 +70,10 @@ class GrpcAllReduceInterface final : public AllReduceInterface {
   int task_id_;
   int num_tasks_;
   int threads_per_task_;
-  int all_reduce_port_;
   AllReduceServiceImpl* local_service_;  // Not owned.
 
-  std::vector<std::unique_ptr<AllReduceGrpcService::Stub>> stubs_;
+  absl::flat_hash_map<std::string, std::unique_ptr<AllReduceGrpcService::Stub>>
+      stubs_;
 
  private:
   // Create gRPC channels to other peers.

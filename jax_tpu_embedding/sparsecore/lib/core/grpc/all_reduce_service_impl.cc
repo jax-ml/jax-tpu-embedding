@@ -19,6 +19,7 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/synchronization/barrier.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
@@ -45,6 +46,8 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
 ::grpc::ServerUnaryReactor* AllReduceServiceImpl::ContributeData(
     ::grpc::CallbackServerContext* context, const AllReduceData* request,
     AllReduceResponse* response) {
+  VLOG(2) << "Received data for sync_key: " << request->sync_key()
+            << " from peer: " << context->peer();
   auto* reactor = context->DefaultReactor();
   absl::MutexLock lock(mutex_);
 
@@ -54,8 +57,15 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
     bool timeout =
         local_reduced_cv_.WaitWithTimeout(&mutex_, absl::Seconds(7200));
     if (timeout) {
-      reactor->Finish(grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED,
-                                   "Timed out waiting for local value."));
+      grpc::Status status = grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED,
+                                   "Timed out waiting for local value.");
+      LOG(ERROR) << "Timeout while waiting for local value for sync_key: "
+                 << request->sync_key() << " from peer: " << context->peer()
+                 << " with status: "
+                 << absl::Status(
+                        static_cast<absl::StatusCode>(status.error_code()),
+                        status.error_message());
+      reactor->Finish(status);
       return reactor;
     }
   }
@@ -80,6 +90,8 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
   all_reduce_state_map_[request->sync_key()]
       .incoming_rpc_counter->DecrementCount();
 
+  VLOG(2) << "Finished processing data for sync_key: " << request->sync_key()
+            << " from peer: " << context->peer();
   reactor->Finish(::grpc::Status::OK);
   return reactor;
 }
@@ -131,6 +143,8 @@ void AllReduceServiceImpl::WaitIncomingRPCs(int sync_key) {
         all_reduce_state_map_.at(sync_key).incoming_rpc_counter.get();
   }
 
+  VLOG(2) << "Waiting for incoming RPCs for sync_key: " << sync_key;
+
   // Wait for the counter outside of the mutex lock to prevent deadlock.
   CHECK(incoming_rpc_counter != nullptr);
   incoming_rpc_counter->Wait();
@@ -143,6 +157,7 @@ void AllReduceServiceImpl::WaitResults(int sync_key) {
     global_results_barrier =
         all_reduce_state_map_.at(sync_key).global_results_barrier.get();
   }
+  VLOG(2) << "Waiting for global results for sync_key: " << sync_key;
   CHECK(global_results_barrier != nullptr);
   global_results_barrier->Block();
 }
@@ -154,6 +169,8 @@ absl::StatusOr<AllReduceData> AllReduceServiceImpl::GetResult(int sync_key) {
   if (state.results_counter->DecrementCount()) {
     all_reduce_state_map_.erase(sync_key);
   }
+  VLOG(2) << "GetResult for sync_key: " << sync_key
+            << " result: " << result.DebugString();
   return result;
 }
 

@@ -16,14 +16,18 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
+#include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/strings/str_cat.h"  // from @com_google_absl
+#include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/time/clock.h"  // from @com_google_absl
@@ -43,10 +47,12 @@ namespace {
 
 // Helper function to send ContributeData RPCs to all peers.
 absl::Status SendLocalData(
-    const std::vector<std::unique_ptr<AllReduceGrpcService::Stub>>& stubs,
+    const absl::flat_hash_map<
+        std::string, std::unique_ptr<AllReduceGrpcService::Stub>>& stubs,
     const AllReduceData& request, int num_hosts) {
   absl::Mutex mutex;
   grpc::Status overall_status ABSL_GUARDED_BY(mutex) = grpc::Status::OK;
+  std::vector<std::string> failed_peers ABSL_GUARDED_BY(mutex);
   absl::BlockingCounter outgoing_rpcs(stubs.size());
 
   struct ContributeDataArgs {
@@ -57,20 +63,33 @@ absl::Status SendLocalData(
 
   // Send our data to all other peers asynchronously.
   DCHECK_EQ(stubs.size(), num_hosts - 1);
-  for (const auto& stub : stubs) {
+  for (const auto& [peer_address, stub] : stubs) {
     auto args = std::make_shared<ContributeDataArgs>();
     args->context.set_deadline(
         absl::ToChronoTime(absl::Now() + absl::Seconds(7200)));
     args->request = request;
+    VLOG(2) << "Sending RPC to peer: " << peer_address
+            << " for sync_key: " << request.sync_key();
 
     stub->async()->ContributeData(
         &args->context, &args->request, &args->response,
-        [&, args](::grpc::Status s) {
-          {
+        [&, args, peer_address = peer_address](::grpc::Status s) {
+          if (!s.ok()) {
+            LOG(ERROR) << "ContributeData async RPC to peer " << peer_address
+                       << " for sync_key: " << args->request.sync_key()
+                       << " failed with status: "
+                       << absl::Status(
+                              static_cast<absl::StatusCode>(s.error_code()),
+                              s.error_message());
             absl::MutexLock lock(mutex);
-            if (!s.ok() && overall_status.ok()) {
+            failed_peers.push_back(peer_address);
+            if (overall_status.ok()) {
               overall_status = s;
             }
+          } else {
+            VLOG(2) << "ContributeData async RPC to peer " << peer_address
+                      << " for sync_key: " << args->request.sync_key()
+                      << " completed successfully.";
           }
           outgoing_rpcs.DecrementCount();
         });
@@ -81,9 +100,16 @@ absl::Status SendLocalData(
 
   // Propagate any RPC errors.
   if (!overall_status.ok()) {
+    absl::MutexLock lock(mutex);
     return absl::Status(
         static_cast<absl::StatusCode>(overall_status.error_code()),
-        overall_status.error_message());
+        absl::StrCat("Failed to communicate with peer(s): ",
+                     absl::StrJoin(failed_peers, ","),
+                     " for sync_key: ", request.sync_key(),
+                     ". Please check if the peer task(s) are running "
+                     "correctly and have not crashed (e.g., due to "
+                     "keepalive ping failures). Overall status: ",
+                     overall_status.error_message()));
   }
   return absl::OkStatus();
 }
@@ -92,11 +118,15 @@ absl::Status SendLocalData(
 
 void GrpcAllReduceInterface::SetUp() {
   for (const auto& peer_address : peer_addresses_) {
+    VLOG(2) << "Attempting to create channel for peer: " << peer_address;
     auto creds = GetDefaultChannelCredentials();
     auto channel = ::grpc::CreateChannel(peer_address, creds);
     auto stub = AllReduceGrpcService::NewStub(channel);
-    stubs_.push_back(std::move(stub));
+    stubs_.insert({peer_address, std::move(stub)});
   }
+  LOG(INFO) << "GrpcAllReduceInterface channel creation complete for task_id: "
+            << task_id_ << ", num_tasks: " << num_tasks_
+            << ", peer_addresses: " << absl::StrJoin(peer_addresses_, ",");
 }
 
 absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
@@ -116,11 +146,14 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
     TF_RETURN_IF_ERROR(
         SendLocalData(stubs_, locally_reduced_data.value(), num_tasks_));
 
+    VLOG(2) << "Done sending local data for sync_key: " << request.sync_key()
+              << " waiting for incoming RPCs from other hosts. " << task_id_;
     // Wait to receive data from all other hosts (Local service performs the
     // reduction).
     local_service_->WaitIncomingRPCs(request.sync_key());
   }
 
+  VLOG(2) << "Waiting for results for sync_key: " << request.sync_key();
   // Wait for one of the threads to aggregate results.
   local_service_->WaitResults(request.sync_key());
 

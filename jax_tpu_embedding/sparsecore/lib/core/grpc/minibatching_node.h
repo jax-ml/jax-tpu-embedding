@@ -43,8 +43,8 @@ class MinibatchingNode {
       : all_reduce_service_(std::make_unique<AllReduceServiceImpl>(
             task_id, num_tasks, threads_per_task)),
         all_reduce_interface_(std::make_unique<GrpcAllReduceInterface>(
-            peer_addresses, task_id, num_tasks, minibatching_port,
-            all_reduce_service_.get(), threads_per_task)),
+            peer_addresses, task_id, num_tasks, all_reduce_service_.get(),
+            threads_per_task)),
         all_reduce_server_(
             ::grpc::ServerBuilder()
                 .AddListeningPort(absl::StrCat("[::]:", minibatching_port),
