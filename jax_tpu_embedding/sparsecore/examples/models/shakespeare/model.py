@@ -52,7 +52,7 @@ class Model(nn.Module):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=self.vocab_size,
         embedding_dim=self.embedding_size,
-        initializer=jax.nn.initializers.zeros,
+        initializer=jax.nn.initializers.normal(),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name=self.table_name,
