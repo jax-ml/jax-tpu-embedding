@@ -60,7 +60,7 @@ absl::Status SendLocalData(
   for (const auto& stub : stubs) {
     auto args = std::make_shared<ContributeDataArgs>();
     args->context.set_deadline(
-        absl::ToChronoTime(absl::Now() + absl::Seconds(60)));
+        absl::ToChronoTime(absl::Now() + absl::Seconds(7200)));
     args->request = request;
 
     stub->async()->ContributeData(

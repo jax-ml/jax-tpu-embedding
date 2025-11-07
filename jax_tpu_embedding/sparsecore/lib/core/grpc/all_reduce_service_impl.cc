@@ -52,7 +52,7 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
   while (all_reduce_state_map_.find(request->sync_key()) ==
          all_reduce_state_map_.end()) {
     bool timeout =
-        local_reduced_cv_.WaitWithTimeout(&mutex_, absl::Seconds(60));
+        local_reduced_cv_.WaitWithTimeout(&mutex_, absl::Seconds(7200));
     if (timeout) {
       reactor->Finish(grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED,
                                    "Timed out waiting for local value."));
