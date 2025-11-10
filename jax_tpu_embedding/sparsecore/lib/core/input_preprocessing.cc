@@ -169,7 +169,8 @@ void ExtractSortAndGroupCooTensorsForTable(
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    PreprocessingThreadPool()->Schedule([&, local_device, &state = state] {
+    PreprocessingThreadPool()->Schedule([&, local_device, &state = state,
+                                         input_batches] {
       state.extracted_coo_tensors_per_device[local_device] =
           internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
               state.stacked_table_metadata, input_batches, local_device,
@@ -458,7 +459,10 @@ void FillDeviceBuffersForTable(
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    PreprocessingThreadPool()->Schedule([&, local_device, &state = state] {
+    PreprocessingThreadPool()->Schedule([&, local_device, &state = state,
+                                         row_pointers_size_per_bucket,
+                                         global_minibatching_required,
+                                         global_minibatching_split] {
       PartitionedCooTensors& grouped_coo_tensors =
           state.partitioned_coo_tensors_per_device[local_device];
       if (options.enable_minibatching && global_minibatching_required) {
