@@ -220,6 +220,7 @@ struct ExtractedCooTensors {
   // grouping them. Might be lower after deduplication.
   std::vector<int> coo_tensors_per_sc;
 
+  ExtractedCooTensors() : ExtractedCooTensors(0, 0) {}
   ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
       : batch_size_for_device(batch_size_for_device),
         coo_tensors_per_sc(num_sc_per_device, 0) {}

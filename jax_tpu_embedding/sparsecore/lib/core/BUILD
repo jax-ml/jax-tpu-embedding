@@ -134,6 +134,7 @@ cc_library(
         ":input_preprocessing_util",
         ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",

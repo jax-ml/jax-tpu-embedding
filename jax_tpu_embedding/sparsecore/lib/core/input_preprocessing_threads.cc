@@ -50,7 +50,8 @@ tsl::thread::ThreadPool* PreprocessingThreadPool() {
   static tsl::thread::ThreadPool* pool = []() {
     const int num_threads = GetThreadPoolSize();
     DCHECK_GE(num_threads, 1);
-    LOG(INFO) << "Creating thread pool for SparseCore input preprocessing: "
+    LOG(INFO) << "Creating thread pool for SparseCore input "
+                 "preprocessing: "
               << num_threads << " threads";
     auto thread_pool = new tsl::thread::ThreadPool(
         tsl::Env::Default(), tsl::ThreadOptions(), kScPool, num_threads,
