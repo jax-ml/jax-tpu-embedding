@@ -226,8 +226,6 @@ struct ExtractedCooTensors {
         coo_tensors_per_sc(num_sc_per_device, 0) {}
 };
 
-// TODO(b/357664103): Converge towards a more compatible interface between the
-// python representation and the c++ representation.
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;
   StackedTableMetadata(
