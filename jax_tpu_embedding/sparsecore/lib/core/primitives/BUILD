@@ -204,7 +204,6 @@ pytype_strict_library(
     srcs = ["__init__.py"],
     visibility = [
         "//jax_tpu_embedding/sparsecore/lib/core:__pkg__",
-        "//jax_tpu_embedding/sparsecore/lib/core/primitives/tests:__pkg__",
         "//jax_tpu_embedding/sparsecore/lib/nn:__subpackages__",
     ],
     deps = [
