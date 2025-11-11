@@ -49,6 +49,7 @@ from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
 from jax_tpu_embedding.sparsecore.lib.core import constants
+from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
 
 
@@ -72,6 +73,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
     lhs_local_embedding_ids: np.ndarray,
     lhs_local_sample_ids: np.ndarray,
     lhs_gains: np.ndarray,
+    num_minibatches_per_physical_sparse_core: np.int32,
     embedding_variables: np.ndarray,
     activations_grad: np.ndarray,
     hyperparameters: np.ndarray,
@@ -83,85 +85,33 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
     sharding_strategy: int = 1,
 ):
   """Abstract eval for sparse_dense_matmul_adagrad."""
-  if lhs_row_pointers.dtype != np.int32:
-    raise ValueError(
-        f"lhs_row_pointers must have type int32, got {lhs_row_pointers.dtype}"
-    )
-  if lhs_local_sample_ids.dtype != np.int32:
-    raise ValueError(
-        "lhs_local_sample_ids must have type int32, got"
-        f" {lhs_local_sample_ids.dtype}"
-    )
-  if lhs_local_embedding_ids.dtype != np.int32:
-    raise ValueError(
-        "lhs_local_embedding_ids must have type uint32, got"
-        f" {lhs_local_embedding_ids.dtype}"
-    )
-  if lhs_gains.dtype != np.float32:
-    raise ValueError(f"lhs_gains must have type float32, got {lhs_gains.dtype}")
+  utils.validate_abstract_eval_params(
+      lhs_row_pointers=lhs_row_pointers,
+      lhs_local_embedding_ids=lhs_local_embedding_ids,
+      lhs_local_sample_ids=lhs_local_sample_ids,
+      lhs_gains=lhs_gains,
+      num_minibatches_per_physical_sparse_core=num_minibatches_per_physical_sparse_core,
+      embedding_table=core.ShapedArray(
+          embedding_variables.shape[1:], embedding_variables.dtype
+      ),
+      activations_grad=activations_grad,
+      max_ids_per_partition=max_ids_per_partition,
+      max_unique_ids_per_partition=max_unique_ids_per_partition,
+      computation_name=computation_name,
+      sharding_strategy=sharding_strategy,
+  )
 
-  if embedding_variables.dtype != np.float32:
-    raise ValueError(
-        "embedding_table must have type float32, got"
-        f" {embedding_variables.dtype}"
-    )
   if hyperparameters.dtype != np.float32 or len(hyperparameters.shape) != 1:
     raise ValueError(
         "hyperparameters must be 1 dimensional with dtype float32, got"
         f" {hyperparameters.dtype} and shape {hyperparameters.shape}"
     )
-  if activations_grad.dtype != np.float32:
-    raise ValueError(
-        f"activations_grad must have type float32, got {activations_grad.dtype}"
-    )
-  if len(lhs_row_pointers.shape) != 1:
-    raise ValueError(
-        f"lhs_row_pointers must have rank 1, got {lhs_row_pointers.shape}"
-    )
-  if (
-      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape
-      or lhs_gains.shape != lhs_local_embedding_ids.shape
-      or len(lhs_local_sample_ids.shape) != 1
-  ):
-    raise ValueError(
-        "LHS sample IDs, embedding IDs, and gains must all have "
-        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "
-        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"
-    )
   if len(embedding_variables.shape) != 3:
     raise ValueError(
         f"embedding_table must have rank 3, got {embedding_variables.shape}"
     )
-  if len(activations_grad.shape) != 2:
-    raise ValueError(
-        f"activations_grad must have rank 2, got {activations_grad.shape}"
-    )
-  if embedding_variables.shape[-1] != activations_grad.shape[-1]:
-    raise ValueError(
-        "embedding_table and activations_grad must have equal feature (minor)"
-        f" dimensions, got {embedding_variables.shape},"
-        f" {activations_grad.shape}"
-    )
   if not callable(optimizer_generator):
     raise ValueError("optimizer_generator must be callable")
-
-  if sharding_strategy != 1:
-    raise ValueError(
-        f"sharding_strategy must be MOD (1), got {sharding_strategy}"
-    )
-
-  if max_ids_per_partition <= 0:
-    raise ValueError(
-        f"max_ids_per_partition must be positive, got {max_ids_per_partition}"
-    )
-
-  if max_unique_ids_per_partition <= 0:
-    raise ValueError(
-        "max_unique_ids_per_partition must be positive, got"
-        f" {max_unique_ids_per_partition}"
-    )
-  if not computation_name:
-    raise ValueError("computation_name must be non-empty")
 
   num_tables = embedding_variables.shape[0]
   return tuple(
@@ -184,6 +134,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     lhs_local_embedding_ids: mlir.ir.BlockArgument,
     lhs_local_sample_ids: mlir.ir.BlockArgument,
     lhs_gains: mlir.ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: mlir.ir.BlockArgument,
     embedding_variables: mlir.ir.BlockArgument,
     activations_grad: mlir.ir.BlockArgument,
     hyperparameters: mlir.ir.BlockArgument,
@@ -195,10 +146,13 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     sharding_strategy: int = 1,
 ) -> Tuple[np.ndarray, ...]:
   """Lowering for sparse_dense_matmul_optimizer_grad."""
+  del num_minibatches_per_physical_sparse_core
   num_slot_variables = (
-      embedding_variables.type.maybe_downcast().get_dim_size(0) - 1
+      ir.RankedTensorType(embedding_variables.type).get_dim_size(0) - 1
   )
-  num_hyperparameters = hyperparameters.type.maybe_downcast().get_dim_size(0)
+  num_hyperparameters = ir.RankedTensorType(hyperparameters.type).get_dim_size(
+      0
+  )
   sdmm_sgd_config = {
       "max_ids_per_partition": max_ids_per_partition,
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
@@ -219,8 +173,8 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   # must be kept intact.
   tables = []
   table_shape = (
-      embedding_variables.type.maybe_downcast().get_dim_size(1),
-      embedding_variables.type.maybe_downcast().get_dim_size(2),
+      ir.RankedTensorType(embedding_variables.type).get_dim_size(1),
+      ir.RankedTensorType(embedding_variables.type).get_dim_size(2),
   )
   for i in range(num_slot_variables + 1):
     sliced = hlo.slice(
@@ -240,7 +194,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   optimizer_generator(
       ctx,
       optimizer_update_computation_name,
-      tables[0].type.maybe_downcast().get_dim_size(1),
+      ir.RankedTensorType(tables[0].type).get_dim_size(1),
   )
   hyperparams = []
   f32type = mlir.aval_to_ir_type(core.ShapedArray((), np.float32))
