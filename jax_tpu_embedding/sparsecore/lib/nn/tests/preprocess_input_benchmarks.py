@@ -178,7 +178,7 @@ def generate_sparse_coo_inputs_for_feature_spec(
 def apply_fdo_stats(stats_cc):
   """Applies FDO adjustment to benchmark specs from stats."""
   stats = embedding.SparseDenseMatmulInputStats.from_cc(stats_cc)
-  fdo_headroom = 2.0
+  fdo_headroom = 1.0  # We process the same input repeatedly.
   for stat_dict in [
       stats.max_ids_per_partition,
       stats.max_unique_ids_per_partition,
@@ -219,7 +219,7 @@ def preprocess_input_benchmark(state: google_benchmark.State):
         num_sc_per_device=4,
         has_leading_dimension=has_leading_dimension,
         batch_number=batch_num,
-        allow_id_dropping=False,
+        allow_id_dropping=batch_num == 0,
     )
     if batch_num == 0:
       apply_fdo_stats(stats_cc)
@@ -250,7 +250,7 @@ def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
             num_sc_per_device=4,
             has_leading_dimension=has_leading_dimension,
             batch_number=batch_num,
-            allow_id_dropping=False,
+            allow_id_dropping=batch_num == 0,
         )
     )
     if batch_num == 0:
@@ -292,7 +292,7 @@ def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
         enable_minibatching=True,
         all_reduce_interface=all_reduce_interfaces[host_id],
         batch_number=batch_number,
-        allow_id_dropping=False,
+        allow_id_dropping=batch_number == 0,
     )
 
   with concurrent.futures.ThreadPoolExecutor(max_workers=num_hosts) as executor:
