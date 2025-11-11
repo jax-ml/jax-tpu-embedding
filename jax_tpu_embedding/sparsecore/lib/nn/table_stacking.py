@@ -373,15 +373,11 @@ def round_up_dim_and_vocab_size(
   return table_to_padded_dim, table_to_padded_vocab_size
 
 
-def _get_stack_table_names(
+def _group_tables_for_stacking(
     num_sc: int,
     flatten_tables: Mapping[str, embedding_spec.TableSpec],
-    flatten_features: Sequence[embedding_spec.FeatureSpec],
-    activation_mem_bytes_limit: int,
-) -> Sequence[Sequence[str]]:
-  """Returns the stack groups for the tables based on their specs."""
-  original_table_names = set(flatten_tables.keys())
-
+) -> list[list[str]]:
+  """Groups table names by padded dimension, optimizer, and combiner."""
   table_to_padded_dim, _ = round_up_dim_and_vocab_size(flatten_tables, num_sc)
   table_name_map = collections.defaultdict(list)
   for table_name, dim in table_to_padded_dim.items():
@@ -391,9 +387,15 @@ def _get_stack_table_names(
         flatten_tables[table_name].combiner,
     )
     table_name_map[key].append(table_name)
+  return list(table_name_map.values())
 
-  groups = list(table_name_map.values())
 
+def _calculate_activation_memory_metrics(
+    num_sc: int,
+    flatten_tables: Mapping[str, embedding_spec.TableSpec],
+    flatten_features: Sequence[embedding_spec.FeatureSpec],
+) -> tuple[Mapping[str, int], Mapping[str, int]]:
+  """Calculates sample count and activation memory bytes per table."""
   # Calculate sample_count per sparsecore for each table.
   table_to_sample_count = collections.defaultdict(int)
   for feature in flatten_features:
@@ -402,11 +404,52 @@ def _get_stack_table_names(
     )
 
   # Calculate and register the activation memory usage of this table.
+  table_to_padded_dim, _ = round_up_dim_and_vocab_size(flatten_tables, num_sc)
   table_to_activation_mem_bytes = {
       tname: table_to_padded_dim[tname] * table_to_sample_count[tname] * 4
       for tname in flatten_tables.keys()
   }
+  return table_to_sample_count, table_to_activation_mem_bytes
 
+
+def _get_stack_table_names(
+    num_sc: int,
+    flatten_tables: Mapping[str, embedding_spec.TableSpec],
+    flatten_features: Sequence[embedding_spec.FeatureSpec],
+    activation_mem_bytes_limit: int,
+) -> Sequence[Sequence[str]]:
+  """Returns the stack groups for the tables based on their specs."""
+  original_table_names = set(flatten_tables.keys())
+
+  groups = _group_tables_for_stacking(num_sc, flatten_tables)
+
+  _, table_to_activation_mem_bytes = _calculate_activation_memory_metrics(
+      num_sc, flatten_tables, flatten_features
+  )
+
+  validated_groups = _split_groups_by_memory_limit(
+      groups, table_to_activation_mem_bytes, activation_mem_bytes_limit
+  )
+
+  grouped_table_names = set()
+  for group in validated_groups:
+    grouped_table_names.update(group)
+
+  if original_table_names != grouped_table_names:
+    raise ValueError(
+        "Table names are not grouped correctly. Original table names:"
+        f" {original_table_names}, grouped table names: {grouped_table_names}"
+    )
+
+  return validated_groups
+
+
+def _split_groups_by_memory_limit(
+    groups: list[list[str]],
+    table_to_activation_mem_bytes: Mapping[str, int],
+    activation_mem_bytes_limit: int,
+) -> list[list[str]]:
+  """Splits table groups to respect the activation memory limit."""
   validated_groups = []
   for group in groups:
     # A list of groups that are split from the current group.
@@ -446,17 +489,6 @@ def _get_stack_table_names(
           )
     # Add into the validated groups.
     validated_groups.extend(split_groups)
-
-  grouped_table_names = set()
-  for group in validated_groups:
-    grouped_table_names.update(group)
-
-  if original_table_names != grouped_table_names:
-    raise ValueError(
-        "Table names are not grouped correctly. Original table names:"
-        f" {original_table_names}, grouped table names: {grouped_table_names}"
-    )
-
   return validated_groups
 
 
