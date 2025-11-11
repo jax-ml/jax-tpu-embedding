@@ -174,7 +174,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  emb_dim_size = ir.ShapedType(embedding_table.type).get_dim_size(1)
+  emb_dim_size = ir.RankedTensorType(embedding_table.type).get_dim_size(1)
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (

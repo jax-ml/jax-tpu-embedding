@@ -200,7 +200,9 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  embedding_table_dim_size = embedding_table.type.get_dim_size(1)
+  embedding_table_dim_size = ir.RankedTensorType(
+      embedding_table.type
+  ).get_dim_size(1)
   hlo_f32 = functools.partial(_hlo_f32, emb_dim=embedding_table_dim_size)
 
   optimizer_update = func_dialect.FuncOp(
@@ -208,35 +210,59 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
       (
           [
               ir.RankedTensorType.get(  # grad
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # embedding_table
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # momentum
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # velocity
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # alpha_t
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # beta_1
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # beta_2
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # epsilon_hat
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
           ],

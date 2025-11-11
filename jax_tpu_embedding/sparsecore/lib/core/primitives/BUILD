@@ -187,11 +187,10 @@ pytype_strict_library(
         "sparse_dense_matmul_optimizer_grad.py",
     ],
     deps = [
+        ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         pypi_requirement("jax"),
-        pypi_requirement("jax/_src/lib"),
         pypi_requirement("jax/extend"),
-        pypi_requirement("jax/extend/mlir"),
         pypi_requirement("jax/extend/mlir:ir"),
         pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
@@ -221,5 +220,8 @@ pytype_strict_library(
 pytype_strict_library(
     name = "utils",
     srcs = ["utils.py"],
-    deps = [pypi_requirement("numpy")],
+    deps = [
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
 )

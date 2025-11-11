@@ -15,6 +15,7 @@
 
 from typing import Any
 
+from jax import typing as jax_typing
 import numpy as np
 
 
@@ -33,13 +34,13 @@ def ensure_dim(check: Any, expected_dim: int, object_name: str):
 
 
 def validate_abstract_eval_params(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
+    lhs_row_pointers: jax_typing.ArrayLike,
+    lhs_local_embedding_ids: jax_typing.ArrayLike,
+    lhs_local_sample_ids: jax_typing.ArrayLike,
+    lhs_gains: jax_typing.ArrayLike,
     num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    activations_grad: np.ndarray,
+    embedding_table: jax_typing.ArrayLike,
+    activations_grad: jax_typing.ArrayLike,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str,
