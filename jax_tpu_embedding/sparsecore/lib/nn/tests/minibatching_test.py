@@ -320,7 +320,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         )
     )
     inputs, inputs_weights = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=10, seed=2025
+        feature=self.feature_spec, max_sample_size=20, seed=2025
     )
 
     preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
@@ -355,7 +355,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         )
     )
     inputs, inputs_weights = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=10, seed=2025
+        feature=self.feature_spec, max_sample_size=20, seed=2025
     )
 
     preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
