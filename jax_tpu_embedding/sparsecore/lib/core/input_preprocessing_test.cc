@@ -57,6 +57,8 @@ using ::testing::Each;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Gt;
+using ::testing::NanSensitiveFloatEq;
+using ::testing::Pointwise;
 using ::testing::SizeIs;
 
 std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
@@ -1386,6 +1388,69 @@ FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)
         fuzztest::ElementOf<FeatureStackingStrategy>(
             {FeatureStackingStrategy::kStackThenSplit,
              FeatureStackingStrategy::kSplitThenStack}));
+
+TEST_F(TableStackingTest,
+       PreprocessingWithAndWithoutOutputBuffersIsEquivalent) {
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables({{"table_0", stacked_table_metadata_multi_}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output_matrix,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches_multi_),
+                                       stacked_tables, options));
+
+  const int num_scs = options.GetNumScs();
+  const int coo_buffer_size_per_device =
+      ComputeCooBufferSizePerDevice(num_scs, options.num_sc_per_device,
+                                    stacked_table_metadata_multi_, 0, false);
+  const int row_pointers_size =
+      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE) *
+      options.num_sc_per_device;
+  std::vector<int> row_pointers_data(row_pointers_size, INT_MAX);
+  std::vector<int> embedding_ids_data(coo_buffer_size_per_device, INT_MAX);
+  std::vector<int> sample_ids_data(coo_buffer_size_per_device, INT_MAX);
+  std::vector<float> gains_data(coo_buffer_size_per_device, std::nanf(""));
+  absl::flat_hash_map<std::string, internal::CsrArraysPerDevice> output_buffers;
+  output_buffers["table_0"] = internal::CsrArraysPerDevice{
+      .row_pointers = absl::MakeSpan(row_pointers_data),
+      .embedding_ids = absl::MakeSpan(embedding_ids_data),
+      .sample_ids = absl::MakeSpan(sample_ids_data),
+      .gains = absl::MakeSpan(gains_data),
+  };
+  options.output_buffers = &output_buffers;
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output_zero_copy,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches_multi_),
+                                       stacked_tables, options));
+  options.output_buffers = nullptr;  // for next test
+
+  ASSERT_EQ(output_matrix.lhs_row_pointers["table_0"].rows(), 1);
+  ASSERT_EQ(output_matrix.lhs_embedding_ids["table_0"].rows(), 1);
+  ASSERT_EQ(output_matrix.lhs_sample_ids["table_0"].rows(), 1);
+  ASSERT_EQ(output_matrix.lhs_gains["table_0"].rows(), 1);
+
+  EXPECT_THAT(row_pointers_data,
+              ElementsAreArray(absl::MakeConstSpan(
+                  output_matrix.lhs_row_pointers["table_0"].data(),
+                  row_pointers_size)));
+  for (int i = 0; i < coo_buffer_size_per_device; ++i) {
+    if (embedding_ids_data[i] != INT_MAX) {
+      EXPECT_EQ(embedding_ids_data[i],
+                output_matrix.lhs_embedding_ids["table_0"].data()[i]);
+      EXPECT_EQ(sample_ids_data[i],
+                output_matrix.lhs_sample_ids["table_0"].data()[i]);
+      EXPECT_THAT(
+          gains_data[i],
+          NanSensitiveFloatEq(output_matrix.lhs_gains["table_0"].data()[i]));
+    }
+  }
+}
 
 }  // namespace
 }  // namespace jax_sc_embedding
