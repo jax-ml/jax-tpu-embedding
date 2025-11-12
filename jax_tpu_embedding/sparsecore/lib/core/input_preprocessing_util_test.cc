@@ -1269,5 +1269,38 @@ TEST(InputPreprocessingUtilTest,
               ElementsAreArray(expected_sample_ids));
 }
 
+TEST(CsrArraysPerHostTest,
+     CreatingCsrArraysPerHostFromExternalArraysTriggersZeroCopies) {
+  const int kLocalDeviceCount = 1;
+  const int kRpSize = 10;
+  const int kCooSize = 20;
+  std::vector<int> rp_data(kRpSize, 0);
+  std::vector<int> eid_data(kCooSize, 0);
+  std::vector<int> sid_data(kCooSize, 0);
+  std::vector<float> gains_data(kCooSize, 0.0);
+
+  internal::CsrArraysPerDevice buffers{
+      .row_pointers = absl::MakeSpan(rp_data),
+      .embedding_ids = absl::MakeSpan(eid_data),
+      .sample_ids = absl::MakeSpan(sid_data),
+      .gains = absl::MakeSpan(gains_data),
+  };
+
+  CsrArraysPerHost csr_arrays_per_host(kLocalDeviceCount, kRpSize, kCooSize,
+                                       buffers);
+  EXPECT_FALSE(csr_arrays_per_host.owns_data);
+
+  internal::CsrArraysPerDevice device_array =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  device_array.row_pointers[0] = 1;
+  device_array.embedding_ids[0] = 2;
+  device_array.sample_ids[0] = 3;
+  device_array.gains[0] = 4.0;
+
+  EXPECT_EQ(rp_data[0], 1);
+  EXPECT_EQ(eid_data[0], 2);
+  EXPECT_EQ(sid_data[0], 3);
+  EXPECT_EQ(gains_data[0], 4.0);
+}
 }  // namespace
 }  // namespace jax_sc_embedding

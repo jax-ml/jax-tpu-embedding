@@ -23,6 +23,8 @@
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/base/nullability.h"  // from @com_google_absl
+#include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/log/check.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -60,10 +62,10 @@ using BlockRow = Eigen::Block<MatrixX<T>, 1, Eigen::Dynamic, Eigen::RowMajor>;
 namespace internal {
 
 struct CsrArraysPerDevice {
-  BlockRow<int> row_pointers;
-  BlockRow<int> embedding_ids;
-  BlockRow<int> sample_ids;
-  BlockRow<float> gains;
+  absl::Span<int> row_pointers;
+  absl::Span<int> embedding_ids;
+  absl::Span<int> sample_ids;
+  absl::Span<float> gains;
 };
 
 struct StatsPerDevice {
@@ -81,21 +83,58 @@ struct CsrArraysPerHost {
   MatrixXi sample_ids;
   MatrixXf gains;
 
+  internal::CsrArraysPerDevice views;
+  bool owns_data = false;
+
+  const int local_device_count_;
+
   CsrArraysPerHost(int local_device_count, int row_pointers_size_per_device,
                    int coo_buffer_size_per_device)
       : row_pointers(local_device_count, row_pointers_size_per_device),
         embedding_ids(local_device_count, coo_buffer_size_per_device),
         sample_ids(local_device_count, coo_buffer_size_per_device),
-        gains(local_device_count, coo_buffer_size_per_device) {}
+        gains(local_device_count, coo_buffer_size_per_device),
+        owns_data(true),
+        local_device_count_(local_device_count) {
+    views = {absl::MakeSpan(row_pointers.data(), row_pointers.size()),
+             absl::MakeSpan(embedding_ids.data(), embedding_ids.size()),
+             absl::MakeSpan(sample_ids.data(), sample_ids.size()),
+             absl::MakeSpan(gains.data(), gains.size())};
+  }
+
+  CsrArraysPerHost(int local_device_count, int row_pointers_size_per_device,
+                   int coo_buffer_size_per_device,
+                   internal::CsrArraysPerDevice output_buffers)
+      : views(output_buffers),
+        owns_data(false),
+        local_device_count_(local_device_count) {
+    CHECK_EQ(output_buffers.row_pointers.size(),
+             local_device_count * row_pointers_size_per_device);
+    CHECK_EQ(output_buffers.embedding_ids.size(),
+             local_device_count * coo_buffer_size_per_device);
+    CHECK_EQ(output_buffers.sample_ids.size(),
+             local_device_count * coo_buffer_size_per_device);
+    CHECK_EQ(output_buffers.gains.size(),
+             local_device_count * coo_buffer_size_per_device);
+  }
 
   internal::CsrArraysPerDevice GetCsrArraysPerDevice(int local_device_id)
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return internal::CsrArraysPerDevice{
-        .row_pointers = row_pointers.row(local_device_id),
-        .embedding_ids = embedding_ids.row(local_device_id),
-        .sample_ids = sample_ids.row(local_device_id),
-        .gains = gains.row(local_device_id),
-    };
+    int row_pointers_size_per_device =
+        views.row_pointers.size() / local_device_count_;
+    int coo_buffer_size_per_device =
+        views.embedding_ids.size() / local_device_count_;
+    return {views.row_pointers.subspan(
+                local_device_id * row_pointers_size_per_device,
+                row_pointers_size_per_device),
+            views.embedding_ids.subspan(
+                local_device_id * coo_buffer_size_per_device,
+                coo_buffer_size_per_device),
+            views.sample_ids.subspan(
+                local_device_id * coo_buffer_size_per_device,
+                coo_buffer_size_per_device),
+            views.gains.subspan(local_device_id * coo_buffer_size_per_device,
+                                coo_buffer_size_per_device)};
   }
 };
 
@@ -194,6 +233,10 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // (Non-owning) Interface for performing all-reduce operations, used during
   // mini-batching to synchronize state across different hosts.
   AllReduceInterface* absl_nullable all_reduce_interface;
+
+  // If provided, CSR data will be written directly to these buffers.
+  const absl::flat_hash_map<std::string, internal::CsrArraysPerDevice>*
+      output_buffers = nullptr;
 
   // Hash function used for creating minibatching buckets.
   CooFormat::HashFn minibatching_bucketing_hash_fn = HighwayHash;
