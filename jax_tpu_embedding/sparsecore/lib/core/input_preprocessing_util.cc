@@ -91,7 +91,7 @@ bool ValidIndices(int row_index, int coo_offset, int processed,
 
 // Pad the row pointers buffer to the end of the buffer.
 void PadRowPointersBuffer(int& lhs_row_offset, int padding, int row_end,
-                          Eigen::Ref<RowVectorXi> row_pointers) {
+                          absl::Span<int> row_pointers) {
   while (lhs_row_offset < row_end) {
     row_pointers[lhs_row_offset++] = padding;
   }
