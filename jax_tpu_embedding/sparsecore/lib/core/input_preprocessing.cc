@@ -164,29 +164,31 @@ void ExtractSortAndGroupCooTensorsForTable(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::BlockingCounter& counter) {
   tsl::profiler::TraceMe traceme([&] {
-    return absl::StrCat("InputPreprocessingTable-ExtractSortGroup-",
-                        state.stacked_table_name);
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("InputPreprocessingTable-ExtractSortGroup-",
+                     state.stacked_table_name),
+        {{"batch_number", options.batch_number}});
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    PreprocessingThreadPool()->Schedule([&, local_device, &state = state,
-                                         input_batches] {
-      state.extracted_coo_tensors_per_device[local_device] =
-          internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-              state.stacked_table_metadata, input_batches, local_device,
-              options);
+    PreprocessingThreadPool()->Schedule(
+        [&, local_device, &state = state, input_batches] {
+          state.extracted_coo_tensors_per_device[local_device] =
+              internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+                  state.stacked_table_metadata, input_batches, local_device,
+                  options);
 
-      internal::StatsPerDevice stats_per_device =
-          state.stats_per_host.GetStatsPerDevice(local_device);
-      state.partitioned_coo_tensors_per_device[local_device] =
-          SortAndGroupCooTensorsPerLocalDevice(
-              state.extracted_coo_tensors_per_device[local_device],
-              state.stacked_table_metadata[0], options, stats_per_device,
-              state.table_minibatching_required);
-      state.dropped_id_count_per_device[local_device] =
-          stats_per_device.dropped_id_count;
-      counter.DecrementCount();
-    });
+          internal::StatsPerDevice stats_per_device =
+              state.stats_per_host.GetStatsPerDevice(local_device);
+          state.partitioned_coo_tensors_per_device[local_device] =
+              SortAndGroupCooTensorsPerLocalDevice(
+                  state.extracted_coo_tensors_per_device[local_device],
+                  state.stacked_table_metadata[0], options, stats_per_device,
+                  state.table_minibatching_required);
+          state.dropped_id_count_per_device[local_device] =
+              stats_per_device.dropped_id_count;
+          counter.DecrementCount();
+        });
   }
 }
 
@@ -210,8 +212,10 @@ void CreateMinibatchingBucketsForTable(
     TableState& state, const PreprocessSparseDenseMatmulInputOptions& options,
     absl::BlockingCounter& counter) {
   tsl::profiler::TraceMe traceme([&] {
-    return absl::StrCat("InputPreprocessingTable-CreateMinibatchingBuckets-",
-                        state.stacked_table_name);
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("InputPreprocessingTable-CreateMinibatchingBuckets-",
+                     state.stacked_table_name),
+        {{"batch_number", options.batch_number}});
   });
   state.stats_per_host.dropped_id_count = 0;
   for (int local_device = 0; local_device < options.local_device_count;
@@ -369,7 +373,10 @@ void MergeStats(
 absl::StatusOr<bool> SyncMinibatchingRequired(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::Span<const TableState> table_states) {
-  tsl::profiler::TraceMe traceme("SyncMinibatchingRequired");
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        "SyncMinibatchingRequired", {{"batch_number", options.batch_number}});
+  });
   if (!options.enable_minibatching) {
     return false;
   }
@@ -395,7 +402,10 @@ absl::StatusOr<bool> SyncMinibatchingRequired(
 absl::StatusOr<MinibatchingSplit> SyncMinibatchingSplit(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::Span<const TableState> table_states) {
-  tsl::profiler::TraceMe traceme("SyncMinibatchingSplit");
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        "SyncMinibatchingSplit", {{"batch_number", options.batch_number}});
+  });
   MinibatchingSplit local_minibatching_split = 0;
   for (const auto& state : table_states) {
     local_minibatching_split |= state.table_minibatching_split;
@@ -454,8 +464,10 @@ void FillDeviceBuffersForTable(
     MinibatchingSplit global_minibatching_split,
     absl::BlockingCounter& counter) {
   tsl::profiler::TraceMe traceme([&] {
-    return absl::StrCat("InputPreprocessingTable-FillBuffer-",
-                        state.stacked_table_name);
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("InputPreprocessingTable-FillBuffer-",
+                     state.stacked_table_name),
+        {{"batch_number", options.batch_number}});
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
@@ -503,9 +515,11 @@ PreprocessSparseDenseMatmulInput(
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options) {
-  tsl::profiler::TraceMe traceme([=, &options] {
-    return absl::StrCat("input_preprocessing_cc-", options.local_device_count,
-                        "/", options.global_device_count);
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("input_preprocessing_cc-", options.local_device_count, "/",
+                     options.global_device_count),
+        {{"batch_number", options.batch_number}});
   });
   if (options.sharding_strategy != ShardingStrategy::kMod) {
     LOG(FATAL) << "Only mod sharding is supported for now.";
@@ -530,7 +544,11 @@ PreprocessSparseDenseMatmulInput(
 
   // Stage 1: COO Extraction and Initial Sort/Group
   {
-    tsl::profiler::TraceMe traceme("ExtractSortAndGroupCooTensors");
+    tsl::profiler::TraceMe traceme([&] {
+      return tsl::profiler::TraceMeEncode(
+          "ExtractSortAndGroupCooTensors",
+          {{"batch_number", options.batch_number}});
+    });
     absl::BlockingCounter counter(table_states.size() *
                                   options.local_device_count);
     for (auto& state : table_states) {
@@ -552,7 +570,11 @@ PreprocessSparseDenseMatmulInput(
 
   if (options.enable_minibatching && global_minibatching_required) {
     {
-      tsl::profiler::TraceMe traceme("CreateMinibatchingBuckets");
+      tsl::profiler::TraceMe traceme([&] {
+        return tsl::profiler::TraceMeEncode(
+            "CreateMinibatchingBuckets",
+            {{"batch_number", options.batch_number}});
+      });
       absl::BlockingCounter counter(table_states.size() *
                                     options.local_device_count);
       for (auto& state : table_states) {
@@ -570,7 +592,10 @@ PreprocessSparseDenseMatmulInput(
 
   // Stage 3: Fill Device Buffers
   {
-    tsl::profiler::TraceMe traceme("FillDeviceBuffers");
+    tsl::profiler::TraceMe traceme([&] {
+      return tsl::profiler::TraceMeEncode(
+          "FillDeviceBuffers", {{"batch_number", options.batch_number}});
+    });
     absl::BlockingCounter counter(table_states.size() *
                                   options.local_device_count);
     for (auto& state : table_states) {
