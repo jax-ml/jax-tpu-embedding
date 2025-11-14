@@ -62,7 +62,7 @@ pytype_strict_contrib_test(
     srcs = ["preprocess_input_benchmarks.py"],
     args = [
         "--num_features=5",
-        "--num_samples=16",
+        "--num_samples=160",
     ],
     env = {"JAX_PLATFORMS": "cpu"},
     main = "preprocess_input_benchmarks.py",

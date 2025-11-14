@@ -48,6 +48,8 @@ extraction use `-show_from='jax_sc_embedding::ExtractCooTensors'` and so on.
 
 import concurrent
 import sys
+from typing import Optional
+
 from absl import app
 from absl import flags
 import google_benchmark
@@ -56,6 +58,7 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
 import portpicker
+
 
 _NUM_FEATURES = flags.DEFINE_integer("num_features", 100, "Number of features.")
 _NUM_SAMPLES = flags.DEFINE_integer("num_samples", 16000, "Number of samples.")
@@ -175,19 +178,39 @@ def generate_sparse_coo_inputs_for_feature_spec(
   return all_indices_tensors, all_values_tensors, all_dense_shape_tensors
 
 
-def apply_fdo_stats(stats_cc):
-  """Applies FDO adjustment to benchmark specs from stats."""
+def apply_fdo_stats(
+    stats_cc: embedding.SparseDenseMatmulInputStats,
+    fdo_headroom: float = 1.0,
+    buffer_size_headroom: Optional[float] = None,
+):
+  """Applies FDO adjustment to benchmark specs from stats.
+
+  Args:
+    stats_cc: The C++ SparseDenseMatmulInputStats object.
+    fdo_headroom: The headroom to apply to the FDO stats for max_ids and
+      max_unique_ids. Defaults to 1.0 because we process the same input
+      repeatedly.
+    buffer_size_headroom: The headroom to apply to FDO stats for
+      required_buffer_size_per_sc. If None, fdo_headroom is used. This may need
+      to be larger than fdo_headroom if minibatching is forced, as minibatching
+      might increase buffer size requirements.
+  """
   stats = embedding.SparseDenseMatmulInputStats.from_cc(stats_cc)
-  fdo_headroom = 1.0  # We process the same input repeatedly.
+  if buffer_size_headroom is None:
+    buffer_size_headroom = fdo_headroom
+
   for stat_dict in [
       stats.max_ids_per_partition,
       stats.max_unique_ids_per_partition,
-      stats.required_buffer_size_per_sc,
   ]:
     for table_name, value in stat_dict.items():
       stat_dict[table_name] = np.array(
           [int(np.ceil(np.max(value) * fdo_headroom))]
       )
+  for table_name, value in stats.required_buffer_size_per_sc.items():
+    stats.required_buffer_size_per_sc[table_name] = np.array(
+        [int(np.ceil(np.max(value) * buffer_size_headroom))]
+    )
   assert _GLOBAL_SPECS is not None
   embedding.update_preprocessing_parameters(
       _GLOBAL_SPECS, stats, num_sc_per_device=4
@@ -261,7 +284,7 @@ def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
 
 @google_benchmark.register
 @google_benchmark.option.unit(google_benchmark.kMillisecond)
-@google_benchmark.option.iterations(100)
+@google_benchmark.option.iterations(25)
 def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul with minibatching."""
   num_hosts = 4
@@ -307,18 +330,23 @@ def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
           (host_id, executor.submit(worker, host_id, batch_num))
           for host_id in range(num_hosts)
       ]
+      num_minibatches = None
       stats_cc = None
       for host_id, future in futures:
         try:
           # All inputs are the same, so just use the last updated stats.
-          *_, stats_cc = future.result(timeout=60)
+          *_, num_minibatches, stats_cc = future.result(timeout=60)
         except concurrent.futures.TimeoutError:
           print(f"Host {host_id} timed out.")
           return
       if batch_num == 0:
         assert stats_cc is not None
-        apply_fdo_stats(stats_cc)
+        apply_fdo_stats(stats_cc, fdo_headroom=0.5, buffer_size_headroom=1.0)
         state.resume_timing()
+      else:
+        # Make sure we are benchmarking multiple minibatches (guranteed by
+        # initial seed).
+        assert num_minibatches >= 5, num_minibatches
       batch_num += 1
 
 
@@ -333,6 +361,7 @@ def main(_):
   global _GLOBAL_RAGGED_DENSE_SHAPES
 
   # Total local batch size that is measured is 16000x100 = 1,600,000.
+  np.random.seed(0)
   _GLOBAL_SPECS = generate_feature_specs(
       _NUM_FEATURES.value, _NUM_SAMPLES.value
   )
