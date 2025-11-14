@@ -418,7 +418,7 @@ void PopulateOutput(TableState& state, PreprocessSparseDenseMatmulOutput& out,
                     absl::Mutex& output_mutex) {
   state.stats_per_host.Flatten();
 
-  absl::MutexLock mutex_lock(output_mutex);
+  absl::MutexLock mutex(output_mutex);
   out.lhs_row_pointers[state.stacked_table_name] =
       std::move(state.csr_arrays_per_host.row_pointers);
   out.lhs_embedding_ids[state.stacked_table_name] =
