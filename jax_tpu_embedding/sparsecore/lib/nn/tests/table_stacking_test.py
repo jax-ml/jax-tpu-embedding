@@ -813,6 +813,88 @@ class TableStackingTest(parameterized.TestCase):
           num_sc_per_device=self.num_sc_per_device,
       )
 
+  @parameterized.parameters(
+      dict(
+          groups=[['a', 'b', 'c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=100,
+          expected=[['a', 'b', 'c']],
+      ),
+      dict(
+          groups=[['a', 'b', 'c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=30,
+          expected=[['a', 'b'], ['c']],
+      ),
+      dict(
+          groups=[['a', 'b', 'c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=35,
+          expected=[['a', 'b'], ['c']],
+      ),
+      dict(
+          groups=[['a', 'b', 'c', 'd']],
+          table_to_mem={'a': 10, 'b': 10, 'c': 10, 'd': 10},
+          limit=25,
+          expected=[['a', 'b'], ['c', 'd']],
+      ),
+      dict(
+          groups=[['a'], ['b', 'c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=35,
+          expected=[['a'], ['b'], ['c']],
+      ),
+      dict(
+          groups=[['a', 'b'], ['c', 'd']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 5, 'd': 5},
+          limit=30,
+          expected=[['a', 'b'], ['c', 'd']],
+      ),
+      dict(
+          groups=[['a', 'b', 'c']],
+          table_to_mem={'a': 60, 'b': 60, 'c': 60},
+          limit=50,
+          expected=[['a'], ['b'], ['c']],
+      ),
+      dict(
+          groups=[['a', 'b', 'c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=60,
+          expected=[['a', 'b', 'c']],
+      ),
+      dict(
+          groups=[['a', 'b', 'c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=40,
+          expected=[['a', 'b'], ['c']],
+      ),
+      dict(
+          groups=[['a', 'b'], ['c']],
+          table_to_mem={'a': 10, 'b': 20, 'c': 30},
+          limit=30,
+          expected=[['a', 'b'], ['c']],
+      ),
+      dict(
+          groups=[['a', 'b'], ['c', 'd']],
+          table_to_mem={'a': 10, 'b': 15, 'c': 20, 'd': 25},
+          limit=30,
+          expected=[['a', 'b'], ['c'], ['d']],
+      ),
+      dict(
+          groups=[],
+          table_to_mem={'a': 10},
+          limit=100,
+          expected=[],
+      ),
+  )
+  def test_split_groups_by_memory_limit(
+      self, groups, table_to_mem, limit, expected
+  ):
+    result = table_stacking._split_groups_by_memory_limit(
+        groups, table_to_mem, limit
+    )
+    self.assertEqual(result, expected)
+
   @parameterized.product(
       donate=[True, False],
       device_count=[1, 2, 4, -1],
