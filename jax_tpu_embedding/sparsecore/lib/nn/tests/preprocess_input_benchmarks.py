@@ -17,11 +17,12 @@ Example usage:
 
 On perflab comparing against HEAD:
 benchy --perflab --runs=10 --reference=srcfs --benchmark_filter=all \
-:preprocess_input_benchmarks.par
+ //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks.par
 
 Or locally:
-bazel run -c opt --dynamic_mode=off --copt=-gmlt :preprocess_input_benchmarks -- \
---benchmark_filter=all --cpu_profile=/tmp/preprocess.prof
+bazel run -c opt --dynamic_mode=off --copt=-gmlt \
+ //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks \
+ -- --benchmark_filter=all --cpu_profile=/tmp/preprocess.prof
 
 The --benchmark_filter flag uses a regex to select benchmarks. For parameterized
 benchmarks, the name is typically formatted as:
