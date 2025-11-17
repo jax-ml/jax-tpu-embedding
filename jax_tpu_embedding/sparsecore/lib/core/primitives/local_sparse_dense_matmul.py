@@ -114,9 +114,10 @@ def _tpu_local_sparse_dense_matmul_lowering(
   constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
   activation_init = hlo.broadcast(
       constant_op,
-      mlir.dense_int_array(
-          [device_batch_size, embedding_table.type.get_dim_size(1)]  # pylint: disable=attribute-error
-      ),
+      mlir.dense_int_array([
+          device_batch_size,
+          ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+      ]),
   )
 
   backend_config = json.dumps({

@@ -143,9 +143,9 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_dim_size = embedding_table.type.maybe_downcast().get_dim_size(
-      1
-  )
+  embedding_table_dim_size = ir.RankedTensorType(
+      embedding_table.type
+  ).get_dim_size(1)
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (

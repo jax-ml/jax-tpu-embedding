@@ -140,22 +140,36 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
       (
           [
               ir.RankedTensorType.get(
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
-                  [1, embedding_table.type.get_dim_size(1)],
+                  [
+                      1,
+                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                  ],
                   ir.F32Type.get(),
               ),
           ],
           [
               ir.TupleType.get_tuple([
                   ir.RankedTensorType.get(
-                      [1, embedding_table.type.get_dim_size(1)],
+                      [
+                          1,
+                          ir.RankedTensorType(
+                              embedding_table.type
+                          ).get_dim_size(1),
+                      ],
                       ir.F32Type.get(),
                   )
               ]),

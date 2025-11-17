@@ -185,7 +185,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  emb_dim_size = embedding_table.type.maybe_downcast().get_dim_size(1)
+  emb_dim_size = ir.RankedTensorType(embedding_table.type).get_dim_size(1)
 
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
