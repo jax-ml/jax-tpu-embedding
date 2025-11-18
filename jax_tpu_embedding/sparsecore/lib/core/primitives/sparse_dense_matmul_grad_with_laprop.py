@@ -322,8 +322,6 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     # update = grad / sqrt(nu_new)
     update = hlo.divide(grad_, hlo.sqrt(nu_new))
 
-    # TODO(b/407826659): Add RMS clipping.
-
     # momentum: update = b_1*mu + ( (1 - b_1^2)^0.5 ) * update
 
     momentum_term_1 = hlo.multiply(b1_, mu_)

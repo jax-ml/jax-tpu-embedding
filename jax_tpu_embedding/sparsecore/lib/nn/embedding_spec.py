@@ -517,7 +517,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
       b1: float = 0.9,
       b2: float = 0.95,
       eps: float = 1e-30,
-      rms_clip_threshold: float = 1.0,
+      rms_clip_threshold: float | None = None,
       initial_slot_value: float = 0.0,
   ):
     super().__init__(
@@ -526,7 +526,10 @@ class LaPropOptimizerSpec(OptimizerSpec):
     self.b1 = b1
     self.b2 = b2
     self.eps = eps
-    self.rms_clip_threshold = rms_clip_threshold
+    if rms_clip_threshold is not None:
+      raise ValueError(
+          "rms_clip_threshold is not yet supported in LaProp optimizer."
+      )
     self.initial_slot_value = initial_slot_value
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
@@ -566,7 +569,6 @@ class LaPropOptimizerSpec(OptimizerSpec):
         self.b1,
         self.b2,
         self.eps,
-        self.rms_clip_threshold,
         self.initial_slot_value,
     ))
 

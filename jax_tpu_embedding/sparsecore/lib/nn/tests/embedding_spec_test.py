@@ -139,7 +139,6 @@ class OptimizerSpecTest(absltest.TestCase):
             b1=0.9,
             b2=0.95,
             eps=1e-30,
-            rms_clip_threshold=1.0,
             initial_slot_value=0.0,
         ),
         embedding_spec.LaPropOptimizerSpec(
@@ -147,7 +146,6 @@ class OptimizerSpecTest(absltest.TestCase):
             b1=0.9,
             b2=0.95,
             eps=1e-30,
-            rms_clip_threshold=1.0,
             initial_slot_value=0.0,
         ),
     )
@@ -157,7 +155,6 @@ class OptimizerSpecTest(absltest.TestCase):
             b1=0.8,
             b2=0.95,
             eps=1e-30,
-            rms_clip_threshold=1.0,
             initial_slot_value=0.0,
         ),
         embedding_spec.LaPropOptimizerSpec(
@@ -165,7 +162,6 @@ class OptimizerSpecTest(absltest.TestCase):
             b1=0.9,
             b2=0.95,
             eps=1e-30,
-            rms_clip_threshold=1.0,
             initial_slot_value=0.0,
         ),
     )
