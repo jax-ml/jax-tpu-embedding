@@ -113,6 +113,26 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
       batch_size_for_device, stacked_table_name, num_sc_per_device);
 }
 
+CsrArraysPerHost CreateCsrArraysPerHost(
+    absl::string_view name,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    int coo_buffer_size_per_device, int row_pointers_size_per_bucket) {
+  const int row_pointers_dim = row_pointers_size_per_bucket *
+                               (options.enable_minibatching
+                                    ? CooFormat::kMaxMinibatchingBuckets
+                                    : 1) *
+                               options.num_sc_per_device;
+  if (options.output_buffers) {
+    auto it = options.output_buffers->find(name);
+    if (it != options.output_buffers->end()) {
+      return CsrArraysPerHost(options.local_device_count, row_pointers_dim,
+                              coo_buffer_size_per_device, it->second);
+    }
+  }
+  return CsrArraysPerHost(options.local_device_count, row_pointers_dim,
+                          coo_buffer_size_per_device);
+}
+
 // Holds the state for processing a single stacked table across all local
 // devices. This includes extracted COO tensors, partitioned COO tensors,
 // CSR arrays, and statistics.
@@ -138,13 +158,9 @@ struct TableState {
         coo_buffer_size_per_device(ComputeCooBufferSizePerDevice(
             num_scs, options.num_sc_per_device, metadata, options.batch_number,
             options.enable_minibatching)),
-        csr_arrays_per_host(options.local_device_count,
-                            row_pointers_size_per_bucket *
-                                (options.enable_minibatching
-                                     ? CooFormat::kMaxMinibatchingBuckets
-                                     : 1) *
-                                options.num_sc_per_device,
-                            coo_buffer_size_per_device),
+        csr_arrays_per_host(CreateCsrArraysPerHost(
+            name, options, coo_buffer_size_per_device,
+            row_pointers_size_per_bucket)),
         stats_per_host(options.local_device_count, options.GetNumScs(),
                        options.num_sc_per_device),
         batch_size_for_device(0) {
@@ -428,15 +444,21 @@ void PopulateOutput(TableState& state, PreprocessSparseDenseMatmulOutput& out,
                     absl::Mutex& output_mutex) {
   state.stats_per_host.Flatten();
 
-  absl::MutexLock mutex(output_mutex);
-  out.lhs_row_pointers[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.row_pointers);
-  out.lhs_embedding_ids[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.embedding_ids);
-  out.lhs_sample_ids[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.sample_ids);
-  out.lhs_gains[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.gains);
+  absl::MutexLock lock(output_mutex);
+  // If `owns_data` is true, it indicates that the data is owned
+  // by `CsrArraysPerHost`, so we need to move it to the output. Otherwise,
+  // the data has already been written directly into the output buffers via
+  // `views`, and no move is necessary.
+  if (state.csr_arrays_per_host.owns_data) {
+    out.lhs_row_pointers[state.stacked_table_name] =
+        std::move(state.csr_arrays_per_host.row_pointers);
+    out.lhs_embedding_ids[state.stacked_table_name] =
+        std::move(state.csr_arrays_per_host.embedding_ids);
+    out.lhs_sample_ids[state.stacked_table_name] =
+        std::move(state.csr_arrays_per_host.sample_ids);
+    out.lhs_gains[state.stacked_table_name] =
+        std::move(state.csr_arrays_per_host.gains);
+  }
 
   out.stats.max_ids_per_partition[state.stacked_table_name] =
       std::move(state.stats_per_host.max_ids_per_partition);
