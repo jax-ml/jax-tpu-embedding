@@ -856,7 +856,6 @@ def stack_tables(
   )
 
 
-# TODO(b/359077239): Explore other ways to take limits as user input.
 def auto_stack_tables(
     features: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
