@@ -92,13 +92,12 @@ void ProcessCooTensors(
       DCHECK_GE(embedding_id, 0);
       DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
 
-      // Compute per-SC coo tensor size.
-      extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc]++;
-
       extracted_coo_tensors.coo_tensors.emplace_back(
           sample_id, embedding_id, gain, options.col_shift, options.col_offset,
           num_scs_mod);
     }
+    extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
+        values_stream.cols();
   }
 }
 }  // namespace jax_sc_embedding
