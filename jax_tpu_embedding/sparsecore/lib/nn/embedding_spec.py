@@ -65,7 +65,6 @@ LaPropSlotVariables = collections.namedtuple(
 )
 
 
-# TODO(b/365975374): Create helper functions for generating OptimizerSpecs.
 @dataclasses.dataclass(frozen=True)
 class OptimizerSpec(metaclass=abc.ABCMeta):
   """Base class for the optimizer specs.
