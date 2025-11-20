@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS", "tpu_py_strict_test")
+load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS", "EXTERNAL_USERS", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary", "pytype_strict_contrib_test", "pytype_strict_library")
 
@@ -40,6 +40,7 @@ pytype_strict_contrib_test(
 pytype_strict_binary(
     name = "preprocess_input_benchmarks",
     srcs = ["preprocess_input_benchmarks.py"],
+    visibility = CORE_USERS,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
