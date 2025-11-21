@@ -403,6 +403,17 @@ cc_library(
     deps = ["@com_google_absl//absl/status:statusor"],
 )
 
+cc_test(
+    name = "sort_and_group_benchmark",
+    srcs = ["sort_and_group_benchmark.cc"],
+    deps = [
+        ":coo_format",
+        ":input_preprocessing_util",
+        ":sort_and_group_coo_tensors_impl",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "minibatching_test_utils",
     testonly = True,
