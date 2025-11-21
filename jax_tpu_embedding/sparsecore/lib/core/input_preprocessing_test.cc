@@ -61,7 +61,7 @@ using ::testing::Gt;
 using ::testing::SizeIs;
 
 std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
-    const std::vector<std::vector<int64_t>>& samples) {
+    absl::Span<const std::vector<int64_t>> samples) {
   std::vector<int64_t> values;
   std::vector<int32_t> row_splits;
   row_splits.push_back(0);

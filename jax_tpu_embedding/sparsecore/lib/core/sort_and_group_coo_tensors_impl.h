@@ -171,8 +171,8 @@ inline void LogSparseCoreStats(
 }
 
 struct LocalSparseCoreTensorGroupingContext {
-  const std::vector<uint64_t>& keys;
-  const std::vector<CooFormat>& coo_tensors;
+  absl::Span<const uint64_t> keys;
+  absl::Span<const CooFormat> coo_tensors;
   const StackedTableMetadata& stacked_table_metadata;
   const PreprocessSparseDenseMatmulInputOptions& options;
   const bool create_buckets;
@@ -193,7 +193,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   const PreprocessSparseDenseMatmulInputOptions& options = context.options;
   const StackedTableMetadata& stacked_table_metadata =
       context.stacked_table_metadata;
-  const std::vector<CooFormat>& coo_tensors = context.coo_tensors;
+  absl::Span<const CooFormat> coo_tensors = context.coo_tensors;
   PartitionedCooTensors& grouped_coo_tensors = context.grouped_coo_tensors;
   StatsPerDevice& stats = context.stats;
   MatrixXi& observed_ids = context.ids_per_sc_partition_per_bucket;
@@ -305,7 +305,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice& stats, SplitType& minibatching_split) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
-  const std::vector<CooFormat>& coo_tensors = extracted_coo_tensors.coo_tensors;
+  absl::Span<const CooFormat> coo_tensors = extracted_coo_tensors.coo_tensors;
   const int num_sc_per_device = options.num_sc_per_device;
   bool allow_id_dropping = options.allow_id_dropping;
   const int batch_size_per_sc = xla::CeilOfRatio(
