@@ -28,6 +28,7 @@
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
 #include "include/grpcpp/security/server_credentials.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/server.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/server_builder.h"  // from @com_github_grpc_grpc
@@ -83,7 +84,7 @@ class AllReduceTest : public ::testing::Test {
 
 TEST_F(AllReduceTest, BlockingAllReduceBool) {
   // Arrange
-  std::vector<bool> inputs = {true, false, true, true};
+  const std::vector<bool> inputs = {true, false, true, true};
   const bool expected_result =
       absl::c_accumulate(inputs, false, std::logical_or<>());
 
@@ -97,7 +98,7 @@ TEST_F(AllReduceTest, BlockingAllReduceBool) {
 
 TEST_F(AllReduceTest, BlockingAllReduceUint64) {
   // Arrange
-  std::vector<uint64_t> inputs = {10, 20, 30, 40};
+  const std::vector<uint64_t> inputs = {10, 20, 30, 40};
   const uint64_t expected_result =
       absl::c_accumulate(inputs, uint64_t{0}, std::bit_or<>());
 
@@ -228,7 +229,7 @@ class MultipleLocalValuesAllReduceTest : public ::testing::Test {
 TEST_F(MultipleLocalValuesAllReduceTest, BlockingAllReduceUint64) {
   // Arrange
   // 2 Tasks x 2 Threads per Task.
-  std::vector<uint64_t> inputs = {10, 20, 30, 40};
+  const std::vector<uint64_t> inputs = {10, 20, 30, 40};
   const uint64_t expected_result =
       absl::c_accumulate(inputs, uint64_t{0}, std::bit_or<>());
 
@@ -243,7 +244,7 @@ TEST_F(MultipleLocalValuesAllReduceTest, BlockingAllReduceUint64) {
 TEST_F(MultipleLocalValuesAllReduceTest, BlockingAllReduceBool) {
   // Arrange
   // 2 Tasks x 2 Threads per Task.
-  std::vector<bool> inputs = {true, false, true, true};
+  const std::vector<bool> inputs = {true, false, true, true};
   const bool expected_result =
       absl::c_accumulate(inputs, false, std::logical_or<>());
 
