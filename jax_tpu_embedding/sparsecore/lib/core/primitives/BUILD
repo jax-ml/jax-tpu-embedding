@@ -201,10 +201,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "primitives",
     srcs = ["__init__.py"],
-    visibility = [
-        "//jax_tpu_embedding/sparsecore/lib/core:__pkg__",
-        "//jax_tpu_embedding/sparsecore/lib/nn:__subpackages__",
-    ],
+    visibility = ["//jax_tpu_embedding/sparsecore/lib/core:__pkg__"],
     deps = [
         ":optimizers_computation",  # buildcleaner: keep
         ":sparse_dense_matmul_csr",  # buildcleaner: keep
