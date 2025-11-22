@@ -608,7 +608,7 @@ TEST_P(MinibatchingTest, KeysAreSorted) {
 TEST_P(MinibatchingTest, IndexFromKeyIsCorrect) {
   std::vector<uint64_t> keys = GenerateGroupingKeys();
   for (int i = 0; i < keys.size(); ++i) {
-    EXPECT_EQ(keys[i] & CooFormat::kIndexMask, i);
+    EXPECT_EQ(CooFormat::GetDataFromKey(keys[i]), i);
   }
 }
 

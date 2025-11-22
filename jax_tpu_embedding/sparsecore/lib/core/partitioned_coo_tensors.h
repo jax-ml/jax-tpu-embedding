@@ -51,19 +51,11 @@ class PartitionedCooTensors {
     bucket_offsets_.push_back(0);
   }
 
-  void MergeWithLastCoo(const CooFormat& coo_tensor) {
-    DCHECK_GT(coo_tensors_.size(), 0);
-    CooFormat& last = coo_tensors_.back();
-    DCHECK_EQ(last.row_id, coo_tensor.row_id);
-    DCHECK_EQ(last.col_id, coo_tensor.col_id);
-    last.gain += coo_tensor.gain;
-  }
-
-  bool MaybeMerge(int bucket_id, const CooFormat& coo_tensor) {
-    if (bucket_id == dedup_bucket_id_ && coo_tensor.col_id == dedup_col_id_ &&
-        coo_tensor.row_id == dedup_row_id_) {
+  bool MaybeMerge(int bucket_id, const CooFormat& coo) {
+    if (bucket_id == dedup_bucket_id_ && coo.col_id == dedup_col_id_ &&
+        coo.row_id == dedup_row_id_) {
       CHECK(!coo_tensors_.empty());
-      MergeWithLastCoo(coo_tensor);
+      coo_tensors_.back().gain += coo.gain;
       return true;
     }
     return false;
