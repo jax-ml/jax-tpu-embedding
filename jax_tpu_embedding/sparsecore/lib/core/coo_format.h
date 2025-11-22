@@ -58,10 +58,14 @@ struct CooFormat {
   // Bits taken by minibatching bucket ID.
   static constexpr uint32_t kMinibatchingBucketBits =
       absl::bit_width(kMaxMinibatchingBuckets - 1);
-  // Bits for Index
-  static constexpr uint32_t kIndexBits = 32 - kMinibatchingBucketBits;
-  // Index Mask
-  static constexpr uint32_t kIndexMask = (1 << kIndexBits) - 1;
+  // Bits for variable data (index or row_id).
+  static constexpr uint32_t kDataBits = 32 - kMinibatchingBucketBits;
+  // Mask for variable data (index or row_id).
+  static constexpr uint32_t kDataMask = (1 << kDataBits) - 1;
+  // Bit offset for rotated_col_id in grouping key.
+  static constexpr uint32_t kRotatedColIdOffset = kDataBits;
+  // Bit offset for bucket_id in grouping key.
+  static constexpr uint32_t kBucketIdOffset = kRotatedColIdOffset + 32;
 
   // A deterministic hash function eventually used to compute mini-batching
   // bucket id as `hash(col_id) % bucket_count`.
@@ -136,24 +140,36 @@ struct CooFormat {
   // Computes a 64-bit sorting key with the following layout:
   // [63:58] bucket_id (6 bits)
   // [57:26] {global_sc_id, local_embedding_id} (32 bits) <- rotated col_id
-  // [25:0]  index (26 bits)
+  // [25:0]  index or row_id (26 bits)
   // The key is used to group and sort COO tensors for efficient processing.
   uint64_t GetGroupingKey(const uint32_t num_scs_bit, const int index,
-                          const bool create_buckets = false,
-                          HashFn hash_fn = HighwayHash) const {
+                          const bool create_buckets,
+                          HashFn hash_fn = HighwayHash,
+                          const bool has_variable_weights = true) const {
     // This structure ensures tensors are sorted first by bucket_id, then by
     // sparse core, and finally by embedding ID.
     const uint32_t bucket_id = create_buckets ? GetBucketId(hash_fn) : 0;
 
-    DCHECK_LE(index, kIndexMask);
+    const uint32_t data = has_variable_weights ? index : row_id;
+    DCHECK_LE(data, kDataMask);
 
     // [global_sc_id, local_embedding_id]
     uint32_t rotated_col_id =
         absl::rotr(static_cast<uint32_t>(col_id), num_scs_bit);
 
-    return (uint64_t{bucket_id} << (64 - kMinibatchingBucketBits)) |
-           (uint64_t{rotated_col_id} << (32 - kMinibatchingBucketBits)) |
-           static_cast<uint64_t>(index);
+    return (uint64_t{bucket_id} << kBucketIdOffset) |
+           (uint64_t{rotated_col_id} << kRotatedColIdOffset) |
+           static_cast<uint64_t>(data);
+  }
+
+  static uint32_t GetDataFromKey(uint64_t key) { return key & kDataMask; }
+
+  static uint32_t GetRotatedColIdFromKey(uint64_t key) {
+    return (key >> kRotatedColIdOffset) & 0xFFFFFFFF;
+  }
+
+  static uint32_t GetBucketIdFromKey(uint64_t key) {
+    return key >> kBucketIdOffset;
   }
 };
 
