@@ -84,13 +84,13 @@ inline void ValidateMaxIdsOrDie(
 }
 
 inline void ValidateKeyCapacity(const int local_sc_id, const int key_count) {
-  // Index = 0 to kIndexMask giving us a count of kIndexMask + 1.
-  if (key_count > 1 + CooFormat::kIndexMask) {
+  // Index = 0 to kDataMask giving us a count of kDataMask + 1.
+  if (key_count > 1 + CooFormat::kDataMask) {
     LOG(ERROR) << absl::StrFormat(
         "Too many tensors for SparseCore #%d: got %d, limit: "
         "%d. Preprocessed output may not be reliable and cause undefined "
         "behavior.",
-        local_sc_id, key_count, CooFormat::kIndexMask);
+        local_sc_id, key_count, CooFormat::kDataMask);
   }
 }
 
@@ -177,6 +177,7 @@ struct LocalSparseCoreTensorGroupingContext {
   const PreprocessSparseDenseMatmulInputOptions& options;
   const bool create_buckets;
   const int32_t local_sc_id;
+  const int32_t num_sc_bits;
 
   // Outputs.
   PartitionedCooTensors& grouped_coo_tensors;
@@ -187,6 +188,7 @@ struct LocalSparseCoreTensorGroupingContext {
   MatrixXi& kept_unique_ids_per_partition_per_bucket;
 };
 
+template <bool kHasVariableWeights>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContext context) {
   // Unpack context for readability.
@@ -214,17 +216,24 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   // capacity. This decision is sticky for all tensors with the same `col_id`
   // within the same bucket.
   bool dropping_current_unique_col_id = false;
+  const int num_sc_bits = context.num_sc_bits;
   for (const uint64_t key : context.keys) {
     // Step 1: Unpack key to get tensor coordinates.
-    const uint32_t index = key & CooFormat::kIndexMask;
-    const CooFormat& coo_tensor = coo_tensors[index];
-    const uint32_t col_id = coo_tensor.col_id;
-    const uint32_t global_sc_id = coo_tensor.col_id & (global_sc_count - 1);
-    const uint32_t bucket_id =
-        context.create_buckets
-            ? coo_tensor.GetBucketId(options.minibatching_bucketing_hash_fn)
-            : 0;
-    const uint32_t row_id = coo_tensor.row_id;
+    const uint32_t bucket_id = CooFormat::GetBucketIdFromKey(key);
+    const uint32_t col_id =
+        absl::rotl(CooFormat::GetRotatedColIdFromKey(key), num_sc_bits);
+    const uint32_t global_sc_id = col_id & (global_sc_count - 1);
+
+    uint32_t row_id;
+    CooFormat coo_tensor(0, 0, 0.0f);
+    if constexpr (kHasVariableWeights) {
+      const uint32_t index = CooFormat::GetDataFromKey(key);
+      coo_tensor = coo_tensors[index];
+      row_id = coo_tensor.row_id;
+    } else {
+      row_id = CooFormat::GetDataFromKey(key);
+      coo_tensor = CooFormat(row_id, col_id, 1.0f);
+    }
 
     // Step 2: Handle duplicates.
     // An ID that is a duplicate of a previously non-dropped ID is merged.
@@ -298,7 +307,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
 // NOTE: We use output buffers `max_ids_per_sc`, `max_unique_ids_per_sc`, and
 // `required_buffer_size_per_sc` because we fill values in a loop to a bigger
 // array.
-template <typename SplitType>
+template <bool kHasVariableWeights = true, typename SplitType>
 PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
@@ -364,25 +373,30 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
            coo_tensors[coo_tensor_index].row_id <
                (local_sc_id + 1) * batch_size_per_sc;
          coo_tensor_index++) {
+      const CooFormat& coo_tensor = coo_tensors[coo_tensor_index];
       // The key here is [bucket_id(6 bits), global_sc_id(num_scs bits),
       // local_embedding_id(32-num_scs bits), index(26 bits)].
       //  Note that this assumes `num_scs` is a power of 2.
-      keys.push_back(coo_tensors[coo_tensor_index].GetGroupingKey(
+      keys.push_back(coo_tensor.GetGroupingKey(
           num_sc_bits, coo_tensor_index, create_buckets,
-          options.minibatching_bucketing_hash_fn));
+          options.minibatching_bucketing_hash_fn, kHasVariableWeights));
+      DCHECK(kHasVariableWeights || coo_tensors[coo_tensor_index].gain == 1.0f)
+          << "kHasVariableWeights: " << kHasVariableWeights
+          << ", coo: " << coo_tensor;
     }
 
     // The expected allocation size may be uninitialized.
     DCHECK(expected_keys_size == 0 || keys.size() == expected_keys_size);
     hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
 
-    internal::GroupAndDeduplicateCooTensorsForLocalSparseCore({
+    const internal::LocalSparseCoreTensorGroupingContext context = {
         .keys = keys,
         .coo_tensors = coo_tensors,
         .stacked_table_metadata = stacked_table_metadata,
         .options = options,
         .create_buckets = create_buckets,
         .local_sc_id = local_sc_id,
+        .num_sc_bits = num_sc_bits,
         .grouped_coo_tensors = grouped_coo_tensors,
         .ids_per_sc_partition_per_bucket = ids_per_sc_partition_per_bucket,
         .unique_ids_per_partition_per_bucket =
@@ -392,7 +406,10 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
             kept_ids_per_sc_partition_per_bucket,
         .kept_unique_ids_per_partition_per_bucket =
             kept_unique_ids_per_partition_per_bucket,
-    });
+    };
+
+    internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
+        kHasVariableWeights>(context);
 
     grouped_coo_tensors.FillRemainingScBuckets();
 

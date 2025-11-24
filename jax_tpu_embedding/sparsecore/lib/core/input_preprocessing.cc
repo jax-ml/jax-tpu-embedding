@@ -113,12 +113,34 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
       batch_size_for_device, stacked_table_name, num_sc_per_device);
 }
 
+// We consider a stack to have variable weights if any feature in the stack
+// has explicitly variable weights or if any feature uses a row combiner
+// other than 'sum' (e.g., 'mean' or 'sqrtn').
+bool StackHasVariableWeights(
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+  for (const auto& metadata : stacked_table_metadata) {
+    // `kHasVariableWeights` must be true if any feature in the stack:
+    // 1.  Is explicitly marked as having variable weights.
+    // 2.  Uses a row combiner other than 'sum'. Non-'sum' combiners (e.g.,
+    //     'mean', 'sqrtn') adjust gains during `ExtractCooTensors`. This
+    //     means the gains in `coo_tensors` are not always 1.0, even with unity
+    //     input weights.
+    if (input_batches[metadata.feature_index]->HasVariableWeights() ||
+        metadata.row_combiner != RowCombiner::kSum) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Holds the state for processing a single stacked table across all local
 // devices. This includes extracted COO tensors, partitioned COO tensors,
 // CSR arrays, and statistics.
 struct TableState {
   absl::string_view stacked_table_name;
   absl::Span<const StackedTableMetadata> stacked_table_metadata;
+  bool has_variable_weights;
   int coo_buffer_size_per_device;
   CsrArraysPerHost csr_arrays_per_host;
   StatsPerHost stats_per_host;
@@ -131,10 +153,12 @@ struct TableState {
 
   TableState(absl::string_view name,
              absl::Span<const StackedTableMetadata> metadata,
+             bool has_variable_weights,
              const PreprocessSparseDenseMatmulInputOptions& options,
              int num_scs, int row_pointers_size_per_bucket)
       : stacked_table_name(name),
         stacked_table_metadata(metadata),
+        has_variable_weights(has_variable_weights),
         coo_buffer_size_per_device(ComputeCooBufferSizePerDevice(
             num_scs, options.num_sc_per_device, metadata, options.batch_number,
             options.enable_minibatching)),
@@ -153,6 +177,24 @@ struct TableState {
     dropped_id_count_per_device.resize(options.local_device_count, 0);
   }
 };
+
+template <typename SplitType>
+void SortAndGroupCooTensorsForTableState(
+    TableState& state, int local_device,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    internal::StatsPerDevice& stats, SplitType& split) {
+  if (state.has_variable_weights) {
+    state.partitioned_coo_tensors_per_device[local_device] =
+        SortAndGroupCooTensorsPerLocalDevice<true>(
+            state.extracted_coo_tensors_per_device[local_device],
+            state.stacked_table_metadata[0], options, stats, split);
+  } else {
+    state.partitioned_coo_tensors_per_device[local_device] =
+        SortAndGroupCooTensorsPerLocalDevice<false>(
+            state.extracted_coo_tensors_per_device[local_device],
+            state.stacked_table_metadata[0], options, stats, split);
+  }
+}
 
 // Extracts, sorts, and groups COO tensors for a single stacked table across
 // all local devices. This function populates
@@ -180,11 +222,9 @@ void ExtractSortAndGroupCooTensorsForTable(
 
           internal::StatsPerDevice stats_per_device =
               state.stats_per_host.GetStatsPerDevice(local_device);
-          state.partitioned_coo_tensors_per_device[local_device] =
-              SortAndGroupCooTensorsPerLocalDevice(
-                  state.extracted_coo_tensors_per_device[local_device],
-                  state.stacked_table_metadata[0], options, stats_per_device,
-                  state.table_minibatching_required);
+          SortAndGroupCooTensorsForTableState(
+              state, local_device, options, stats_per_device,
+              state.table_minibatching_required);
           state.dropped_id_count_per_device[local_device] =
               stats_per_device.dropped_id_count;
           counter.DecrementCount();
@@ -230,11 +270,9 @@ void CreateMinibatchingBucketsForTable(
           options.num_sc_per_device);
       internal::StatsPerDevice dummy_stats =
           dummy_stats_host.GetStatsPerDevice(0);
-      state.partitioned_coo_tensors_per_device[local_device] =
-          SortAndGroupCooTensorsPerLocalDevice(
-              state.extracted_coo_tensors_per_device[local_device],
-              state.stacked_table_metadata[0], options, dummy_stats,
-              state.table_minibatching_split);
+      SortAndGroupCooTensorsForTableState(state, local_device, options,
+                                         dummy_stats,
+                                         state.table_minibatching_split);
       state.dropped_id_count_per_device[local_device] =
           dummy_stats.dropped_id_count;
       counter.DecrementCount();
@@ -538,8 +576,11 @@ PreprocessSparseDenseMatmulInput(
   table_states.reserve(stacked_tables.size());
   for (const auto& [stacked_table_name, stacked_table_metadata] :
        stacked_tables) {
+    const bool stack_has_weights =
+        StackHasVariableWeights(input_batches, stacked_table_metadata);
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
-                              options, num_scs, row_pointers_size_per_bucket);
+                              stack_has_weights, options, num_scs,
+                              row_pointers_size_per_bucket);
   }
 
   // Stage 1: COO Extraction and Initial Sort/Group

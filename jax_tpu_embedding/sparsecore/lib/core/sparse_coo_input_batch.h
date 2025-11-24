@@ -59,6 +59,8 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   // Returns the number of rows in the current slice.
   int64_t size() const override { return batch_size_; }
 
+  bool HasVariableWeights() const override { return false; }
+
   // Extracts COO tensors for each SparseCore.
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          ExtractedCooTensors& coo_tensors) override;

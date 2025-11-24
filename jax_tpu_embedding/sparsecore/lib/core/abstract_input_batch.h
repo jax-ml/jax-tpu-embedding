@@ -49,7 +49,9 @@ class AbstractInputBatch {
   // Return the batch size or the number of samples in this input batch.
   virtual ssize_t size() const = 0;
 
-  // Extract COO Tensors.
+  // Returns true if the input batch has variable weights.
+  virtual bool HasVariableWeights() const { return true; }
+
   virtual void ExtractCooTensors(
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensors& extracted_coo_tensors) = 0;
