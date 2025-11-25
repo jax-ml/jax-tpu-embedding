@@ -250,6 +250,12 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
       continue;
     }
 
+    // We do NOT drop IDs when minibatching is enabled and we are in the
+    // first pass (`create_buckets=false`), as we need to detect limit
+    // overflows to decide if minibatching is required.
+    const bool can_drop_id =
+        !options.enable_minibatching || context.create_buckets;
+
     // Step 3: Update observed statistics for the new ID.
     // We have a new column if the bucket_id changes (we can't dedupe across
     // bucket boundaries) or if the col_id changes within the same bucket. Note
@@ -261,17 +267,14 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     observed_ids(global_sc_id, bucket_id) += 1;
     if (is_new_col) {
       observed_unique_ids(global_sc_id, bucket_id) += 1;
-      dropping_current_unique_col_id =
-          (kept_unique_ids(global_sc_id, bucket_id) + 1) >
-          max_unique_ids_per_partition;
+      if (allow_id_dropping && can_drop_id) {
+        dropping_current_unique_col_id =
+            (kept_unique_ids(global_sc_id, bucket_id) + 1) >
+            max_unique_ids_per_partition;
+      }
     }
 
     // Step 4: Determine if the ID should be dropped based on capacity limits.
-    // We do NOT drop IDs when minibatching is enabled and we are in the
-    // first pass (`create_buckets=false`), as we need to detect limit
-    // overflows to decide if minibatching is required.
-    const bool can_drop_id =
-        !options.enable_minibatching || context.create_buckets;
     const bool exceeds_ids_limit =
         (kept_ids(global_sc_id, bucket_id) + 1) > max_ids_per_partition;
 
@@ -283,9 +286,11 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     } else {
       grouped_coo_tensors.Add(context.local_sc_id, bucket_id, coo_tensor);
       // Update kept counts.
-      kept_ids(global_sc_id, bucket_id) += 1;
-      if (is_new_col) {
-        kept_unique_ids(global_sc_id, bucket_id) += 1;
+      if (allow_id_dropping && can_drop_id) {
+        kept_ids(global_sc_id, bucket_id) += 1;
+        if (is_new_col) {
+          kept_unique_ids(global_sc_id, bucket_id) += 1;
+        }
       }
     }
 
