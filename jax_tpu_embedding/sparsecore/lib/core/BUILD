@@ -404,15 +404,20 @@ cc_library(
 )
 
 cc_test(
-    name = "sort_and_group_benchmark",
-    srcs = ["sort_and_group_benchmark.cc"],
+    name = "extract_sort_and_group_benchmark",
+    srcs = ["extract_sort_and_group_benchmark.cc"],
     deps = [
+        ":abstract_input_batch",
         ":coo_format",
+        ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":ragged_tensor_input_batch",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:distributions",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@com_google_benchmark//:benchmark_main",
         "@eigen_archive//:eigen3",
     ],
