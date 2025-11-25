@@ -1353,6 +1353,17 @@ def init_embedding_variables(
   return stacked_mapping
 
 
+def _combiner_to_enum(combiner: str):
+  if combiner == "sum":
+    return embedding_spec_pb2.SUM
+  elif combiner == "mean":
+    return embedding_spec_pb2.MEAN
+  elif combiner == "sqrtn":
+    return embedding_spec_pb2.SQRTN
+  else:
+    return embedding_spec_pb2.COMBINER_UNSPECIFIED
+
+
 def create_proto_from_feature_specs(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int | None,
@@ -1394,6 +1405,9 @@ def create_proto_from_feature_specs(
               max_ids_per_partition=feature.table_spec.stacked_table_spec.max_ids_per_partition,
               num_sparsecores=(num_sparsecore_per_device * global_device_count),
               max_unique_ids_per_partition=feature.table_spec.stacked_table_spec.max_unique_ids_per_partition,
+              combiner=_combiner_to_enum(
+                  feature.table_spec.stacked_table_spec.combiner
+              ),
           )
       )
     if current_table_name not in stack_to_table_specs[current_stack_name]:
@@ -1406,6 +1420,7 @@ def create_proto_from_feature_specs(
               padded_embedding_dim=feature.table_spec.setting_in_stack.padded_embedding_dim,
               row_offset_in_shard=feature.table_spec.setting_in_stack.row_offset_in_shard,
               shard_rotation=feature.table_spec.setting_in_stack.shard_rotation,
+              combiner=_combiner_to_enum(feature.table_spec.combiner),
           )
       )
     feature_spec = embedding_spec_pb2.FeatureSpecProto(

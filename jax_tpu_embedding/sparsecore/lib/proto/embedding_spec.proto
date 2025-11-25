@@ -35,6 +35,13 @@ message FeatureSpecProto {
   int64 col_shift = 6;
 }
 
+enum Combiner {
+  COMBINER_UNSPECIFIED = 0;
+  SUM = 1;
+  MEAN = 2;
+  SQRTN = 3;
+}
+
 message TableSpecProto {
   // The name of the table.
   string table_name = 1;
@@ -66,6 +73,8 @@ message TableSpecProto {
   int64 shard_rotation = 10;
   // The list of features that point to this table.
   repeated FeatureSpecProto feature_specs = 11;
+  // Combiner strategy for the table.
+  Combiner combiner = 12;
 }
 
 message StackedTableSpecProto {
@@ -93,6 +102,8 @@ message StackedTableSpecProto {
   int64 num_sparsecores = 9;
   // Specs for the table that are stacked.
   repeated TableSpecProto table_specs = 10;
+  // Combiner strategy for the stack.
+  Combiner combiner = 11;
 }
 
 message EmbeddingSpecProto {
