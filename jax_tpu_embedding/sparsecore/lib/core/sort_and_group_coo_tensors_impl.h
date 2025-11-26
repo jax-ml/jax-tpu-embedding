@@ -175,7 +175,6 @@ struct LocalSparseCoreTensorGroupingContext {
   absl::Span<const CooFormat> coo_tensors;
   const StackedTableMetadata& stacked_table_metadata;
   const PreprocessSparseDenseMatmulInputOptions& options;
-  const bool create_buckets;
   const int32_t local_sc_id;
   const int32_t num_sc_bits;
 
@@ -184,11 +183,12 @@ struct LocalSparseCoreTensorGroupingContext {
   MatrixXi& ids_per_sc_partition_per_bucket;
   MatrixXi& unique_ids_per_partition_per_bucket;
   StatsPerDevice& stats;
+  // These are only used for id dropping decisions and can be ignored otherwise.
   MatrixXi& kept_ids_per_sc_partition_per_bucket;
   MatrixXi& kept_unique_ids_per_partition_per_bucket;
 };
 
-template <bool kHasVariableWeights>
+template <bool kHasVariableWeights, bool kCreateBuckets>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContext context) {
   // Unpack context for readability.
@@ -219,7 +219,8 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   const int num_sc_bits = context.num_sc_bits;
   for (const uint64_t key : context.keys) {
     // Step 1: Unpack key to get tensor coordinates.
-    const uint32_t bucket_id = CooFormat::GetBucketIdFromKey(key);
+    const uint32_t bucket_id =
+        kCreateBuckets ? CooFormat::GetBucketIdFromKey(key) : 0;
     const uint32_t col_id =
         absl::rotl(CooFormat::GetRotatedColIdFromKey(key), num_sc_bits);
     const uint32_t global_sc_id = col_id & (global_sc_count - 1);
@@ -244,26 +245,29 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     }
     // If the ID is a duplicate of the last seen ID, it must have been dropped
     // (otherwise it would have been merged above), so drop this one too.
-    if (bucket_id == prev_bucket_id && col_id == prev_col_id &&
-        row_id == prev_row_id) {
+    bool fully_duplicate = col_id == prev_col_id && row_id == prev_row_id;
+    if constexpr (kCreateBuckets) {
+      fully_duplicate = fully_duplicate && bucket_id == prev_bucket_id;
+    }
+    if (fully_duplicate) {
       ++stats.dropped_id_count;
       continue;
     }
-
-    // We do NOT drop IDs when minibatching is enabled and we are in the
-    // first pass (`create_buckets=false`), as we need to detect limit
-    // overflows to decide if minibatching is required.
-    const bool can_drop_id =
-        !options.enable_minibatching || context.create_buckets;
 
     // Step 3: Update observed statistics for the new ID.
     // We have a new column if the bucket_id changes (we can't dedupe across
     // bucket boundaries) or if the col_id changes within the same bucket. Note
     // that multiple col_ids can map to the same bucket.
-    const bool is_new_col =
-        (bucket_id != prev_bucket_id || col_id != prev_col_id);
+    bool is_new_col = col_id != prev_col_id;
+    if constexpr (kCreateBuckets) {
+      is_new_col = is_new_col || bucket_id != prev_bucket_id;
+    }
     // Update observed stats. These are never decremented and are used for
     // reporting.
+    // We do NOT drop IDs when minibatching is enabled and we are in the
+    // first pass (`kCreateBuckets=false`), as we need to detect limit
+    // overflows to decide if minibatching is required.
+    const bool can_drop_id = !options.enable_minibatching || kCreateBuckets;
     observed_ids(global_sc_id, bucket_id) += 1;
     if (is_new_col) {
       observed_unique_ids(global_sc_id, bucket_id) += 1;
@@ -312,8 +316,9 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
 // NOTE: We use output buffers `max_ids_per_sc`, `max_unique_ids_per_sc`, and
 // `required_buffer_size_per_sc` because we fill values in a loop to a bigger
 // array.
-template <bool kHasVariableWeights = true, typename SplitType>
-PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
+template <bool kHasVariableWeights = true, bool kCreateBuckets,
+          typename SplitType>
+PartitionedCooTensors SortAndGroupCooTensorsPerLocalDeviceImpl(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -334,20 +339,18 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   // This function can be called in two passes for minibatching. The logic for
   // stats collection and ID dropping depends on the pass.
   //
-  // Pass 1: Check if minibatching is required (`create_buckets` is false).
+  // Pass 1: Check if minibatching is required (`kCreateBuckets` is false).
   // - No IDs are dropped.
   // - Stats are collected on all observed IDs to compute splits.
   //
-  // Pass 2: Create buckets (`create_buckets` is true).
+  // Pass 2: Create buckets (`kCreateBuckets` is true).
   // - A dummy stats object is used (stats are not re-computed).
   // - IDs may be dropped if they exceed capacity.
-  const bool create_buckets = options.enable_minibatching &&
-                              (std::is_same_v<SplitType, MinibatchingSplit>);
 
   // Partition COO tensors among SparseCores for the local device (based on row
   // id).
   const int bucket_count =
-      create_buckets ? CooFormat::kMaxMinibatchingBuckets : 1;
+      kCreateBuckets ? CooFormat::kMaxMinibatchingBuckets : 1;
   PartitionedCooTensors grouped_coo_tensors(
       coo_tensors.size(), num_sc_per_device, global_sc_count, bucket_count);
 
@@ -383,7 +386,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
       // local_embedding_id(32-num_scs bits), index(26 bits)].
       //  Note that this assumes `num_scs` is a power of 2.
       keys.push_back(coo_tensor.GetGroupingKey(
-          num_sc_bits, coo_tensor_index, create_buckets,
+          num_sc_bits, coo_tensor_index, kCreateBuckets,
           options.minibatching_bucketing_hash_fn, kHasVariableWeights));
       DCHECK(kHasVariableWeights || coo_tensors[coo_tensor_index].gain == 1.0f)
           << "kHasVariableWeights: " << kHasVariableWeights
@@ -399,7 +402,6 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
         .coo_tensors = coo_tensors,
         .stacked_table_metadata = stacked_table_metadata,
         .options = options,
-        .create_buckets = create_buckets,
         .local_sc_id = local_sc_id,
         .num_sc_bits = num_sc_bits,
         .grouped_coo_tensors = grouped_coo_tensors,
@@ -414,7 +416,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     };
 
     internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-        kHasVariableWeights>(context);
+        kHasVariableWeights, kCreateBuckets>(context);
 
     grouped_coo_tensors.FillRemainingScBuckets();
 
@@ -450,7 +452,7 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
 
     // Only validate if creating minibatching buckets or when minibatching is
     // disabled, not when checking if minibatching is required.
-    if (!options.enable_minibatching || create_buckets)
+    if (!options.enable_minibatching || kCreateBuckets)
       internal::ValidateMaxIdsOrDie(
           observed_max_ids_per_bucket, observed_max_unique_ids_per_bucket,
           max_ids_per_partition, max_unique_ids_per_partition,
@@ -458,6 +460,26 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
   }  // end local_sc_id loop
 
   return grouped_coo_tensors;
+}
+
+template <bool kHasVariableWeights = true, typename SplitType>
+PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
+    const ExtractedCooTensors& extracted_coo_tensors,
+    const StackedTableMetadata& stacked_table_metadata,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    internal::StatsPerDevice& stats, SplitType& minibatching_split) {
+  const bool create_buckets =
+      options.enable_minibatching &&
+      std::is_same_v<SplitType, MinibatchingSplit>;
+  if (create_buckets) {
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<kHasVariableWeights, true>(
+        extracted_coo_tensors, stacked_table_metadata, options, stats,
+        minibatching_split);
+  } else {
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<kHasVariableWeights, false>(
+        extracted_coo_tensors, stacked_table_metadata, options, stats,
+        minibatching_split);
+  }
 }
 
 }  // namespace jax_sc_embedding
