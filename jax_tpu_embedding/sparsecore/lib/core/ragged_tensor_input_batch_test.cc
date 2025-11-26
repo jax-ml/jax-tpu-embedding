@@ -20,6 +20,8 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/types/span.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
@@ -27,21 +29,10 @@ namespace {
 
 using ::testing::ElementsAre;
 
-class RaggedTensorInputBatchTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    // (0, 0), (0, 1), (0, 2), (1, 0), (2, 0), (3, 2)
-    embedding_ids_ = {0, 1, 2, 0, 0, 2};
-    embedding_splits_ = {0, 3, 4, 5, 6};
-  }
-
-  std::vector<int64_t> embedding_ids_;
-  std::vector<int32_t> embedding_splits_;
-};
-
-TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
-  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids_,
-                                                     embedding_splits_);
+TEST(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
+  // Input: (0, 0), (0, 1), (0, 2), (1, 0), (2, 0), (3, 2)
+  RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
+      ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
 
   ExtractedCooTensors extracted_1(4, 4);
   ExtractedCooTensors extracted_2(4, 4);
@@ -97,9 +88,10 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
       ElementsAre(CooFormat(16, 0 + 8, 1.0), CooFormat(17, 2 + 8, 1.0)));
 }
 
-TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
-  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids_,
-                                                     embedding_splits_);
+TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
+  // Input: (0, 0), (0, 1), (0, 2), (1, 0), (2, 0), (3, 2)
+  RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
+      ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
 
   ExtractedCooTensors extracted(4, 4);
   ragged_tensor_feature_input.ExtractCooTensors(
@@ -120,10 +112,9 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
 }
 
-TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
-  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids_,
-                                                     embedding_splits_);
-
+TEST(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
+  RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
+      ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
   ExtractedCooTensors extracted(4, 4);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
@@ -145,14 +136,14 @@ TEST_F(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
                   CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
 }
 
-TEST_F(RaggedTensorInputBatchTest,
+TEST(RaggedTensorInputBatchTest,
        FixedValencyRowOffsetsCooExtractionIsCorrect) {
   std::vector<int64_t> embedding_ids = {0, 1, 0, 2, 0, 3, 0, 4};
   int batch_size = 4;
   int valency = 2;
   FixedValencyRowOffsets row_offsets(batch_size, valency);
-  RaggedTensorInputBatch ragged_tensor_feature_input(embedding_ids,
-                                                     row_offsets);
+  RaggedTensorInputBatch ragged_tensor_feature_input(
+      absl::MakeConstSpan(embedding_ids), row_offsets);
 
   ExtractedCooTensors extracted(4, 4);
   ragged_tensor_feature_input.ExtractCooTensors(

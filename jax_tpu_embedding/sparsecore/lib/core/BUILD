@@ -311,8 +311,10 @@ cc_library(
         ":process_coo_tensors",
         ":sparse_csr_input_stream",
         ":unity_weights_stream",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -442,8 +444,10 @@ cc_test(
     name = "ragged_tensor_input_batch_test",
     srcs = ["ragged_tensor_input_batch_test.cc"],
     deps = [
+        ":coo_format",
         ":input_preprocessing_util",
         ":ragged_tensor_input_batch",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )

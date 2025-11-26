@@ -15,7 +15,9 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SPARSE_CSR_INPUT_STREAM_IMPL_H_
 
 #include <limits>
+#include <type_traits>
 
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 
 namespace jax_sc_embedding {
@@ -35,12 +37,22 @@ namespace jax_sc_embedding {
 // This allows the class to be used with different types of data sources, such
 // as vectors, arrays, or other data structures.
 template <typename T, typename ValuesView, typename RowPointersView>
-class SparseCsrInputBatchStream {
+class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
  public:
-  SparseCsrInputBatchStream(ValuesView values, RowPointersView row_pointers,
-                            int row_start, int row_end,
-                            absl::string_view table_name = "unknown_table_name",
-                            T max_vocab_id = std::numeric_limits<T>::max())
+  // Ensures that ValuesView and RowPointersView are view-like types that are
+  // cheap to copy. This prevents expensive copies of underlying data
+  // containers (e.g. std::vector) and encourages passing views (e.g.
+  // absl::Span) instead.
+  static_assert(std::is_trivially_copyable_v<ValuesView>,
+                "ValuesView must be trivially copyable.");
+  static_assert(std::is_trivially_copyable_v<RowPointersView>,
+                "RowPointersView must be trivially copyable.");
+
+  SparseCsrInputBatchStream(
+      ValuesView values ABSL_ATTRIBUTE_LIFETIME_BOUND,
+      RowPointersView row_pointers ABSL_ATTRIBUTE_LIFETIME_BOUND, int row_start,
+      int row_end, absl::string_view table_name = "unknown_table_name",
+      T max_vocab_id = std::numeric_limits<T>::max())
       : values_ref_(values),
         row_pointers_(row_pointers),
         curr_row_(row_start),

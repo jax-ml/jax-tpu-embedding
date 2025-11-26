@@ -60,6 +60,9 @@ using ::testing::Eq;
 using ::testing::Gt;
 using ::testing::SizeIs;
 
+using InputBatch =
+    ::jax_sc_embedding::RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>;
+
 std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
     absl::Span<const std::vector<int64_t>> samples) {
   std::vector<int64_t> values;
@@ -71,54 +74,48 @@ std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
     }
     row_splits.push_back(values.size());
   }
-  using InputBatch =
-      RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
-  return std::make_unique<InputBatch>(values, row_splits);
+  return std::make_unique<InputBatch>(std::move(values), std::move(row_splits));
 }
 
 class TableStackingTest : public ::testing::Test {
-  using InputBatch =
-      RaggedTensorInputBatch<std::vector<int64_t>, std::vector<int32_t>>;
-
  protected:
-  InputBatch input_a_{std::vector<int64_t>{5, 18,  //
-                                           18, 0,  //
-                                           0, 20,  //
-                                           18, 0,  //
-                                           18, 0,  //
-                                           0, 20,  //
-                                           5, 18,  //
-                                           18, 0},
-                      std::vector<int32_t>{0, 2, 4, 6, 8, 10, 12, 14, 16}};
-  InputBatch input_b_{std::vector<int64_t>{2,   //
-                                           10,  //
-                                           1,   //
-                                           9,   //
-                                           3,   //
-                                           7,   //
-                                           4,   //
-                                           8},
-                      std::vector<int32_t>{0, 1, 2, 3, 4, 5, 6, 7, 8}};
-  InputBatch input_c_{std::vector<int64_t>{1,                    //
-                                           2, 2,                 //
-                                           3, 3, 3,              //
-                                           4, 4, 4, 4,           //
-                                           5, 5, 5, 5, 5,        //
-                                           6, 6, 6, 6, 6, 6,     //
-                                           7, 7, 7, 7, 7, 7, 7,  //
-                                           8, 8, 8, 8, 8, 8, 8, 8},
-                      std::vector<int32_t>{0, 1, 3, 6, 10, 15, 21, 28, 36}};
+  InputBatch input_a_{{5, 18,  //
+                       18, 0,  //
+                       0, 20,  //
+                       18, 0,  //
+                       18, 0,  //
+                       0, 20,  //
+                       5, 18,  //
+                       18, 0},
+                      {0, 2, 4, 6, 8, 10, 12, 14, 16}};
+  InputBatch input_b_{{2,   //
+                       10,  //
+                       1,   //
+                       9,   //
+                       3,   //
+                       7,   //
+                       4,   //
+                       8},
+                      {0, 1, 2, 3, 4, 5, 6, 7, 8}};
+  InputBatch input_c_{{1,                    //
+                       2, 2,                 //
+                       3, 3, 3,              //
+                       4, 4, 4, 4,           //
+                       5, 5, 5, 5, 5,        //
+                       6, 6, 6, 6, 6, 6,     //
+                       7, 7, 7, 7, 7, 7, 7,  //
+                       8, 8, 8, 8, 8, 8, 8, 8},
+                      {0, 1, 3, 6, 10, 15, 21, 28, 36}};
   InputBatch input_d_{
-      std::vector<int64_t>{
-          9,  9,  9,  9,  9,  9,  9,  9,  9,                           //
-          10, 10, 10, 10, 10, 10, 10, 10, 10, 10,                      //
-          11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,                  //
-          12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,              //
-          13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,          //
-          14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,      //
-          15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,  //
-          16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
-      std::vector<int32_t>{0, 9, 19, 30, 42, 55, 69, 84, 100}};
+      {9,  9,  9,  9,  9,  9,  9,  9,  9,                           //
+       10, 10, 10, 10, 10, 10, 10, 10, 10, 10,                      //
+       11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,                  //
+       12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,              //
+       13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,          //
+       14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,      //
+       15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,  //
+       16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
+      {0, 9, 19, 30, 42, 55, 69, 84, 100}};
 
   std::vector<StackedTableMetadata> stacked_table_metadata_multi_{
       StackedTableMetadata(
@@ -647,8 +644,8 @@ class MinibatchingCountTest : public ::testing::Test {
          ++table_id) {
       const int batch_size = stacked_table_metadata_[table_id].batch_size;
       const int batch_size_per_sc = batch_size / local_sc_count;
-      std::vector<int> ids;
-      std::vector<int> row_offsets;
+      std::vector<int64_t> ids;
+      std::vector<int32_t> row_offsets;
       row_offsets.push_back(0);
       int curr_row_offset = 0;
       for (int local_sc_id = 0; local_sc_id < local_sc_count; ++local_sc_id) {
@@ -681,9 +678,7 @@ class MinibatchingCountTest : public ::testing::Test {
       CHECK_EQ(row_offsets.back(), ids.size());
 
       input_batches.push_back(
-          std::make_unique<
-              RaggedTensorInputBatch<std::vector<int>, std::vector<int>>>(
-              ids, row_offsets));
+          std::make_unique<InputBatch>(std::move(ids), std::move(row_offsets)));
     }
     return input_batches;
   }

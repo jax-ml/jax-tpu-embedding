@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <utility>
 #include <vector>
 
 #include "benchmark/benchmark.h"
@@ -112,30 +113,19 @@ ExtractedCooTensors GenerateSkewedCooTensors(int num_sc_per_device,
   return extracted_coo_tensors;
 }
 
-// This struct holds the data for the input batches. This is necessary because
-// `RaggedTensorInputBatch` uses `absl::Span` to view the data, and we need to
-// ensure the underlying data remains in scope for the duration of the
-// benchmark.
-struct BenchmarkInput {
-  std::vector<std::vector<int64_t>> values_data;
-  std::vector<std::vector<int32_t>> row_splits_data;
+std::vector<std::unique_ptr<AbstractInputBatch>>
+GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
+                                       int batch_size_per_sc, int vocab_size,
+                                       int num_features) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
-};
-
-BenchmarkInput GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
-                                                      int batch_size_per_sc,
-                                                      int vocab_size,
-                                                      int num_features) {
-  BenchmarkInput benchmark_input;
-  benchmark_input.values_data.resize(num_features);
-  benchmark_input.row_splits_data.resize(num_features);
+  input_batches.reserve(num_features);
   absl::BitGen gen(std::seed_seq{kSeed});  // seed for reproducibility
 
   const int batch_size_for_device = num_sc_per_device * batch_size_per_sc;
 
   for (int f = 0; f < num_features; ++f) {
-    auto& values = benchmark_input.values_data[f];
-    auto& row_splits = benchmark_input.row_splits_data[f];
+    std::vector<int64_t> values;
+    std::vector<int32_t> row_splits;
     row_splits.push_back(0);
 
     for (int row = 0; row < batch_size_for_device; ++row) {
@@ -147,19 +137,19 @@ BenchmarkInput GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
       row_splits.push_back(values.size());
     }
 
-    benchmark_input.input_batches.push_back(
-        std::make_unique<RaggedTensorInputBatch<absl::Span<const int64_t>,
-                                                absl::Span<const int32_t>>>(
-            values, row_splits));
+    input_batches.push_back(
+        std::make_unique<RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>>(
+            std::move(values), std::move(row_splits)));
   }
-  return benchmark_input;
+  return input_batches;
 }
 
 void BM_ExtractCooTensors(benchmark::State& state) {
   const int num_features = state.range(0);
   const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
-  BenchmarkInput benchmark_input = GenerateSkewedRaggedTensorInputBatches(
-      kNumScPerDevice, kBatchSizePerSc, kVocabSize, num_features);
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
+                                             kVocabSize, num_features);
 
   std::vector<StackedTableMetadata> stacked_table_metadata;
   stacked_table_metadata.reserve(num_features);
@@ -185,7 +175,7 @@ void BM_ExtractCooTensors(benchmark::State& state) {
 
   for (auto s : state) {
     internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-        stacked_table_metadata, absl::MakeSpan(benchmark_input.input_batches),
+        stacked_table_metadata, absl::MakeSpan(input_batches),
         /*local_device_id=*/0, options);
   }
 }
