@@ -324,7 +324,10 @@ cc_library(
 cc_library(
     name = "sparse_csr_input_stream",
     hdrs = ["sparse_csr_input_stream_impl.h"],
-    deps = ["@com_google_absl//absl/strings:string_view"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings:string_view",
+    ],
 )
 
 cc_library(
@@ -333,6 +336,7 @@ cc_library(
     deps = [
         ":abstract_input_batch",
         ":input_preprocessing_util",
+        ":unity_weights_stream",
         "@com_google_absl//absl/log:check",
     ],
 )

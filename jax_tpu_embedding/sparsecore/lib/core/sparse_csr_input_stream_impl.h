@@ -47,18 +47,23 @@ class SparseCsrInputBatchStream {
         row_end_(row_end),
         curr_idx_(row_pointers[row_start]),
         max_vocab_id_(max_vocab_id),
-        table_name_(table_name) {}
+        table_name_(table_name) {
+    curr_row_cols_ =
+        curr_row_ == row_end_
+            ? 0
+            : row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
+  }
 
   int size() const { return row_pointers_[row_end_] - row_pointers_[0]; }
 
-  int cols() const {
-    return row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
-  }
+  // Returns number of values in current row.
+  int cols() const { return curr_row_cols_; }
 
   void NextRow() {
     ++curr_row_;
     if (curr_row_ < row_end_) {
       curr_idx_ = row_pointers_[curr_row_];
+      curr_row_cols_ = row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
     }
   }
 
@@ -85,6 +90,7 @@ class SparseCsrInputBatchStream {
   int curr_row_;
   int row_end_;
   int curr_idx_;
+  int curr_row_cols_;
   T max_vocab_id_;
   absl::string_view table_name_;
 };

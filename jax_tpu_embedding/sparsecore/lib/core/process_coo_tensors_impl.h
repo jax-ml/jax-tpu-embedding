@@ -20,20 +20,48 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/unity_weights_stream_impl.h"
 
 namespace jax_sc_embedding {
 
+// Overload for UnityWeightsStream.
+// This avoids looping when combiner is kMean or kSqrtn because get() always
+// returns 1.0. We can compute the result in O(1) time.
+// The loop cannot be optimized away by the compiler in the generic case because
+// it must preserve the side effect of calling NextCol() on the stream, so this
+// specialization is necessary for top performance with unity weights.
+template <typename ValuesStream>
+float ComputeWeightDivisor(RowCombiner combiner,
+                           UnityWeightsStream<ValuesStream>& weights_stream) {
+  const int num_cols = weights_stream.cols();
+  // We must advance the stream cursor to the end of the row, as this is an
+  // expected side effect of calling ComputeWeightDivisor in the generic case.
+  weights_stream.SeekCol(num_cols);
+  switch (combiner) {
+    case RowCombiner::kSum:
+    return 1.0f;
+  case RowCombiner::kMean:
+    return static_cast<float>(num_cols);
+  case RowCombiner::kSqrtn:
+    return std::sqrt(num_cols);
+  }
+}
+
+// Generic implementation for any weight stream that is not UnityWeightsStream.
 template <typename WeightsStreamT>
 float ComputeWeightDivisor(RowCombiner combiner,
                            WeightsStreamT& weights_stream) {
+  const int num_cols = weights_stream.cols();
+  if (combiner == RowCombiner::kSum) {
+    return 1.0f;
+  }
   switch (combiner) {
     case RowCombiner::kSum:
       return 1.0f;
     case RowCombiner::kMean: {
       // Sum of elements.
       float sum = 0.0f;
-      for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.NextCol()) {
+      for (; weights_stream.col() < num_cols; weights_stream.NextCol()) {
         sum += weights_stream.get();
       }
       return sum;
@@ -41,8 +69,7 @@ float ComputeWeightDivisor(RowCombiner combiner,
     case RowCombiner::kSqrtn: {
       // Sqrt of sum of squares.
       float sum = 0.0f;
-      for (; weights_stream.col() < weights_stream.cols();
-           weights_stream.NextCol()) {
+      for (; weights_stream.col() < num_cols; weights_stream.NextCol()) {
         sum += std::pow(weights_stream.get(), 2);
       }
       return std::sqrt(sum);
@@ -84,8 +111,12 @@ void ProcessCooTensors(
         values_stream.row() - options.slice_start + options.row_offset;
     const float divisor =
         ComputeWeightDivisor(options.combiner, weights_stream);
+    const int num_cols = values_stream.cols();
 
-    for (weights_stream.SeekCol(0); values_stream.col() < values_stream.cols();
+    extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
+        num_cols;
+
+    for (weights_stream.SeekCol(0); values_stream.col() < num_cols;
          values_stream.NextCol(), weights_stream.NextCol()) {
       const int embedding_id = values_stream.get();
       const float gain = weights_stream.get() / divisor;
@@ -96,8 +127,6 @@ void ProcessCooTensors(
           sample_id, embedding_id, gain, options.col_shift, options.col_offset,
           num_scs_mod);
     }
-    extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
-        values_stream.cols();
   }
 }
 }  // namespace jax_sc_embedding
