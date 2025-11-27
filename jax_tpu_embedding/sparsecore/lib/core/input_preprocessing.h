@@ -19,6 +19,8 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -44,11 +46,13 @@ struct SparseDenseMatmulInputStats {
 };
 
 namespace internal {
-ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
+
+void ExtractCooTensorsForLocalDevice(
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    int local_device_id,
-    const PreprocessSparseDenseMatmulInputOptions& options);
+    int local_device, const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<ExtractedSparseCoreTensors> extracted_sc_tensors);
+
 }  // namespace internal
 
 struct PreprocessSparseDenseMatmulOutput {

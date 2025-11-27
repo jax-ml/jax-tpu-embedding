@@ -95,7 +95,10 @@ void ProcessCooTensors(
       extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   CHECK_GT(batch_size_per_sc, 0);
 
-  extracted_coo_tensors.coo_tensors.reserve(values_stream.size());
+  for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
+    extracted_coo_tensors.per_sc_tensors[sc_id].coo_tensors.reserve(
+        batch_size_per_sc);
+  }
 
   DCHECK_EQ(values_stream.size(), weights_stream.size());
 
@@ -113,8 +116,7 @@ void ProcessCooTensors(
         ComputeWeightDivisor(options.combiner, weights_stream);
     const int num_cols = values_stream.cols();
 
-    extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
-        num_cols;
+    const int local_sc_id = sample_id / batch_size_per_sc;
 
     for (weights_stream.SeekCol(0); values_stream.col() < num_cols;
          values_stream.NextCol(), weights_stream.NextCol()) {
@@ -123,9 +125,10 @@ void ProcessCooTensors(
       DCHECK_GE(embedding_id, 0);
       DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
 
-      extracted_coo_tensors.coo_tensors.emplace_back(
-          sample_id, embedding_id, gain, options.col_shift, options.col_offset,
-          num_scs_mod);
+      extracted_coo_tensors.per_sc_tensors[local_sc_id]
+          .coo_tensors.emplace_back(sample_id, embedding_id, gain,
+                                    options.col_shift, options.col_offset,
+                                    num_scs_mod);
     }
   }
 }

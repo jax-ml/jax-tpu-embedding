@@ -63,96 +63,6 @@ using ::testing::SizeIs;
 using InputBatch =
     ::jax_sc_embedding::RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>;
 
-std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
-    absl::Span<const std::vector<int64_t>> samples) {
-  std::vector<int64_t> values;
-  std::vector<int32_t> row_splits;
-  row_splits.push_back(0);
-  for (const auto& sample_ids : samples) {
-    for (const auto& id : sample_ids) {
-      values.push_back(id);
-    }
-    row_splits.push_back(values.size());
-  }
-  return std::make_unique<InputBatch>(std::move(values), std::move(row_splits));
-}
-
-class TableStackingTest : public ::testing::Test {
- protected:
-  InputBatch input_a_{{5, 18,  //
-                       18, 0,  //
-                       0, 20,  //
-                       18, 0,  //
-                       18, 0,  //
-                       0, 20,  //
-                       5, 18,  //
-                       18, 0},
-                      {0, 2, 4, 6, 8, 10, 12, 14, 16}};
-  InputBatch input_b_{{2,   //
-                       10,  //
-                       1,   //
-                       9,   //
-                       3,   //
-                       7,   //
-                       4,   //
-                       8},
-                      {0, 1, 2, 3, 4, 5, 6, 7, 8}};
-  InputBatch input_c_{{1,                    //
-                       2, 2,                 //
-                       3, 3, 3,              //
-                       4, 4, 4, 4,           //
-                       5, 5, 5, 5, 5,        //
-                       6, 6, 6, 6, 6, 6,     //
-                       7, 7, 7, 7, 7, 7, 7,  //
-                       8, 8, 8, 8, 8, 8, 8, 8},
-                      {0, 1, 3, 6, 10, 15, 21, 28, 36}};
-  InputBatch input_d_{
-      {9,  9,  9,  9,  9,  9,  9,  9,  9,                           //
-       10, 10, 10, 10, 10, 10, 10, 10, 10, 10,                      //
-       11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,                  //
-       12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,              //
-       13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,          //
-       14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,      //
-       15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,  //
-       16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
-      {0, 9, 19, 30, 42, 55, 69, 84, 100}};
-
-  std::vector<StackedTableMetadata> stacked_table_metadata_multi_{
-      StackedTableMetadata(
-          /*name=*/"table_0",
-          /*feature_index=*/0, /*max_ids_per_partition=*/16,
-          /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
-          /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16),
-      StackedTableMetadata(
-          /*name=*/"table_1",
-          /*feature_index=*/1, /*max_ids_per_partition=*/16,
-          /*max_unique_ids_per_partition=*/16, /*row_offset=*/16,
-          /*col_offset=*/32, /*col_shift=*/0, /*batch_size=*/16)};
-
-  std::vector<StackedTableMetadata> stacked_table_metadata_single_{
-      StackedTableMetadata(
-          /*name=*/"table_0",
-          /*feature_index=*/0, /*max_ids_per_partition=*/16,
-          /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
-          /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/8),
-      StackedTableMetadata(
-          /*name=*/"table_1",
-          /*feature_index=*/1, /*max_ids_per_partition=*/16,
-          /*max_unique_ids_per_partition=*/16, /*row_offset=*/8,
-          /*col_offset=*/32, /*col_shift=*/0, /*batch_size=*/8)};
-
-  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches_multi_,
-      input_batches_single_;
-
-  void SetUp() override {
-    input_batches_multi_.push_back(std::make_unique<InputBatch>(input_a_));
-    input_batches_multi_.push_back(std::make_unique<InputBatch>(input_b_));
-
-    input_batches_single_.push_back(std::make_unique<InputBatch>(input_c_));
-    input_batches_single_.push_back(std::make_unique<InputBatch>(input_d_));
-  }
-};
-
 namespace testing_utils {
 
 // Wrapper around an AllReduceInterface that causes a test failure if
@@ -217,244 +127,21 @@ class AllReduceSyncKeyCollector : public AllReduceInterface {
   std::vector<int> sync_keys_ ABSL_GUARDED_BY(mutex_);
 };
 
+std::unique_ptr<AbstractInputBatch> CreateInputBatchFromSamples(
+    absl::Span<const std::vector<int64_t>> samples) {
+  std::vector<int64_t> values;
+  std::vector<int32_t> row_splits;
+  row_splits.push_back(0);
+  for (const auto& sample_ids : samples) {
+    for (const auto& id : sample_ids) {
+      values.push_back(id);
+    }
+    row_splits.push_back(values.size());
+  }
+  return std::make_unique<InputBatch>(std::move(values), std::move(row_splits));
+}
+
 }  // namespace testing_utils
-
-TEST_F(TableStackingTest, MultiProcessStackingStackThenSplit) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 2,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_multi_, absl::MakeSpan(input_batches_multi_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(24));
-  // This results in an uneven ID distribution - 8, 8, 4, 4
-
-  std::vector<CooFormat> expected_coo_tensors;
-  // Feature 0, slice 0
-  // SC 0 (4 rows, 8 ids)
-  expected_coo_tensors.push_back(CooFormat(0, 5, 1));
-  expected_coo_tensors.push_back(CooFormat(0, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(1, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(1, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(2, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(2, 20, 1));
-  expected_coo_tensors.push_back(CooFormat(3, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(3, 0, 1));
-  // SC 1 (4 rows, 8 ids)
-  expected_coo_tensors.push_back(CooFormat(4, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(4, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(5, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(5, 20, 1));
-  expected_coo_tensors.push_back(CooFormat(6, 5, 1));
-  expected_coo_tensors.push_back(CooFormat(6, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(7, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(7, 0, 1));
-
-  // Feature 1, slice 0
-  // SC 2 (4 rows, 4 ids)
-  expected_coo_tensors.push_back(CooFormat(8, 34, 1));
-  expected_coo_tensors.push_back(CooFormat(9, 42, 1));
-  expected_coo_tensors.push_back(CooFormat(10, 33, 1));
-  expected_coo_tensors.push_back(CooFormat(11, 41, 1));
-  // SC 3 (4 rows, 4 ids)
-  expected_coo_tensors.push_back(CooFormat(12, 35, 1));
-  expected_coo_tensors.push_back(CooFormat(13, 39, 1));
-  expected_coo_tensors.push_back(CooFormat(14, 36, 1));
-  expected_coo_tensors.push_back(CooFormat(15, 40, 1));
-
-  EXPECT_THAT(extracted_coo_tensors.coo_tensors,
-              ElementsAreArray(expected_coo_tensors));
-}
-
-TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 2,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_multi_, absl::MakeSpan(input_batches_multi_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(24));
-  // This results in a more even distribution (actually ideal) - 6,6,6,6
-
-  std::vector<CooFormat> expected_coo_tensors;
-
-  // SC 0 (4 rows, 6 ids)
-  // Feature 0, slice 0
-  expected_coo_tensors.push_back(CooFormat(0, 5, 1));
-  expected_coo_tensors.push_back(CooFormat(0, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(1, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(1, 0, 1));
-
-  // Feature 1, slice 0
-  expected_coo_tensors.push_back(CooFormat(2, 34, 1));
-  expected_coo_tensors.push_back(CooFormat(3, 42, 1));
-
-  // SC 1 (4 rows, 6 ids)
-  // Feature 0, slice 1
-  expected_coo_tensors.push_back(CooFormat(4, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(4, 20, 1));
-  expected_coo_tensors.push_back(CooFormat(5, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(5, 0, 1));
-
-  // Feature 1, slice 1
-  expected_coo_tensors.push_back(CooFormat(6, 33, 1));
-  expected_coo_tensors.push_back(CooFormat(7, 41, 1));
-
-  // SC 2 (4 rows, 6 ids)
-  // Feature 0, slice 2
-  expected_coo_tensors.push_back(CooFormat(8, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(8, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(9, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(9, 20, 1));
-
-  // Feature 1, slice 2
-  expected_coo_tensors.push_back(CooFormat(10, 35, 1));
-  expected_coo_tensors.push_back(CooFormat(11, 39, 1));
-  // SC 3 (4 rows, 6 ids)
-  // Feature 0, slice 3
-  expected_coo_tensors.push_back(CooFormat(12, 5, 1));
-  expected_coo_tensors.push_back(CooFormat(12, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(13, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(13, 0, 1));
-
-  // Feature 1, slice 3
-  expected_coo_tensors.push_back(CooFormat(14, 36, 1));
-  expected_coo_tensors.push_back(CooFormat(15, 40, 1));
-
-  EXPECT_THAT(extracted_coo_tensors.coo_tensors,
-              ElementsAreArray(expected_coo_tensors));
-}
-
-TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
-
-  const int batch_size_per_sc =
-      extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
-  std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-  for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-    ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
-  }
-
-  std::vector<int> expected_ids_per_sc = {1 + 2 + 9 + 10, 3 + 4 + 11 + 12,
-                                          5 + 6 + 13 + 14, 7 + 8 + 15 + 16};
-
-  EXPECT_EQ(ids_per_sc, expected_ids_per_sc);
-}
-
-TEST_F(TableStackingTest, SingleProcessSingleDeviceStackThenSplit) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
-
-  const int batch_size_per_sc =
-      extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
-  std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-  for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-    ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
-  }
-
-  std::vector<int> expected_ids_per_sc = {1 + 2 + 3 + 4,     //
-                                          5 + 6 + 7 + 8,     //
-                                          9 + 10 + 11 + 12,  //
-                                          13 + 14 + 15 + 16};
-
-  EXPECT_EQ(ids_per_sc, expected_ids_per_sc);
-}
-
-TEST_F(TableStackingTest, MultiChipSplitThenStack) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 2,
-      .global_device_count = 2,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
-
-  std::vector<int> expected_ids_per_sc[] = {{1 + 9, 2 + 10, 3 + 11, 4 + 12},
-                                            {5 + 13, 6 + 14, 7 + 15, 8 + 16}};
-
-  for (int local_device_id = 0; local_device_id < options.local_device_count;
-       ++local_device_id) {
-    ExtractedCooTensors extracted_coo_tensors =
-        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-            stacked_table_metadata_single_,
-            absl::MakeSpan(input_batches_single_), local_device_id, options);
-    EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 8);
-
-    const int batch_size_per_sc =
-        extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
-    std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-    for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-      ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
-    }
-
-    EXPECT_EQ(ids_per_sc, expected_ids_per_sc[local_device_id])
-        << "local_device_id: " << local_device_id;
-  }
-}
-
-TEST_F(TableStackingTest, MultiChipStackThenSplit) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 2,
-      .global_device_count = 2,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
-
-  std::vector<int> expected_ids_per_sc[] = {{1 + 2, 3 + 4, 9 + 10, 11 + 12},
-                                            {5 + 6, 7 + 8, 13 + 14, 15 + 16}};
-
-  for (int local_device_id = 0; local_device_id < options.local_device_count;
-       ++local_device_id) {
-    ExtractedCooTensors extracted_coo_tensors =
-        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-            stacked_table_metadata_single_,
-            absl::MakeSpan(input_batches_single_), local_device_id, options);
-
-    EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 8);
-
-    const int batch_size_per_sc =
-        extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
-    std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-    for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-      ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
-    }
-
-    EXPECT_EQ(ids_per_sc, expected_ids_per_sc[local_device_id])
-        << "local_device_id: " << local_device_id;
-  }
-}
 
 TEST(InputPreprocessingUtilTest, MergeStats) {
   SparseDenseMatmulInputStats stats1;
@@ -512,27 +199,6 @@ TEST(InputPreprocessingUtilTest, MergeStats) {
               ElementsAreArray({200, 201, 202, 203}));
   EXPECT_THAT(stats1.required_buffer_sizes["table_2"],
               ElementsAreArray({300, 301, 302, 303}));
-}
-
-TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
-
-  std::vector<int> expected_coo_tensors_per_sc = {
-      1 + 2 + 9 + 10, 3 + 4 + 11 + 12, 5 + 6 + 13 + 14, 7 + 8 + 15 + 16};
-  EXPECT_EQ(extracted_coo_tensors.coo_tensors_per_sc,
-            expected_coo_tensors_per_sc);
 }
 
 class MinibatchingTest : public testing::TestWithParam<bool> {
@@ -1018,7 +684,8 @@ void RunPreprocessingOutputIsValidTest(
     for (const auto& sample : table_samples) {
       total_input_ids += sample.size();
     }
-    input_batches.push_back(CreateInputBatchFromSamples(table_samples));
+    input_batches.push_back(
+        testing_utils::CreateInputBatchFromSamples(table_samples));
   }
 
   const int kGlobalDeviceCount = global_device_count;
@@ -1216,7 +883,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
                          int num_sc_per_device, int global_device_count,
                          FeatureStackingStrategy feature_stacking_strategy) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
-  input_batches.push_back(CreateInputBatchFromSamples(samples));
+  input_batches.push_back(testing_utils::CreateInputBatchFromSamples(samples));
 
   absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
       stacked_tables;
