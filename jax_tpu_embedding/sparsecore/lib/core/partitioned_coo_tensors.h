@@ -33,6 +33,8 @@ namespace jax_sc_embedding {
 class PartitionedCooTensors {
  public:
   PartitionedCooTensors() : PartitionedCooTensors(0, 0, 0, 1) {}
+  // TODO(b/444292437): Remove `num_sc_per_device` and make this class a
+  // per-SparseCore class.
   PartitionedCooTensors(int reserve_count, int num_sc_per_device,
                         uint32_t global_sc_count, int bucket_count_per_sc = 1)
       : coo_tensors_(),
@@ -192,7 +194,6 @@ class PartitionedCooTensors {
       bucket_offsets_[dest_pos + minibatches - 1] =
           bucket_offsets_[start_pos + bucket_count_per_sc_ - 1];
     }
-
     bucket_offsets_.resize(1 + num_sc_per_device_ * minibatches);
 
     DCHECK(absl::c_is_sorted(bucket_offsets_));
@@ -213,7 +214,6 @@ class PartitionedCooTensors {
 
     while (curr_sc_id_ < target_sc_id || curr_bucket_id_ < target_bucket_id) {
       DCHECK_LT(curr_sc_id_, num_sc_per_device_);
-      DCHECK_LT(curr_bucket_id_, bucket_count_per_sc_);
       bucket_offsets_.push_back(coo_tensors_.size());
       if (curr_bucket_id_ == bucket_count_per_sc_ - 1) {
         ++curr_sc_id_;

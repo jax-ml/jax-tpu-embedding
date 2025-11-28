@@ -27,7 +27,16 @@
 namespace jax_sc_embedding {
 namespace {
 
-using ::testing::ElementsAre;
+using ::testing::UnorderedElementsAre;
+
+std::vector<CooFormat> FlattenCooTensors(const ExtractedCooTensors& extracted) {
+  std::vector<CooFormat> result;
+  for (const auto& sc_tensors : extracted.per_sc_tensors) {
+    result.insert(result.end(), sc_tensors.coo_tensors.begin(),
+                  sc_tensors.coo_tensors.end());
+  }
+  return result;
+}
 
 TEST(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
   // Input: (0, 0), (0, 1), (0, 2), (1, 0), (2, 0), (3, 2)
@@ -76,16 +85,16 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
       },
       extracted_3);
 
-  EXPECT_THAT(extracted_1.coo_tensors,
-              ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),
-                          CooFormat(0, 2, 1.0), CooFormat(1, 0, 1.0),
-                          CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
-  EXPECT_THAT(extracted_2.coo_tensors,
-              ElementsAre(CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0)));
+  EXPECT_THAT(FlattenCooTensors(extracted_1),
+              UnorderedElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),
+                                   CooFormat(0, 2, 1.0), CooFormat(1, 0, 1.0),
+                                   CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
+  EXPECT_THAT(FlattenCooTensors(extracted_2),
+              UnorderedElementsAre(CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0)));
 
-  EXPECT_THAT(
-      extracted_3.coo_tensors,
-      ElementsAre(CooFormat(16, 0 + 8, 1.0), CooFormat(17, 2 + 8, 1.0)));
+  EXPECT_THAT(FlattenCooTensors(extracted_3),
+              UnorderedElementsAre(CooFormat(16, 0 + 8, 1.0),
+                                   CooFormat(17, 2 + 8, 1.0)));
 }
 
 TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
@@ -106,10 +115,11 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
           .combiner = RowCombiner::kMean,
       },
       extracted);
-  EXPECT_THAT(extracted.coo_tensors,
-              ElementsAre(CooFormat(0, 0, 1.0 / 3), CooFormat(0, 1, 1.0 / 3),
-                          CooFormat(0, 2, 1.0 / 3), CooFormat(1, 0, 1.0),
-                          CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
+  EXPECT_THAT(
+      FlattenCooTensors(extracted),
+      UnorderedElementsAre(CooFormat(0, 0, 1.0 / 3), CooFormat(0, 1, 1.0 / 3),
+                           CooFormat(0, 2, 1.0 / 3), CooFormat(1, 0, 1.0),
+                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
 }
 
 TEST(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
@@ -128,16 +138,15 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
           .combiner = RowCombiner::kSqrtn,
       },
       extracted);
-  EXPECT_THAT(
-      extracted.coo_tensors,
-      ElementsAre(CooFormat(0, 0, 1.0 / std::sqrt(3)),
-                  CooFormat(0, 1, 1.0 / std::sqrt(3)),
-                  CooFormat(0, 2, 1.0 / std::sqrt(3)), CooFormat(1, 0, 1.0),
-                  CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
+  EXPECT_THAT(FlattenCooTensors(extracted),
+              UnorderedElementsAre(CooFormat(0, 0, 1.0 / std::sqrt(3)),
+                                   CooFormat(0, 1, 1.0 / std::sqrt(3)),
+                                   CooFormat(0, 2, 1.0 / std::sqrt(3)),
+                                   CooFormat(1, 0, 1.0), CooFormat(2, 0, 1.0),
+                                   CooFormat(3, 2, 1.0)));
 }
 
-TEST(RaggedTensorInputBatchTest,
-       FixedValencyRowOffsetsCooExtractionIsCorrect) {
+TEST(RaggedTensorInputBatchTest, FixedValencyRowOffsetsCooExtractionIsCorrect) {
   std::vector<int64_t> embedding_ids = {0, 1, 0, 2, 0, 3, 0, 4};
   int batch_size = 4;
   int valency = 2;
@@ -158,11 +167,12 @@ TEST(RaggedTensorInputBatchTest,
           .combiner = RowCombiner::kSum,
       },
       extracted);
-  EXPECT_THAT(extracted.coo_tensors,
-              ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),  // Row 0
-                          CooFormat(1, 0, 1.0), CooFormat(1, 2, 1.0),  // Row 1
-                          CooFormat(2, 0, 1.0), CooFormat(2, 3, 1.0),  // Row 2
-                          CooFormat(3, 0, 1.0), CooFormat(3, 4, 1.0))  // Row 3
+  EXPECT_THAT(
+      FlattenCooTensors(extracted),
+      UnorderedElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),  // Row 0
+                           CooFormat(1, 0, 1.0), CooFormat(1, 2, 1.0),  // Row 1
+                           CooFormat(2, 0, 1.0), CooFormat(2, 3, 1.0),  // Row 2
+                           CooFormat(3, 0, 1.0), CooFormat(3, 4, 1.0))  // Row 3
   );
 }
 

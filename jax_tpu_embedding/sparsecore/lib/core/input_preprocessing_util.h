@@ -212,18 +212,61 @@ enum class RowCombiner {
 
 RowCombiner GetRowCombiner(absl::string_view combiner);
 
-struct ExtractedCooTensors {
+// Holds stats and grouped tensors for a single SparseCore.
+struct PerSparseCoreGroupedData;
+
+namespace internal {
+void AggregatePerSparseCoreStats(const PerSparseCoreGroupedData& result,
+                                 int sc_id,
+                                 internal::StatsPerDevice& stats_per_device,
+                                 int& dropped_id_count);
+}
+
+// Holds stats and grouped tensors for a single SparseCore.
+struct PerSparseCoreGroupedData {
+  // Tensors partitioned by bucket and global SC, for a single local SC.
+  // This will be configured as if num_sc_per_device=1.
+  // TODO(b/444292437): remove num_sc_per_device=1.
+  PartitionedCooTensors grouped_tensors;
+
+  // Observed IDs per global SC partition per bucket for this local SC.
+  MatrixXi ids_per_sc_partition_per_bucket;
+  // Observed unique IDs per global SC partition per bucket for this local SC.
+  MatrixXi unique_ids_per_partition_per_bucket;
+  // Total required buffer size for this SC, summed across partitions.
+  int required_buffer_size = 0;
+  // Number of IDs dropped for this SC.
+  int dropped_id_count = 0;
+  // Batch size for the device this SparseCore belongs to.
+  int batch_size_for_device = 0;
+
+  PerSparseCoreGroupedData() = default;
+  PerSparseCoreGroupedData(int coo_count, int global_sc_count, int bucket_count,
+                           int batch_size_for_device)
+      : grouped_tensors(coo_count, /*num_sc_per_device=*/1, global_sc_count,
+                          bucket_count),
+        ids_per_sc_partition_per_bucket(
+            MatrixXi::Zero(global_sc_count, bucket_count)),
+        unique_ids_per_partition_per_bucket(
+            MatrixXi::Zero(global_sc_count, bucket_count)),
+        batch_size_for_device(batch_size_for_device) {}
+};
+
+// Holds extracted tensors for one SparseCore before sorting and grouping.
+struct ExtractedSparseCoreTensors {
   std::vector<CooFormat> coo_tensors;
+  int batch_size_for_device = 0;
+};
+
+struct ExtractedCooTensors {
+  std::vector<ExtractedSparseCoreTensors> per_sc_tensors;
   // Number of samples these coo_tensors are extracted from.
   int batch_size_for_device;
-  // Count coo tensors per SC for efficient allocation of vector for sorting and
-  // grouping them. Might be lower after deduplication.
-  std::vector<int> coo_tensors_per_sc;
 
   ExtractedCooTensors() : ExtractedCooTensors(0, 0) {}
   ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
-      : batch_size_for_device(batch_size_for_device),
-        coo_tensors_per_sc(num_sc_per_device, 0) {}
+      : per_sc_tensors(num_sc_per_device),
+        batch_size_for_device(batch_size_for_device) {}
 };
 
 struct StackedTableMetadata {
@@ -287,7 +330,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
 void FillLocalDeviceBuffer(
-    const PartitionedCooTensors& grouped_coo_tensors,
+    absl::Span<const PerSparseCoreGroupedData> sc_grouped_data,
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,

@@ -204,6 +204,24 @@ int FillBufferSegment(const BufferFillingOptions& options,
 
 }  // namespace
 
+namespace internal {
+void AggregatePerSparseCoreStats(const PerSparseCoreGroupedData& result,
+                                 int sc_id,
+                                 internal::StatsPerDevice& stats_per_device,
+                                 int& dropped_id_count) {
+  stats_per_device.max_ids_per_partition =
+      stats_per_device.max_ids_per_partition.cwiseMax(
+          result.ids_per_sc_partition_per_bucket.rowwise().sum().transpose());
+  stats_per_device.max_unique_ids_per_partition =
+      stats_per_device.max_unique_ids_per_partition.cwiseMax(
+          result.unique_ids_per_partition_per_bucket.rowwise()
+              .sum()
+              .transpose());
+  stats_per_device.required_buffer_size[sc_id] = result.required_buffer_size;
+  dropped_id_count += result.dropped_id_count;
+}
+}  // namespace internal
+
 RowCombiner GetRowCombiner(absl::string_view combiner) {
   if (combiner == "sum") {
     return RowCombiner::kSum;
@@ -310,7 +328,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
 // `gains` because we fill values in a loop to a bigger array.
 void FillLocalDeviceBuffer(
-    const PartitionedCooTensors& grouped_coo_tensors,
+    absl::Span<const PerSparseCoreGroupedData> sc_grouped_data,
     const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -318,12 +336,15 @@ void FillLocalDeviceBuffer(
     int& dropped_id_count_static_bound) {
   tsl::profiler::TraceMe t("FillLocalDeviceBuffer");
   const int num_sc_per_device = options.num_sc_per_device;
+  CHECK_EQ(num_sc_per_device, sc_grouped_data.size());
   const int num_scs = options.GetNumScs();
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
   DCHECK_GT(batch_size_per_sc, 0);
   int coo_begin = 0;
   int lhs_row_begin = 0;
   for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
+    const auto& grouped_coo_tensors =
+        sc_grouped_data[local_sc_id].grouped_tensors;
     for (int minibatch_id = 0;
          minibatch_id < grouped_coo_tensors.GetNumMinibatches();
          ++minibatch_id) {
@@ -336,7 +357,7 @@ void FillLocalDeviceBuffer(
       coo_begin = FillBufferSegment(
           {
               .local_sc_id = local_sc_id,
-              .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
+              .coo_tensors = grouped_coo_tensors(0, minibatch_id),
               .lhs_row_begin = lhs_row_begin,
               .lhs_row_end = lhs_row_end,
               .coo_begin = coo_begin,
