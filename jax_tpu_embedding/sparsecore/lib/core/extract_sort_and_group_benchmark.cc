@@ -184,7 +184,7 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack,
+      .enable_minibatching = true,
   };
 
   for (auto s : state) {
@@ -223,6 +223,7 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
+      .enable_minibatching = true,
   };
   bool minibatching_required = false;
   StatsPerHost stats_per_host(
