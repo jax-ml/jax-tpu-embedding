@@ -240,16 +240,12 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     // An ID that is a duplicate of a previously non-dropped ID is merged.
     // It does not count as a new ID for stats and does not go through dropping
     // logic.
-    if (grouped_coo_tensors.MaybeMerge(bucket_id, coo_tensor)) {
+    if (grouped_coo_tensors.MaybeMerge(coo_tensor)) {
       continue;
     }
     // If the ID is a duplicate of the last seen ID, it must have been dropped
     // (otherwise it would have been merged above), so drop this one too.
-    bool fully_duplicate = col_id == prev_col_id && row_id == prev_row_id;
-    if constexpr (kCreateBuckets) {
-      fully_duplicate = fully_duplicate && bucket_id == prev_bucket_id;
-    }
-    if (fully_duplicate) {
+    if (row_id == prev_row_id && col_id == prev_col_id) {
       ++stats.dropped_id_count;
       continue;
     }

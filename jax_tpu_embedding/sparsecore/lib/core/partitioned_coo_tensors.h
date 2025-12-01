@@ -44,14 +44,13 @@ class PartitionedCooTensors {
         curr_bucket_id_(0),
         merged_(false),
         dedup_col_id_(std::numeric_limits<uint32_t>::max()),
-        dedup_row_id_(std::numeric_limits<uint32_t>::max()),
-        dedup_bucket_id_(-1) {
+        dedup_row_id_(std::numeric_limits<uint32_t>::max()) {
     coo_tensors_.reserve(reserve_count);
     bucket_offsets_.reserve(1 + num_sc_per_device * bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
   }
 
-  void MergeWithLastCoo(const CooFormat& coo_tensor) {
+  inline void MergeWithLastCoo(const CooFormat& coo_tensor) {
     DCHECK_GT(coo_tensors_.size(), 0);
     CooFormat& last = coo_tensors_.back();
     DCHECK_EQ(last.row_id, coo_tensor.row_id);
@@ -59,10 +58,13 @@ class PartitionedCooTensors {
     last.gain += coo_tensor.gain;
   }
 
-  bool MaybeMerge(int bucket_id, const CooFormat& coo_tensor) {
-    if (bucket_id == dedup_bucket_id_ && coo_tensor.col_id == dedup_col_id_ &&
-        coo_tensor.row_id == dedup_row_id_) {
-      CHECK(!coo_tensors_.empty());
+  inline bool MaybeMerge(const CooFormat& coo_tensor) {
+    // If col_id is the same, bucket_id must also be the same.
+    // For fastest short-circuiting, check row_id first, as it's the last
+    // component of the sort key and thus most likely to differ between
+    // consecutive non-identical elements.
+    if (coo_tensor.row_id == dedup_row_id_ &&
+        coo_tensor.col_id == dedup_col_id_) {
       MergeWithLastCoo(coo_tensor);
       return true;
     }
@@ -72,7 +74,6 @@ class PartitionedCooTensors {
   void ResetDedupState() {
     dedup_col_id_ = std::numeric_limits<uint32_t>::max();
     dedup_row_id_ = std::numeric_limits<uint32_t>::max();
-    dedup_bucket_id_ = -1;
   }
 
   // Add Coo tensor for given SC and bucket. Similar to std::vector::push_back.
@@ -81,7 +82,6 @@ class PartitionedCooTensors {
     AdvanceBucketOffsets(target_sc_id, target_bucket_id);
 
     coo_tensors_.push_back(coo_tensor);
-    dedup_bucket_id_ = target_bucket_id;
     dedup_col_id_ = coo_tensor.col_id;
     dedup_row_id_ = coo_tensor.row_id;
   }
@@ -245,7 +245,6 @@ class PartitionedCooTensors {
   // dropped.
   uint32_t dedup_col_id_;
   uint32_t dedup_row_id_;
-  int dedup_bucket_id_;
 };
 
 }  // namespace jax_sc_embedding
