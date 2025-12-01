@@ -19,7 +19,7 @@ from absl.testing import absltest
 import jax
 from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
-from jax_tpu_embedding.sparsecore.lib.core import test_utils
+from jax_tpu_embedding.sparsecore.lib.core.tests import test_utils
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
