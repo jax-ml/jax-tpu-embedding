@@ -95,10 +95,6 @@ void ProcessCooTensors(
       extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   CHECK_GT(batch_size_per_sc, 0);
 
-  extracted_coo_tensors.coo_tensors.reserve(values_stream.size());
-
-  DCHECK_EQ(values_stream.size(), weights_stream.size());
-
   for (; values_stream.row() < options.slice_end &&
          weights_stream.row() < options.slice_end;
        values_stream.NextRow(), weights_stream.NextRow()) {

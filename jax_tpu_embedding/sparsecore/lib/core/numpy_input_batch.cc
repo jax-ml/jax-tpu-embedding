@@ -14,7 +14,6 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
 
 #include <memory>
-#include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -48,8 +47,6 @@ class NumpyDenseInputBatchStream {
   // avoid implicit type conversions (leading to undefined behavior).
   template <typename U>
   NumpyDenseInputBatchStream(U matrix, int row_start, int row_end) = delete;
-
-  int size() const { return size_; }
 
   int cols() const { return cols_; }
 
@@ -97,9 +94,6 @@ class NumpyRaggedInputBatchStream {
         size_(row_end - row_start),
         row_end_(row_end) {}
 
-  // estimate of total embedding ids (currently a lower bound).
-  int size() const { return size_; }
-
   int cols() const { return row_ref_->shape(0); }
 
   void NextRow() {
@@ -144,8 +138,7 @@ void NumpySparseInputBatch::ExtractCooTensors(
 
   if (feature_.ndim() == 2) {
     py::gil_scoped_acquire _;
-    // I'm not sure but without casting, passing feature_ as `const py::array&`
-    // and using feature_.unchecked_reference<T,2> seems to give garbage values.
+    // The casted temporary values must outlive the ProcessCooTensors.
     auto feature_array = feature_.cast<py::array_t<int>>();
     auto weights_array = weights_.cast<py::array_t<float>>();
     py::gil_scoped_release __;

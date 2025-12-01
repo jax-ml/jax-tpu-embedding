@@ -299,9 +299,13 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options) {
   int batch_size_for_device = 0;
+  int64_t total_ids_for_device = 0;
   for (const auto& feature_metadata : stacked_table_metadata) {
     batch_size_for_device +=
         input_batches[feature_metadata.feature_index]->size() /
+        options.local_device_count;
+    total_ids_for_device +=
+        input_batches[feature_metadata.feature_index]->id_count() /
         options.local_device_count;
   }
   CheckDeviceBatchSize(batch_size_for_device, options.num_sc_per_device,
@@ -328,6 +332,7 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
 
   ExtractedCooTensors extracted_coo_tensors(options.num_sc_per_device,
                                             batch_size_for_device);
+  extracted_coo_tensors.coo_tensors.reserve(total_ids_for_device);
 
   // This slices each feature into `feature_slices` partitions and then
   // interleaves them: (k=num_sc_per_device-1). For stacking strategy

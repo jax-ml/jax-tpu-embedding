@@ -46,8 +46,11 @@ class AbstractInputBatch {
     const RowCombiner combiner ABSL_REQUIRE_EXPLICIT_INIT;
   };
 
-  // Return the batch size or the number of samples in this input batch.
-  virtual ssize_t size() const = 0;
+  // Returns the number of samples (e.g., rows) in this input batch.
+  virtual int64_t size() const = 0;
+
+  // Returns the total number of embedding IDs across all samples.
+  virtual int64_t id_count() const = 0;
 
   // Returns true if the input batch has variable weights.
   virtual bool HasVariableWeights() const { return true; }

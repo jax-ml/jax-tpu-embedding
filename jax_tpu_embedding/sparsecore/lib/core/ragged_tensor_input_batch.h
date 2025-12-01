@@ -88,7 +88,11 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
         table_name_(table_name),
         max_vocab_id_(max_vocab_id) {}
 
+  // Returns the number of samples in this input batch.
   int64_t size() const override { return row_offsets_.size() - 1; }
+
+  // Returns the total number of embedding IDs across all samples.
+  int64_t id_count() const override { return row_offsets_[size()]; }
 
   bool HasVariableWeights() const override { return false; }
 
@@ -129,7 +133,12 @@ class RaggedTensorInputBatchWithOwnedData : public AbstractInputBatch {
         view_(absl::MakeConstSpan(embedding_ids_),
               absl::MakeConstSpan(row_splits_), table_name, max_vocab_id) {}
 
+  // Returns the number of samples in this input batch.
   int64_t size() const override { return view_.size(); }
+
+  // Returns the total number of embedding IDs across all samples.
+  int64_t id_count() const override { return view_.id_count(); }
+
   bool HasVariableWeights() const override {
     return view_.HasVariableWeights();
   }

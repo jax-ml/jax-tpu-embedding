@@ -55,6 +55,7 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
       T max_vocab_id = std::numeric_limits<T>::max())
       : values_ref_(values),
         row_pointers_(row_pointers),
+        row_start_(row_start),
         curr_row_(row_start),
         row_end_(row_end),
         curr_idx_(row_pointers[row_start]),
@@ -65,8 +66,6 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
             ? 0
             : row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
   }
-
-  int size() const { return row_pointers_[row_end_] - row_pointers_[0]; }
 
   // Returns number of values in current row.
   int cols() const { return curr_row_cols_; }
@@ -99,6 +98,7 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
  private:
   ValuesView values_ref_;
   RowPointersView row_pointers_;
+  int row_start_;
   int curr_row_;
   int row_end_;
   int curr_idx_;

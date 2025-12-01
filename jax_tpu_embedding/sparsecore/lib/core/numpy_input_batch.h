@@ -14,6 +14,8 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_BATCH_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_BATCH_H_
 
+#include <cstdint>
+
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -38,9 +40,22 @@ class NumpySparseInputBatch : public AbstractInputBatch {
         << "Dimension mismatch for features and weights";
     CHECK(feature_.ndim() == 1 || feature_.ndim() == 2)
         << "Only 1D and 2D numpy arrays supported as inputs.";
+
+    if (feature_.ndim() == 1) {
+      // Iterating over every row to sum up the number of IDs negates the
+      // performance benefit of reserving memory for them, so we underestimate
+      // the number of IDs as 1 per sample.
+      id_count_ = feature_.shape(0);
+    } else {
+      id_count_ = feature_.shape(0) * feature_.shape(1);
+    }
   }
 
-  py::ssize_t size() const override { return feature_.shape(0); }
+  // Returns the number of samples in this input batch.
+  int64_t size() const override { return feature_.shape(0); }
+
+  // Returns the total number of embedding IDs across all samples.
+  int64_t id_count() const override { return id_count_; }
 
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          ExtractedCooTensors& coo_tensors) override;
@@ -48,6 +63,7 @@ class NumpySparseInputBatch : public AbstractInputBatch {
  private:
   const py::array feature_;
   const py::array weights_;
+  int64_t id_count_;
 };
 
 }  // namespace jax_sc_embedding

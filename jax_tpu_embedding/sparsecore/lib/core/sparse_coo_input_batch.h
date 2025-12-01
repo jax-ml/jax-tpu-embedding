@@ -56,8 +56,11 @@ class PySparseCooInputBatch : public AbstractInputBatch {
         << "Need GIL to create references to indices and values.";
   }
 
-  // Returns the number of rows in the current slice.
+  // Returns the number of samples in this input batch.
   int64_t size() const override { return batch_size_; }
+
+  // Returns the total number of embedding IDs across all samples.
+  int64_t id_count() const override { return values_.size(); }
 
   bool HasVariableWeights() const override { return false; }
 
