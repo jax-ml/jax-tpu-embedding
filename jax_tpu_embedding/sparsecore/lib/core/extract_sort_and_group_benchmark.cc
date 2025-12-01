@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,18 @@
 namespace jax_sc_embedding {
 
 namespace {
+
+std::string CombinerToString(RowCombiner combiner) {
+  switch (combiner) {
+    case RowCombiner::kSum:
+      return "kSum";
+    case RowCombiner::kMean:
+      return "kMean";
+    case RowCombiner::kSqrtn:
+      return "kSqrtn";
+  }
+}
+
 template <typename Derived>
 void LogStats(const Eigen::MatrixBase<Derived>& data, absl::string_view name) {
   if (data.size() == 0) {
@@ -147,6 +160,7 @@ GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
 void BM_ExtractCooTensors(benchmark::State& state) {
   const int num_features = state.range(0);
   const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
+  state.SetLabel(CombinerToString(combiner));
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              kVocabSize, num_features);
@@ -188,8 +202,10 @@ BENCHMARK(BM_ExtractCooTensors)
     ->UseRealTime();
 
 void BM_SortAndGroup_Phase1(benchmark::State& state) {
+  const RowCombiner combiner = static_cast<RowCombiner>(state.range(0));
   ExtractedCooTensors extracted_coo_tensors =
       GenerateSkewedCooTensors(kNumScPerDevice, kBatchSizePerSc, kVocabSize);
+  state.SetLabel(CombinerToString(combiner));
 
   // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
   // the generated data. This doesn't affect performance of grouping itself.
@@ -199,7 +215,9 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
       /*row_offset=*/0,
       /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
+      /*col_shift=*/0, /*batch_size=*/0,
+      /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+      /*row_combiner=*/combiner);
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = kGlobalDeviceCount,
@@ -231,6 +249,9 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_SortAndGroup_Phase1)
+    ->Arg(0)  // kSum
+    ->Arg(1)  // kMean
+    ->Arg(2)  // kSqrtn
     ->Threads(8)
     ->UseRealTime();
 
