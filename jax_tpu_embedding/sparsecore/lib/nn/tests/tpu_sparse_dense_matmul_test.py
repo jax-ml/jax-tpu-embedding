@@ -105,7 +105,6 @@ class ErrorHandlingTest(absltest.TestCase):
   # Tests that even if static buffer size is too small, the matmul can proceed.
   def test_static_buffer_size_was_too_small(self):
     long_feature = np.arange(800, dtype=np.int32).reshape(8, -1)
-    long_weights = np.ones(long_feature.shape, dtype=np.float32)
 
     long_spec = embedding_spec.TableSpec(
         vocabulary_size=1000,
@@ -144,10 +143,8 @@ class ErrorHandlingTest(absltest.TestCase):
         {
             "feature": long_feature,
         },
-        {
-            "feature": long_weights,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=4,
@@ -315,48 +312,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         ],
         dtype=object,
     )
-    self.input_weights = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
-    self.input_weights_table_b = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
 
   @parameterized.product(
       using_pmap=[False, True],
@@ -386,11 +341,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
             "feature_spec_a": self.input_tensor,
             "feature_spec_aa": self.input_tensor,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_aa": self.input_weights,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=2,
         global_device_count=2,
         num_sc_per_device=num_sc_per_device,
@@ -516,11 +468,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
             "feature_spec_a": self.input_tensor,
             "feature_spec_aa": self.input_tensor,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_aa": self.input_weights,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=2,
         global_device_count=2,
         num_sc_per_device=num_sc_per_device,
@@ -670,11 +619,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
             "feature_spec_a": self.input_tensor,
             "feature_spec_b": self.input_tensor_table_b,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_b": self.input_weights_table_b,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=4,
@@ -785,11 +731,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
             "feature_spec_a": self.input_tensor,
             "feature_spec_b": self.input_tensor_table_b,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_b": self.input_weights_table_b,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=2,
         global_device_count=2,
         num_sc_per_device=num_sc_per_device,
@@ -1289,27 +1232,6 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         ],
         dtype=object,
     )
-    input_weights = np.array(
-        [
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
     batch_number = 42
     preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
         {
@@ -1317,12 +1239,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
             "language": input_tensor,
             "related_item": input_tensor,
         },
-        {
-            "country": input_weights,
-            "language": input_weights,
-            "related_item": input_weights,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=mesh.local_mesh.size,
         global_device_count=mesh.size,
         num_sc_per_device=num_sc_per_device,
@@ -1463,8 +1381,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     batch_number = 42
     preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
         {"quantized_feature": self.input_tensor},
-        {"quantized_feature": self.input_weights},
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,

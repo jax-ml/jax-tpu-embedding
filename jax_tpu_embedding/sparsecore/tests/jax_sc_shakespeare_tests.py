@@ -192,17 +192,13 @@ class ShakespeareTest(absltest.TestCase):
       # Step 1: SC input processing.
       # --------------------------------------------------------------------------
       features = np.reshape(features, (-1, 1))
-      feature_weights = np.ones(features.shape, dtype=np.float32)
       # Pack the features into a tree structure.
       feature_structure = jax.tree.structure(feature_specs)
       features = jax.tree_util.tree_unflatten(feature_structure, [features])
-      feature_weights = jax.tree_util.tree_unflatten(
-          feature_structure, [feature_weights]
-      )
 
       preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
           features,
-          feature_weights,
+          None,  # uniform weights
           feature_specs,
           local_device_count=mesh.local_mesh.size,
           global_device_count=mesh.size,

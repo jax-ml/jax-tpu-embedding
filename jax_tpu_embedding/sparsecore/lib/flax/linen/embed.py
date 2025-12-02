@@ -117,7 +117,7 @@ class SparseCoreEmbed(nn.Module):
       self,
       step: int,
       features: embedding.Nested[np.ndarray],
-      features_weights: embedding.Nested[np.ndarray],
+      features_weights: embedding.Nested[np.ndarray] | None,
       all_reduce_interface: Any | None = None,
   ) -> embedding.PreprocessedInput:
     """Preprocesses the input for sparse dense matmul.
@@ -131,7 +131,8 @@ class SparseCoreEmbed(nn.Module):
         should be either a 2D numpy array or a 1D list or numpy array of numpy
         arrays with dtype object (in the ragged tensor case).
       features_weights: The input feature weights. The structure must be
-        identical to the features.
+        identical to the features. If None, uniform weights (1.0) are assumed
+        for all features.
       all_reduce_interface: The all reduce interface for minibatching. This can
         be generated using the `get_all_reduce_interface` function. Not required
         for single-host minibatching.

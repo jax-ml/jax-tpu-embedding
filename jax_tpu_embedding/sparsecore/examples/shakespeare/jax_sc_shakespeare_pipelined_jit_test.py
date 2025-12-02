@@ -481,14 +481,10 @@ class EmbeddingPipelineTest(absltest.TestCase):
         * self.local_batch_size
     ]
     features = np.reshape(features, (-1, 1))
-    features_weights = np.ones(features.shape, dtype=np.float32)
 
     # Pack the features into a tree structure.
     feature_structure = jax.tree.structure(self.feature_specs)
     features = jax.tree_util.tree_unflatten(feature_structure, [features])
-    features_weights = jax.tree_util.tree_unflatten(
-        feature_structure, [features_weights]
-    )
 
     # Preprocess the inputs and build JAX global views of the data.
     def make_global_view(x: PyTree) -> PyTree:
@@ -505,7 +501,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
     #   original specs.
     preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
         features=features,
-        features_weights=features_weights,
+        features_weights=None,  # uniform weights
         feature_specs=self.feature_specs,
         local_device_count=self.global_mesh.local_mesh.size,
         global_device_count=self.global_mesh.size,

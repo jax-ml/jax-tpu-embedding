@@ -532,7 +532,7 @@ def preprocess_sparse_dense_matmul_input(
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
           jax.tree.leaves(features),
-          jax.tree.leaves(features_weights),  # leaves(None) = None
+          jax.tree.leaves(features_weights) if features_weights else None,
           jax.tree.leaves(feature_specs),
           local_device_count,
           global_device_count,

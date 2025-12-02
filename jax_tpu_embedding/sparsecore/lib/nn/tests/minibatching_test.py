@@ -32,18 +32,16 @@ def _generate_random_inputs(
     max_sample_size: int,
     seed: int | None = None,
 ):
-  """Generates random inputs and input weights for testing."""
+  """Generates random inputs for testing."""
   rng = np.random.RandomState(seed)
   inputs = []
-  inputs_weights = []
   for _ in range(feature.input_shape[0]):
     num_ids = rng.randint(1, max_sample_size + 1)
     ids = rng.randint(
         0, feature.table_spec.vocabulary_size, size=(num_ids,), dtype=np.int32
     )
     inputs.append(ids)
-    inputs_weights.append(np.ones_like(ids, dtype=np.float32))
-  return np.array(inputs, dtype=object), np.array(inputs_weights, dtype=object)
+  return np.array(inputs, dtype=object)
 
 
 def _generate_expected_activations(
@@ -190,12 +188,12 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     )
 
   def test_single_host_minibatching_not_required(self):
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=8
     )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
@@ -212,12 +210,12 @@ class SingleHostMinibatchingTest(absltest.TestCase):
             max_ids_per_partition=1, max_unique_ids_per_partition=1
         )
     )
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=20
     )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
@@ -243,13 +241,13 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.feature_spec = dataclasses.replace(
         self.feature_spec, input_shape=[batch_size, 1]
     )
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=8
     )
 
     _, stats = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
@@ -276,13 +274,13 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.feature_spec = dataclasses.replace(
         self.feature_spec, input_shape=[batch_size, 1]
     )
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=8
     )
 
     _, stats = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
@@ -319,13 +317,13 @@ class SingleHostMinibatchingTest(absltest.TestCase):
             max_ids_per_partition=2, max_unique_ids_per_partition=2
         )
     )
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=20, seed=2025
     )
 
     preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
@@ -354,13 +352,13 @@ class SingleHostMinibatchingTest(absltest.TestCase):
             max_ids_per_partition=2, max_unique_ids_per_partition=2
         )
     )
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=20, seed=2025
     )
 
     preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
@@ -433,12 +431,12 @@ class MultiHostMinibatchingTest(absltest.TestCase):
       )
 
   def worker(self, host_id: int):
-    inputs, inputs_weights = _generate_random_inputs(
+    inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=10, seed=2025
     )
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         features=[inputs],
-        features_weights=[inputs_weights],
+        features_weights=None,  # uniform weights
         feature_specs=[self.feature_spec],
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),

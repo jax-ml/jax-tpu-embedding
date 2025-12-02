@@ -282,11 +282,7 @@ class ShakespeareTest(absltest.TestCase):
       # SC input processing
       preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
           {self.shakespeare_feature.name: features},
-          {
-              self.shakespeare_feature.name: np.ones_like(
-                  features, dtype=jnp.float32
-              )
-          },
+          None,  # uniform weights
           {self.shakespeare_feature.name: self.shakespeare_feature},
           local_device_count=self.mesh.local_mesh.size,
           global_device_count=self.mesh.size,

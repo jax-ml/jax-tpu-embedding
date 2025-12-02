@@ -177,52 +177,6 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ],
         dtype=np.int32,
     )
-    self.input_weights_table_c = np.array(
-        [[1.0] for _ in range(16)],
-        dtype=np.float32,
-    )
-    self.input_weights = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
-    self.input_weights_table_b = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
 
   def test_sparse_dense_matmul_one_chip_unsharded(self):
     devices = jax.devices()[:1]
@@ -244,12 +198,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             "feature_spec_b": self.input_tensor_table_b,
             "feature_spec_c": self.input_tensor_table_c,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_b": self.input_weights_table_b,
-            "feature_spec_c": self.input_weights_table_c,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=4,
@@ -515,12 +465,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             "feature_spec_b": self.input_tensor_table_b,
             "feature_spec_c": self.input_tensor_table_c,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_b": self.input_weights_table_b,
-            "feature_spec_c": self.input_weights_table_c,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=num_devices,
         global_device_count=num_devices,
         num_sc_per_device=4,
@@ -796,12 +742,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             "feature_spec_b": self.input_tensor_table_b,
             "feature_spec_c": self.input_tensor_table_c,
         },
-        {
-            "feature_spec_a": self.input_weights,
-            "feature_spec_b": self.input_weights_table_b,
-            "feature_spec_c": self.input_weights_table_c,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=num_devices,
         global_device_count=num_devices,
         num_sc_per_device=4,
@@ -1065,10 +1007,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         {
             "feature_spec_a": self.input_tensor,
         },
-        {
-            "feature_spec_a": self.input_weights,
-        },
-        feature_specs,
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
         local_device_count=num_devices,
         global_device_count=num_devices,
         num_sc_per_device=num_sc_per_device,

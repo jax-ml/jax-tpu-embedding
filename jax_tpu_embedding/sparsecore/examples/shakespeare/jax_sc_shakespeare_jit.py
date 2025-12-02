@@ -491,14 +491,10 @@ def run_model():
         process_id * local_batch_size : (process_id + 1) * local_batch_size
     ]
     features = np.reshape(features, (-1, 1))
-    feature_weights = np.ones(features.shape, dtype=np.float32)
 
     # Pack the features into a tree structure.
     feature_structure = jax.tree.structure(feature_specs)
     features = jax.tree_util.tree_unflatten(feature_structure, [features])
-    feature_weights = jax.tree_util.tree_unflatten(
-        feature_structure, [feature_weights]
-    )
 
     # Preprocess the inputs and build JAX global views of the data.
     make_global_view = lambda x: jax.tree.map(
@@ -507,7 +503,7 @@ def run_model():
     )
     preprocessed_inputs, stats = embedding.preprocess_sparse_dense_matmul_input(
         features,
-        feature_weights,
+        None,  # uniform weights
         feature_specs,
         local_device_count=global_mesh.local_mesh.size,
         global_device_count=global_mesh.size,

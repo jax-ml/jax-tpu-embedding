@@ -1140,10 +1140,6 @@ class EmbeddingTest(parameterized.TestCase):
     max_len = max(len(row) for row in input_tensor) if input_tensor.size else 0
     dense_shape = np.array([len(input_tensor), max_len], dtype=np.int64)
     batch_number = 42
-    input_weights = np.array(
-        [np.ones_like(row, dtype=np.float32) for row in input_tensor],
-        dtype=object,
-    )
 
     # Act
     preprocessed_inputs, _ = (
@@ -1162,8 +1158,8 @@ class EmbeddingTest(parameterized.TestCase):
     preprocessed_inputs_ragged, _ = (
         embedding.preprocess_sparse_dense_matmul_input(
             {"feature_spec_a": input_tensor},
-            {"feature_spec_a": input_weights},
-            feature_specs,
+            features_weights=None,  # uniform weights
+            feature_specs=feature_specs,
             local_device_count=1,
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,

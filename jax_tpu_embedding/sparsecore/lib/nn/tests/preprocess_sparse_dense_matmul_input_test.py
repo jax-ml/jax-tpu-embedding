@@ -186,9 +186,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         features={
             "feature_b": self.feature_b_input,
         },
-        features_weights={
-            "feature_b": self.input_weights_b,
-        },
+        features_weights=None,  # uniform weights
         feature_specs={
             "feature_b": self.feature_spec_b,
         },
@@ -222,9 +220,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         features={
             "feature_b": self.feature_b_input,
         },
-        features_weights={
-            "feature_b": self.input_weights_b,
-        },
+        features_weights=None,  # uniform weights
         feature_specs={
             "feature_b": self.feature_spec_b,
         },
@@ -288,10 +284,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
             "feature_b": self.feature_b_input,
             "feature_a": self.feature_a_input,
         },
-        features_weights={
-            "feature_a": self.input_weights_a,
-            "feature_b": self.input_weights_b,
-        },
+        features_weights=None,  # uniform weights
         feature_specs={
             "feature_b": self.feature_spec_b,
             "feature_a": self.feature_spec_a,
@@ -430,10 +423,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
             "feature_b": self.feature_b_input,
             "feature_a": self.feature_a_input,
         },
-        features_weights={
-            "feature_a": self.input_weights_a,
-            "feature_b": self.input_weights_b,
-        },
+        features_weights=None,  # uniform weights
         feature_specs={
             "feature_b": self.feature_spec_b,
             "feature_a": self.feature_spec_a,

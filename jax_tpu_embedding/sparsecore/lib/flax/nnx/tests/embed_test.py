@@ -152,48 +152,6 @@ class EmbeddingLayerTest(parameterized.TestCase):
         ],
         dtype=object,
     )
-    self.input_weights = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
-    self.input_weights_table_b = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
     self.port = portpicker.pick_unused_port()
 
   @parameterized.named_parameters(
@@ -229,7 +187,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
       )
     embedding_lookup_input = embedding.preprocess_sparse_dense_matmul_input(
         (self.input_tensor, self.input_tensor_table_b),
-        (self.input_weights, self.input_weights_table_b),
+        None,  # uniform weights
         feature_specs,
         local_device_count=jax.local_device_count(),
         global_device_count=jax.device_count(),
@@ -454,7 +412,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
       )
     embedding_lookup_input = embedding.preprocess_sparse_dense_matmul_input(
         (self.input_tensor, self.input_tensor),
-        (self.input_weights, self.input_weights),
+        None,  # uniform weights
         feature_specs,
         local_device_count=jax.local_device_count(),
         global_device_count=jax.device_count(),

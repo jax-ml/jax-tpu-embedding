@@ -154,48 +154,6 @@ class EmbeddingLayerTest(parameterized.TestCase):
         ],
         dtype=object,
     )
-    self.input_weights = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
-    self.input_weights_table_b = np.array(
-        [
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-            np.array([1.0, 1.0], dtype=np.float32),
-        ],
-        dtype=object,
-    )
 
   @parameterized.named_parameters(
       dict(testcase_name='_with_minibatching', enable_minibatching=True),
@@ -220,7 +178,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     embedding_lookup_input = sc_module.preprocess_inputs(
         step,
         (self.input_tensor, self.input_tensor_table_b),
-        (self.input_weights, self.input_weights_table_b),
+        None,  # uniform weights
     )
 
     padded_vocab_a = (
@@ -465,7 +423,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     embedding_lookup_input = sc_module.preprocess_inputs(
         step,
         (self.input_tensor, self.input_tensor),
-        (self.input_weights, self.input_weights),
+        None,  # uniform weights
     )
     padded_vocab_a = (
         self.feature_spec_a.table_spec.setting_in_stack.padded_vocab_size
