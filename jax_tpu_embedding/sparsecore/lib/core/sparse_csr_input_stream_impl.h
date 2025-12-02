@@ -89,7 +89,7 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
   T get() const {
     DCHECK_LT(curr_idx_, row_pointers_[curr_row_ + 1]);
     T embedding_id = values_ref_[curr_idx_];
-    CHECK(embedding_id >= 0 && embedding_id <= max_vocab_id_)
+    DCHECK(embedding_id >= 0 && embedding_id <= max_vocab_id_)
         << "Invalid vocabulary id: " << embedding_id << " for table "
         << table_name_ << " with vocabulary size: " << max_vocab_id_;
     return embedding_id;
