@@ -2968,6 +2968,59 @@ class InputPreprocessingTest(parameterized.TestCase):
     assert_equal_coo_buffer(sample_ids["table"], expected_sample_ids["table"])
     assert_equal_coo_buffer(gains["table"], expected_gains["table"])
 
+  @parameterized.product(combiner=["mean", "sqrtn", "sum"])
+  def test_unity_weights_same_as_none(self, combiner):
+    table_spec = dataclasses.replace(self.table_spec, combiner=combiner)
+    feature_spec = dataclasses.replace(self.feature_spec, table_spec=table_spec)
+    embedding.prepare_feature_specs_for_training(
+        feature_spec,
+        global_device_count=1,
+        num_sc_per_device=4,
+    )
+    batch_number = 42
+    local_device_count = 1
+    num_sc_per_device = 4
+
+    # With explicit unity weights
+    row_pointers_w, embedding_ids_w, sample_ids_w, gains_w, *_ = (
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            features=[self.input_features],
+            feature_weights=[self.input_weights],
+            feature_specs=[feature_spec],
+            local_device_count=local_device_count,
+            global_device_count=1,
+            num_sc_per_device=num_sc_per_device,
+            batch_number=batch_number,
+        )
+    )
+
+    # With feature_weights=None
+    row_pointers_n, embedding_ids_n, sample_ids_n, gains_n, *_ = (
+        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+            features=[self.input_features],
+            feature_weights=None,
+            feature_specs=[feature_spec],
+            local_device_count=local_device_count,
+            global_device_count=1,
+            num_sc_per_device=num_sc_per_device,
+            batch_number=batch_number,
+        )
+    )
+
+    np.testing.assert_equal(row_pointers_w, row_pointers_n)
+    stack_name = table_spec.name
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        local_device_count,
+        num_sc_per_device,
+        row_pointers_w[stack_name],
+    )
+    assert_equal_coo_buffer(
+        embedding_ids_w[stack_name], embedding_ids_n[stack_name]
+    )
+    assert_equal_coo_buffer(sample_ids_w[stack_name], sample_ids_n[stack_name])
+    assert_equal_coo_buffer(gains_w[stack_name], gains_n[stack_name])
+
 
 class MinibatchingNodeTest(absltest.TestCase):
 

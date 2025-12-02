@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_NUMPY_INPUT_BATCH_H_
 
 #include <cstdint>
+#include <optional>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
@@ -30,14 +31,20 @@ namespace py = ::pybind11;
 
 class NumpySparseInputBatch : public AbstractInputBatch {
  public:
-  NumpySparseInputBatch(const py::array& feature, const py::array& weights)
+  NumpySparseInputBatch(const py::array& feature)
+      : NumpySparseInputBatch(feature, std::nullopt) {}
+
+  NumpySparseInputBatch(const py::array& feature,
+                        std::optional<py::array> weights)
       : feature_(feature), weights_(weights) {
     DCHECK(PyGILState_Check())
         << "Need GIL to create references to features and weights.";
-    CHECK_EQ(feature_.shape(0), weights_.shape(0))
-        << "Batch size mismatch for features and weights.";
-    CHECK_EQ(feature_.ndim(), weights_.ndim())
-        << "Dimension mismatch for features and weights";
+    if (weights_.has_value()) {
+      CHECK_EQ(feature_.shape(0), weights_->shape(0))
+          << "Batch size mismatch for features and weights.";
+      CHECK_EQ(feature_.ndim(), weights_->ndim())
+          << "Dimension mismatch for features and weights";
+    }
     CHECK(feature_.ndim() == 1 || feature_.ndim() == 2)
         << "Only 1D and 2D numpy arrays supported as inputs.";
 
@@ -57,12 +64,16 @@ class NumpySparseInputBatch : public AbstractInputBatch {
   // Returns the total number of embedding IDs across all samples.
   int64_t id_count() const override { return id_count_; }
 
+  bool HasVariableWeights() const override { return weights_.has_value(); }
+
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
                          ExtractedCooTensors& coo_tensors) override;
 
  private:
   const py::array feature_;
-  const py::array weights_;
+  // NOTE: stored as optional<py::array> instead of py::object to avoid GIL
+  // locking to cast to array every time.
+  const std::optional<const py::array> weights_;
   int64_t id_count_;
 };
 

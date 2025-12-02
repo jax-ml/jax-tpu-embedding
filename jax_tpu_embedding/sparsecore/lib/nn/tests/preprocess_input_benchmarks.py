@@ -119,7 +119,6 @@ def generate_feature_specs(num_features: int, num_samples: int):
 def generate_samples_for_feature_spec(feature_specs, num_samples, ragged=False):
   """Generates random samples for a given feature spec."""
   all_features = []
-  all_feature_weights = []
   for feature_spec in feature_specs:
     table_spec = feature_spec.table_spec
     if not ragged:
@@ -128,11 +127,7 @@ def generate_samples_for_feature_spec(feature_specs, num_samples, ragged=False):
           size=(num_samples, 16),
           dtype=np.int32,
       )
-      feature_weights = np.ones(
-          (num_samples, table_spec.embedding_dim), dtype=np.float32
-      )
       all_features.append(features)
-      all_feature_weights.append(feature_weights)
     else:
       counts = np.random.randint(1, 32, size=num_samples)
       total_ids = np.sum(counts)
@@ -143,10 +138,8 @@ def generate_samples_for_feature_spec(feature_specs, num_samples, ragged=False):
       )
       split_indices = np.cumsum(counts)[:-1]
       features = np.split(ids_flat, split_indices)
-      feature_weights = [np.ones((c,), dtype=np.float32) for c in counts]
       all_features.append(np.array(features, dtype=object))
-      all_feature_weights.append(np.array(feature_weights, dtype=object))
-  return all_features, all_feature_weights
+  return all_features, None
 
 
 def generate_sparse_coo_inputs_for_feature_spec(

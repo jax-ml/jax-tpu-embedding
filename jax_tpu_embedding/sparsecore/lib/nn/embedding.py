@@ -458,7 +458,7 @@ def get_all_reduce_interface(
 
 def preprocess_sparse_dense_matmul_input(
     features: Nested[ArrayLike],
-    features_weights: Nested[ArrayLike],
+    features_weights: Nested[ArrayLike] | None,
     feature_specs: Nested[embedding_spec.FeatureSpec],
     local_device_count: int,
     global_device_count: int,
@@ -482,7 +482,8 @@ def preprocess_sparse_dense_matmul_input(
       should be either a 2D numpy array or a 1D list or numpy array of numpy
       arrays with dtype object (in the ragged tensor case).
     features_weights: The input feature weights. The structure must be identical
-      to the features.
+      to the features. If None, uniform weights (1.0) are assumed for all
+      features.
     feature_specs: The feature specs. This needs to have the same structure as
       features and features_weights (e.g., if one of them is a mapping then all
       of them are).
@@ -513,9 +514,10 @@ def preprocess_sparse_dense_matmul_input(
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(features, feature_specs, "features", "feature_specs")
-  _assert_same_structure(
-      features_weights, feature_specs, "features_weights", "feature_specs"
-  )
+  if features_weights is not None:
+    _assert_same_structure(
+        features_weights, feature_specs, "features_weights", "feature_specs"
+    )
 
   if (
       enable_minibatching
@@ -530,7 +532,7 @@ def preprocess_sparse_dense_matmul_input(
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
           jax.tree.leaves(features),
-          jax.tree.leaves(features_weights),
+          jax.tree.leaves(features_weights),  # leaves(None) = None
           jax.tree.leaves(feature_specs),
           local_device_count,
           global_device_count,

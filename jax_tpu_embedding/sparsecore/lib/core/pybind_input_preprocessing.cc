@@ -171,18 +171,25 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
 }
 
 py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
-    py::list features, py::list feature_weights, py::list feature_specs,
-    int local_device_count, int global_device_count, int num_sc_per_device,
-    ShardingStrategy sharding_strategy, bool has_leading_dimension,
-    bool allow_id_dropping, FeatureStackingStrategy feature_stacking_strategy,
-    int batch_number, bool enable_minibatching,
-    AllReduceInterface* all_reduce_interface) {
-  CHECK_EQ(features.size(), feature_weights.size());
+    py::list features, std::optional<py::list> feature_weights,
+    py::list feature_specs, int local_device_count, int global_device_count,
+    int num_sc_per_device, ShardingStrategy sharding_strategy,
+    bool has_leading_dimension, bool allow_id_dropping,
+    FeatureStackingStrategy feature_stacking_strategy, int batch_number,
+    bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
+  if (feature_weights.has_value()) {
+    CHECK_EQ(features.size(), feature_weights->size());
+  }
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.reserve(features.size());
   for (int i = 0; i < features.size(); ++i) {
-    input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
-        features[i], feature_weights[i]));
+    if (!feature_weights.has_value()) {
+      input_batches.push_back(
+          std::make_unique<NumpySparseInputBatch>(features[i]));
+    } else {
+      input_batches.push_back(std::make_unique<NumpySparseInputBatch>(
+          features[i], feature_weights.value()[i]));
+    }
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,

@@ -15,9 +15,11 @@
 
 #include <memory>
 
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/unity_weights_stream_impl.h"
 #include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
 #include "tsl/profiler/lib/traceme.h"
@@ -34,7 +36,8 @@ namespace {
 template <typename T>
 class NumpyDenseInputBatchStream {
  public:
-  explicit NumpyDenseInputBatchStream(const py::array_t<T>& matrix,
+  explicit NumpyDenseInputBatchStream(const py::array_t<T>& matrix
+                                          ABSL_ATTRIBUTE_LIFETIME_BOUND,
                                       int row_start, int row_end)
       : matrix_ref_(matrix.template unchecked<2>()),
         curr_row_(row_start),
@@ -131,28 +134,58 @@ class NumpyRaggedInputBatchStream {
 
 }  // namespace
 
+// Must be called without the GIL. Acquires it internally.
 void NumpySparseInputBatch::ExtractCooTensors(
     const ExtractCooTensorsOptions& options, ExtractedCooTensors& coo_tensors) {
-  DCHECK(!PyGILState_Check());  // Does not require external GIL
+  DCHECK(!PyGILState_Check());  // Does not require external GIL (only for
+                                // casting).
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
 
+  // The following code is structured to minimize the GIL lock contention.
+  // - If weights are not provided, there is no GIL contention since the GIL
+  //   is only acquired once.
+  // - If weights are provided, the GIL is only acquired once for casting
+  //   weights_ to py::array (and only if feature_ is 2D).
+
+  // Also the types of value_stream and weights_stream are different so we have
+  // duplicated code.
+
   if (feature_.ndim() == 2) {
-    py::gil_scoped_acquire _;
-    // The casted temporary values must outlive the ProcessCooTensors.
+    // For casting feature_ to py::array. (1st acquire)
+    py::gil_scoped_acquire gil;
     auto feature_array = feature_.cast<py::array_t<int>>();
-    auto weights_array = weights_.cast<py::array_t<float>>();
-    py::gil_scoped_release __;
     NumpyDenseInputBatchStream<int> values_stream(
         feature_array, options.slice_start, options.slice_end);
-    NumpyDenseInputBatchStream<float> weights_stream(
-        weights_array, options.slice_start, options.slice_end);
-    ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+
+    if (!weights_.has_value()) {
+      py::gil_scoped_release release;
+
+      UnityWeightsStream<NumpyDenseInputBatchStream<int>> weights_stream(
+          values_stream);
+      ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+    } else {
+      // Re-use the same GIL lock to cast weights_ to py::array.
+      auto weights_array = weights_->cast<py::array_t<float>>();
+      py::gil_scoped_release release;
+
+      NumpyDenseInputBatchStream<float> weights_stream(
+          weights_array, options.slice_start, options.slice_end);
+      ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+    }
   } else {
+    // No GIL here.
     NumpyRaggedInputBatchStream<int> values_stream(
         feature_, options.slice_start, options.slice_end);
-    NumpyRaggedInputBatchStream<float> weights_stream(
-        weights_, options.slice_start, options.slice_end);
-    ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+
+    if (!weights_.has_value()) {
+      UnityWeightsStream<NumpyRaggedInputBatchStream<int>> weights_stream(
+          values_stream);
+      ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+    } else {
+      NumpyRaggedInputBatchStream<float> weights_stream(
+          weights_.value(), options.slice_start, options.slice_end);
+      ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+    }
   }
 }
 
