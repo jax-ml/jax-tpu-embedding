@@ -270,9 +270,14 @@ def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
 
 @google_benchmark.register
 @google_benchmark.option.unit(google_benchmark.kMillisecond)
+@google_benchmark.option.arg_names(["force_minibatching"])
+@google_benchmark.option.args_product([[False, True]])
 @google_benchmark.option.iterations(25)
-def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
-  """Benchmark for preprocessing input for sparse-dense matmul with minibatching."""
+def preprocess_input_benchmark_minibatching_enabled(
+    state: google_benchmark.State,
+):
+  """Benchmark for preprocessing input for sparse-dense matmul with minibatching enabled."""
+  force_minibatching = state.range(0)
   num_hosts = 4
   ports = [portpicker.pick_unused_port() for _ in range(num_hosts)]
   all_reduce_interfaces = []
@@ -326,12 +331,19 @@ def preprocess_input_benchmark_minibatching(state: google_benchmark.State):
           return
       if batch_num == 0:
         assert stats_cc is not None
-        apply_fdo_stats(stats_cc, fdo_headroom=0.5, buffer_size_headroom=1.0)
+        if force_minibatching:
+          apply_fdo_stats(stats_cc, fdo_headroom=0.5, buffer_size_headroom=1.0)
+        else:
+          apply_fdo_stats(stats_cc, fdo_headroom=1.0)
         state.resume_timing()
       else:
-        # Make sure we are benchmarking multiple minibatches (guranteed by
-        # initial seed).
-        assert num_minibatches >= 5, num_minibatches
+        if force_minibatching:
+          # Make sure we are benchmarking multiple minibatches (guaranteed by
+          # initial seed).
+          assert num_minibatches >= 5, num_minibatches
+        else:
+          # Make sure we are benchmarking only one minibatch.
+          assert num_minibatches == 1, num_minibatches
       batch_num += 1
 
 
