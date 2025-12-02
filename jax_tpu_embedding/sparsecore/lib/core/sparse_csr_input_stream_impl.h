@@ -59,12 +59,12 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
         curr_row_(row_start),
         row_end_(row_end),
         curr_idx_(row_pointers[row_start]),
+        curr_row_start_idx_(row_pointers[row_start]),
         max_vocab_id_(max_vocab_id),
         table_name_(table_name) {
-    curr_row_cols_ =
-        curr_row_ == row_end_
-            ? 0
-            : row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
+    curr_row_cols_ = curr_row_ == row_end_
+                         ? 0
+                         : row_pointers_[curr_row_ + 1] - curr_row_start_idx_;
   }
 
   // Returns number of values in current row.
@@ -73,18 +73,19 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
   void NextRow() {
     ++curr_row_;
     if (curr_row_ < row_end_) {
-      curr_idx_ = row_pointers_[curr_row_];
-      curr_row_cols_ = row_pointers_[curr_row_ + 1] - row_pointers_[curr_row_];
+      curr_row_start_idx_ = row_pointers_[curr_row_];
+      curr_idx_ = curr_row_start_idx_;
+      curr_row_cols_ = row_pointers_[curr_row_ + 1] - curr_row_start_idx_;
     }
   }
 
   void NextCol() { ++curr_idx_; }
 
-  void SeekCol(int col) { curr_idx_ = row_pointers_[curr_row_] + col; }
+  void SeekCol(int col) { curr_idx_ = curr_row_start_idx_ + col; }
 
   int row() const { return curr_row_; }
 
-  int col() const { return curr_idx_ - row_pointers_[curr_row_]; }
+  int col() const { return curr_idx_ - curr_row_start_idx_; }
 
   T get() const {
     DCHECK_LT(curr_idx_, row_pointers_[curr_row_ + 1]);
@@ -102,7 +103,11 @@ class ABSL_ATTRIBUTE_VIEW SparseCsrInputBatchStream {
   int curr_row_;
   int row_end_;
   int curr_idx_;
+
+  // Cached values to avoid memory reads when processing a row.
+  int curr_row_start_idx_;
   int curr_row_cols_;
+
   T max_vocab_id_;
   absl::string_view table_name_;
 };
