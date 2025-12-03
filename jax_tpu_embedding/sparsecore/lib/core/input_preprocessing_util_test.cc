@@ -738,7 +738,13 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
 
   EXPECT_EQ(minibatching_split, 0);
 
-  CsrArraysPerHost csr_arrays_per_host(1, 8 * 4, 40 * 4);
+  MatrixXi row_pointers(1, 8 * 4);
+  MatrixXi embedding_ids(1, 40 * 4);
+  MatrixXi sample_ids(1, 40 * 4);
+  MatrixXf gains(1, 40 * 4);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
   int dropped_static_bound = 0;
@@ -864,7 +870,13 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
 
   coo_tensors_by_id.MergeAll();
 
-  CsrArraysPerHost csr_arrays_per_host(1, 8 * 4, 40 * 4);
+  MatrixXi row_pointers(1, 8 * 4);
+  MatrixXi embedding_ids(1, 40 * 4);
+  MatrixXi sample_ids(1, 40 * 4);
+  MatrixXf gains(1, 40 * 4);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
   FillLocalDeviceBuffer(coo_tensors_by_id,
@@ -1019,8 +1031,13 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   const int coo_buffer_size_per_sc = 168;
   const int row_pointers_size = 128;
   const int num_devices = 1;
-  CsrArraysPerHost csr_arrays_per_host = CsrArraysPerHost(
-      num_devices, row_pointers_size, coo_buffer_size_per_sc * 4);
+  MatrixXi row_pointers(num_devices, row_pointers_size);
+  MatrixXi embedding_ids(num_devices, coo_buffer_size_per_sc * 4);
+  MatrixXi sample_ids(num_devices, coo_buffer_size_per_sc * 4);
+  MatrixXf gains(num_devices, coo_buffer_size_per_sc * 4);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
@@ -1162,8 +1179,13 @@ TEST(InputPreprocessingUtilTest,
   const int coo_buffer_size_per_sc = 3;
   const int batch_size_per_sc = 4;
 
-  CsrArraysPerHost csr_arrays_per_host(1, row_ptrs_size_per_bucket,
-                                       coo_buffer_size_per_sc);
+  MatrixXi row_pointers(1, row_ptrs_size_per_bucket);
+  MatrixXi embedding_ids(1, coo_buffer_size_per_sc);
+  MatrixXi sample_ids(1, coo_buffer_size_per_sc);
+  MatrixXf gains(1, coo_buffer_size_per_sc);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_arrays =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
@@ -1175,6 +1197,80 @@ TEST(InputPreprocessingUtilTest,
 
   EXPECT_EQ(dropped_static, 1);
   EXPECT_EQ(dropped_sort, 0);
+}
+
+TEST(InputPreprocessingUtilTest, FillBufferWritesToPreAllocatedMemory) {
+  std::vector<CooFormat> coo_formats;
+
+  for (int row = 0; row < 8; ++row) {
+    coo_formats.push_back(CooFormat(row, 0, 1.0));
+    coo_formats.push_back(CooFormat(row, 1, 1.0));
+    coo_formats.push_back(CooFormat(row, 2, 1.0));
+    coo_formats.push_back(CooFormat(row, 3, 1.0));
+  }
+  ExtractedCooTensors extracted_coo_tensors(4, 8);
+  extracted_coo_tensors.coo_tensors = coo_formats;
+  StackedTableMetadata stacked_table_metadata(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
+      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+  };
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
+  PartitionedCooTensors coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          extracted_coo_tensors, stacked_table_metadata, options,
+          stats_per_device, minibatching_split);
+
+  EXPECT_EQ(minibatching_split, 0);
+
+  // Pre-allocate matrices.
+  MatrixXi row_pointers(1, 8 * 4);
+  MatrixXi embedding_ids(1, 40 * 4);
+  MatrixXi sample_ids(1, 40 * 4);
+  MatrixXf gains(1, 40 * 4);
+
+  // Initialize with a pattern to verify overwriting.
+  row_pointers.setConstant(-1);
+  embedding_ids.setConstant(-1);
+  sample_ids.setConstant(-1);
+  gains.setConstant(-1.0f);
+
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
+  internal::CsrArraysPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  int dropped_static_bound = 0;
+  FillLocalDeviceBuffer(coo_tensors_by_id,
+                        /*row_pointers_size_per_bucket=*/8,
+                        /*coo_buffer_size_per_sc=*/40,
+                        /*batch_size_per_sc=*/2, options, csr_array,
+                        dropped_static_bound);
+
+  std::array<int, 32> expected_row_pointers = {
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+      2, 10, 18, 26, 32, 32, 32, 32,  //
+  };
+  // Verify that the ORIGINAL matrices are modified.
+  EXPECT_THAT(absl::MakeSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray(expected_row_pointers));
+
+  // Verify a portion of embedding_ids to ensure they are written.
+  // We check the first 8 elements (SC0, row 0 and 1).
+  // Expected: 0, 0, INT_MAX...
+  EXPECT_EQ(embedding_ids(0, 0), 0);
+  EXPECT_EQ(embedding_ids(0, 1), 0);
+  EXPECT_EQ(embedding_ids(0, 2), INT_MAX);
 }
 
 TEST(InputPreprocessingUtilTest,
@@ -1229,9 +1325,14 @@ TEST(InputPreprocessingUtilTest,
   static constexpr int coo_buffer_size_per_sc = 6;
   static constexpr int batch_size_per_sc = 4;
 
-  CsrArraysPerHost csr_arrays_per_host(
-      1, row_ptrs_size_per_bucket * grouped.GetNumMinibatches(),
-      coo_buffer_size_per_sc);
+  MatrixXi row_pointers(
+      1, row_ptrs_size_per_bucket * grouped.GetNumMinibatches());
+  MatrixXi embedding_ids(1, coo_buffer_size_per_sc);
+  MatrixXi sample_ids(1, coo_buffer_size_per_sc);
+  MatrixXf gains(1, coo_buffer_size_per_sc);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_arrays =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
 

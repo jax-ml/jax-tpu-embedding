@@ -48,6 +48,16 @@ namespace jax_sc_embedding {
 
 namespace {
 
+void AllocateOutputCsrBuffersIfNeeded(
+    MatrixXi& row_pointers, MatrixXi& embedding_ids, MatrixXi& sample_ids,
+    MatrixXf& gains, const PreprocessSparseDenseMatmulInputOptions& options,
+    int row_pointers_size_per_device, int coo_buffer_size_per_device) {
+  row_pointers.resize(options.local_device_count, row_pointers_size_per_device);
+  embedding_ids.resize(options.local_device_count, coo_buffer_size_per_device);
+  sample_ids.resize(options.local_device_count, coo_buffer_size_per_device);
+  gains.resize(options.local_device_count, coo_buffer_size_per_device);
+}
+
 // Extract the COO tensors for a single feature slice.
 void ExtractCooTensorsForSingleFeatureSlice(
     const StackedTableMetadata& metadata,
@@ -155,20 +165,14 @@ struct TableState {
              absl::Span<const StackedTableMetadata> metadata,
              bool has_variable_weights,
              const PreprocessSparseDenseMatmulInputOptions& options,
-             int num_scs, int row_pointers_size_per_bucket)
+             int num_scs, int coo_buffer_size_per_device,
+             MatrixXi& row_pointers, MatrixXi& embedding_ids,
+             MatrixXi& sample_ids, MatrixXf& gains)
       : stacked_table_name(name),
         stacked_table_metadata(metadata),
         has_variable_weights(has_variable_weights),
-        coo_buffer_size_per_device(ComputeCooBufferSizePerDevice(
-            num_scs, options.num_sc_per_device, metadata, options.batch_number,
-            options.enable_minibatching)),
-        csr_arrays_per_host(options.local_device_count,
-                            row_pointers_size_per_bucket *
-                                (options.enable_minibatching
-                                     ? CooFormat::kMaxMinibatchingBuckets
-                                     : 1) *
-                                options.num_sc_per_device,
-                            coo_buffer_size_per_device),
+        coo_buffer_size_per_device(coo_buffer_size_per_device),
+        csr_arrays_per_host(row_pointers, embedding_ids, sample_ids, gains),
         stats_per_host(options.local_device_count, options.GetNumScs(),
                        options.num_sc_per_device),
         batch_size_for_device(0) {
@@ -472,14 +476,6 @@ void PopulateOutput(TableState& state, PreprocessSparseDenseMatmulOutput& out,
   state.stats_per_host.Flatten();
 
   absl::MutexLock mutex(output_mutex);
-  out.lhs_row_pointers[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.row_pointers);
-  out.lhs_embedding_ids[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.embedding_ids);
-  out.lhs_sample_ids[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.sample_ids);
-  out.lhs_gains[state.stacked_table_name] =
-      std::move(state.csr_arrays_per_host.gains);
 
   out.stats.max_ids_per_partition[state.stacked_table_name] =
       std::move(state.stats_per_host.max_ids_per_partition);
@@ -576,6 +572,10 @@ PreprocessSparseDenseMatmulInput(
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
       std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  const int num_buckets =
+      options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+  const int row_pointers_size_per_device =
+      row_pointers_size_per_bucket * num_buckets * options.num_sc_per_device;
 
   std::vector<TableState> table_states;
   table_states.reserve(stacked_tables.size());
@@ -583,9 +583,36 @@ PreprocessSparseDenseMatmulInput(
        stacked_tables) {
     const bool stack_has_weights =
         StackHasVariableWeights(input_batches, stacked_table_metadata);
+    const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
+        num_scs, options.num_sc_per_device, stacked_table_metadata,
+        options.batch_number, options.enable_minibatching);
+
+    MatrixXi* row_pointers_ptr;
+    MatrixXi* embedding_ids_ptr;
+    MatrixXi* sample_ids_ptr;
+    MatrixXf* gains_ptr;
+
+    if (options.output_csr_arrays != nullptr) {
+      OutputCsrArrays& out_arrays = *options.output_csr_arrays;
+      row_pointers_ptr = &out_arrays.lhs_row_pointers[stacked_table_name];
+      embedding_ids_ptr = &out_arrays.lhs_embedding_ids[stacked_table_name];
+      sample_ids_ptr = &out_arrays.lhs_sample_ids[stacked_table_name];
+      gains_ptr = &out_arrays.lhs_gains[stacked_table_name];
+    } else {
+      row_pointers_ptr = &out.lhs_row_pointers[stacked_table_name];
+      embedding_ids_ptr = &out.lhs_embedding_ids[stacked_table_name];
+      sample_ids_ptr = &out.lhs_sample_ids[stacked_table_name];
+      gains_ptr = &out.lhs_gains[stacked_table_name];
+
+      AllocateOutputCsrBuffersIfNeeded(
+          *row_pointers_ptr, *embedding_ids_ptr, *sample_ids_ptr, *gains_ptr,
+          options, row_pointers_size_per_device, coo_buffer_size_per_device);
+    }
+
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
                               stack_has_weights, options, num_scs,
-                              row_pointers_size_per_bucket);
+                              coo_buffer_size_per_device, *row_pointers_ptr,
+                              *embedding_ids_ptr, *sample_ids_ptr, *gains_ptr);
   }
 
   // Stage 1: COO Extraction and Initial Sort/Group

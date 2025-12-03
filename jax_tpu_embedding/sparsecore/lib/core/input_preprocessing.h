@@ -25,9 +25,6 @@
 
 namespace jax_sc_embedding {
 
-template <typename T>
-using StackedTableMap = absl::flat_hash_map<std::string, T>;
-
 struct SparseDenseMatmulInputStats {
   StackedTableMap<RowVectorXi> max_ids_per_partition;
   StackedTableMap<RowVectorXi> max_unique_ids_per_partition;

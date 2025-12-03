@@ -58,6 +58,8 @@ using ::testing::Each;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Gt;
+using ::testing::NanSensitiveFloatEq;
+using ::testing::Pointwise;
 using ::testing::SizeIs;
 
 using InputBatch =
