@@ -16,6 +16,7 @@
 #include <sys/types.h>
 
 #include <cstdint>
+#include <optional>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -51,6 +52,13 @@ class AbstractInputBatch {
 
   // Returns the total number of embedding IDs across all samples.
   virtual int64_t id_count() const = 0;
+
+  // Returns number of ids in rows [start_row, end_row).
+  // If not implemented by a subclass, returns std::nullopt.
+  virtual std::optional<int64_t> GetIdsCountInSlice(int start_row,
+                                                    int end_row) const {
+    return std::nullopt;
+  }
 
   // Returns true if the input batch has variable weights.
   virtual bool HasVariableWeights() const { return true; }

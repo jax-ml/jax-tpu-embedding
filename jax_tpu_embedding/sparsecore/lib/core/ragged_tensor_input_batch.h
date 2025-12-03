@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_RAGGED_TENSOR_INPUT_BATCH_H_
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -94,6 +95,11 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
   // Returns the total number of embedding IDs across all samples.
   int64_t id_count() const override { return row_offsets_[size()]; }
 
+  std::optional<int64_t> GetIdsCountInSlice(
+      int start_row, int end_row) const override {
+    return row_offsets_[end_row] - row_offsets_[start_row];
+  }
+
   bool HasVariableWeights() const override { return false; }
 
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,
@@ -138,6 +144,11 @@ class RaggedTensorInputBatchWithOwnedData : public AbstractInputBatch {
 
   // Returns the total number of embedding IDs across all samples.
   int64_t id_count() const override { return view_.id_count(); }
+
+  std::optional<int64_t> GetIdsCountInSlice(
+      int start_row, int end_row) const override {
+    return view_.GetIdsCountInSlice(start_row, end_row);
+  }
 
   bool HasVariableWeights() const override {
     return view_.HasVariableWeights();

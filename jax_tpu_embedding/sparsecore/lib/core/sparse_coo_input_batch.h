@@ -17,6 +17,7 @@
 #include <Python.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,6 +63,12 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   // Returns the total number of embedding IDs across all samples.
   int64_t id_count() const override { return values_.size(); }
 
+  std::optional<int64_t> GetIdsCountInSlice(int start_row,
+                                            int end_row) const override {
+    ConstructRowPointersIfRequired();
+    return row_pointers_[end_row] - row_pointers_[start_row];
+  }
+
   bool HasVariableWeights() const override { return false; }
 
   // Extracts COO tensors for each SparseCore.
@@ -76,16 +83,16 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   const int64_t batch_size_;
   const std::string table_name_;
 
-  std::vector<int64_t> row_pointers_;
-  absl::once_flag row_pointer_construction_flag_;
+  mutable std::vector<int64_t> row_pointers_;
+  mutable absl::once_flag row_pointer_construction_flag_;
 
   // Converts this to a CSR format. A refactor could return an object of type
   // SparseCsrInputBatch after Slicing, and ExtractCooTensors can call
   // the same function on a temporary object of SparseCsrInputBatch type.
-  void ConstructRowPointersIfRequired();
+  void ConstructRowPointersIfRequired() const;
 
   // Internal function called by `ConstructRowPointersIfRequired`.
-  void ConstructRowPointers();
+  void ConstructRowPointers() const;
 };
 }  // namespace jax_sc_embedding
 

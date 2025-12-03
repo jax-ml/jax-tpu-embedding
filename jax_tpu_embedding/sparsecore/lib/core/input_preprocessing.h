@@ -23,6 +23,7 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -42,6 +43,21 @@ struct SparseDenseMatmulInputStats {
 };
 
 namespace internal {
+
+// Asynchronously extracts COO tensors for all features on a given local
+// device. Returns a vector of AsyncValueRefs, one for each feature slice,
+// which will become ready as extraction completes.
+std::vector<tsl::AsyncValueRef<ExtractedCooTensors>>
+ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync(
+    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    int local_device_id,
+    const PreprocessSparseDenseMatmulInputOptions& options);
+
+// Synchronously extracts and merges COO tensors for all features on a given
+// local device. This function calls the asynchronous version and blocks until
+// all results are ready, then merges them into a single ExtractedCooTensors
+// object.
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
