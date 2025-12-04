@@ -252,7 +252,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     }
     // If the ID is a duplicate of the last seen ID, it must have been dropped
     // (otherwise it would have been merged above), so drop this one too.
-    if (row_id == prev_row_id && col_id == prev_col_id) {
+    if (perform_id_dropping && row_id == prev_row_id && col_id == prev_col_id) {
       ++stats.dropped_id_count;
       continue;
     }
