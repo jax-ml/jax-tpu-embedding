@@ -195,29 +195,36 @@ void BM_ExtractCooTensors(benchmark::State& state) {
 }
 BENCHMARK(BM_ExtractCooTensors)
     // Args: {num_features, combiner}
-    ->Args({4, 0})  // kSum
-    ->Args({4, 1})  // kMean
-    ->Args({4, 2})  // kSqrtn
+    ->Args({20, 0})  // kSum
+    ->Args({20, 1})  // kMean
+    ->Args({20, 2})  // kSqrtn
     ->Threads(8)
     ->UseRealTime();
 
 void BM_SortAndGroup_Phase1(benchmark::State& state) {
-  const RowCombiner combiner = static_cast<RowCombiner>(state.range(0));
-  ExtractedCooTensors extracted_coo_tensors =
-      GenerateSkewedCooTensors(kNumScPerDevice, kBatchSizePerSc, kVocabSize);
+  const int num_features = state.range(0);
+  const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
   state.SetLabel(CombinerToString(combiner));
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
+                                             kVocabSize, num_features);
 
-  // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
-  // the generated data. This doesn't affect performance of grouping itself.
-  StackedTableMetadata stacked_table_metadata(
-      "stacked_table", /*feature_index=*/0,
-      /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
-      /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
-      /*row_offset=*/0,
-      /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0,
-      /*suggested_coo_buffer_size_per_device=*/std::nullopt,
-      /*row_combiner=*/combiner);
+  std::vector<StackedTableMetadata> stacked_table_metadata_list;
+  stacked_table_metadata_list.reserve(num_features);
+  for (int i = 0; i < num_features; ++i) {
+    // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
+    // the generated data. This doesn't affect performance of grouping itself.
+    stacked_table_metadata_list.push_back(StackedTableMetadata(
+        absl::StrCat("table_", i), /*feature_index=*/i,
+        /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
+        /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
+        /*row_offset=*/0,
+        /*col_offset=*/0,
+        /*col_shift=*/0, /*batch_size=*/kBatchSizePerSc,
+        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+        /*row_combiner=*/combiner));
+  }
+
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = kGlobalDeviceCount,
@@ -225,6 +232,12 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .allow_id_dropping = false,
       .enable_minibatching = true,
   };
+
+  ExtractedCooTensors extracted_coo_tensors =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+          stacked_table_metadata_list, absl::MakeSpan(input_batches),
+          /*local_device_id=*/0, options);
+
   bool minibatching_required = false;
   StatsPerHost stats_per_host(
       /*local_device_count=*/1,
@@ -235,7 +248,7 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
 
   if (state.thread_index() == 0) {
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-        extracted_coo_tensors, stacked_table_metadata, options,
+        extracted_coo_tensors, stacked_table_metadata_list[0], options,
         stats_per_device, minibatching_required);
     LogStats(stats_per_device.max_ids_per_partition,
              "Max ids per partition across all global SCs");
@@ -245,14 +258,14 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
 
   for (auto s : state) {
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-        extracted_coo_tensors, stacked_table_metadata, options,
+        extracted_coo_tensors, stacked_table_metadata_list[0], options,
         stats_per_device, minibatching_required);
   }
 }
 BENCHMARK(BM_SortAndGroup_Phase1)
-    ->Arg(0)  // kSum
-    ->Arg(1)  // kMean
-    ->Arg(2)  // kSqrtn
+    ->Args({20, 0})  // kSum
+    ->Args({20, 1})  // kMean
+    ->Args({20, 2})  // kSqrtn
     ->Threads(8)
     ->UseRealTime();
 
