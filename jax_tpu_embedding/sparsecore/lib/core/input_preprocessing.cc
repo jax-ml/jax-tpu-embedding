@@ -537,6 +537,53 @@ void FillDeviceBuffersForTable(
   }
 }
 
+std::tuple<MatrixXi&, MatrixXi&, MatrixXi&, MatrixXf&> GetOutputCsrBuffers(
+    const std::string& stacked_table_name,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    int row_pointers_size_per_device, int coo_buffer_size_per_device,
+    OutputCsrArrays* output_csr_arrays,
+    PreprocessSparseDenseMatmulOutput& out) {
+  if (output_csr_arrays != nullptr) {
+    DCHECK(output_csr_arrays->lhs_row_pointers.contains(stacked_table_name))
+        << "Missing lhs_row_pointers for table: " << stacked_table_name;
+    DCHECK(output_csr_arrays->lhs_embedding_ids.contains(stacked_table_name))
+        << "Missing lhs_embedding_ids for table: " << stacked_table_name;
+    DCHECK(output_csr_arrays->lhs_sample_ids.contains(stacked_table_name))
+        << "Missing lhs_sample_ids for table: " << stacked_table_name;
+    DCHECK(output_csr_arrays->lhs_gains.contains(stacked_table_name))
+        << "Missing lhs_gains for table: " << stacked_table_name;
+    MatrixXi& row_pointers =
+        output_csr_arrays->lhs_row_pointers[stacked_table_name];
+    DCHECK_EQ(row_pointers.rows(), options.local_device_count);
+    DCHECK_EQ(row_pointers.cols(), row_pointers_size_per_device);
+
+    MatrixXi& embedding_ids =
+        output_csr_arrays->lhs_embedding_ids[stacked_table_name];
+    DCHECK_EQ(embedding_ids.rows(), options.local_device_count);
+    DCHECK_EQ(embedding_ids.cols(), coo_buffer_size_per_device);
+
+    MatrixXi& sample_ids =
+        output_csr_arrays->lhs_sample_ids[stacked_table_name];
+    DCHECK_EQ(sample_ids.rows(), options.local_device_count);
+    DCHECK_EQ(sample_ids.cols(), coo_buffer_size_per_device);
+
+    MatrixXf& gains = output_csr_arrays->lhs_gains[stacked_table_name];
+    DCHECK_EQ(gains.rows(), options.local_device_count);
+    DCHECK_EQ(gains.cols(), coo_buffer_size_per_device);
+
+    return {row_pointers, embedding_ids, sample_ids, gains};
+  }
+  MatrixXi& row_pointers = out.lhs_row_pointers[stacked_table_name];
+  MatrixXi& embedding_ids = out.lhs_embedding_ids[stacked_table_name];
+  MatrixXi& sample_ids = out.lhs_sample_ids[stacked_table_name];
+  MatrixXf& gains = out.lhs_gains[stacked_table_name];
+
+  AllocateOutputCsrBuffersIfNeeded(row_pointers, embedding_ids, sample_ids,
+                                   gains, options, row_pointers_size_per_device,
+                                   coo_buffer_size_per_device);
+  return {row_pointers, embedding_ids, sample_ids, gains};
+}
+
 }  // namespace
 
 void SparseDenseMatmulInputStats::merge(
@@ -589,52 +636,9 @@ PreprocessSparseDenseMatmulInput(
         num_scs, options.num_sc_per_device, stacked_table_metadata,
         options.batch_number, options.enable_minibatching);
 
-    // TODO(b/456278497): Move this logic to a separate function for
-    // readability.
-    auto get_buffers =
-        [&]() -> std::tuple<MatrixXi&, MatrixXi&, MatrixXi&, MatrixXf&> {
-      if (output_csr_arrays != nullptr) {
-        DCHECK(output_csr_arrays->lhs_row_pointers.contains(stacked_table_name))
-            << "Missing lhs_row_pointers for table: " << stacked_table_name;
-        DCHECK(
-            output_csr_arrays->lhs_embedding_ids.contains(stacked_table_name))
-            << "Missing lhs_embedding_ids for table: " << stacked_table_name;
-        DCHECK(output_csr_arrays->lhs_sample_ids.contains(stacked_table_name))
-            << "Missing lhs_sample_ids for table: " << stacked_table_name;
-        DCHECK(output_csr_arrays->lhs_gains.contains(stacked_table_name))
-            << "Missing lhs_gains for table: " << stacked_table_name;
-        MatrixXi& row_pointers =
-            output_csr_arrays->lhs_row_pointers[stacked_table_name];
-        DCHECK_EQ(row_pointers.rows(), options.local_device_count);
-        DCHECK_EQ(row_pointers.cols(), row_pointers_size_per_device);
-
-        MatrixXi& embedding_ids =
-            output_csr_arrays->lhs_embedding_ids[stacked_table_name];
-        DCHECK_EQ(embedding_ids.rows(), options.local_device_count);
-        DCHECK_EQ(embedding_ids.cols(), coo_buffer_size_per_device);
-
-        MatrixXi& sample_ids =
-            output_csr_arrays->lhs_sample_ids[stacked_table_name];
-        DCHECK_EQ(sample_ids.rows(), options.local_device_count);
-        DCHECK_EQ(sample_ids.cols(), coo_buffer_size_per_device);
-
-        MatrixXf& gains = output_csr_arrays->lhs_gains[stacked_table_name];
-        DCHECK_EQ(gains.rows(), options.local_device_count);
-        DCHECK_EQ(gains.cols(), coo_buffer_size_per_device);
-
-        return {row_pointers, embedding_ids, sample_ids, gains};
-      }
-      MatrixXi& row_pointers = out.lhs_row_pointers[stacked_table_name];
-      MatrixXi& embedding_ids = out.lhs_embedding_ids[stacked_table_name];
-      MatrixXi& sample_ids = out.lhs_sample_ids[stacked_table_name];
-      MatrixXf& gains = out.lhs_gains[stacked_table_name];
-
-      AllocateOutputCsrBuffersIfNeeded(
-          row_pointers, embedding_ids, sample_ids, gains, options,
-          row_pointers_size_per_device, coo_buffer_size_per_device);
-      return {row_pointers, embedding_ids, sample_ids, gains};
-    };
-    auto [row_pointers, embedding_ids, sample_ids, gains] = get_buffers();
+    auto [row_pointers, embedding_ids, sample_ids, gains] = GetOutputCsrBuffers(
+        stacked_table_name, options, row_pointers_size_per_device,
+        coo_buffer_size_per_device, output_csr_arrays, out);
 
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
                               stack_has_weights, options, num_scs,
