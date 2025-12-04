@@ -19,14 +19,12 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
-
-template <typename T>
-using StackedTableMap = absl::flat_hash_map<std::string, T>;
 
 struct SparseDenseMatmulInputStats {
   StackedTableMap<RowVectorXi> max_ids_per_partition;
@@ -65,7 +63,8 @@ PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
-    const PreprocessSparseDenseMatmulInputOptions& options);
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    OutputCsrArrays* output_csr_arrays = nullptr);
 
 }  // namespace jax_sc_embedding
 

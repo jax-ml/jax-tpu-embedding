@@ -16,6 +16,7 @@
 
 #include <bitset>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
@@ -23,6 +24,7 @@
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/base/nullability.h"  // from @com_google_absl
+#include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -57,13 +59,25 @@ using RowVectorXf = RowVectorX<float>;
 template <typename T>
 using BlockRow = Eigen::Block<MatrixX<T>, 1, Eigen::Dynamic, Eigen::RowMajor>;
 
+template <typename T>
+using StackedTableMap = absl::flat_hash_map<std::string, T>;
+
+// Container for output CSR arrays for multiple stacked tables.
+// Allows pre-allocated buffers to be passed in, avoiding data copies.
+struct OutputCsrArrays {
+  StackedTableMap<MatrixXi> lhs_row_pointers;
+  StackedTableMap<MatrixXi> lhs_embedding_ids;
+  StackedTableMap<MatrixXi> lhs_sample_ids;
+  StackedTableMap<MatrixXf> lhs_gains;
+};
+
 namespace internal {
 
 struct CsrArraysPerDevice {
-  BlockRow<int> row_pointers;
-  BlockRow<int> embedding_ids;
-  BlockRow<int> sample_ids;
-  BlockRow<float> gains;
+  Eigen::Ref<RowVectorXi> row_pointers;
+  Eigen::Ref<RowVectorXi> embedding_ids;
+  Eigen::Ref<RowVectorXi> sample_ids;
+  Eigen::Ref<RowVectorXf> gains;
 };
 
 struct StatsPerDevice {
@@ -76,17 +90,19 @@ struct StatsPerDevice {
 }  // namespace internal
 
 struct CsrArraysPerHost {
-  MatrixXi row_pointers;
-  MatrixXi embedding_ids;
-  MatrixXi sample_ids;
-  MatrixXf gains;
+  Eigen::Map<MatrixXi> row_pointers;
+  Eigen::Map<MatrixXi> embedding_ids;
+  Eigen::Map<MatrixXi> sample_ids;
+  Eigen::Map<MatrixXf> gains;
 
-  CsrArraysPerHost(int local_device_count, int row_pointers_size_per_device,
-                   int coo_buffer_size_per_device)
-      : row_pointers(local_device_count, row_pointers_size_per_device),
-        embedding_ids(local_device_count, coo_buffer_size_per_device),
-        sample_ids(local_device_count, coo_buffer_size_per_device),
-        gains(local_device_count, coo_buffer_size_per_device) {}
+  CsrArraysPerHost(MatrixXi& row_pointers, MatrixXi& embedding_ids,
+                   MatrixXi& sample_ids, MatrixXf& gains)
+      : row_pointers(row_pointers.data(), row_pointers.rows(),
+                     row_pointers.cols()),
+        embedding_ids(embedding_ids.data(), embedding_ids.rows(),
+                      embedding_ids.cols()),
+        sample_ids(sample_ids.data(), sample_ids.rows(), sample_ids.cols()),
+        gains(gains.data(), gains.rows(), gains.cols()) {}
 
   internal::CsrArraysPerDevice GetCsrArraysPerDevice(int local_device_id)
       ABSL_ATTRIBUTE_LIFETIME_BOUND {

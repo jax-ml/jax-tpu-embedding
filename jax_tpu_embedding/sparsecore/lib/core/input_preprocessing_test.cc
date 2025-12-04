@@ -456,6 +456,75 @@ TEST_F(TableStackingTest, MultiChipStackThenSplit) {
   }
 }
 
+TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
+  const int local_device_count = 1;
+  const int global_device_count = 1;
+  const int num_sc_per_device = 4;
+
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(std::make_unique<InputBatch>(input_a_));
+
+  OutputCsrArrays output_csr_arrays;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = local_device_count,
+      .global_device_count = global_device_count,
+      .num_sc_per_device = num_sc_per_device,
+      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack,
+  };
+
+  const int num_scs = num_sc_per_device * global_device_count;
+  const int row_pointers_size_per_bucket =
+      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  const int num_buckets = 1;
+  const int row_pointers_size_per_device =
+      row_pointers_size_per_bucket * num_buckets * num_sc_per_device;
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables;
+
+  stacked_tables[stacked_table_metadata_multi_[0].name].push_back(
+      stacked_table_metadata_multi_[0]);
+
+  for (const auto& [table_name, metadata_list] : stacked_tables) {
+    int coo_buffer_size = ComputeCooBufferSizePerDevice(
+        num_scs, num_sc_per_device, metadata_list, options.batch_number,
+        options.enable_minibatching);
+
+    output_csr_arrays.lhs_row_pointers[table_name].resize(
+        local_device_count, row_pointers_size_per_device);
+    output_csr_arrays.lhs_embedding_ids[table_name].resize(local_device_count,
+                                                           coo_buffer_size);
+    output_csr_arrays.lhs_sample_ids[table_name].resize(local_device_count,
+                                                        coo_buffer_size);
+    output_csr_arrays.lhs_gains[table_name].resize(local_device_count,
+                                                   coo_buffer_size);
+
+    output_csr_arrays.lhs_row_pointers[table_name].setConstant(-1);
+    output_csr_arrays.lhs_embedding_ids[table_name].setConstant(-1);
+    output_csr_arrays.lhs_sample_ids[table_name].setConstant(-1);
+    output_csr_arrays.lhs_gains[table_name].setConstant(-1.0f);
+  }
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options,
+                                       &output_csr_arrays));
+
+  for (const auto& [table_name, _] : stacked_tables) {
+    const MatrixXi& row_ptrs = output_csr_arrays.lhs_row_pointers[table_name];
+    // Check that data was written (first element shouldn't be -1).
+    EXPECT_NE(row_ptrs(0, 0), -1);
+
+    // Verify that the returned output structure has empty matrices for this
+    // table because we provided the buffers.
+    EXPECT_EQ(output.lhs_row_pointers[table_name].size(), 0);
+    EXPECT_EQ(output.lhs_embedding_ids[table_name].size(), 0);
+    EXPECT_EQ(output.lhs_sample_ids[table_name].size(), 0);
+    EXPECT_EQ(output.lhs_gains[table_name].size(), 0);
+  }
+}
+
 TEST(InputPreprocessingUtilTest, MergeStats) {
   SparseDenseMatmulInputStats stats1;
   SparseDenseMatmulInputStats stats2;

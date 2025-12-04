@@ -730,7 +730,8 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
                               /*num_sc_per_device=*/4);
-  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
   PartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
@@ -738,7 +739,14 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
 
   EXPECT_EQ(minibatching_split, 0);
 
-  CsrArraysPerHost csr_arrays_per_host(1, 8 * 4, 40 * 4);
+  MatrixXi row_pointers(1, 8 * 4);
+  MatrixXi embedding_ids(1, 40 * 4);
+  MatrixXi sample_ids(1, 40 * 4);
+  MatrixXf gains(1, 40 * 4);
+
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
   int dropped_static_bound = 0;
@@ -864,7 +872,14 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
 
   coo_tensors_by_id.MergeAll();
 
-  CsrArraysPerHost csr_arrays_per_host(1, 8 * 4, 40 * 4);
+  MatrixXi row_pointers(1, 8 * 4);
+  MatrixXi embedding_ids(1, 40 * 4);
+  MatrixXi sample_ids(1, 40 * 4);
+  MatrixXf gains(1, 40 * 4);
+
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
   FillLocalDeviceBuffer(coo_tensors_by_id,
@@ -1019,8 +1034,13 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   const int coo_buffer_size_per_sc = 168;
   const int row_pointers_size = 128;
   const int num_devices = 1;
-  CsrArraysPerHost csr_arrays_per_host = CsrArraysPerHost(
-      num_devices, row_pointers_size, coo_buffer_size_per_sc * 4);
+  MatrixXi row_pointers(num_devices, row_pointers_size);
+  MatrixXi embedding_ids(num_devices, coo_buffer_size_per_sc * 4);
+  MatrixXi sample_ids(num_devices, coo_buffer_size_per_sc * 4);
+  MatrixXf gains(num_devices, coo_buffer_size_per_sc * 4);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
@@ -1162,8 +1182,13 @@ TEST(InputPreprocessingUtilTest,
   const int coo_buffer_size_per_sc = 3;
   const int batch_size_per_sc = 4;
 
-  CsrArraysPerHost csr_arrays_per_host(1, row_ptrs_size_per_bucket,
-                                       coo_buffer_size_per_sc);
+  MatrixXi row_pointers(1, row_ptrs_size_per_bucket);
+  MatrixXi embedding_ids(1, coo_buffer_size_per_sc);
+  MatrixXi sample_ids(1, coo_buffer_size_per_sc);
+  MatrixXf gains(1, coo_buffer_size_per_sc);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_arrays =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
@@ -1229,9 +1254,14 @@ TEST(InputPreprocessingUtilTest,
   static constexpr int coo_buffer_size_per_sc = 6;
   static constexpr int batch_size_per_sc = 4;
 
-  CsrArraysPerHost csr_arrays_per_host(
-      1, row_ptrs_size_per_bucket * grouped.GetNumMinibatches(),
-      coo_buffer_size_per_sc);
+  MatrixXi row_pointers(1,
+                        row_ptrs_size_per_bucket * grouped.GetNumMinibatches());
+  MatrixXi embedding_ids(1, coo_buffer_size_per_sc);
+  MatrixXi sample_ids(1, coo_buffer_size_per_sc);
+  MatrixXf gains(1, coo_buffer_size_per_sc);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+
   internal::CsrArraysPerDevice csr_arrays =
       csr_arrays_per_host.GetCsrArraysPerDevice(0);
 
@@ -1270,4 +1300,5 @@ TEST(InputPreprocessingUtilTest,
 }
 
 }  // namespace
+
 }  // namespace jax_sc_embedding
