@@ -30,10 +30,10 @@ Boolean parameters are often represented as 0 for False and 1 for True.
 `[benchmark_name]/[param1]:[value1]`.
 
 For example, to run only the `sparse_coo` benchmarks:
-`--benchmark_filter=preprocess_input_benchmark_sparse_coo`
+`--benchmark_filter=preprocess_sparse_coo`
 
 To run only the ragged benchmark with ragged=True:
-`--benchmark_filter='preprocess_input_benchmark/ragged:1'`
+`--benchmark_filter='preprocess_numpy/ragged:1'`
 
 To upload the profile to pprof:
 pprof -flame /tmp/preprocess.prof
@@ -213,7 +213,7 @@ def apply_fdo_stats(
 @google_benchmark.option.arg_names(["ragged"])
 @google_benchmark.option.args_product([[False, True]])
 @google_benchmark.option.iterations(100)
-def preprocess_input_benchmark(state: google_benchmark.State):
+def preprocess_numpy(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   ragged = state.range(0)
   if ragged:
@@ -243,7 +243,7 @@ def preprocess_input_benchmark(state: google_benchmark.State):
 @google_benchmark.register
 @google_benchmark.option.unit(google_benchmark.kMillisecond)
 @google_benchmark.option.iterations(100)
-def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
+def preprocess_sparse_coo(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul."""
   batch_num = 0
   while state:
@@ -273,7 +273,7 @@ def preprocess_input_benchmark_sparse_coo(state: google_benchmark.State):
 @google_benchmark.option.arg_names(["force_minibatching"])
 @google_benchmark.option.args_product([[False, True]])
 @google_benchmark.option.iterations(25)
-def preprocess_input_benchmark_minibatching_enabled(
+def preprocess_minibatching(
     state: google_benchmark.State,
 ):
   """Benchmark for preprocessing input for sparse-dense matmul with minibatching enabled."""
