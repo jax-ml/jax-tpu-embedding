@@ -17,6 +17,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -35,6 +36,8 @@
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
+#include "absl/synchronization/notification.h"  // from @com_google_absl
+#include "absl/time/time.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
@@ -1031,6 +1034,79 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
   auto sync_keys_set =
       absl::flat_hash_set<int>(sync_keys.begin(), sync_keys.end());
   EXPECT_THAT(sync_keys_set, SizeIs(kBatchCount * 2));
+}
+
+TEST_F(MinibatchingCountTest, PreprocessInputWithHighLoad) {
+  const int kFeatureBatchSize = 1600;
+  for (auto& feature : stacked_table_metadata_) {
+    feature.batch_size = kFeatureBatchSize;
+  }
+  // This test checks for deadlocks when preprocessing multiple batches in
+  // parallel on a small thread pool, using a separate small thread pool
+  // for internal async tasks.
+  const int kNumBatchThreads = 8;
+  const int kNumInternalThreads = 50;
+  const int kNumBatches = 2 * kNumBatchThreads;
+  const int kNumTables = 10;
+  tsl::thread::ThreadPool pool_batches(tsl::Env::Default(), "PoolBatches",
+                                       kNumBatchThreads);
+  tsl::thread::ThreadPool pool_internal(tsl::Env::Default(), "PoolInternal",
+                                        kNumInternalThreads);
+  absl::BlockingCounter counter(kNumBatches);
+  absl::Notification done;
+
+  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+      stacked_tables;
+  for (int i = 0; i < kNumTables; ++i) {
+    std::vector<StackedTableMetadata> features;
+    // Repeat these 2 features 5 times = 10 features per table.
+    for (int j = 0; j < 5; ++j) {
+      features.push_back(StackedTableMetadata(
+          /*name=*/absl::StrCat("table_", i),
+          /*feature_index=*/0, /*max_ids_per_partition=*/14000,
+          /*max_unique_ids_per_partition=*/14000,
+          /*row_offset=*/j * kFeatureBatchSize,
+          /*col_offset=*/j * 32, /*col_shift=*/0,
+          /*batch_size=*/kFeatureBatchSize));
+      features.push_back(StackedTableMetadata(
+          /*name=*/absl::StrCat("table_", i),
+          /*feature_index=*/1, /*max_ids_per_partition=*/14000,
+          /*max_unique_ids_per_partition=*/14000,
+          /*row_offset=*/(j + 5) * kFeatureBatchSize,
+          /*col_offset=*/(j + 5) * 32, /*col_shift=*/0,
+          /*batch_size=*/kFeatureBatchSize));
+    }
+    stacked_tables[absl::StrCat("T", i)] = features;
+  }
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      CreateInputBatches(
+          /*max_ids_per_partitions=*/{kFeatureBatchSize * 32,
+                                      kFeatureBatchSize * 32},
+          /*max_unique_ids_per_partitions=*/
+          {kFeatureBatchSize * 8, kFeatureBatchSize * 8},
+          /*global_sc_count=*/8, /*local_sc_count=*/4);
+
+  for (int i = 0; i < kNumBatches; ++i) {
+    pool_batches.Schedule([&, i]() {
+      PreprocessSparseDenseMatmulInputOptions options{
+          .local_device_count = 1,
+          .global_device_count = 1,
+          .num_sc_per_device = 4,
+          .allow_id_dropping = false,
+          .enable_minibatching = true,
+          .batch_number = i,
+          .async_task_scheduler = [&](std::function<void()> fn) {
+            pool_internal.Schedule(std::move(fn));
+          }};
+      EXPECT_THAT(PreprocessSparseDenseMatmulInput(
+                      absl::MakeSpan(input_batches), stacked_tables, options),
+                  IsOk());
+      if (counter.DecrementCount()) {
+        done.Notify();
+      }
+    });
+  }
+  EXPECT_TRUE(done.WaitForNotificationWithTimeout(absl::Seconds(60)));
 }
 
 void ValidateCooId(int embedding_id, int sample_id, int64_t total_padded_vocab,
