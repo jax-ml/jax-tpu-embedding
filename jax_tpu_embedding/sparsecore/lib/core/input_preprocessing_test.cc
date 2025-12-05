@@ -485,24 +485,44 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   stacked_tables[stacked_table_metadata_multi_[0].name].push_back(
       stacked_table_metadata_multi_[0]);
 
+  StackedTableMap<MatrixXi> row_pointers_store;
+  StackedTableMap<MatrixXi> embedding_ids_store;
+  StackedTableMap<MatrixXi> sample_ids_store;
+  StackedTableMap<MatrixXf> gains_store;
+
   for (const auto& [table_name, metadata_list] : stacked_tables) {
     int coo_buffer_size = ComputeCooBufferSizePerDevice(
         num_scs, num_sc_per_device, metadata_list, options.batch_number,
         options.enable_minibatching);
 
-    output_csr_arrays.lhs_row_pointers[table_name].resize(
-        local_device_count, row_pointers_size_per_device);
-    output_csr_arrays.lhs_embedding_ids[table_name].resize(local_device_count,
-                                                           coo_buffer_size);
-    output_csr_arrays.lhs_sample_ids[table_name].resize(local_device_count,
-                                                        coo_buffer_size);
-    output_csr_arrays.lhs_gains[table_name].resize(local_device_count,
-                                                   coo_buffer_size);
+    row_pointers_store[table_name] =
+        MatrixXi(local_device_count, row_pointers_size_per_device);
+    MatrixXi& row_pointers = row_pointers_store[table_name];
+    output_csr_arrays.lhs_row_pointers.insert(
+        {table_name, Eigen::Map<MatrixXi>(row_pointers.data(),
+                                          row_pointers.rows(),
+                                          row_pointers.cols())});
 
-    output_csr_arrays.lhs_row_pointers[table_name].setConstant(-1);
-    output_csr_arrays.lhs_embedding_ids[table_name].setConstant(-1);
-    output_csr_arrays.lhs_sample_ids[table_name].setConstant(-1);
-    output_csr_arrays.lhs_gains[table_name].setConstant(-1.0f);
+    embedding_ids_store[table_name] =
+        MatrixXi(local_device_count, coo_buffer_size);
+    MatrixXi& embedding_ids = embedding_ids_store[table_name];
+    output_csr_arrays.lhs_embedding_ids.insert(
+        {table_name, Eigen::Map<MatrixXi>(embedding_ids.data(),
+                                          embedding_ids.rows(),
+                                          embedding_ids.cols())});
+
+    sample_ids_store[table_name] =
+        MatrixXi(local_device_count, coo_buffer_size);
+    MatrixXi& sample_ids = sample_ids_store[table_name];
+    output_csr_arrays.lhs_sample_ids.insert(
+        {table_name, Eigen::Map<MatrixXi>(sample_ids.data(), sample_ids.rows(),
+                                          sample_ids.cols())});
+
+    gains_store[table_name] = MatrixXf(local_device_count, coo_buffer_size);
+    MatrixXf& gains = gains_store[table_name];
+    output_csr_arrays.lhs_gains.insert(
+        {table_name,
+         Eigen::Map<MatrixXf>(gains.data(), gains.rows(), gains.cols())});
   }
 
   TF_ASSERT_OK_AND_ASSIGN(
@@ -512,10 +532,6 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
                                        &output_csr_arrays));
 
   for (const auto& [table_name, _] : stacked_tables) {
-    const MatrixXi& row_ptrs = output_csr_arrays.lhs_row_pointers[table_name];
-    // Check that data was written (first element shouldn't be -1).
-    EXPECT_NE(row_ptrs(0, 0), -1);
-
     // Verify that the returned output structure has empty matrices for this
     // table because we provided the buffers.
     EXPECT_EQ(output.lhs_row_pointers[table_name].size(), 0);

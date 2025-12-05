@@ -65,10 +65,10 @@ using StackedTableMap = absl::flat_hash_map<std::string, T>;
 // Container for output CSR arrays for multiple stacked tables.
 // Allows pre-allocated buffers to be passed in, avoiding data copies.
 struct OutputCsrArrays {
-  StackedTableMap<MatrixXi> lhs_row_pointers;
-  StackedTableMap<MatrixXi> lhs_embedding_ids;
-  StackedTableMap<MatrixXi> lhs_sample_ids;
-  StackedTableMap<MatrixXf> lhs_gains;
+  StackedTableMap<Eigen::Map<MatrixXi>> lhs_row_pointers;
+  StackedTableMap<Eigen::Map<MatrixXi>> lhs_embedding_ids;
+  StackedTableMap<Eigen::Map<MatrixXi>> lhs_sample_ids;
+  StackedTableMap<Eigen::Map<MatrixXf>> lhs_gains;
 };
 
 namespace internal {
@@ -95,8 +95,9 @@ struct CsrArraysPerHost {
   Eigen::Map<MatrixXi> sample_ids;
   Eigen::Map<MatrixXf> gains;
 
-  CsrArraysPerHost(MatrixXi& row_pointers, MatrixXi& embedding_ids,
-                   MatrixXi& sample_ids, MatrixXf& gains)
+  CsrArraysPerHost(Eigen::Ref<MatrixXi> row_pointers,
+                   Eigen::Ref<MatrixXi> embedding_ids,
+                   Eigen::Ref<MatrixXi> sample_ids, Eigen::Ref<MatrixXf> gains)
       : row_pointers(row_pointers.data(), row_pointers.rows(),
                      row_pointers.cols()),
         embedding_ids(embedding_ids.data(), embedding_ids.rows(),

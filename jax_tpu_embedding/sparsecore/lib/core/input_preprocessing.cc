@@ -35,6 +35,7 @@
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
+#include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
@@ -167,8 +168,9 @@ struct TableState {
              bool has_variable_weights,
              const PreprocessSparseDenseMatmulInputOptions& options,
              int num_scs, int coo_buffer_size_per_device,
-             MatrixXi& row_pointers, MatrixXi& embedding_ids,
-             MatrixXi& sample_ids, MatrixXf& gains)
+             Eigen::Ref<MatrixXi> row_pointers,
+             Eigen::Ref<MatrixXi> embedding_ids,
+             Eigen::Ref<MatrixXi> sample_ids, Eigen::Ref<MatrixXf> gains)
       : stacked_table_name(name),
         stacked_table_metadata(metadata),
         has_variable_weights(has_variable_weights),
@@ -537,12 +539,14 @@ void FillDeviceBuffersForTable(
   }
 }
 
-std::tuple<MatrixXi&, MatrixXi&, MatrixXi&, MatrixXf&> GetOutputCsrBuffers(
-    const std::string& stacked_table_name,
-    const PreprocessSparseDenseMatmulInputOptions& options,
-    int row_pointers_size_per_device, int coo_buffer_size_per_device,
-    OutputCsrArrays* output_csr_arrays,
-    PreprocessSparseDenseMatmulOutput& out) {
+std::tuple<Eigen::Ref<MatrixXi>, Eigen::Ref<MatrixXi>, Eigen::Ref<MatrixXi>,
+           Eigen::Ref<MatrixXf>>
+GetOutputCsrBuffers(const std::string& stacked_table_name,
+                    const PreprocessSparseDenseMatmulInputOptions& options,
+                    int row_pointers_size_per_device,
+                    int coo_buffer_size_per_device,
+                    OutputCsrArrays* output_csr_arrays,
+                    PreprocessSparseDenseMatmulOutput& out) {
   if (output_csr_arrays != nullptr) {
     DCHECK(output_csr_arrays->lhs_row_pointers.contains(stacked_table_name))
         << "Missing lhs_row_pointers for table: " << stacked_table_name;
@@ -552,22 +556,23 @@ std::tuple<MatrixXi&, MatrixXi&, MatrixXi&, MatrixXf&> GetOutputCsrBuffers(
         << "Missing lhs_sample_ids for table: " << stacked_table_name;
     DCHECK(output_csr_arrays->lhs_gains.contains(stacked_table_name))
         << "Missing lhs_gains for table: " << stacked_table_name;
-    MatrixXi& row_pointers =
-        output_csr_arrays->lhs_row_pointers[stacked_table_name];
+    Eigen::Map<MatrixXi>& row_pointers =
+        output_csr_arrays->lhs_row_pointers.find(stacked_table_name)->second;
     DCHECK_EQ(row_pointers.rows(), options.local_device_count);
     DCHECK_EQ(row_pointers.cols(), row_pointers_size_per_device);
 
-    MatrixXi& embedding_ids =
-        output_csr_arrays->lhs_embedding_ids[stacked_table_name];
+    Eigen::Map<MatrixXi>& embedding_ids =
+        output_csr_arrays->lhs_embedding_ids.find(stacked_table_name)->second;
     DCHECK_EQ(embedding_ids.rows(), options.local_device_count);
     DCHECK_EQ(embedding_ids.cols(), coo_buffer_size_per_device);
 
-    MatrixXi& sample_ids =
-        output_csr_arrays->lhs_sample_ids[stacked_table_name];
+    Eigen::Map<MatrixXi>& sample_ids =
+        output_csr_arrays->lhs_sample_ids.find(stacked_table_name)->second;
     DCHECK_EQ(sample_ids.rows(), options.local_device_count);
     DCHECK_EQ(sample_ids.cols(), coo_buffer_size_per_device);
 
-    MatrixXf& gains = output_csr_arrays->lhs_gains[stacked_table_name];
+    Eigen::Map<MatrixXf>& gains =
+        output_csr_arrays->lhs_gains.find(stacked_table_name)->second;
     DCHECK_EQ(gains.rows(), options.local_device_count);
     DCHECK_EQ(gains.cols(), coo_buffer_size_per_device);
 
