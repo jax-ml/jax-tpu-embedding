@@ -135,15 +135,12 @@ cc_library(
     deps = [
         ":abstract_input_batch",
         ":coo_format",
-        ":input_preprocessing_threads",
         ":input_preprocessing_util",
         ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
@@ -153,9 +150,11 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
+        "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:statusor",
         "@tsl//tsl/profiler/lib:traceme",
         "@xla//xla:util",
+        "@xla//xla/tsl/concurrency:async_value",
     ],
 )
 

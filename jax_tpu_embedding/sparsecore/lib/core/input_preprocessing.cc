@@ -38,10 +38,11 @@
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
+#include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
 #include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
@@ -513,10 +514,10 @@ void FillDeviceBuffersForTable(
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    PreprocessingThreadPool()->Schedule([&, local_device, &state = state,
-                                         row_pointers_size_per_bucket,
-                                         global_minibatching_required,
-                                         global_minibatching_split] {
+    options.async_task_scheduler([&, local_device, &state = state,
+                                  row_pointers_size_per_bucket,
+                                  global_minibatching_required,
+                                  global_minibatching_split] {
       PartitionedCooTensors& grouped_coo_tensors =
           state.partitioned_coo_tensors_per_device[local_device];
       if (options.enable_minibatching && global_minibatching_required) {
@@ -587,6 +588,25 @@ GetOutputCsrBuffers(const std::string& stacked_table_name,
                                    gains, options, row_pointers_size_per_device,
                                    coo_buffer_size_per_device);
   return {row_pointers, embedding_ids, sample_ids, gains};
+}
+
+void FillDeviceBuffersAllTables(
+    absl::Span<TableState> table_states,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    int row_pointers_size_per_bucket, bool global_minibatching_required,
+    MinibatchingSplit global_minibatching_split) {
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        "FillDeviceBuffers", {{"batch_number", options.batch_number}});
+  });
+  absl::BlockingCounter counter(table_states.size() *
+                                options.local_device_count);
+  for (auto& state : table_states) {
+    FillDeviceBuffersForTable(state, options, row_pointers_size_per_bucket,
+                              global_minibatching_required,
+                              global_minibatching_split, counter);
+  }
+  counter.Wait();
 }
 
 }  // namespace
@@ -671,12 +691,47 @@ PreprocessSparseDenseMatmulInput(
       PostProcessTableState(state);
     }
   }
-  TF_ASSIGN_OR_RETURN(bool global_minibatching_required,
-                      SyncMinibatchingRequired(options, table_states));
 
-  // Stage 2: Optional Re-Sort/Group
+  tsl::AsyncValueRef<absl::StatusOr<bool>> global_minibatching_required_avr;
+  std::unique_ptr<tsl::Thread> sync_thread;
+  if (options.enable_minibatching) {
+    global_minibatching_required_avr =
+        tsl::MakeUnconstructedAsyncValueRef<absl::StatusOr<bool>>();
+    sync_thread.reset(tsl::Env::Default()->StartThread(
+        tsl::ThreadOptions(), "SyncMinibatchingRequired",
+        [&options, &table_states, avr = global_minibatching_required_avr]() {
+          avr.emplace(SyncMinibatchingRequired(options, table_states));
+        }));
+  }
+
+  // Redundant with global_minibatching_required_avr, but allows us to avoid
+  // the async dependency.
+  bool local_minibatching_required = false;
+  for (const auto& state : table_states) {
+    local_minibatching_required |= state.table_minibatching_required;
+  }
+
+  // If minibatching is not enabled, or not required locally we can fill
+  // device buffers assuming minibatching is not required globally.
+  // If it turns out that minibatching is required globally, we will
+  // re-fill the buffers later.
+  if (!options.enable_minibatching || !local_minibatching_required) {
+    FillDeviceBuffersAllTables(absl::MakeSpan(table_states), options,
+                               row_pointers_size_per_bucket,
+                               /* global_minibatching_required= */ false,
+                               /* global_minibatching_split= */ 0);
+  }
+
+  bool global_minibatching_required = false;
+  if (options.enable_minibatching) {
+    tsl::BlockUntilReady(global_minibatching_required_avr);
+    TF_ASSIGN_OR_RETURN(global_minibatching_required,
+                        *global_minibatching_required_avr);
+  }
+
   MinibatchingSplit global_minibatching_split = 0;
 
+  // Minibatching slow path: Optional Re-Sort/Group
   if (options.enable_minibatching && global_minibatching_required) {
     {
       tsl::profiler::TraceMe traceme([&] {
@@ -697,35 +752,23 @@ PreprocessSparseDenseMatmulInput(
 
     TF_ASSIGN_OR_RETURN(global_minibatching_split,
                         SyncMinibatchingSplit(options, table_states));
+    FillDeviceBuffersAllTables(
+        absl::MakeSpan(table_states), options, row_pointers_size_per_bucket,
+        global_minibatching_required, global_minibatching_split);
   }
 
-  // Stage 3: Fill Device Buffers
-  {
-    tsl::profiler::TraceMe traceme([&] {
-      return tsl::profiler::TraceMeEncode(
-          "FillDeviceBuffers", {{"batch_number", options.batch_number}});
-    });
-    absl::BlockingCounter counter(table_states.size() *
-                                  options.local_device_count);
-    for (auto& state : table_states) {
-      FillDeviceBuffersForTable(state, options, row_pointers_size_per_bucket,
-                                global_minibatching_required,
-                                global_minibatching_split, counter);
-    }
-    counter.Wait();
-    for (auto& state : table_states) {
-      state.stats_per_host.dropped_id_count +=
-          absl::c_accumulate(state.dropped_id_count_per_device, 0LL);
-      // NOMUTANTS -- Informational.
-      CheckBufferUsage(
-          /* max_required_buffer_size_per_device= */
-          state.stats_per_host.required_buffer_size.maxCoeff() *
-              options.num_sc_per_device,
-          state.coo_buffer_size_per_device, state.stacked_table_name,
-          options.batch_number);
+  for (auto& state : table_states) {
+    state.stats_per_host.dropped_id_count +=
+        absl::c_accumulate(state.dropped_id_count_per_device, 0LL);
+    // NOMUTANTS -- Informational.
+    CheckBufferUsage(
+        /* max_required_buffer_size_per_device= */
+        state.stats_per_host.required_buffer_size.maxCoeff() *
+            options.num_sc_per_device,
+        state.coo_buffer_size_per_device, state.stacked_table_name,
+        options.batch_number);
 
-      PopulateOutput(state, out, output_mutex);
-    }
+    PopulateOutput(state, out, output_mutex);
   }
 
   out.num_minibatches = global_minibatching_split.count() + 1;
