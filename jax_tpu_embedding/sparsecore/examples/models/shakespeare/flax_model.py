@@ -34,27 +34,27 @@ class Model(nn.Module):
   vocab_size: int
   seq_len: int
   embedding_size: int
+  mesh: jax.sharding.Mesh
   feature_name: str = 'shakespeare_feature'
-  mesh: jax.sharding.Mesh | None = None
   sharding_axis: str = 'sparsecore_sharding'
 
-  def add_sharding_constraint(self, x: jax.Array, names: tuple[str | None]):
-    # Add a sharding constraint to the array.
-    #
-    # Add a sharding constraint to the array to ensure that the sharding
-    # information is not lost during compilation. This may not be necessary but
-    # it helps SPMD and ensures that the sharding information is as expected.
-    #
-    # Args:
-    #   x: The array to add the sharding constraint to.
-    #   names: The mesh axes for the partition spec.
-    #
-    # Returns:
-    #   The array with the sharding constraint added.
+  def add_sharding_constraint(self, x: jax.Array):
+    """Add a sharding constraint to the array.
+
+    Add a sharding constraint to the array to ensure that the sharding
+    information is not lost during compilation. This may not be necessary but
+    it helps SPMD and ensures that the sharding information is as expected.
+
+    Args:
+      x: The array to add the sharding constraint to.
+
+    Returns:
+      The array with the sharding constraint added.
+    """
     return jax.lax.with_sharding_constraint(
         x,
         jax.sharding.NamedSharding(
-            self.mesh, jax.sharding.PartitionSpec(*names)
+            self.mesh, jax.sharding.PartitionSpec(self.sharding_axis)
         ),
     )
 
@@ -70,12 +70,12 @@ class Model(nn.Module):
     # Unpack the activations.
     x = x[self.feature_name]
     x = jnp.reshape(x, (self.global_batch_size, -1))
-    x = self.add_sharding_constraint(x, (self.sharding_axis,))
+    x = self.add_sharding_constraint(x)
 
     # Apply the dense portion of the model.
     x = nn.Dense(self.embedding_size)(x)
-    x = self.add_sharding_constraint(x, (self.sharding_axis,))
+    x = self.add_sharding_constraint(x)
     x = nn.Dense(self.vocab_size)(x)
-    x = self.add_sharding_constraint(x, (self.sharding_axis,))
+    x = self.add_sharding_constraint(x)
 
     return x
