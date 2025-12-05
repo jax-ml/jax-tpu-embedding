@@ -64,6 +64,7 @@ struct CooFormat {
   static constexpr uint32_t kDataMask = (1 << kDataBits) - 1;
   // Bit offset for rotated_col_id in grouping key.
   static constexpr uint32_t kRotatedColIdOffset = kDataBits;
+
   // Bit offset for bucket_id in grouping key.
   static constexpr uint32_t kBucketIdOffset = kRotatedColIdOffset + 32;
 

@@ -67,6 +67,7 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@tsl//tsl/profiler/lib:traceme",
         "@xla//xla:util",
+        "@xla//xla/tsl/concurrency:async_value",
     ],
 )
 
@@ -433,6 +434,7 @@ cc_test(
         "@com_google_absl//absl/types:span",
         "@com_google_benchmark//:benchmark_main",
         "@eigen_archive//:eigen3",
+        "@xla//xla/tsl/concurrency:async_value",
     ],
 )
 

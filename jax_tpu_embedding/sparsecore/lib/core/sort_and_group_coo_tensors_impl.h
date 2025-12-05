@@ -329,8 +329,9 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDeviceImpl(
   absl::Span<const CooFormat> coo_tensors = extracted_coo_tensors.coo_tensors;
   const int num_sc_per_device = options.num_sc_per_device;
   bool allow_id_dropping = options.allow_id_dropping;
-  const int batch_size_per_sc = xla::CeilOfRatio(
-      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
+  const int batch_size_for_device = extracted_coo_tensors.batch_size_for_device;
+  const int batch_size_per_sc =
+      xla::CeilOfRatio(batch_size_for_device, options.num_sc_per_device);
   const uint32_t global_sc_count = options.GetNumScs();
   const int num_sc_bits = absl::bit_width(global_sc_count - 1);
   const int max_ids_per_partition =
@@ -387,8 +388,10 @@ PartitionedCooTensors SortAndGroupCooTensorsPerLocalDeviceImpl(
       // The key here is [bucket_id(6 bits), global_sc_id(num_scs bits),
       // local_embedding_id(32-num_scs bits), index(26 bits)].
       //  Note that this assumes `num_scs` is a power of 2.
+      uint32_t data =
+          kHasVariableWeights ? coo_tensor_index : coo_tensor.row_id;
       keys.push_back(coo_tensor.GetGroupingKey(
-          num_sc_bits, coo_tensor_index, kCreateBuckets,
+          num_sc_bits, data, kCreateBuckets,
           options.minibatching_bucketing_hash_fn, kHasVariableWeights));
       DCHECK(kHasVariableWeights || coo_tensors[coo_tensor_index].gain == 1.0f)
           << "kHasVariableWeights: " << kHasVariableWeights
