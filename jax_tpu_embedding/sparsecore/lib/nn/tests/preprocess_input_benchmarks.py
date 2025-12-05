@@ -295,9 +295,10 @@ def preprocess_minibatching(
     )
 
   def worker(host_id: int, batch_number: int):
-    return pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-        _GLOBAL_RAGGED_FEATURES,
-        _GLOBAL_RAGGED_WEIGHTS,
+    return pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+        _GLOBAL_RAGGED_INDICES,
+        _GLOBAL_RAGGED_VALUES,
+        _GLOBAL_RAGGED_DENSE_SHAPES,
         _GLOBAL_SPECS,
         local_device_count=4,
         global_device_count=16,
