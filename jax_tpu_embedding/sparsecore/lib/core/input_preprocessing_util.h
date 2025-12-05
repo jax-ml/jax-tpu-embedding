@@ -20,16 +20,19 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 
 namespace jax_sc_embedding {
@@ -214,6 +217,12 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
   // Hash function used for creating minibatching buckets.
   CooFormat::HashFn minibatching_bucketing_hash_fn = HighwayHash;
+
+  // Callback to schedule async work.
+  absl::AnyInvocable<void(std::function<void()>) const> async_task_scheduler =
+      [](std::function<void()> callback) {
+        PreprocessingThreadPool()->Schedule(std::move(callback));
+      };
 
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }

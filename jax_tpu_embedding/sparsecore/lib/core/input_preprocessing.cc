@@ -220,7 +220,7 @@ void ExtractSortAndGroupCooTensorsForTable(
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    PreprocessingThreadPool()->Schedule(
+    options.async_task_scheduler(
         [&, local_device, &state = state, input_batches] {
           state.extracted_coo_tensors_per_device[local_device] =
               internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
@@ -267,7 +267,7 @@ void CreateMinibatchingBucketsForTable(
   state.stats_per_host.dropped_id_count = 0;
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    PreprocessingThreadPool()->Schedule([&, local_device, &state = state] {
+    options.async_task_scheduler([&, local_device, &state = state] {
       // Note: We create a dummy stats object here because we don't want to
       // overwrite the stats from the first pass, which are authoritative.
       // The only stat we care about from this second pass is the number of
