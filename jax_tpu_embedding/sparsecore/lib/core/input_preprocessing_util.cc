@@ -225,7 +225,7 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
   int64_t suggested_value = xla::RoundUpTo<int64_t>(
       suggested_coo_buffer_size_per_device,
       TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_scs_per_device);
-  CHECK(suggested_value <= theoretical_max)
+  DCHECK(suggested_value <= theoretical_max)
       << "Suggested Coo Buffer Size is larger than the theoretical "
          "max for table "
       << stacked_table_name << ": " << suggested_value << " vs "
