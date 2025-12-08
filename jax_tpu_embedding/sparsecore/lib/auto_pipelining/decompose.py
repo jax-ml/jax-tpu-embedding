@@ -90,9 +90,12 @@ def _combine_shard_maps(
 
   # Feed the updated embedding table to the lookup primitive.
   updated_tables = update_jaxpr.eqns[-1].outvars
-  lookup_primitive_eqn = lookup_jaxpr.eqns[0]
+  lookup_primitive_eqn = utils.get_embedding_lookup_eqn(lookup_jaxpr.eqns)
   lookup_primitive_eqn = lookup_primitive_eqn.replace(
       invars=lookup_primitive_eqn.invars[:-1] + [updated_tables[0]]
+  )
+  rewritten_lookup_eqns = utils.replace_embedding_lookup_eqn(
+      lookup_jaxpr.eqns, lookup_primitive_eqn
   )
 
   # Combine the sub Jaxpr.
@@ -100,7 +103,7 @@ def _combine_shard_maps(
       constvars=update_jaxpr.constvars + lookup_jaxpr.constvars,
       invars=update_jaxpr.invars + lookup_jaxpr.invars[:-1],
       outvars=update_jaxpr.outvars + lookup_jaxpr.outvars,
-      eqns=update_jaxpr.eqns + [lookup_primitive_eqn] + lookup_jaxpr.eqns[1:],
+      eqns=update_jaxpr.eqns + rewritten_lookup_eqns,
   )
 
   # Combine shard_map parameters.

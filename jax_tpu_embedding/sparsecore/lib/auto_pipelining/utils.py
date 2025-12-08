@@ -26,10 +26,11 @@ CUSTOM_VJP_CALL_PRIMITIVE_NAME = 'custom_vjp_call_jaxpr'
 SHARD_MAP_PRIMITIVE_NAME = 'shard_map'
 
 # The number of data inputs of the embedding lookup shard_map.
-# They are row_pointers, embedding_ids, sample_ids, gains.
-EMBEDDING_LOOKUP_DATA_LEN = 4
+# They are row_pointers, embedding_ids, sample_ids, gains, num_minibatches.
+EMBEDDING_LOOKUP_DATA_LEN = 5
 # The number of data inputs of the embedding update shard_map.
-# They are row_pointers, embedding_ids, sample_ids, gains, gradients.
+# They are:
+#   gradients, row_pointers, embedding_ids, sample_ids, gains, num_minibatches.
 EMBEDDING_UPDATE_DATA_LEN = EMBEDDING_LOOKUP_DATA_LEN + 1
 
 
@@ -37,18 +38,41 @@ def is_embedding_lookup(eqn: jex.core.JaxprEqn) -> bool:
   if eqn.primitive.name != SHARD_MAP_PRIMITIVE_NAME:
     return False
   jaxpr = eqn.params['jaxpr']
-  return jaxpr.eqns[0].primitive.name.startswith(
-      EMBEDDING_LOOKUP_PRIMITIVE_PREFIX
-  )
+  for sub_eqn in jaxpr.eqns:
+    if sub_eqn.primitive.name.startswith(EMBEDDING_LOOKUP_PRIMITIVE_PREFIX):
+      return True
+  return False
 
 
 def is_embedding_update(eqn: jex.core.JaxprEqn) -> bool:
   if eqn.primitive.name != SHARD_MAP_PRIMITIVE_NAME:
     return False
   jaxpr = eqn.params['jaxpr']
-  return jaxpr.eqns[-1].primitive.name.startswith(
-      EMBEDDING_UPDATE_PRIMITIVE_PREFIX
-  )
+  for sub_eqn in jaxpr.eqns:
+    if sub_eqn.primitive.name.startswith(EMBEDDING_UPDATE_PRIMITIVE_PREFIX):
+      return True
+  return False
+
+
+def get_embedding_lookup_eqn(
+    eqns: list[jex.core.JaxprEqn],
+) -> jex.core.JaxprEqn:
+  for eqn in eqns:
+    if eqn.primitive.name.startswith(EMBEDDING_LOOKUP_PRIMITIVE_PREFIX):
+      return eqn
+  assert False, 'No embedding lookup found in the given eqns.'
+
+
+def replace_embedding_lookup_eqn(
+    eqns: list[jex.core.JaxprEqn], new_lookup_eqn: jex.core.JaxprEqn,
+) -> list[jex.core.JaxprEqn]:
+  result = []
+  for eqn in eqns:
+    if eqn.primitive.name.startswith(EMBEDDING_LOOKUP_PRIMITIVE_PREFIX):
+      result.append(new_lookup_eqn)
+    else:
+      result.append(eqn)
+  return result
 
 
 def lookup_params(

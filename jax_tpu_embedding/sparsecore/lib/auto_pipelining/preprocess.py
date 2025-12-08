@@ -78,13 +78,8 @@ def _validate_embedding_lookup(eqn: jex.core.JaxprEqn) -> None:
   # lookup primitive should be the first equation in the shard_map, for easy
   # check in the later transformations.
   jaxpr = eqn.params['jaxpr']
-  lookup_eqn = jaxpr.eqns[0]
-  assert lookup_eqn.primitive.name.startswith(
-      utils.EMBEDDING_LOOKUP_PRIMITIVE_PREFIX
-  ), (
-      'The first equation in the shard_map is not an embedding lookup. '
-      f'Got {lookup_eqn.primitive.name}'
-  )
+  # This will assert if there's no lookup operation in the shard_map.
+  lookup_eqn = utils.get_embedding_lookup_eqn(jaxpr.eqns)
 
   # Embedding table should be the last input of the lookup shard_map.
   # Slot variables are not used for embedding lookup.
@@ -114,7 +109,10 @@ def _validate_embedding_update(eqn: jex.core.JaxprEqn) -> None:
   # Used when passing updates from dense to SC backward.
   embed_tables = jaxpr.invars[utils.EMBEDDING_UPDATE_DATA_LEN :]
   assert (
-      update_eqn.invars[4:][: len(embed_tables)] == embed_tables
+      update_eqn.invars[utils.EMBEDDING_UPDATE_DATA_LEN - 1 :][
+          : len(embed_tables)
+      ]
+      == embed_tables
   ), 'Embedding table should be the last input of the update shard_map'
 
   # Embedding table should be the only output of the update shard_map.
