@@ -20,13 +20,14 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
-#include "absl/functional/any_invocable.h"  // from @com_google_absl
+#include "absl/functional/function_ref.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -187,6 +188,10 @@ enum class FeatureStackingStrategy {
 
 enum class ShardingStrategy : int { kMod = 1 };
 
+inline void PreprocessingThreadPoolSchedule(std::function<void()> callback) {
+  PreprocessingThreadPool()->Schedule(std::move(callback));
+}
+
 struct PreprocessSparseDenseMatmulInputOptions {
   // The number of TPU devices on the current host.
   const int local_device_count ABSL_REQUIRE_EXPLICIT_INIT;
@@ -218,15 +223,18 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // Hash function used for creating minibatching buckets.
   CooFormat::HashFn minibatching_bucketing_hash_fn = HighwayHash;
 
-  // Callback to schedule async work.
-  absl::AnyInvocable<void(std::function<void()>) const> async_task_scheduler =
-      [](std::function<void()> callback) {
-        PreprocessingThreadPool()->Schedule(std::move(callback));
-      };
+  // Callback to schedule async work. Since `absl::FunctionRef` is non-owning,
+  // any custom callable provided must outlive the
+  // `PreprocessSparseDenseMatmulInputOptions` instance.
+  absl::FunctionRef<void(std::function<void()>)> async_task_scheduler =
+      PreprocessingThreadPoolSchedule;
 
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 };
+
+static_assert(
+    std::is_trivially_copyable<PreprocessSparseDenseMatmulInputOptions>());
 
 // Different combiners that are supported for samples with multiple ids.
 // By default, we use kSum (add the embeddings for all ids in the sample).
