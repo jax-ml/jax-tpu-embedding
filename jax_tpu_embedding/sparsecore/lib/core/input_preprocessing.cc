@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -41,6 +42,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
+#include "xla/tsl/concurrency/async_value.h"  // from @xla
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
@@ -68,14 +70,34 @@ void ExtractCooTensorsForSingleFeatureSlice(
     const int local_device_id, const int feature_slice_id,
     const int feature_slices_per_device,
     const PreprocessSparseDenseMatmulInputOptions& options,
+    const int batch_size_for_device_total,
     ExtractedCooTensors& extracted_coo_tensors) {
   const int feature_index = metadata.feature_index;
   const std::unique_ptr<AbstractInputBatch>& curr_batch =
       input_batches[feature_index];
   const int num_samples = curr_batch->size();
+  const int num_samples_per_split =
+      num_samples / (options.local_device_count * feature_slices_per_device);
+  const int start_index =
+      (local_device_id * feature_slices_per_device + feature_slice_id) *
+      num_samples_per_split;
+  int end_index = std::min(num_samples, start_index + num_samples_per_split);
 
-  const int batch_size_per_slice = xla::CeilOfRatio(
-      extracted_coo_tensors.batch_size_for_device, feature_slices_per_device);
+  // Reserve space in COO tensor vector if input batch provides slice
+  // count.
+  std::optional<int64_t> ids_in_slice =
+      curr_batch->GetIdsCountInSlice(start_index, end_index);
+
+  if (ids_in_slice.has_value()) {
+    extracted_coo_tensors.coo_tensors.reserve(ids_in_slice.value());
+  } else {
+    extracted_coo_tensors.coo_tensors.reserve(xla::CeilOfRatio<int64_t>(
+        curr_batch->id_count(),
+        options.local_device_count * feature_slices_per_device));
+  }
+
+  const int batch_size_per_slice =
+      xla::CeilOfRatio(batch_size_for_device_total, feature_slices_per_device);
 
   CHECK_GT(feature_slices_per_device, 0);
   CHECK_GT(options.global_device_count, 0);
@@ -89,21 +111,13 @@ void ExtractCooTensorsForSingleFeatureSlice(
   const int col_offset = metadata.col_offset;
   const int col_shift = metadata.col_shift;
 
-  const int num_samples_per_split =
-      num_samples / (options.local_device_count * feature_slices_per_device);
-  const int start_index =
-      (local_device_id * feature_slices_per_device + feature_slice_id) *
-      num_samples_per_split;
-  int end_index = std::min(num_samples, start_index + num_samples_per_split);
-
-  // In the case of feature stacking, we need to group all the COO tensors
-  // at this stage (i.e., before the sorting later on).
   VLOG(2) << absl::StrFormat(
       "Extracting COO Tensor from feature #%d from row %d to %d "
       "(local_device_id = %d, feature_slice_id = %d, row_offset = %d, "
       "batch_size_per_slice = %d)",
       feature_index, start_index, end_index, local_device_id, feature_slice_id,
       row_offset, batch_size_per_slice);
+
   curr_batch->ExtractCooTensors(
       {
           .slice_start = start_index,
@@ -187,25 +201,23 @@ struct TableState {
 };
 
 template <typename SplitType>
-void SortAndGroupCooTensorsForTableState(
-    TableState& state, int local_device,
+PartitionedCooTensors SortAndGroupCooTensorsForTableState(
+    bool has_variable_weights,
+    const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::StatsPerDevice& stats, SplitType& split) {
-  if (state.has_variable_weights) {
-    state.partitioned_coo_tensors_per_device[local_device] =
-        SortAndGroupCooTensorsPerLocalDevice<true>(
-            state.extracted_coo_tensors_per_device[local_device],
-            state.stacked_table_metadata[0], options, stats, split);
+    internal::StatsPerDevice& stats, SplitType& split,
+    const ExtractedCooTensors& extracted_coo_tensors) {
+  if (has_variable_weights) {
+    return SortAndGroupCooTensorsPerLocalDevice<true>(
+        extracted_coo_tensors, stacked_table_metadata, options, stats, split);
   } else {
-    state.partitioned_coo_tensors_per_device[local_device] =
-        SortAndGroupCooTensorsPerLocalDevice<false>(
-            state.extracted_coo_tensors_per_device[local_device],
-            state.stacked_table_metadata[0], options, stats, split);
+    return SortAndGroupCooTensorsPerLocalDevice<false>(
+        extracted_coo_tensors, stacked_table_metadata, options, stats, split);
   }
 }
 
-// Extracts, sorts, and groups COO tensors for a single stacked table across
-// all local devices. This function populates
+// Extracts, sorts, and groups COO tensors for a single stacked table across all
+// local devices. This function populates
 // `state.extracted_coo_tensors_per_device` and
 // `state.partitioned_coo_tensors_per_device`.
 void ExtractSortAndGroupCooTensorsForTable(
@@ -221,21 +233,48 @@ void ExtractSortAndGroupCooTensorsForTable(
   });
   for (int local_device = 0; local_device < options.local_device_count;
        ++local_device) {
-    options.async_task_scheduler(
-        [&, local_device, &state = state, input_batches] {
-          state.extracted_coo_tensors_per_device[local_device] =
-              internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-                  state.stacked_table_metadata, input_batches, local_device,
-                  options);
+    std::vector<tsl::AsyncValueRef<ExtractedCooTensors>>
+        extracted_coo_tensors_av =
+            internal::ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync(
+                state.stacked_table_metadata, input_batches, local_device,
+                options);
 
-          internal::StatsPerDevice stats_per_device =
-              state.stats_per_host.GetStatsPerDevice(local_device);
-          SortAndGroupCooTensorsForTableState(
-              state, local_device, options, stats_per_device,
-              state.table_minibatching_required);
-          state.dropped_id_count_per_device[local_device] =
-              stats_per_device.dropped_id_count;
-          counter.DecrementCount();
+    tsl::RunWhenReady(
+        absl::MakeConstSpan(extracted_coo_tensors_av),
+        [&, local_device, extracted_coo_tensors_av, &state = state]() mutable {
+          options.async_task_scheduler([&, local_device,
+                                        extracted_coo_tensors_av,
+                                        &state = state]() mutable {
+            int64_t total_ids_for_device = 0;
+            for (const auto& av : extracted_coo_tensors_av) {
+              total_ids_for_device += av.get().coo_tensors.size();
+            }
+
+            ExtractedCooTensors& merged_result =
+                state.extracted_coo_tensors_per_device[local_device];
+            merged_result = ExtractedCooTensors(
+                options.num_sc_per_device,
+                extracted_coo_tensors_av[0].get().batch_size_for_device);
+            merged_result.coo_tensors.reserve(total_ids_for_device);
+
+            for (auto& av : extracted_coo_tensors_av) {
+              merged_result.Append(std::move(av.get()));
+            }
+            internal::StatsPerDevice stats_per_device =
+                state.stats_per_host.GetStatsPerDevice(local_device);
+
+            state.partitioned_coo_tensors_per_device[local_device] =
+                SortAndGroupCooTensorsForTableState(
+                    state.has_variable_weights, state.stacked_table_metadata[0],
+                    options, stats_per_device,
+                    state.table_minibatching_required,
+                    state.extracted_coo_tensors_per_device[local_device]);
+
+            state.dropped_id_count_per_device[local_device] =
+                stats_per_device.dropped_id_count;
+
+            counter.DecrementCount();
+          });
         });
   }
 }
@@ -278,9 +317,11 @@ void CreateMinibatchingBucketsForTable(
           options.num_sc_per_device);
       internal::StatsPerDevice dummy_stats =
           dummy_stats_host.GetStatsPerDevice(0);
-      SortAndGroupCooTensorsForTableState(state, local_device, options,
-                                         dummy_stats,
-                                         state.table_minibatching_split);
+      state.partitioned_coo_tensors_per_device[local_device] =
+          SortAndGroupCooTensorsForTableState(
+              state.has_variable_weights, state.stacked_table_metadata[0],
+              options, dummy_stats, state.table_minibatching_split,
+              state.extracted_coo_tensors_per_device[local_device]);
       state.dropped_id_count_per_device[local_device] =
           dummy_stats.dropped_id_count;
       counter.DecrementCount();
@@ -301,11 +342,20 @@ inline bool Serialize(bool value) { return value; }
 inline bool Deserialize(bool value) { return value; }
 
 // Extract the COO tensors for all features.
-ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
+std::vector<tsl::AsyncValueRef<ExtractedCooTensors>>
+ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options) {
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync-",
+                     stacked_table_metadata[0].name),
+        {{"batch_number", options.batch_number}});
+  });
+  // Calculate total batch size and total number of IDs for this device by
+  // summing up sizes and ID counts of all features in the stacked table.
   int batch_size_for_device = 0;
   int64_t total_ids_for_device = 0;
   for (const auto& feature_metadata : stacked_table_metadata) {
@@ -319,6 +369,10 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
   CheckDeviceBatchSize(batch_size_for_device, options.num_sc_per_device,
                        stacked_table_metadata[0].name);
 
+  // Determine the number of slices per feature based on stacking strategy.
+  // kStackThenSplit: All features are stacked first, then split, so 1 slice.
+  // kSplitThenStack: Each feature is split, then stacked, so
+  // num_sc_per_device slices.
   int feature_slices_per_device;
   switch (options.feature_stacking_strategy) {
     case FeatureStackingStrategy::kStackThenSplit:
@@ -348,15 +402,85 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
   //   SC1: F1_2, F2_2, ... Fn_2,  // <- batch_size_per_slice
   //   ...                         // <- batch_size_per_slice
   //   SCk: F1_k, F2_k, ..., Fn_k  // <- batch_size_per_slice
-  for (int feature_slice_id = 0; feature_slice_id < feature_slices_per_device;
-       ++feature_slice_id) {
-    for (const auto& feature_metadata : stacked_table_metadata) {
-      ExtractCooTensorsForSingleFeatureSlice(
-          feature_metadata, input_batches, local_device_id, feature_slice_id,
-          feature_slices_per_device, options, extracted_coo_tensors);
+
+  // Holds async results for each feature and slice. The size is
+  // num_features * num_slices.
+  std::vector<tsl::AsyncValueRef<ExtractedCooTensors>> feature_results_av;
+  feature_results_av.reserve(feature_slices_per_device *
+                             stacked_table_metadata.size());
+  for (int i = 0;
+       i < feature_slices_per_device * stacked_table_metadata.size(); ++i) {
+    feature_results_av.push_back(
+        tsl::MakeUnconstructedAsyncValueRef<ExtractedCooTensors>());
+  }
+
+  // Schedule all feature slices for parallel execution.
+  for (int feature_idx = 0; feature_idx < stacked_table_metadata.size();
+       ++feature_idx) {
+    for (int feature_slice_id = 0; feature_slice_id < feature_slices_per_device;
+         ++feature_slice_id) {
+      options.async_task_scheduler([=, feature_idx = feature_idx,
+                                    feature_slice_id = feature_slice_id,
+                                    feature_results_av = feature_results_av,
+                                    &options]() mutable {
+        const StackedTableMetadata& feature_metadata =
+            stacked_table_metadata[feature_idx];
+        // Calculate the index in `feature_results_av` for the current
+        // feature and slice.
+        int result_idx =
+            feature_slice_id * stacked_table_metadata.size() + feature_idx;
+
+        ExtractedCooTensors result(options.num_sc_per_device,
+                                   batch_size_for_device);
+
+        // Extract COO tensors for the current slice.
+        ExtractCooTensorsForSingleFeatureSlice(
+            feature_metadata, input_batches, local_device_id, feature_slice_id,
+            feature_slices_per_device, options, batch_size_for_device, result);
+
+        // Emplace result into async value to signal completion.
+        feature_results_av[result_idx].emplace(std::move(result));
+      });
     }
   }
-  return extracted_coo_tensors;
+
+  return feature_results_av;
+}
+
+// Sync version of ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync.
+// Merges the results from all features and slices into a single
+// ExtractedCooTensors object. This is only for testing.
+ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
+    const absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    const int local_device_id,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  std::vector<tsl::AsyncValueRef<ExtractedCooTensors>> results_av =
+      ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync(
+          stacked_table_metadata, input_batches, local_device_id, options);
+  tsl::AsyncValueRef<ExtractedCooTensors> merged_av =
+      tsl::MakeUnconstructedAsyncValueRef<ExtractedCooTensors>();
+  tsl::RunWhenReady(
+      absl::MakeConstSpan(results_av),
+      [results_av, merged_av, &options]() mutable {
+        int64_t total_ids_for_device = 0;
+        for (const auto& av : results_av) {
+          total_ids_for_device += av.get().coo_tensors.size();
+        }
+
+        ExtractedCooTensors merged_result(
+            options.num_sc_per_device,
+            results_av[0].get().batch_size_for_device);
+        merged_result.coo_tensors.reserve(total_ids_for_device);
+        for (auto& av : results_av) {
+          merged_result.Append(std::move(av.get()));
+        }
+        DCHECK_EQ(merged_result.coo_tensors.size(), total_ids_for_device);
+        merged_av.emplace(std::move(merged_result));
+      });
+
+  tsl::BlockUntilReady(merged_av.GetAsyncValue());
+  return merged_av.get();
 }
 
 }  // namespace internal
@@ -520,6 +644,7 @@ void FillDeviceBuffersForTable(
                                   global_minibatching_split] {
       PartitionedCooTensors& grouped_coo_tensors =
           state.partitioned_coo_tensors_per_device[local_device];
+
       if (options.enable_minibatching && global_minibatching_required) {
         grouped_coo_tensors.Merge(global_minibatching_split);
       }
@@ -680,6 +805,7 @@ PreprocessSparseDenseMatmulInput(
     });
     absl::BlockingCounter counter(table_states.size() *
                                   options.local_device_count);
+
     for (auto& state : table_states) {
       ExtractSortAndGroupCooTensorsForTable(state, input_batches, options,
                                             counter);

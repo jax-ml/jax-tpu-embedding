@@ -31,11 +31,12 @@
 
 namespace jax_sc_embedding {
 
-void PySparseCooInputBatch::ConstructRowPointers() {
+void PySparseCooInputBatch::ConstructRowPointers() const {
   if (!row_pointers_.empty()) {
     return;
   }
   auto indices_array = indices_.unchecked<2>();
+  auto values_array = values_.unchecked<1>();
   // Precompute indexes for row starts. Add a sentinel node for last row.
   row_pointers_.reserve(batch_size_ + 1);
   int row_pointers_index = 0;
@@ -44,7 +45,7 @@ void PySparseCooInputBatch::ConstructRowPointers() {
   int last_val = -1;     // Only for DCHECK.
   for (int i = 0; i < indices_array.shape(0); ++i) {
     const int row_id = indices_array(i, 0), col_id = indices_array(i, 1),
-              val = values_.at(i);
+              val = values_array(i);
     DCHECK_GE(row_id, last_row_id) << "Decreasing row id values for row-major.";
     while (row_pointers_index <= row_id) {
       // Increment index until we reach the current row. Keep storing the row
@@ -73,7 +74,7 @@ void PySparseCooInputBatch::ConstructRowPointers() {
   DCHECK_EQ(row_pointers_.size(), batch_size_ + 1);
 }
 
-void PySparseCooInputBatch::ConstructRowPointersIfRequired() {
+void PySparseCooInputBatch::ConstructRowPointersIfRequired() const {
   absl::call_once(row_pointer_construction_flag_,
                   &PySparseCooInputBatch::ConstructRowPointers, this);
 }

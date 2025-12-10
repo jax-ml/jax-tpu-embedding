@@ -35,6 +35,8 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
+#include "xla/tsl/concurrency/async_value.h"  // from @xla
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -168,6 +170,8 @@ void BM_ExtractCooTensors(benchmark::State& state) {
   std::vector<StackedTableMetadata> stacked_table_metadata;
   stacked_table_metadata.reserve(num_features);
   for (int i = 0; i < num_features; ++i) {
+    // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
+    // the generated data. This doesn't affect performance of grouping itself.
     stacked_table_metadata.push_back(StackedTableMetadata(
         absl::StrCat("table_", i), /*feature_index=*/i,
         /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
@@ -188,9 +192,13 @@ void BM_ExtractCooTensors(benchmark::State& state) {
   };
 
   for (auto s : state) {
-    internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-        stacked_table_metadata, absl::MakeSpan(input_batches),
-        /*local_device_id=*/0, options);
+    std::vector<tsl::AsyncValueRef<ExtractedCooTensors>> results_av =
+        internal::ExtractCooTensorsForAllFeaturesPerLocalDeviceAsync(
+            stacked_table_metadata, absl::MakeSpan(input_batches),
+            /*local_device_id=*/0, options);
+    for (auto& av : results_av) {
+      tsl::BlockUntilReady(av.GetAsyncValue());
+    }
   }
 }
 BENCHMARK(BM_ExtractCooTensors)
@@ -233,6 +241,7 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .enable_minibatching = true,
   };
 
+  // Extract COO tensors for all features on a single local device.
   ExtractedCooTensors extracted_coo_tensors =
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
           stacked_table_metadata_list, absl::MakeSpan(input_batches),

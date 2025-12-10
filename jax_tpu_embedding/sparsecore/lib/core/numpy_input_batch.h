@@ -64,6 +64,14 @@ class NumpySparseInputBatch : public AbstractInputBatch {
   // Returns the total number of embedding IDs across all samples.
   int64_t id_count() const override { return id_count_; }
 
+  std::optional<int64_t> GetIdsCountInSlice(int start_row,
+                                            int end_row) const override {
+    if (feature_.ndim() == 2) {
+      return (end_row - start_row) * feature_.shape(1);
+    }
+    return std::nullopt;
+  }
+
   bool HasVariableWeights() const override { return weights_.has_value(); }
 
   void ExtractCooTensors(const ExtractCooTensorsOptions& options,

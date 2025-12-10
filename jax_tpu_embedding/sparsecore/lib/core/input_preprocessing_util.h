@@ -17,6 +17,7 @@
 #include <bitset>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -28,6 +29,7 @@
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/functional/function_ref.h"  // from @com_google_absl
+#include "absl/log/check.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -73,6 +75,44 @@ struct OutputCsrArrays {
   StackedTableMap<Eigen::Map<MatrixXi>> lhs_embedding_ids;
   StackedTableMap<Eigen::Map<MatrixXi>> lhs_sample_ids;
   StackedTableMap<Eigen::Map<MatrixXf>> lhs_gains;
+};
+
+struct ExtractedCooTensors {
+  std::vector<CooFormat> coo_tensors;
+  // Number of samples these coo_tensors are extracted from.
+  int batch_size_for_device;
+  // Count coo tensors per SC for efficient allocation of vector for sorting and
+  // grouping them. Might be lower after deduplication.
+  std::vector<int> coo_tensors_per_sc;
+
+  ExtractedCooTensors() : ExtractedCooTensors(0, 0) {}
+  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
+      : batch_size_for_device(batch_size_for_device),
+        coo_tensors_per_sc(num_sc_per_device, 0) {}
+
+  // Test only constructor.
+  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device,
+                      absl::Span<const CooFormat> coos)
+      : coo_tensors(coos.begin(), coos.end()),
+        batch_size_for_device(batch_size_for_device),
+        coo_tensors_per_sc(num_sc_per_device, 0) {
+    DCHECK_GT(num_sc_per_device, 0);
+    DCHECK_EQ(batch_size_for_device % num_sc_per_device, 0);
+    const int batch_size_per_sc = batch_size_for_device / num_sc_per_device;
+    for (const auto& coo : coo_tensors) {
+      coo_tensors_per_sc[coo.row_id / batch_size_per_sc]++;
+    }
+  }
+
+  // Appends other to this, leaving other in an unspecified state.
+  void Append(ExtractedCooTensors&& other) {
+    coo_tensors.insert(coo_tensors.end(),
+                       std::make_move_iterator(other.coo_tensors.begin()),
+                       std::make_move_iterator(other.coo_tensors.end()));
+    for (int i = 0; i < coo_tensors_per_sc.size(); ++i) {
+      coo_tensors_per_sc[i] += other.coo_tensors_per_sc[i];
+    }
+  }
 };
 
 namespace internal {
@@ -245,20 +285,6 @@ enum class RowCombiner {
 };
 
 RowCombiner GetRowCombiner(absl::string_view combiner);
-
-struct ExtractedCooTensors {
-  std::vector<CooFormat> coo_tensors;
-  // Number of samples these coo_tensors are extracted from.
-  int batch_size_for_device;
-  // Count coo tensors per SC for efficient allocation of vector for sorting and
-  // grouping them. Might be lower after deduplication.
-  std::vector<int> coo_tensors_per_sc;
-
-  ExtractedCooTensors() : ExtractedCooTensors(0, 0) {}
-  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
-      : batch_size_for_device(batch_size_for_device),
-        coo_tensors_per_sc(num_sc_per_device, 0) {}
-};
 
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;
