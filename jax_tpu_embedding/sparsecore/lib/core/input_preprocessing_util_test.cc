@@ -146,8 +146,7 @@ TEST(SortAndGroupTest, Base) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 8);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -157,6 +156,7 @@ TEST(SortAndGroupTest, Base) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -234,8 +234,7 @@ TEST(SortAndGroupTest, TwoScs) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(2, 8);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(2, 8, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -245,6 +244,7 @@ TEST(SortAndGroupTest, TwoScs) {
       .global_device_count = 1,
       .num_sc_per_device = 2,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/2,
@@ -303,8 +303,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 8);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
@@ -314,6 +313,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -354,8 +354,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 16);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/4,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
@@ -365,6 +364,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -410,8 +410,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 16);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/8,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
@@ -421,6 +420,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -467,8 +467,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
     coo_formats.push_back(CooFormat(row, 6, 1.0));
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 128);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/64,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
@@ -478,6 +477,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -519,8 +519,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
     coo_formats.push_back(CooFormat(row, 8, 1.0));
     coo_formats.push_back(CooFormat(row, 16, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 128);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/128,
       /*max_unique_ids_per_partition=*/4, /*row_offset=*/0, /*col_offset=*/0,
@@ -530,6 +529,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -571,8 +571,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
   for (int row = 0; row < 128; ++row) {
     coo_formats.push_back(CooFormat(row, row * 4, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 128);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -582,6 +581,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -624,8 +624,7 @@ TEST(SortAndGroupTest, IdDropping) {
   }
   // Force dropping of IDs here with max_ids_per_partition == 2
   // The later 2 samples for each sparsecore will be dropped.
-  ExtractedCooTensors extracted_coo_tensors(4, 16);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
@@ -635,6 +634,7 @@ TEST(SortAndGroupTest, IdDropping) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = true,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   bool minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -715,8 +715,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 8);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -726,6 +725,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -846,8 +846,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
     coo_formats.push_back(CooFormat(row, 2, 1.0));
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 8);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -858,6 +857,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
       .enable_minibatching = true,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
@@ -976,8 +976,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       coo_formats.push_back(CooFormat(row, col, 1.0));
     }
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 8);
-  extracted_coo_tensors.coo_tensors = coo_formats;
+  ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
   StackedTableMetadata stacked_table_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
@@ -988,6 +987,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
       .enable_minibatching = true,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
@@ -1153,8 +1153,7 @@ TEST(InputPreprocessingUtilTest,
   coo_formats.emplace_back(/*row=*/1, /*col=*/1, /*gain=*/1.0);
 
   ExtractedCooTensors extracted(/*num_sc_per_device=*/1,
-                                /*batch_size_for_device=*/4);
-  extracted.coo_tensors = coo_formats;
+                                /*batch_size_for_device=*/4, coo_formats);
 
   StackedTableMetadata meta("stacked_table", /*feature_index=*/0,
                             /*max_ids_per_partition=*/32,
@@ -1167,6 +1166,7 @@ TEST(InputPreprocessingUtilTest,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
 
   bool minibatching_required = false;
@@ -1217,8 +1217,7 @@ TEST(InputPreprocessingUtilTest,
   coo_formats.emplace_back(/*row=*/3, /*col=*/1, /*gain=*/1.0);
 
   ExtractedCooTensors extracted(/*num_sc_per_device=*/1,
-                                /*batch_size_for_device=*/4);
-  extracted.coo_tensors = coo_formats;
+                                /*batch_size_for_device=*/4, coo_formats);
 
   StackedTableMetadata meta("stacked_table", /*feature_index=*/0,
                             /*max_ids_per_partition=*/32,
@@ -1232,6 +1231,7 @@ TEST(InputPreprocessingUtilTest,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
+      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
       .enable_minibatching = true,
       .minibatching_bucketing_hash_fn = hash_fn,
   };
