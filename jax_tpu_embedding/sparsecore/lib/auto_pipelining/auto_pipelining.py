@@ -190,7 +190,10 @@ def _run(
       updates_0=updates_1,
   )
 
-  return next_state, (carry, *func_results)
+  return next_state, (
+      carry,
+      *func_results,
+  )
 
 
 def finalize_pipelining(
@@ -201,8 +204,8 @@ def finalize_pipelining(
       fn, PipeliningFunction
   ), 'The function is not auto-pipelining wrapped.'
   state, (carry, *res) = fn.finalize(state, carry)
-  _, (carry, *_) = fn.finalize(state, carry)
-  return carry, *res
+  state, (carry, *_) = fn.finalize(state, carry)
+  return state, (carry, *res)
 
 
 FunctionArgs = ParamSpec('FunctionArgs')
@@ -211,6 +214,7 @@ FunctionResults = TypeVar('FunctionResults')
 
 def auto_pipelining(
     fn: Callable[FunctionArgs, FunctionResults],
+    out_shardings: tuple[Any, ...],
     static_argnums: tuple[int, ...] = (),
 ) -> Callable[
     Concatenate[EmbeddingPipeliningState, FunctionArgs],
@@ -255,4 +259,13 @@ def auto_pipelining(
     runner = _build_runner(carry, state.args_1)
     return _run(runner, state, carry, None)
 
-  return PipeliningFunction(jax.jit(train_pipeline), jax.jit(finalize_pipeline))
+  train_pipeline = jax.jit(
+      train_pipeline,
+      out_shardings=out_shardings,
+      donate_argnames=('carry',),
+  )
+  finalize_pipeline = jax.jit(
+      finalize_pipeline, out_shardings=out_shardings, donate_argnames=('carry',)
+  )
+
+  return PipeliningFunction(train_pipeline, finalize_pipeline)
