@@ -40,6 +40,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/grpc_credentials.h"
 #include "tsl/platform/errors.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
+#include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
 namespace rpc {
@@ -50,6 +51,7 @@ absl::Status SendLocalData(
     const absl::flat_hash_map<
         std::string, std::unique_ptr<AllReduceGrpcService::Stub>>& stubs,
     const AllReduceData& request, int num_hosts) {
+  tsl::profiler::TraceMe traceme("GrpcAllReduceInterface::SendLocalData");
   absl::Mutex mutex;
   grpc::Status overall_status ABSL_GUARDED_BY(mutex) = grpc::Status::OK;
   std::vector<std::string> failed_peers ABSL_GUARDED_BY(mutex);

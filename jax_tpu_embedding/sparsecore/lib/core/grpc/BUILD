@@ -62,6 +62,7 @@ cc_library(
         "@com_google_absl//absl/time",
         "@tsl//tsl/platform:errors",
         "@tsl//tsl/platform:statusor",
+        "@tsl//tsl/profiler/lib:traceme",
     ],
 )
 
