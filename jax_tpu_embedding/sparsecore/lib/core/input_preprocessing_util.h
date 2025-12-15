@@ -87,7 +87,6 @@ enum class RowCombiner {
 
 RowCombiner GetRowCombiner(absl::string_view combiner);
 
-// TODO: b/444292437 - Evaluate the impact of ordering if fields in this struct.
 struct IdPair {
   int32_t col_id;
   int32_t row_id;
