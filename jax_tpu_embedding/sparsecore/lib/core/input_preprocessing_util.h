@@ -104,7 +104,8 @@ struct ExtractedCooTensors {
   //       instead rematerialize during grouping.
   //    b. For 'mean' combiner: We store token counts per row in
   //       `row_token_counts` and compute gains (1.0 / token_count) during
-  //       grouping.
+  //       grouping. This is ~2.5% faster than storing pre-computed gains per
+  //       row.
   //    c. For 'sqrtn' combiner: We pre-calculate and store gains per row in
   //       `row_gains`, because sqrt() is more expensive to compute on-the-fly
   //       during grouping compared to division for 'mean'.
@@ -114,8 +115,6 @@ struct ExtractedCooTensors {
   std::vector<float> gains;
   // Number of samples these coo_tensors are extracted from.
   int batch_size_for_device;
-  // TODO: b/444292437 - Evaluate the impact of storing pre-computed mean gains
-  // as well.
   std::vector<int> row_token_counts;
   std::vector<float> row_gains;
   // Count coo tensors per SC for efficient allocation of vector for sorting and
