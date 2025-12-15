@@ -30,7 +30,6 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
@@ -96,34 +95,6 @@ std::vector<int> GenerateEmbeddingIdsForRow(absl::BitGen& gen, int vocab_size) {
     ids_out.push_back(embedding_id);
   }
   return ids_out;
-}
-
-ExtractedCooTensors GenerateSkewedCooTensors(int num_sc_per_device,
-                                             int batch_size_per_sc,
-                                             int vocab_size) {
-  const int batch_size_for_device = num_sc_per_device * batch_size_per_sc;
-
-  absl::BitGen gen(std::seed_seq{kSeed});  // seed for reproducibility
-
-  ExtractedCooTensors extracted_coo_tensors(num_sc_per_device,
-                                            batch_size_for_device);
-
-  // For each sample in the batch:
-  // 1. Draw a sample size from a Lognormal distribution.
-  // 2. Draw `sample_size` IDs. Each ID is drawn from a Zipf distribution
-  //    with probability `kSkewProbability`, or uniformly from [0, kVocabSize)
-  //    otherwise.
-  for (int row = 0; row < batch_size_for_device; ++row) {
-    std::vector<int> embedding_ids =
-        GenerateEmbeddingIdsForRow(gen, vocab_size);
-    int sc_id = row / batch_size_per_sc;
-    extracted_coo_tensors.coo_tensors_per_sc[sc_id] += embedding_ids.size();
-    for (int embedding_id : embedding_ids) {
-      extracted_coo_tensors.coo_tensors.push_back(
-          CooFormat(row, embedding_id, 1.0));
-    }
-  }
-  return extracted_coo_tensors;
 }
 
 std::vector<std::unique_ptr<AbstractInputBatch>>
