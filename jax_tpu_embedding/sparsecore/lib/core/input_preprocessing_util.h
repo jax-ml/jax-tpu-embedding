@@ -15,9 +15,9 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
 #include <bitset>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -77,31 +77,171 @@ struct OutputCsrArrays {
   StackedTableMap<Eigen::Map<MatrixXf>> lhs_gains;
 };
 
+// Different combiners that are supported for samples with multiple ids.
+// By default, we use kSum (add the embeddings for all ids in the sample).
+enum class RowCombiner {
+  kSum = 0,
+  kMean = 1,
+  kSqrtn = 2,
+};
+
+RowCombiner GetRowCombiner(absl::string_view combiner);
+
+// TODO: b/444292437 - Evaluate the impact of ordering if fields in this struct.
+struct IdPair {
+  int32_t col_id;
+  int32_t row_id;
+};
+
 struct ExtractedCooTensors {
-  std::vector<CooFormat> coo_tensors;
+  std::vector<IdPair> ids;
+  // For storing gains, we use different strategies to optimize for memory and
+  // performance:
+  // 1. If weights are non-uniform (`has_variable_weights_ == true`), we store
+  //    per-tensor gains in the `gains` vector.
+  // 2. If weights are uniform (`has_variable_weights_ == false`):
+  //    a. For 'sum' combiner: Gains are always 1.0, so we don't store them and
+  //       instead rematerialize during grouping.
+  //    b. For 'mean' combiner: We store token counts per row in
+  //       `row_token_counts` and compute gains (1.0 / token_count) during
+  //       grouping.
+  //    c. For 'sqrtn' combiner: We pre-calculate and store gains per row in
+  //       `row_gains`, because sqrt() is more expensive to compute on-the-fly
+  //       during grouping compared to division for 'mean'.
+  // This approach minimizes memory footprint for uniform weights by storing
+  // data per-row for 'mean' and 'sqrtn', rather than per-tensor. (We only
+  // perform 1 push_back per row, rather than per tensor.)
+  std::vector<float> gains;
   // Number of samples these coo_tensors are extracted from.
   int batch_size_for_device;
+  // TODO: b/444292437 - Evaluate the impact of storing pre-computed mean gains
+  // as well.
+  std::vector<int> row_token_counts;
+  std::vector<float> row_gains;
   // Count coo tensors per SC for efficient allocation of vector for sorting and
   // grouping them. Might be lower after deduplication.
   std::vector<int> coo_tensors_per_sc;
+  bool has_variable_weights_;
 
   ExtractedCooTensors() : ExtractedCooTensors(0, 0) {}
-  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device)
+  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device,
+                      bool has_variable_weights = true,
+                      RowCombiner combiner = RowCombiner::kSum)
       : batch_size_for_device(batch_size_for_device),
-        coo_tensors_per_sc(num_sc_per_device, 0) {}
+        coo_tensors_per_sc(num_sc_per_device, 0),
+        has_variable_weights_(has_variable_weights) {
+    if (!has_variable_weights_) {
+      switch (combiner) {
+        case RowCombiner::kMean:
+          row_token_counts.resize(batch_size_for_device);
+          break;
+        case RowCombiner::kSqrtn:
+          row_gains.resize(batch_size_for_device);
+          break;
+        case RowCombiner::kSum:
+          break;
+      }
+    }
+  }
 
   // Test only constructor.
   ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device,
                       absl::Span<const CooFormat> coos)
-      : coo_tensors(coos.begin(), coos.end()),
-        batch_size_for_device(batch_size_for_device),
-        coo_tensors_per_sc(num_sc_per_device, 0) {
+      : batch_size_for_device(batch_size_for_device),
+        coo_tensors_per_sc(num_sc_per_device, 0),
+        has_variable_weights_(false) {
+    ids.reserve(coos.size());
+
+    // Check if any of the gains are not 1.0.
+    for (const auto& coo : coos) {
+      if (coo.gain != 1.0f) {
+        has_variable_weights_ = true;
+        break;
+      }
+    }
+
+    // If we have variable weights, we need to store the gains.
+    if (has_variable_weights_) {
+      gains.reserve(coos.size());
+    }
+
+    // Add all the coos to the extracted coo tensors.
+    for (const auto& coo : coos) {
+      ids.push_back({.col_id = coo.col_id, .row_id = coo.row_id});
+      if (has_variable_weights_) {
+        gains.push_back(coo.gain);
+      }
+    }
+
+    // Populate the coo_tensors_per_sc vector.
     DCHECK_GT(num_sc_per_device, 0);
     DCHECK_EQ(batch_size_for_device % num_sc_per_device, 0);
     const int batch_size_per_sc = batch_size_for_device / num_sc_per_device;
-    for (const auto& coo : coo_tensors) {
-      coo_tensors_per_sc[coo.row_id / batch_size_per_sc]++;
+    for (const auto& id_pair : ids) {
+      coo_tensors_per_sc[id_pair.row_id / batch_size_per_sc]++;
     }
+  }
+
+  bool has_variable_weights() const { return has_variable_weights_; }
+
+  void emplace_back(int row_id, int embedding_id, float gain, int col_shift,
+                    int col_offset, int num_scs_mod) {
+    this->ids.push_back({.col_id = CooFormat::GetColId(embedding_id, col_shift,
+                                                       col_offset, num_scs_mod),
+                         .row_id = row_id});
+    if (has_variable_weights_) {
+      this->gains.push_back(gain);
+    }
+  }
+
+  size_t size() const { return ids.size(); }
+
+  void reserve(size_t n) {
+    ids.reserve(n);
+    if (has_variable_weights_) {
+      gains.reserve(n);
+    }
+  }
+
+  CooFormat get(int i) const {
+    return CooFormat(ids[i].row_id, ids[i].col_id,
+                     has_variable_weights_ ? gains[i] : 1.0f);
+  }
+
+  template <bool kHasVariableWeights>
+  CooFormat GetCooFormatWithGain(uint64_t key, uint32_t col_id,
+                                 RowCombiner combiner) const {
+    float gain = 1.0f;
+    uint32_t row_id;
+    if constexpr (kHasVariableWeights) {
+      const uint32_t index = CooFormat::GetDataFromKey(key);
+      row_id = ids[index].row_id;
+      gain = gains[index];
+    } else {
+      row_id = CooFormat::GetDataFromKey(key);
+      switch (combiner) {
+        case RowCombiner::kMean:
+          gain = 1.0f / static_cast<float>(row_token_counts[row_id]);
+          break;
+        case RowCombiner::kSum:
+          gain = 1.0f;
+          break;
+        case RowCombiner::kSqrtn:
+          gain = row_gains[row_id];
+          break;
+      }
+    }
+    return CooFormat(row_id, col_id, gain);
+  }
+
+  // For test only.
+  std::vector<CooFormat> ToCooVector() const {
+    std::vector<CooFormat> coos;
+    coos.reserve(size());
+    for (int i = 0; i < size(); ++i) {
+      coos.push_back(get(i));
+    }
+    return coos;
   }
 };
 
@@ -265,16 +405,6 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
 static_assert(
     std::is_trivially_copyable<PreprocessSparseDenseMatmulInputOptions>());
-
-// Different combiners that are supported for samples with multiple ids.
-// By default, we use kSum (add the embeddings for all ids in the sample).
-enum class RowCombiner {
-  kSum = 0,
-  kMean = 1,
-  kSqrtn = 2,
-};
-
-RowCombiner GetRowCombiner(absl::string_view combiner);
 
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;

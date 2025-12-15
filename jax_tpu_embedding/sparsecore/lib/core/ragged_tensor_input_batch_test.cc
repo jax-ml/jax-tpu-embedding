@@ -76,15 +76,15 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
       },
       extracted_3);
 
-  EXPECT_THAT(extracted_1.coo_tensors,
+  EXPECT_THAT(extracted_1.ToCooVector(),
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),
                           CooFormat(0, 2, 1.0), CooFormat(1, 0, 1.0),
                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
-  EXPECT_THAT(extracted_2.coo_tensors,
+  EXPECT_THAT(extracted_2.ToCooVector(),
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(1, 0, 1.0)));
 
   EXPECT_THAT(
-      extracted_3.coo_tensors,
+      extracted_3.ToCooVector(),
       ElementsAre(CooFormat(16, 0 + 8, 1.0), CooFormat(17, 2 + 8, 1.0)));
 }
 
@@ -106,7 +106,7 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
           .combiner = RowCombiner::kMean,
       },
       extracted);
-  EXPECT_THAT(extracted.coo_tensors,
+  EXPECT_THAT(extracted.ToCooVector(),
               ElementsAre(CooFormat(0, 0, 1.0 / 3), CooFormat(0, 1, 1.0 / 3),
                           CooFormat(0, 2, 1.0 / 3), CooFormat(1, 0, 1.0),
                           CooFormat(2, 0, 1.0), CooFormat(3, 2, 1.0)));
@@ -129,7 +129,7 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
       },
       extracted);
   EXPECT_THAT(
-      extracted.coo_tensors,
+      extracted.ToCooVector(),
       ElementsAre(CooFormat(0, 0, 1.0 / std::sqrt(3)),
                   CooFormat(0, 1, 1.0 / std::sqrt(3)),
                   CooFormat(0, 2, 1.0 / std::sqrt(3)), CooFormat(1, 0, 1.0),
@@ -158,7 +158,7 @@ TEST(RaggedTensorInputBatchTest,
           .combiner = RowCombiner::kSum,
       },
       extracted);
-  EXPECT_THAT(extracted.coo_tensors,
+  EXPECT_THAT(extracted.ToCooVector(),
               ElementsAre(CooFormat(0, 0, 1.0), CooFormat(0, 1, 1.0),  // Row 0
                           CooFormat(1, 0, 1.0), CooFormat(1, 2, 1.0),  // Row 1
                           CooFormat(2, 0, 1.0), CooFormat(2, 3, 1.0),  // Row 2

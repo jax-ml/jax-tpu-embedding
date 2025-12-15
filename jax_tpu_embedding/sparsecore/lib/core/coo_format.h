@@ -130,11 +130,41 @@ struct CooFormat {
            (embedding_id & ~num_scs_mod) + col_offset;
   }
 
-  uint32_t GetBucketId(HashFn hash_fn = HighwayHash) const {
+  // Static method to avoid creating a CooFormat object when only col_id is
+  // available, which is common when iterating over Struct-of-Arrays data
+  // structures for performance.
+  static uint32_t GetBucketId(int col_id, HashFn hash_fn = HighwayHash) {
     // Checks that kMaxMinibatchingBuckets is a power of 2.
     static_assert(absl::has_single_bit(kMaxMinibatchingBuckets));
 
     return hash_fn(col_id) & (kMaxMinibatchingBuckets - 1);
+  }
+
+  uint32_t GetBucketId(HashFn hash_fn = HighwayHash) const {
+    return GetBucketId(col_id, hash_fn);
+  }
+
+  // Static method to avoid creating a CooFormat object when only col_id and
+  // data are available, which is common when iterating over Struct-of-Arrays
+  // data structures for performance.
+  static uint64_t GetGroupingKey(uint32_t col_id, uint32_t data,
+                                 const uint32_t num_scs_bit,
+                                 const bool create_buckets,
+                                 HashFn hash_fn = HighwayHash) {
+    // This structure ensures tensors are sorted first by bucket_id, then by
+    // sparse core, and finally by embedding ID.
+    const uint32_t bucket_id =
+        create_buckets ? GetBucketId(col_id, hash_fn) : 0;
+
+    DCHECK_LE(data, kDataMask);
+
+    // [global_sc_id, local_embedding_id]
+    uint32_t rotated_col_id =
+        absl::rotr(static_cast<uint32_t>(col_id), num_scs_bit);
+
+    return (uint64_t{bucket_id} << kBucketIdOffset) |
+           (uint64_t{rotated_col_id} << kRotatedColIdOffset) |
+           static_cast<uint64_t>(data);
   }
 
   // Computes a 64-bit sorting key with the following layout:
@@ -146,20 +176,8 @@ struct CooFormat {
                           const bool create_buckets,
                           HashFn hash_fn = HighwayHash,
                           const bool has_variable_weights = true) const {
-    // This structure ensures tensors are sorted first by bucket_id, then by
-    // sparse core, and finally by embedding ID.
-    const uint32_t bucket_id = create_buckets ? GetBucketId(hash_fn) : 0;
-
-    const uint32_t data = has_variable_weights ? index : row_id;
-    DCHECK_LE(data, kDataMask);
-
-    // [global_sc_id, local_embedding_id]
-    uint32_t rotated_col_id =
-        absl::rotr(static_cast<uint32_t>(col_id), num_scs_bit);
-
-    return (uint64_t{bucket_id} << kBucketIdOffset) |
-           (uint64_t{rotated_col_id} << kRotatedColIdOffset) |
-           static_cast<uint64_t>(data);
+    return GetGroupingKey(col_id, has_variable_weights ? index : row_id,
+                          num_scs_bit, create_buckets, hash_fn);
   }
 
   static uint32_t GetDataFromKey(uint64_t key) { return key & kDataMask; }

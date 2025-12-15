@@ -43,7 +43,7 @@ float ComputeWeightDivisor(RowCombiner combiner,
   case RowCombiner::kMean:
     return static_cast<float>(num_cols);
   case RowCombiner::kSqrtn:
-    return std::sqrt(num_cols);
+    return std::sqrt(static_cast<float>(num_cols));
   }
 }
 
@@ -105,9 +105,25 @@ void ProcessCooTensors(
 
     const int sample_id =
         values_stream.row() - options.slice_start + options.row_offset;
-    const float divisor =
-        ComputeWeightDivisor(options.combiner, weights_stream);
     const int num_cols = values_stream.cols();
+    float divisor = 1.0f;
+
+    if (extracted_coo_tensors.has_variable_weights()) {
+      divisor = ComputeWeightDivisor(options.combiner, weights_stream);
+    } else {
+      switch (options.combiner) {
+        case RowCombiner::kMean:
+          extracted_coo_tensors.row_token_counts[sample_id] = num_cols;
+          break;
+        case RowCombiner::kSqrtn: {
+          extracted_coo_tensors.row_gains[sample_id] =
+              1.0f / std::sqrt(static_cast<float>(num_cols));
+          break;
+        }
+        case RowCombiner::kSum:
+          break;
+      }
+    }
 
     extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
         num_cols;
@@ -115,13 +131,15 @@ void ProcessCooTensors(
     for (weights_stream.SeekCol(0); values_stream.col() < num_cols;
          values_stream.NextCol(), weights_stream.NextCol()) {
       const int embedding_id = values_stream.get();
-      const float gain = weights_stream.get() / divisor;
+      const float gain = extracted_coo_tensors.has_variable_weights()
+                             ? weights_stream.get() / divisor
+                             : 1.0f;
       DCHECK_GE(embedding_id, 0);
       DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
 
-      extracted_coo_tensors.coo_tensors.emplace_back(
-          sample_id, embedding_id, gain, options.col_shift, options.col_offset,
-          num_scs_mod);
+      extracted_coo_tensors.emplace_back(sample_id, embedding_id, gain,
+                                         options.col_shift, options.col_offset,
+                                         num_scs_mod);
     }
   }
 }

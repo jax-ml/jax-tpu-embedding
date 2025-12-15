@@ -45,8 +45,8 @@ namespace internal {
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    int local_device_id,
-    const PreprocessSparseDenseMatmulInputOptions& options);
+    int local_device_id, const PreprocessSparseDenseMatmulInputOptions& options,
+    bool has_variable_weights = false);
 }  // namespace internal
 
 struct PreprocessSparseDenseMatmulOutput {

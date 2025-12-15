@@ -127,20 +127,12 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
 }
 
 // We consider a stack to have variable weights if any feature in the stack
-// has explicitly variable weights or if any feature uses a row combiner
-// other than 'sum' (e.g., 'mean' or 'sqrtn').
+// has explicitly variable weights.
 bool StackHasVariableWeights(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     absl::Span<const StackedTableMetadata> stacked_table_metadata) {
   for (const auto& metadata : stacked_table_metadata) {
-    // `kHasVariableWeights` must be true if any feature in the stack:
-    // 1.  Is explicitly marked as having variable weights.
-    // 2.  Uses a row combiner other than 'sum'. Non-'sum' combiners (e.g.,
-    //     'mean', 'sqrtn') adjust gains during `ExtractCooTensors`. This
-    //     means the gains in `coo_tensors` are not always 1.0, even with unity
-    //     input weights.
-    if (input_batches[metadata.feature_index]->HasVariableWeights() ||
-        metadata.row_combiner != RowCombiner::kSum) {
+    if (input_batches[metadata.feature_index]->HasVariableWeights()) {
       return true;
     }
   }
@@ -226,7 +218,7 @@ void ExtractSortAndGroupCooTensorsForTable(
           state.extracted_coo_tensors_per_device[local_device] =
               internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
                   state.stacked_table_metadata, input_batches, local_device,
-                  options);
+                  options, state.has_variable_weights);
 
           internal::StatsPerDevice stats_per_device =
               state.stats_per_host.GetStatsPerDevice(local_device);
@@ -305,13 +297,18 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     const absl::Span<const StackedTableMetadata> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const int local_device_id,
-    const PreprocessSparseDenseMatmulInputOptions& options) {
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    bool has_variable_weights) {
   int batch_size_for_device = 0;
   int64_t total_ids_for_device = 0;
   for (const auto& feature_metadata : stacked_table_metadata) {
     batch_size_for_device +=
         input_batches[feature_metadata.feature_index]->size() /
         options.local_device_count;
+    // This is almost correct, but could be slightly off depending on sample
+    // sizes.
+    // TODO: b/444292437 - Evaluate impact of summing
+    // batch->GetIdCountInSlice(...) to get an accurate value.
     total_ids_for_device +=
         input_batches[feature_metadata.feature_index]->id_count() /
         options.local_device_count;
@@ -338,9 +335,10 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
       << "Batch size must be greater or equal to the number of "
          "features stacked together (per feature slice).";
 
-  ExtractedCooTensors extracted_coo_tensors(options.num_sc_per_device,
-                                            batch_size_for_device);
-  extracted_coo_tensors.coo_tensors.reserve(total_ids_for_device);
+  ExtractedCooTensors extracted_coo_tensors(
+      options.num_sc_per_device, batch_size_for_device, has_variable_weights,
+      stacked_table_metadata[0].row_combiner);
+  extracted_coo_tensors.reserve(total_ids_for_device);
 
   // This slices each feature into `feature_slices` partitions and then
   // interleaves them: (k=num_sc_per_device-1). For stacking strategy

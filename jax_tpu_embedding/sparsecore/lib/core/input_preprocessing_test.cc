@@ -232,7 +232,7 @@ TEST_F(TableStackingTest, MultiProcessStackingStackThenSplit) {
           /*local_device_id=*/0, options);
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(24));
+  ASSERT_THAT(extracted_coo_tensors.size(), Eq(24));
   // This results in an uneven ID distribution - 8, 8, 4, 4
 
   std::vector<CooFormat> expected_coo_tensors;
@@ -268,7 +268,7 @@ TEST_F(TableStackingTest, MultiProcessStackingStackThenSplit) {
   expected_coo_tensors.push_back(CooFormat(14, 36, 1));
   expected_coo_tensors.push_back(CooFormat(15, 40, 1));
 
-  EXPECT_THAT(extracted_coo_tensors.coo_tensors,
+  EXPECT_THAT(extracted_coo_tensors.ToCooVector(),
               ElementsAreArray(expected_coo_tensors));
 }
 
@@ -285,7 +285,7 @@ TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
           /*local_device_id=*/0, options);
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(24));
+  ASSERT_THAT(extracted_coo_tensors.size(), Eq(24));
   // This results in a more even distribution (actually ideal) - 6,6,6,6
 
   std::vector<CooFormat> expected_coo_tensors;
@@ -333,7 +333,7 @@ TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
   expected_coo_tensors.push_back(CooFormat(14, 36, 1));
   expected_coo_tensors.push_back(CooFormat(15, 40, 1));
 
-  EXPECT_THAT(extracted_coo_tensors.coo_tensors,
+  EXPECT_THAT(extracted_coo_tensors.ToCooVector(),
               ElementsAreArray(expected_coo_tensors));
 }
 
@@ -350,13 +350,13 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
           /*local_device_id=*/0, options);
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
+  ASSERT_THAT(extracted_coo_tensors.size(), Eq(16 * 17 / 2));
 
   const int batch_size_per_sc =
       extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-  for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-    ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
+  for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
+    ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
   }
 
   std::vector<int> expected_ids_per_sc = {1 + 2 + 9 + 10, 3 + 4 + 11 + 12,
@@ -378,13 +378,13 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceStackThenSplit) {
           /*local_device_id=*/0, options);
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
+  ASSERT_THAT(extracted_coo_tensors.size(), Eq(16 * 17 / 2));
 
   const int batch_size_per_sc =
       extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-  for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-    ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
+  for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
+    ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
   }
 
   std::vector<int> expected_ids_per_sc = {1 + 2 + 3 + 4,     //
@@ -416,8 +416,8 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
     const int batch_size_per_sc =
         extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
     std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-    for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-      ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
+    for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
+      ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
     }
 
     EXPECT_EQ(ids_per_sc, expected_ids_per_sc[local_device_id])
@@ -447,8 +447,8 @@ TEST_F(TableStackingTest, MultiChipStackThenSplit) {
     const int batch_size_per_sc =
         extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
     std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-    for (const auto& coo_tensor : extracted_coo_tensors.coo_tensors) {
-      ids_per_sc[coo_tensor.row_id / batch_size_per_sc]++;
+    for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
+      ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
     }
 
     EXPECT_EQ(ids_per_sc, expected_ids_per_sc[local_device_id])
@@ -612,7 +612,7 @@ TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
           /*local_device_id=*/0, options);
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.coo_tensors, SizeIs(16 * 17 / 2));
+  ASSERT_THAT(extracted_coo_tensors.size(), Eq(16 * 17 / 2));
 
   std::vector<int> expected_coo_tensors_per_sc = {
       1 + 2 + 9 + 10, 3 + 4 + 11 + 12, 5 + 6 + 13 + 14, 7 + 8 + 15 + 16};

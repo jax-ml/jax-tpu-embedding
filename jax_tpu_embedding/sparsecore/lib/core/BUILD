@@ -421,7 +421,6 @@ cc_test(
     srcs = ["extract_sort_and_group_benchmark.cc"],
     deps = [
         ":abstract_input_batch",
-        ":coo_format",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         ":ragged_tensor_input_batch",
