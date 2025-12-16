@@ -207,7 +207,7 @@ class PartitionedCooTensors {
   int GetNumMinibatches() const { return bucket_count_per_sc_; }
 
   static PartitionedCooTensors MergeAll(
-      std::vector<PartitionedCooTensors>&& parts) {
+      absl::Span<PartitionedCooTensors> parts) {
     DCHECK(!parts.empty());
     // If there is only one part, no merging is needed.
     if (parts.size() == 1) {
