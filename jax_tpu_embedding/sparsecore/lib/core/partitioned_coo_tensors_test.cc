@@ -14,6 +14,8 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 
 #include <bitset>
+#include <utility>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -185,6 +187,90 @@ TEST(PartitionedCooTensorsTest, NoMerge) {
   EXPECT_THAT(tensors(1, 3), ElementsAre(coo8));
   EXPECT_EQ(tensors.Size(0), 4);
   EXPECT_EQ(tensors.Size(1), 4);
+}
+
+TEST(PartitionedCooTensorsTest, MergeDistinctSparseCores) {
+  // Create first part (simulating SC 0).
+  PartitionedCooTensors part1(/*reserve_count=*/10, /*sc_count=*/1,
+                              /*global_sc_count=*/2,
+                              /*bucket_count=*/2);
+  CooFormat coo1(1, 1, 1.0);
+  CooFormat coo2(2, 2, 2.0);
+  part1.Add(0, 0, coo1);
+  part1.Add(0, 1, coo2);
+  part1.FillRemainingScBuckets();
+
+  // Create second part (simulating SC 1).
+  PartitionedCooTensors part2(/*reserve_count=*/10, /*sc_count=*/1,
+                              /*global_sc_count=*/2,
+                              /*bucket_count=*/2);
+  CooFormat coo3(3, 3, 3.0);
+  CooFormat coo4(4, 4, 4.0);
+  part2.Add(0, 0, coo3);
+  part2.Add(0, 1, coo4);
+  part2.FillRemainingScBuckets();
+
+  // Merge the parts.
+  std::vector<PartitionedCooTensors> parts;
+  parts.reserve(2);
+  parts.push_back(std::move(part1));
+  parts.push_back(std::move(part2));
+
+  PartitionedCooTensors result =
+      PartitionedCooTensors::MergeAll(std::move(parts));
+
+  // Verify that the result contains 2 SCs.
+  EXPECT_EQ(result.GetNumMinibatches(), 2);
+  EXPECT_EQ(result.Size(0), 2);
+  EXPECT_EQ(result.Size(1), 2);
+
+  // Verify contents of SC 0 (from part 1) and SC 1 (from part 2).
+  EXPECT_THAT(result(0, 0), ElementsAre(coo1));
+  EXPECT_THAT(result(0, 1), ElementsAre(coo2));
+  EXPECT_THAT(result(1, 0), ElementsAre(coo3));
+  EXPECT_THAT(result(1, 1), ElementsAre(coo4));
+}
+
+TEST(PartitionedCooTensorsTest, MergeDistinctSparseCoresWithOffsets) {
+  // Simulating SC 0
+  PartitionedCooTensors part1(/*reserve_count=*/10, /*sc_count=*/1,
+                              /*global_sc_count=*/2,
+                              /*bucket_count=*/2);
+  CooFormat coo1(1, 1, 1.0);
+  CooFormat coo2(2, 2, 2.0);
+  part1.Add(0, 0, coo1);
+  part1.Add(0, 1, coo2);
+  part1.FillRemainingScBuckets();
+
+  // Simulating SC 1
+  PartitionedCooTensors part2(/*reserve_count=*/10, /*sc_count=*/1,
+                              /*global_sc_count=*/2,
+                              /*bucket_count=*/2);
+  CooFormat coo3(3, 3, 3.0);
+  CooFormat coo4(4, 4, 4.0);
+  CooFormat coo5(5, 5, 5.0);
+  part2.Add(0, 0, coo3);
+  part2.Add(0, 0, coo4);
+  part2.Add(0, 1, coo5);
+  part2.FillRemainingScBuckets();
+
+  std::vector<PartitionedCooTensors> parts;
+  parts.push_back(std::move(part1));
+  parts.push_back(std::move(part2));
+
+  PartitionedCooTensors result =
+      PartitionedCooTensors::MergeAll(std::move(parts));
+
+  EXPECT_EQ(result.GetNumMinibatches(), 2);
+  // SC 0 has 2 buckets, sizes 1 and 1.
+  EXPECT_EQ(result.Size(0), 2);
+  // SC 1 has 2 buckets, sizes 2 and 1.
+  EXPECT_EQ(result.Size(1), 3);
+
+  EXPECT_THAT(result(0, 0), ElementsAre(coo1));
+  EXPECT_THAT(result(0, 1), ElementsAre(coo2));
+  EXPECT_THAT(result(1, 0), ElementsAre(coo3, coo4));
+  EXPECT_THAT(result(1, 1), ElementsAre(coo5));
 }
 
 }  // namespace

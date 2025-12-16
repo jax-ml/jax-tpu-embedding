@@ -179,20 +179,19 @@ struct TableState {
 };
 
 template <typename SplitType>
-void SortAndGroupCooTensorsForTableState(
+tsl::AsyncValueRef<std::pair<PartitionedCooTensors, int>>
+SortAndGroupCooTensorsForTableStateAsync(
     TableState& state, int local_device,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::StatsPerDevice& stats, SplitType& split) {
+    internal::StatsPerDevice stats, SplitType& split) {
   if (state.has_variable_weights) {
-    state.partitioned_coo_tensors_per_device[local_device] =
-        SortAndGroupCooTensorsPerLocalDevice<true>(
-            state.extracted_coo_tensors_per_device[local_device],
-            state.stacked_table_metadata[0], options, stats, split);
+    return SortAndGroupCooTensorsPerLocalDeviceAsync<true>(
+        state.extracted_coo_tensors_per_device[local_device],
+        state.stacked_table_metadata[0], options, stats, split);
   } else {
-    state.partitioned_coo_tensors_per_device[local_device] =
-        SortAndGroupCooTensorsPerLocalDevice<false>(
-            state.extracted_coo_tensors_per_device[local_device],
-            state.stacked_table_metadata[0], options, stats, split);
+    return SortAndGroupCooTensorsPerLocalDeviceAsync<false>(
+        state.extracted_coo_tensors_per_device[local_device],
+        state.stacked_table_metadata[0], options, stats, split);
   }
 }
 
@@ -222,12 +221,17 @@ void ExtractSortAndGroupCooTensorsForTable(
 
           internal::StatsPerDevice stats_per_device =
               state.stats_per_host.GetStatsPerDevice(local_device);
-          SortAndGroupCooTensorsForTableState(
+          auto result_av = SortAndGroupCooTensorsForTableStateAsync(
               state, local_device, options, stats_per_device,
               state.table_minibatching_required);
-          state.dropped_id_count_per_device[local_device] =
-              stats_per_device.dropped_id_count;
-          counter.DecrementCount();
+
+          result_av.AndThen([result_av, &state, local_device, &counter] {
+            auto& result = result_av.get();
+            state.partitioned_coo_tensors_per_device[local_device] =
+                std::move(result.first);
+            state.dropped_id_count_per_device[local_device] = result.second;
+            counter.DecrementCount();
+          });
         });
   }
 }
@@ -265,17 +269,23 @@ void CreateMinibatchingBucketsForTable(
       // overwrite the stats from the first pass, which are authoritative.
       // The only stat we care about from this second pass is the number of
       // dropped IDs.
-      StatsPerHost dummy_stats_host(
+      auto dummy_stats_host = std::make_shared<StatsPerHost>(
           /*local_device_count=*/1, options.GetNumScs(),
           options.num_sc_per_device);
       internal::StatsPerDevice dummy_stats =
-          dummy_stats_host.GetStatsPerDevice(0);
-      SortAndGroupCooTensorsForTableState(state, local_device, options,
-                                         dummy_stats,
-                                         state.table_minibatching_split);
-      state.dropped_id_count_per_device[local_device] =
-          dummy_stats.dropped_id_count;
-      counter.DecrementCount();
+          dummy_stats_host->GetStatsPerDevice(0);
+      auto result_av = SortAndGroupCooTensorsForTableStateAsync(
+          state, local_device, options, dummy_stats,
+          state.table_minibatching_split);
+
+      result_av.AndThen(
+          [result_av, &state, local_device, &counter, dummy_stats_host] {
+            auto& result = result_av.get();
+            state.partitioned_coo_tensors_per_device[local_device] =
+                std::move(result.first);
+            state.dropped_id_count_per_device[local_device] = result.second;
+            counter.DecrementCount();
+          });
     });
   }
 }
