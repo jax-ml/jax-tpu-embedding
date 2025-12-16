@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -51,6 +52,20 @@ namespace jax_sc_embedding {
 
 namespace {
 
+struct FeatureSliceInfo {
+  int local_device_id;
+  int feature_slice_id;
+  int feature_slices_per_device;
+  int start_index;
+  int end_index;
+  int batch_size_per_slice;
+};
+
+struct FeatureSlice {
+  FeatureSliceInfo info;
+  const StackedTableMetadata* metadata;
+};
+
 void AllocateOutputCsrBuffersIfNeeded(
     MatrixXi& row_pointers, MatrixXi& embedding_ids, MatrixXi& sample_ids,
     MatrixXf& gains, const PreprocessSparseDenseMatmulInputOptions& options,
@@ -65,36 +80,25 @@ void AllocateOutputCsrBuffersIfNeeded(
 void ExtractCooTensorsForSingleFeatureSlice(
     const StackedTableMetadata& metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    const int local_device_id, const int feature_slice_id,
-    const int feature_slices_per_device,
+    const FeatureSliceInfo& slice_info,
     const PreprocessSparseDenseMatmulInputOptions& options,
     ExtractedCooTensors& extracted_coo_tensors) {
   const int feature_index = metadata.feature_index;
   const std::unique_ptr<AbstractInputBatch>& curr_batch =
       input_batches[feature_index];
-  const int num_samples = curr_batch->size();
 
-  const int batch_size_per_slice = xla::CeilOfRatio(
-      extracted_coo_tensors.batch_size_for_device, feature_slices_per_device);
-
-  CHECK_GT(feature_slices_per_device, 0);
+  CHECK_GT(slice_info.feature_slices_per_device, 0);
   CHECK_GT(options.global_device_count, 0);
   CHECK_GT(options.local_device_count, 0);
 
   const int row_offset_per_slice =
       metadata.row_offset /
-      (options.global_device_count * feature_slices_per_device);
+      (options.global_device_count * slice_info.feature_slices_per_device);
   const int row_offset =
-      feature_slice_id * batch_size_per_slice + row_offset_per_slice;
+      slice_info.feature_slice_id * slice_info.batch_size_per_slice +
+      row_offset_per_slice;
   const int col_offset = metadata.col_offset;
   const int col_shift = metadata.col_shift;
-
-  const int num_samples_per_split =
-      num_samples / (options.local_device_count * feature_slices_per_device);
-  const int start_index =
-      (local_device_id * feature_slices_per_device + feature_slice_id) *
-      num_samples_per_split;
-  int end_index = std::min(num_samples, start_index + num_samples_per_split);
 
   // In the case of feature stacking, we need to group all the COO tensors
   // at this stage (i.e., before the sorting later on).
@@ -102,12 +106,13 @@ void ExtractCooTensorsForSingleFeatureSlice(
       "Extracting COO Tensor from feature #%d from row %d to %d "
       "(local_device_id = %d, feature_slice_id = %d, row_offset = %d, "
       "batch_size_per_slice = %d)",
-      feature_index, start_index, end_index, local_device_id, feature_slice_id,
-      row_offset, batch_size_per_slice);
+      feature_index, slice_info.start_index, slice_info.end_index,
+      slice_info.local_device_id, slice_info.feature_slice_id, row_offset,
+      slice_info.batch_size_per_slice);
   curr_batch->ExtractCooTensors(
       {
-          .slice_start = start_index,
-          .slice_end = end_index,
+          .slice_start = slice_info.start_index,
+          .slice_end = slice_info.end_index,
           .row_offset = row_offset,
           .col_offset = col_offset,
           .col_shift = col_shift,
@@ -309,23 +314,15 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options,
     bool has_variable_weights) {
+  // Calculate the total batch size for this device across all features.
   int batch_size_for_device = 0;
-  int64_t total_ids_for_device = 0;
   for (const auto& feature_metadata : stacked_table_metadata) {
     batch_size_for_device +=
         input_batches[feature_metadata.feature_index]->size() /
         options.local_device_count;
-    // This is almost correct, but could be slightly off depending on sample
-    // sizes.
-    // TODO: b/444292437 - Evaluate impact of summing
-    // batch->GetIdCountInSlice(...) to get an accurate value.
-    total_ids_for_device +=
-        input_batches[feature_metadata.feature_index]->id_count() /
-        options.local_device_count;
   }
-  CheckDeviceBatchSize(batch_size_for_device, options.num_sc_per_device,
-                       stacked_table_metadata[0].name);
 
+  // Determine the number of slices per feature based on stacking strategy.
   int feature_slices_per_device;
   switch (options.feature_stacking_strategy) {
     case FeatureStackingStrategy::kStackThenSplit:
@@ -340,29 +337,89 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
       break;
   }
 
+  CheckDeviceBatchSize(batch_size_for_device, options.num_sc_per_device,
+                       stacked_table_metadata[0].name);
+
   CHECK_GE(batch_size_for_device,
            feature_slices_per_device * stacked_table_metadata.size())
       << "Batch size must be greater or equal to the number of "
          "features stacked together (per feature slice).";
 
+  // Initialize COO tensor structure and calculate batch size per slice.
   ExtractedCooTensors extracted_coo_tensors(
       options.num_sc_per_device, batch_size_for_device, has_variable_weights,
       stacked_table_metadata[0].row_combiner);
+  const int batch_size_per_slice =
+      xla::CeilOfRatio(batch_size_for_device, feature_slices_per_device);
+
+  // Precompute slice information for all features and slices.
+  std::vector<FeatureSlice> feature_slices(feature_slices_per_device *
+                                           stacked_table_metadata.size());
+
+  int64_t total_ids_for_device = 0;
+  bool exact_size_known = true;
+
+  for (int feature_idx = 0; feature_idx < stacked_table_metadata.size();
+       ++feature_idx) {
+    const auto& feature_metadata = stacked_table_metadata[feature_idx];
+    const std::unique_ptr<AbstractInputBatch>& curr_batch =
+        input_batches[feature_metadata.feature_index];
+    const int num_samples = curr_batch->size();
+    // This division is exact as checked earlier in CheckDeviceBatchSize.
+    const int num_samples_per_split =
+        num_samples / (options.local_device_count * feature_slices_per_device);
+    for (int feature_slice_id = 0; feature_slice_id < feature_slices_per_device;
+         ++feature_slice_id) {
+      const int start_index =
+          (local_device_id * feature_slices_per_device + feature_slice_id) *
+          num_samples_per_split;
+      int end_index =
+          std::min(num_samples, start_index + num_samples_per_split);
+
+      // Store slice information in slice-major order.
+      feature_slices[feature_slice_id * stacked_table_metadata.size() +
+                     feature_idx] = {
+          .info =
+              FeatureSliceInfo{
+                  .local_device_id = local_device_id,
+                  .feature_slice_id = feature_slice_id,
+                  .feature_slices_per_device = feature_slices_per_device,
+                  .start_index = start_index,
+                  .end_index = end_index,
+                  .batch_size_per_slice = batch_size_per_slice},
+          .metadata = &feature_metadata};
+
+      if (exact_size_known) {
+        std::optional<int64_t> ids_in_slice =
+            curr_batch->GetIdsCountInSlice(start_index, end_index);
+        if (!ids_in_slice.has_value()) {
+          exact_size_known = false;
+          continue;
+        }
+        total_ids_for_device += ids_in_slice.value();
+      }
+    }
+  }
+
+  // If exact size is not known, fall back to using the total id_count per
+  // feature.
+  if (!exact_size_known) {
+    total_ids_for_device = 0;
+    for (const auto& feature_metadata : stacked_table_metadata) {
+      total_ids_for_device +=
+          input_batches[feature_metadata.feature_index]->id_count() /
+          options.local_device_count;
+    }
+  }
+
+  // Reserve memory for COO tensors.
   extracted_coo_tensors.reserve(total_ids_for_device);
 
-  // This slices each feature into `feature_slices` partitions and then
-  // interleaves them: (k=num_sc_per_device-1). For stacking strategy
-  //   SC0: F1_1, F2_1, ... Fn_1,  // <- batch_size_per_slice
-  //   SC1: F1_2, F2_2, ... Fn_2,  // <- batch_size_per_slice
-  //   ...                         // <- batch_size_per_slice
-  //   SCk: F1_k, F2_k, ..., Fn_k  // <- batch_size_per_slice
-  for (int feature_slice_id = 0; feature_slice_id < feature_slices_per_device;
-       ++feature_slice_id) {
-    for (const auto& feature_metadata : stacked_table_metadata) {
-      ExtractCooTensorsForSingleFeatureSlice(
-          feature_metadata, input_batches, local_device_id, feature_slice_id,
-          feature_slices_per_device, options, extracted_coo_tensors);
-    }
+  // Extract COO tensors for each slice.
+  for (const auto& slice : feature_slices) {
+    ExtractCooTensorsForSingleFeatureSlice(*slice.metadata, input_batches,
+                                           slice.info, options,
+                                           extracted_coo_tensors);
   }
   return extracted_coo_tensors;
 }
