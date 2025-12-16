@@ -588,7 +588,7 @@ SortAndGroupCooTensorsPerLocalDeviceAsync(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::StatsPerDevice stats, SplitType& minibatching_split) {
+    internal::StatsPerDevice& stats, SplitType& minibatching_split) {
   const bool create_buckets =
       options.enable_minibatching &&
       std::is_same_v<SplitType, MinibatchingSplit>;
