@@ -400,6 +400,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                                   max_ids_per_partition,
                                   max_unique_ids_per_partition,
                                   stacked_table_name]() mutable {
+      tsl::profiler::TraceMe t("SortAndGroupCooTensorsPerSparseCore");
       std::vector<PartitionedCooTensors> sc_parts;
       sc_parts.reserve(end_sc - start_sc);
 
