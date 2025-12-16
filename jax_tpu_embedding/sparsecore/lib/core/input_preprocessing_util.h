@@ -398,11 +398,11 @@ struct PreprocessSparseDenseMatmulInputOptions {
       PreprocessingThreadPoolSchedule;
 
   // Number of SparseCores to group into a single sorting task.
-  // This controls the parallelism of the sorting phase. Defaults to 4, which
-  // our non-parallel case.
+  // This controls the parallelism of the sorting phase. Defaults to
+  // num_sc_per_device.
   // TODO(b/469153631): Figure out heuristic to avoid over-parallelization
   // of small tables (which incur significant overhead).
-  int num_sc_per_sorting_task = 4;
+  int num_sc_per_sorting_task = num_sc_per_device;
 
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
