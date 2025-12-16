@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
@@ -208,6 +209,10 @@ class PartitionedCooTensors {
   static PartitionedCooTensors MergeAll(
       std::vector<PartitionedCooTensors>&& parts) {
     DCHECK(!parts.empty());
+    // If there is only one part, no merging is needed.
+    if (parts.size() == 1) {
+      return std::move(parts[0]);
+    }
     int num_sc_per_device = 0;
     size_t total_coo_size = 0;
     int bucket_count = parts[0].bucket_count_per_sc_;
