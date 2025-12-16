@@ -523,7 +523,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
       // Merge the parts for this task.
       SparseCoreTaskResult task_result = {
           .grouped_coo_tensors =
-              PartitionedCooTensors::MergeAll(std::move(sc_parts)),
+              PartitionedCooTensors::MergeAll(absl::MakeSpan(sc_parts)),
           .stats_host = std::move(local_stats_host),
           .dropped_id_count = total_dropped,
           .split_val = task_split};
@@ -575,7 +575,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
         }
 
         PartitionedCooTensors merged =
-            PartitionedCooTensors::MergeAll(std::move(parts));
+            PartitionedCooTensors::MergeAll(absl::MakeSpan(parts));
         final_result.emplace(std::make_pair(std::move(merged), total_dropped));
       });
 

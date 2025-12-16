@@ -19,6 +19,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 
 namespace jax_sc_embedding {
@@ -217,7 +218,7 @@ TEST(PartitionedCooTensorsTest, MergeDistinctSparseCores) {
   parts.push_back(std::move(part2));
 
   PartitionedCooTensors result =
-      PartitionedCooTensors::MergeAll(std::move(parts));
+      PartitionedCooTensors::MergeAll(absl::MakeSpan(parts));
 
   // Verify that the result contains 2 SCs.
   EXPECT_EQ(result.GetNumMinibatches(), 2);
@@ -259,7 +260,7 @@ TEST(PartitionedCooTensorsTest, MergeDistinctSparseCoresWithOffsets) {
   parts.push_back(std::move(part2));
 
   PartitionedCooTensors result =
-      PartitionedCooTensors::MergeAll(std::move(parts));
+      PartitionedCooTensors::MergeAll(absl::MakeSpan(parts));
 
   EXPECT_EQ(result.GetNumMinibatches(), 2);
   // SC 0 has 2 buckets, sizes 1 and 1.
