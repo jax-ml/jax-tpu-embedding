@@ -29,6 +29,7 @@ _DUMP_DIR = flags.DEFINE_string(
 
 NUM_SC_PER_DEVICE_MAP = {
     'TPU v5': 4,
+    'TPU v5p': 4,  # In pathways setup, TPU v5 shows up as TPU v5p.
     'TPU v6 lite': 2,
     'TPU7x': 4,
 }
