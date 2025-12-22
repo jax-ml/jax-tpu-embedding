@@ -78,8 +78,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
     lhs_gains: np.ndarray,
     num_minibatches_per_physical_sparse_core: np.int32,
     embedding_table: np.ndarray,
-    velocity: np.ndarray,
     momentum: np.ndarray,
+    velocity: np.ndarray,
     activations_grad: np.ndarray,
     alpha_t: np.float32,
     beta_1: np.float32,
@@ -113,8 +113,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
   utils.ensure_dtype(beta_1, np.float32, "beta_1")
   utils.ensure_dtype(beta_2, np.float32, "beta_2")
   utils.ensure_dtype(epsilon_hat, np.float32, "epsilon_hat")
-  utils.ensure_dtype(velocity, np.float32, "momentum")
-  utils.ensure_dtype(momentum, np.float32, "velocity")
+  utils.ensure_dtype(momentum, np.float32, "momentum")
+  utils.ensure_dtype(velocity, np.float32, "velocity")
 
   if embedding_table.shape != velocity.shape:
     raise ValueError(
