@@ -1237,11 +1237,7 @@ def _init_stacked_embedding_table(
     # TODO: b/377517742 - Fix layout issue for PMAP cases.
   else:
     local_device_count = jax.local_device_count()
-    embedding_table = jax.pmap(init_func)(
-        rng.reshape(
-            (local_device_count, rng.shape[0] // local_device_count, -1)
-        )
-    )
+    embedding_table = jax.pmap(init_func)(rng.reshape((local_device_count, -1)))
   return embedding_table
 
 
