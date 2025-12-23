@@ -32,7 +32,7 @@ tpu_py_strict_test(
     },
     main = "jax_sc_shakespeare_jit.py",
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -63,7 +63,7 @@ pytype_strict_binary(
     main = "jax_sc_shakespeare_jit.py",
     tags = ["oss_exclude"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/fdo:file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -97,11 +97,10 @@ tpu_py_strict_test(
     },
     main = "jax_sc_shakespeare_pmap.py",
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
@@ -125,11 +124,10 @@ pytype_strict_binary(
     main = "jax_sc_shakespeare_pmap.py",
     tags = ["oss_exclude"],
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
@@ -157,7 +155,7 @@ tpu_py_strict_test(
         "requires-net:external",  # For xprof uploading.
     ],
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_pipelining_utils",

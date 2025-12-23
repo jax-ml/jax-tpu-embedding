@@ -37,7 +37,6 @@ pytype_strict_library(
         "model.py",
     ],
     deps = [
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("optax"),
@@ -69,5 +68,21 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("flax/nnx"),
         pypi_requirement("jax"),
+    ],
+)
+
+pytype_strict_library(
+    name = "config",
+    srcs = ["config.py"],
+    deps = [
+        ":dataset",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
+        pypi_requirement("flax:core"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
     ],
 )

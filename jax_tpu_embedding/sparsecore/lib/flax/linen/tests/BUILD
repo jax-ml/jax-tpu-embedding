@@ -48,12 +48,10 @@ tpu_py_strict_test(
         "JAX_TRACEBACK_FILTERING": "off",
     },
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_model",
         "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed_optimizer",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),

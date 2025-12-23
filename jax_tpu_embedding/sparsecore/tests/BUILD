@@ -37,10 +37,9 @@ tpu_py_strict_test(
         "XLA_FLAGS": "--xla_dump_to=sponge",
     },
     deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
+        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),

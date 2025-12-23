@@ -35,8 +35,8 @@ class Model(nn.Module):
   seq_len: int
   embedding_size: int
   mesh: jax.sharding.Mesh
-  feature_name: str = 'shakespeare_feature'
-  sharding_axis: str = 'sparsecore_sharding'
+  feature_name: str
+  sharding_axis: str
 
   def add_sharding_constraint(self, x: jax.Array):
     """Add a sharding constraint to the array.

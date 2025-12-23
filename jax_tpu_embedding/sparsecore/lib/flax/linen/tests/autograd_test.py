@@ -20,49 +20,17 @@ from absl.testing import absltest
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as shakespeare_data
+from jax_tpu_embedding.sparsecore.examples.models.shakespeare import config as shakespeare_config
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import flax_model as shakespeare_model
 from jax_tpu_embedding.sparsecore.lib.flax.linen import embed_optimizer
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
-from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
-from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
 
 
 Nested = embedding.Nested
-
 FLAGS = flags.FLAGS
-
 np.set_printoptions(threshold=np.inf)
-
-_VOCAB_SIZE = flags.DEFINE_integer('vocab_size', 4096, 'Vocabulary size.')
-_BATCH_SIZE = flags.DEFINE_integer('batch_size', 8, 'Batch size.')
-
-_LEARNING_RATE = flags.DEFINE_float('learning_rate', 0.005, 'Learning rate.')
-
-_SEQ_LEN = flags.DEFINE_integer(
-    'sequence_length', 16, 'Sequence length of context words.'
-)
-
-_NUM_TABLES = flags.DEFINE_integer(
-    'num_tables', 1, 'Number of tables to create.'
-)
-
-_NUM_STEPS = flags.DEFINE_integer(
-    'num_steps', 100, 'Number of steps to train for.'
-)
-
-_NUM_EPOCHS = flags.DEFINE_integer(
-    'num_epochs',
-    1,
-    'Number of separate epochs.',
-)
-
-_EMBEDDING_SIZE = flags.DEFINE_integer('embedding_size', 16, 'Embedding size.')
-_EMBEDDING_INIT = flags.DEFINE_enum(
-    'embedding_init', 'normal', ['normal', 'row_id'], 'Embedding initializer.'
-)
 
 
 ################################################################################
@@ -72,86 +40,40 @@ class ShakespeareTest(absltest.TestCase):
   """Input processing and convergence of basic model using JAX SC libraries."""
 
   def test_shakespeare_model_loss_convergence(self):
-    devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
-    mesh = jax.sharding.Mesh(devices, 'x')
+    FLAGS.vocab_size = 4096
+    FLAGS.batch_size = 8
+    FLAGS.embedding_size = 16
+    config = shakespeare_config.get_config()
 
-    word_ids = shakespeare_data.load_shakespeare(_VOCAB_SIZE.value)
-    feature_batches, label_batches = shakespeare_data.word_id_batches(
-        word_ids,
-        _NUM_STEPS.value,
-        _BATCH_SIZE.value,
-        _SEQ_LEN.value,
-        _NUM_TABLES.value,
-    )
-    feature_batches = feature_batches['words_0']
-
-    # Define feature/table specs.
-    table_spec = embedding_spec.TableSpec(
-        vocabulary_size=_VOCAB_SIZE.value,
-        embedding_dim=_EMBEDDING_SIZE.value,
-        initializer=jax.nn.initializers.ones,
-        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=1),
-        combiner='sum',
-        name='shakespeare',
-        max_ids_per_partition=64,
-        max_unique_ids_per_partition=64,
+    mesh = jax.sharding.Mesh(config.global_devices, config.sharding_axis)
+    data_sharding = jax.sharding.NamedSharding(
+        mesh, jax.sharding.PartitionSpec(config.sharding_axis)
     )
 
-    feature_spec = embedding_spec.FeatureSpec(
-        table_spec=table_spec,
-        input_shape=(_BATCH_SIZE.value * _SEQ_LEN.value, 1),
-        output_shape=(
-            _BATCH_SIZE.value * _SEQ_LEN.value,
-            _EMBEDDING_SIZE.value,
-        ),
-        name='shakespeare_feature',
-    )
-
-    feature_specs = nn.FrozenDict({'shakespeare_feature': feature_spec})
-    embedding.prepare_feature_specs_for_training(
-        feature_specs,
-        global_device_count=len(devices),
-        num_sc_per_device=num_sc_per_device,
-    )
+    feature_batches, label_batches = shakespeare_config.get_batches(config)
+    feature_specs = shakespeare_config.create_feature_specs(config)
 
     # Construct the model.
     model = shakespeare_model.Model(
         feature_specs=feature_specs,
-        global_batch_size=_BATCH_SIZE.value,
-        vocab_size=_VOCAB_SIZE.value,
-        seq_len=_SEQ_LEN.value,
-        embedding_size=_EMBEDDING_SIZE.value,
+        global_batch_size=config.global_batch_size,
+        vocab_size=config.vocab_size,
+        seq_len=config.seq_len,
+        embedding_size=config.embedding_size,
         mesh=mesh,
-        sharding_axis='x',
+        feature_name=config.feature_name,
+        sharding_axis=config.sharding_axis,
     )
 
-    # Initialize the model.
-    def process_inputs(batch_number, feature_batch):
-      features = np.reshape(feature_batch, (-1, 1))
-
-      # Pack the features into a tree structure.
-      feature_structure = jax.tree.structure(feature_specs)
-      features = jax.tree_util.tree_unflatten(feature_structure, [features])
-
-      return embedding.preprocess_sparse_dense_matmul_input(
-          features,
-          None,  # uniform weights
-          feature_specs,
-          local_device_count=mesh.local_mesh.size,
-          global_device_count=mesh.size,
-          num_sc_per_device=num_sc_per_device,
-          sharding_strategy='MOD',
-          batch_number=batch_number,
-      )[0]
-
-    first_model_input = process_inputs(-1, feature_batches[0])
+    first_model_input, _ = shakespeare_config.process_inputs(
+        config, feature_specs, -1, feature_batches[0], data_sharding
+    )
     params = model.init(jax.random.key(42), first_model_input)
 
     # Create optimizer.
     tx = embed_optimizer.create_optimizer_for_sc_model(
         params,
-        optax.sgd(learning_rate=_LEARNING_RATE.value),
+        optax.sgd(learning_rate=config.learning_rate),
     )
     opt_state = tx.init(params)
 
@@ -194,14 +116,13 @@ class ShakespeareTest(absltest.TestCase):
 
     step = 0
     for features, labels in zip(feature_batches, label_batches):
-      # ------------------------------------------------------------------------
-      # Step 1: SC input processing.
-      # ------------------------------------------------------------------------
-      processed_input_tensor = process_inputs(step, features)
+      features = shakespeare_config.local_slice(config, features)
+      labels = shakespeare_config.device_slice(config, labels, data_sharding)
 
-      # ------------------------------------------------------------------------
-      # Step 2: run model.
-      # ------------------------------------------------------------------------
+      processed_input_tensor, _ = shakespeare_config.process_inputs(
+          config, feature_specs, step, features, data_sharding
+      )
+
       params, opt_state, loss_val = train_step(
           params, processed_input_tensor, labels, opt_state
       )

@@ -18,7 +18,6 @@ from typing import Any, Mapping
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import optax
 
 
@@ -30,7 +29,6 @@ class Model(nn.Module):
     vocab_size: The number of unique words in the vocabulary.
     seq_len: The length of the sequences in the global batch.
     embedding_size: The dimension of the embedding vectors.
-    table_name: The name of the embedding table.
     feature_name: The name of the embedding feature.
   """
 
@@ -38,38 +36,7 @@ class Model(nn.Module):
   vocab_size: int
   seq_len: int
   embedding_size: int
-  table_name: str = 'shakespeare_table'
-  feature_name: str = 'shakespeare_feature'
-
-  def create_feature_specs(
-      self,
-  ) -> Mapping[str, embedding_spec.FeatureSpec]:
-    """Creates the feature specs for the Shakespeare model.
-
-    Returns:
-      The feature specs for the Shakespeare model.
-    """
-    table_spec = embedding_spec.TableSpec(
-        vocabulary_size=self.vocab_size,
-        embedding_dim=self.embedding_size,
-        initializer=jax.nn.initializers.zeros,
-        optimizer=embedding_spec.SGDOptimizerSpec(),
-        combiner='sum',
-        name=self.table_name,
-        max_ids_per_partition=64,
-        max_unique_ids_per_partition=64,
-    )
-    feature_spec = embedding_spec.FeatureSpec(
-        table_spec=table_spec,
-        input_shape=(self.global_batch_size * self.seq_len, 1),
-        output_shape=(
-            self.global_batch_size * self.seq_len,
-            self.embedding_size,
-        ),
-        name=self.feature_name,
-    )
-    feature_specs = nn.FrozenDict({self.feature_name: feature_spec})
-    return feature_specs
+  feature_name: str
 
   @nn.compact
   def __call__(self, emb_activations: Mapping[str, jax.Array]):

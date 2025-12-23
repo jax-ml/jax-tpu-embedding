@@ -36,7 +36,7 @@ import jax.numpy as jnp
 from jax.sharding import Mesh  # pylint: disable=g-importing-member
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
 from jax.sharding import PartitionSpec as P  # pylint: disable=g-importing-member
-from jax_tpu_embedding.sparsecore.examples.models.shakespeare import dataset as shakespeare_data
+from jax_tpu_embedding.sparsecore.examples.models.shakespeare import config as shakespeare_config
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import model as shakespeare_model
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_pipelining_utils as ep_utils
@@ -109,91 +109,44 @@ ShakespeareModelPipelineState = ep_utils.PipelineState[
     ShakespeareModelOutput,
 ]
 
-_VOCAB_SIZE = flags.DEFINE_integer(
-    'vocab_size', 512, 'Vocabulary size.', lower_bound=512
-)
-
-_GLOBAL_BATCH_SIZE = flags.DEFINE_integer(
-    'batch_size', 32, 'Global batch size.'
-)
-
-_LEARNING_RATE = flags.DEFINE_float('learning_rate', 0.005, 'Learning rate.')
-
-_SEQ_LEN = flags.DEFINE_integer(
-    'sequence_length', 16, 'Sequence length of context words.'
-)
-
-_NUM_TABLES = flags.DEFINE_integer(
-    'num_tables', 1, 'Number of tables to create.'
-)
-
-_NUM_STEPS = flags.DEFINE_integer(
-    'num_steps', 1000, 'Number of steps to train for.'
-)
-
-_EMBEDDING_SIZE = flags.DEFINE_integer('embedding_size', 8, 'Embedding size.')
-
-_LOG_FREQUENCY = flags.DEFINE_integer(
-    'log_frequency', 10, 'Frequency to log metrics.'
-)
-_METRICS_RESET_FREQUENCY = flags.DEFINE_integer(
-    'metrics_reset_frequency', 10, 'Number of steps to average loss over.'
-)
-
 info = logging.info
-vlog1 = partial(logging.vlog, 1)
 
 
 def create_train_state(
-    rng: jax.Array,
-    global_device_count: int,
-    num_sc_per_device: int,
-    global_batch_size: int,
-    vocab_size: int,
-    seq_len: int,
-    embedding_size: int,
+    config: shakespeare_config.Config, rng: jax.Array
 ) -> tuple[
     nn.Module, optax.GradientTransformation, TrainState, NestedFeatureSpecs
 ]:
   """Creates and initializes the model, optimizer, train state, and feature specs.
 
   Args:
+    config: The model configuration.
     rng: JAX PRNG Key.
-    global_device_count: The number of global devices (chips). Typically
-      `mesh.size`.
-    num_sc_per_device: The number of sparsecores per device.
-    global_batch_size: global batch size.
-    vocab_size: embedding vocabulary size.
-    seq_len: sequence length.
-    embedding_size: embedding dimension.
 
   Returns:
     The model, optimizer, initial train state, and feature specs.
   """
   model = shakespeare_model.Model(
-      global_batch_size=global_batch_size,
-      vocab_size=vocab_size,
-      seq_len=seq_len,
-      embedding_size=embedding_size,
+      global_batch_size=config.global_batch_size,
+      vocab_size=config.vocab_size,
+      seq_len=config.seq_len,
+      embedding_size=config.embedding_size,
+      feature_name=config.feature_name,
   )
 
   # Global embedding activations. We can change this to local arrays and use
   # make_array_from_single_device_arrays as above.
   init_emb_activations = {
-      model.feature_name: jnp.zeros(
-          (global_batch_size, seq_len * embedding_size)
+      config.feature_name: jnp.zeros(
+          (config.global_batch_size, config.seq_len * config.embedding_size)
       )
   }
 
   params = model.init(rng, init_emb_activations)
   parameter_overview.log_parameter_overview(params)
-  optimizer = optax.adam(learning_rate=_LEARNING_RATE.value)
-  feature_specs = model.create_feature_specs()
-  embedding.prepare_feature_specs_for_training(
-      feature_specs,
-      global_device_count=global_device_count,
-      num_sc_per_device=num_sc_per_device,
-  )
+  optimizer = optax.adam(learning_rate=config.learning_rate)
+  feature_specs = shakespeare_config.create_feature_specs(config)
+
   return (
       model,
       optimizer,
@@ -210,16 +163,19 @@ class EmbeddingPipelineTest(absltest.TestCase):
   def setUp(self):
     super().setUp()
 
+    flags.FLAGS.vocab_size = 512
+    flags.FLAGS.batch_size = 32
+    flags.FLAGS.num_steps = 1000
+    self.config = shakespeare_config.get_config()
+
     # Get number of global and local devices
-    self.num_global_devices = jax.device_count()
-    self.num_local_devices = jax.local_device_count()
-    self.num_processes = jax.process_count()
-    self.process_id = jax.process_index()
-    self.local_devices = jax.local_devices()
-    self.global_devices = jax.devices()
-    self.num_sc_per_device = utils.num_sparsecores_per_device(
-        self.global_devices[0]
-    )
+    self.num_global_devices = self.config.num_global_devices
+    self.num_local_devices = self.config.num_local_devices
+    self.num_processes = self.config.num_processes
+    self.process_id = self.config.process_id
+    self.local_devices = self.config.local_devices
+    self.global_devices = self.config.global_devices
+    self.num_sc_per_device = self.config.num_sc_per_device
 
     # Log device information
     info(
@@ -244,12 +200,12 @@ class EmbeddingPipelineTest(absltest.TestCase):
     )
 
     # Define sharding specs
-    self.pd = P('device')  # Device sharding.
-    self.pe = P('device', None)  # PartitionSpec for embedding tables.
+    self.pd = P(self.config.sharding_axis)  # Device sharding.
+    self.pe = P(self.config.sharding_axis, None)  # For embedding tables.
 
     # Create global mesh and sharding
     self.global_mesh = Mesh(
-        np.array(self.global_devices), axis_names=['device']
+        np.array(self.global_devices), axis_names=[self.config.sharding_axis]
     )
     self.global_sharding = NamedSharding(self.global_mesh, self.pd)
     self.global_emb_sharding = NamedSharding(self.global_mesh, self.pe)
@@ -280,15 +236,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
 
     # Initialize the model.
     self.model, self.optimizer, self.train_state, self.feature_specs = (
-        create_train_state(
-            jax.random.key(42),
-            self.num_global_devices,
-            self.num_sc_per_device,
-            _GLOBAL_BATCH_SIZE.value,
-            _VOCAB_SIZE.value,
-            _SEQ_LEN.value,
-            _EMBEDDING_SIZE.value,
-        )
+        create_train_state(self.config, jax.random.key(42))
     )
 
     # Define SparseCore forward and backward functions
@@ -306,38 +254,12 @@ class EmbeddingPipelineTest(absltest.TestCase):
     # Note 2: The input processor expects 2-d lookups, so we scale-up the batch
     # size and reshape the results.
 
-    self.local_batch_size = _GLOBAL_BATCH_SIZE.value // self.num_processes
-    self.device_batch_size = _GLOBAL_BATCH_SIZE.value // self.num_global_devices
-    info(
-        'batch sizes: global=%s, local=%s, device=%s',
-        _GLOBAL_BATCH_SIZE.value,
-        self.local_batch_size,
-        self.device_batch_size,
-    )
-
-    # Define per SparseCore vocabulary size
-    self.per_sc_vocab_size = _VOCAB_SIZE.value // self.num_sc_per_device
-    if self.per_sc_vocab_size < 8 or self.per_sc_vocab_size % 8 != 0:
-      raise ValueError(
-          'Vocabulary size must be a multiple of 8 per SC: VOCAB_SIZE ='
-          f' {_VOCAB_SIZE.value}, num_scs = {self.num_sc_per_device}'
-      )
+    self.local_batch_size = self.config.local_batch_size
 
     # Load Shakespeare data
-    self.word_ids = shakespeare_data.load_shakespeare(_VOCAB_SIZE.value)
-    vlog1('word_ids len = %s', len(self.word_ids))
-    self.feature_batches, self.label_batches = shakespeare_data.word_id_batches(
-        self.word_ids,
-        _NUM_STEPS.value,
-        _GLOBAL_BATCH_SIZE.value,
-        _SEQ_LEN.value,
-        _NUM_TABLES.value,
+    self.feature_batches, self.label_batches = shakespeare_config.get_batches(
+        self.config
     )
-    self.feature_batches = self.feature_batches['words_0']
-    vlog1('feature_batches len = %s', len(self.feature_batches))
-    vlog1('feature_batches[0] shape = %s', self.feature_batches[0].shape)
-    vlog1('label_batches len = %s', len(self.label_batches))
-    vlog1('label_batches[0] shape = %s', self.label_batches[0].shape)
 
     # Define table specs
     self.table_specs = {
@@ -464,52 +386,21 @@ class EmbeddingPipelineTest(absltest.TestCase):
 
     # These are currently global batches so each task needs to offset into the
     # data for it's local slice.
-    labels = labels_i[
-        self.process_id
-        * self.local_batch_size : (self.process_id + 1)
-        * self.local_batch_size
-    ]
-    labels = jax.make_array_from_process_local_data(
-        self.global_sharding, labels
+    labels = shakespeare_config.device_slice(
+        self.config, labels_i, self.global_sharding
     )
-
-    # Each input preprocessing processes the current process's slice of the
-    # global batch.
-    features = features_i[
-        self.process_id
-        * self.local_batch_size : (self.process_id + 1)
-        * self.local_batch_size
-    ]
-    features = np.reshape(features, (-1, 1))
-
-    # Pack the features into a tree structure.
-    feature_structure = jax.tree.structure(self.feature_specs)
-    features = jax.tree_util.tree_unflatten(feature_structure, [features])
-
-    # Preprocess the inputs and build JAX global views of the data.
-    def make_global_view(x: PyTree) -> PyTree:
-      """Makes a global view of this process's slice of preprocessed data."""
-      return jax.tree.map(
-          lambda y: jax.make_array_from_process_local_data(
-              self.global_sharding, y
-          ),
-          x,
-      )
+    features = shakespeare_config.local_slice(self.config, features_i)
 
     # Note: eventually the preprocessing will dynamically adjust the limits
     #   and, hence, update the feature specs. For now, we just use the
     #   original specs.
-    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
-        features=features,
-        features_weights=None,  # uniform weights
-        feature_specs=self.feature_specs,
-        local_device_count=self.global_mesh.local_mesh.size,
-        global_device_count=self.global_mesh.size,
-        num_sc_per_device=self.num_sc_per_device,
-        sharding_strategy='MOD',
-        batch_number=step,
+    preprocessed_inputs, _ = shakespeare_config.process_inputs(
+        self.config,
+        self.feature_specs,
+        step,
+        features,
+        self.global_sharding,
     )
-    preprocessed_inputs = make_global_view(preprocessed_inputs)
     return ShakesperaeModelPipelineCurrentStepInput(
         dense_inputs=ShakespeareModelDenseInput(labels=labels),
         sparse_inputs=preprocessed_inputs,
@@ -545,15 +436,15 @@ class EmbeddingPipelineTest(absltest.TestCase):
   def _post_train_step(self, step: int, model_output: ShakespeareModelOutput):
     """Performs any special handling or consumption of the train step outputs."""
 
-    if ep_utils.is_output_valid(step, _NUM_STEPS.value):
+    if ep_utils.is_output_valid(step, self.config.num_steps):
       self.train_metrics = self.train_metrics.merge(model_output.metrics_update)
 
-    if (step + 1) % _LOG_FREQUENCY.value == 0:
+    if (step + 1) % self.config.log_frequency == 0:
       m = self.train_metrics.compute()
       info('Step %s: Loss = %s', step, m['train_loss'])
       parameter_overview.log_parameter_overview(self.train_state.params)
 
-    if (step + 1) % _METRICS_RESET_FREQUENCY.value == 0:
+    if (step + 1) % self.config.loss_reset_frequency == 0:
       self.train_metrics = TrainMetrics.empty()
 
   def test_run_shakespeare_pipelined_model(self):
@@ -562,13 +453,12 @@ class EmbeddingPipelineTest(absltest.TestCase):
     This test trains the model for a number of steps and then checks that the
     final loss is less than a certain threshold.
     """
-
     pipeline_state: ShakespeareModelPipelineState = None
     pipeline_input: ShakesperaeModelPipelineCurrentStepInput = None
     train_step = None
     fake_tc_train_step = None
 
-    num_steps = _NUM_STEPS.value
+    num_steps = self.config.num_steps
 
     step_counter = 0
     while self.train_state.step < num_steps:
@@ -576,9 +466,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
       with jax.profiler.StepTraceAnnotation(
           'train', step_num=self.train_state.step
       ):
-        vlog1('*' * 70)
-        vlog1('* STEP = %s', step_counter)
-        vlog1('*' * 70)
+        shakespeare_config.step_header(step_counter)
 
         if step_counter < num_steps:
           pipeline_input = self._prepare_batch(step_counter)
@@ -656,7 +544,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
     final_loss = self.train_metrics.compute()['train_loss']
     logging.info('final_loss: %s', final_loss)
     # Deterministic with initial seed
-    np.testing.assert_allclose(final_loss, 0.00204, atol=1e-5)
+    np.testing.assert_allclose(final_loss, 0.000225, atol=1e-5)
 
 
 if __name__ == '__main__':

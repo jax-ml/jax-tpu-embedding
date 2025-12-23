@@ -39,15 +39,16 @@ class Model(nnx.Module):
       embedding_size: int,
       enable_minibatching: bool,
       mesh: jax.sharding.Mesh,
+      feature_name: str,
       sharding_axis: str,
   ):
-    self.feature_name = 'shakespeare_feature'
     assert len(feature_specs) == 1, 'Shakespeare model expects one feature.'
-    assert self.feature_name in feature_specs, (
-        'Shakespeare model expects feature named "%s".' % self.feature_name
+    assert feature_name in feature_specs, (
+        'Shakespeare model expects feature named "%s".' % feature_name
     )
 
     self.feature_specs = feature_specs
+    self.feature_name = feature_name
     self.global_batch_size = global_batch_size
     self.vocab_size = vocab_size
     self.seq_len = seq_len
