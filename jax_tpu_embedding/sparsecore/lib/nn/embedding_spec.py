@@ -288,8 +288,7 @@ class AdamOptimizerSpec(OptimizerSpec):
     Here we use the bias-corrected parameters from section 2.1 of
     the original paper::
 
-      alpha_t = alpha * sqrt(1 - beta_2^t) / (1 - beta_1^t)
-      epsilon_hat = epsilon * sqrt(1 + beta_2^t)
+      whoops
 
     Args:
       step: The step count for the optimizer.
