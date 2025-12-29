@@ -776,6 +776,7 @@ def stack_tables(
   Then creates new feature specs with updated table specs with relevant
   fields related to stacking setup. The features are updated in-place with the
   new table specs.
+
   Args:
     features: The input features.
     table_names: A list of table names to be stacked.
