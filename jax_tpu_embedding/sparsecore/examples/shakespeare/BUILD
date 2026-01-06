@@ -27,9 +27,6 @@ tpu_py_strict_test(
         "--dump_dir=sponge",
         # "--vmodule=jax_sc_shakespeare_jit=1",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     main = "jax_sc_shakespeare_jit.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
@@ -92,9 +89,6 @@ tpu_py_strict_test(
         "--dump_dir=sponge",
         # "--vmodule=jax_sc_shakespeare_pmap=1",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     main = "jax_sc_shakespeare_pmap.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
@@ -147,9 +141,6 @@ tpu_py_strict_test(
     args = [
         # "--vmodule=jax_sc_shakespeare_pipelined_jit_test=1",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     main = "jax_sc_shakespeare_pipelined_jit_test.py",
     tags = [
         "requires-net:external",  # For xprof uploading.
