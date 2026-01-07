@@ -156,7 +156,6 @@ TEST(SortAndGroupTest, Base) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -244,7 +243,6 @@ TEST(SortAndGroupTest, TwoScs) {
       .global_device_count = 1,
       .num_sc_per_device = 2,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/2,
@@ -313,7 +311,6 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -364,7 +361,6 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -420,7 +416,6 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -477,7 +472,6 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -529,7 +523,6 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -581,7 +574,6 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -634,7 +626,6 @@ TEST(SortAndGroupTest, IdDropping) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = true,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   bool minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -725,7 +716,6 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -857,7 +847,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
       .enable_minibatching = true,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
@@ -987,7 +976,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
       .enable_minibatching = true,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
@@ -1166,7 +1154,6 @@ TEST(InputPreprocessingUtilTest,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
   };
 
   bool minibatching_required = false;
@@ -1231,7 +1218,6 @@ TEST(InputPreprocessingUtilTest,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit,
       .enable_minibatching = true,
       .minibatching_bucketing_hash_fn = hash_fn,
   };

@@ -327,9 +327,6 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
   // Determine the number of slices per feature based on stacking strategy.
   int feature_slices_per_device;
   switch (options.feature_stacking_strategy) {
-    case FeatureStackingStrategy::kStackThenSplit:
-      feature_slices_per_device = 1;
-      break;
     case FeatureStackingStrategy::kSplitThenStack:
       feature_slices_per_device = options.num_sc_per_device;
       break;
@@ -703,6 +700,10 @@ PreprocessSparseDenseMatmulInput(
   });
   if (options.sharding_strategy != ShardingStrategy::kMod) {
     LOG(FATAL) << "Only mod sharding is supported for now.";
+  }
+  if (options.feature_stacking_strategy !=
+      FeatureStackingStrategy::kSplitThenStack) {
+    LOG(FATAL) << "Only split-then-stack is supported for now.";
   }
   CHECK_GT(options.local_device_count, 0);
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";

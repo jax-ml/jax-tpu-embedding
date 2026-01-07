@@ -233,7 +233,6 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
       .value("Mod", ShardingStrategy::kMod)
       .export_values();
   py::enum_<FeatureStackingStrategy>(m, "FeatureStackingStrategy")
-      .value("STACK_THEN_SPLIT", FeatureStackingStrategy::kStackThenSplit)
       .value("SPLIT_THEN_STACK", FeatureStackingStrategy::kSplitThenStack)
       .export_values();
   py::class_<AllReduceInterface> all_reduce_interface(m, "AllReduceInterface");

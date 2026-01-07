@@ -219,59 +219,6 @@ class AllReduceSyncKeyCollector : public AllReduceInterface {
 
 }  // namespace testing_utils
 
-TEST_F(TableStackingTest, MultiProcessStackingStackThenSplit) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 2,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_multi_, absl::MakeSpan(input_batches_multi_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.size(), Eq(24));
-  // This results in an uneven ID distribution - 8, 8, 4, 4
-
-  std::vector<CooFormat> expected_coo_tensors;
-  // Feature 0, slice 0
-  // SC 0 (4 rows, 8 ids)
-  expected_coo_tensors.push_back(CooFormat(0, 5, 1));
-  expected_coo_tensors.push_back(CooFormat(0, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(1, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(1, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(2, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(2, 20, 1));
-  expected_coo_tensors.push_back(CooFormat(3, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(3, 0, 1));
-  // SC 1 (4 rows, 8 ids)
-  expected_coo_tensors.push_back(CooFormat(4, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(4, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(5, 0, 1));
-  expected_coo_tensors.push_back(CooFormat(5, 20, 1));
-  expected_coo_tensors.push_back(CooFormat(6, 5, 1));
-  expected_coo_tensors.push_back(CooFormat(6, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(7, 18, 1));
-  expected_coo_tensors.push_back(CooFormat(7, 0, 1));
-
-  // Feature 1, slice 0
-  // SC 2 (4 rows, 4 ids)
-  expected_coo_tensors.push_back(CooFormat(8, 34, 1));
-  expected_coo_tensors.push_back(CooFormat(9, 42, 1));
-  expected_coo_tensors.push_back(CooFormat(10, 33, 1));
-  expected_coo_tensors.push_back(CooFormat(11, 41, 1));
-  // SC 3 (4 rows, 4 ids)
-  expected_coo_tensors.push_back(CooFormat(12, 35, 1));
-  expected_coo_tensors.push_back(CooFormat(13, 39, 1));
-  expected_coo_tensors.push_back(CooFormat(14, 36, 1));
-  expected_coo_tensors.push_back(CooFormat(15, 40, 1));
-
-  EXPECT_THAT(extracted_coo_tensors.ToCooVector(),
-              ElementsAreArray(expected_coo_tensors));
-}
-
 TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 1,
@@ -365,36 +312,6 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
   EXPECT_EQ(ids_per_sc, expected_ids_per_sc);
 }
 
-TEST_F(TableStackingTest, SingleProcessSingleDeviceStackThenSplit) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
-          /*local_device_id=*/0, options);
-
-  EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
-  ASSERT_THAT(extracted_coo_tensors.size(), Eq(16 * 17 / 2));
-
-  const int batch_size_per_sc =
-      extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
-  std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-  for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
-    ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
-  }
-
-  std::vector<int> expected_ids_per_sc = {1 + 2 + 3 + 4,     //
-                                          5 + 6 + 7 + 8,     //
-                                          9 + 10 + 11 + 12,  //
-                                          13 + 14 + 15 + 16};
-
-  EXPECT_EQ(ids_per_sc, expected_ids_per_sc);
-}
-
 TEST_F(TableStackingTest, MultiChipSplitThenStack) {
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 2,
@@ -425,36 +342,7 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
   }
 }
 
-TEST_F(TableStackingTest, MultiChipStackThenSplit) {
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 2,
-      .global_device_count = 2,
-      .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kStackThenSplit};
 
-  std::vector<int> expected_ids_per_sc[] = {{1 + 2, 3 + 4, 9 + 10, 11 + 12},
-                                            {5 + 6, 7 + 8, 13 + 14, 15 + 16}};
-
-  for (int local_device_id = 0; local_device_id < options.local_device_count;
-       ++local_device_id) {
-    ExtractedCooTensors extracted_coo_tensors =
-        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-            stacked_table_metadata_single_,
-            absl::MakeSpan(input_batches_single_), local_device_id, options);
-
-    EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 8);
-
-    const int batch_size_per_sc =
-        extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
-    std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-    for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
-      ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
-    }
-
-    EXPECT_EQ(ids_per_sc, expected_ids_per_sc[local_device_id])
-        << "local_device_id: " << local_device_id;
-  }
-}
 
 TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   const int local_device_count = 1;
@@ -1255,8 +1143,7 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
         fuzztest::InRange(1, 1024),
         // Domain for feature_stacking_strategy
         fuzztest::ElementOf<FeatureStackingStrategy>(
-            {FeatureStackingStrategy::kStackThenSplit,
-             FeatureStackingStrategy::kSplitThenStack}),
+            {FeatureStackingStrategy::kSplitThenStack}),
         // Domain for enable_minibatching
         fuzztest::Arbitrary<bool>());
 
@@ -1292,8 +1179,7 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
         fuzztest::InRange(1, 128),
         // Domain for feature_stacking_strategy
         fuzztest::ElementOf<FeatureStackingStrategy>(
-            {FeatureStackingStrategy::kStackThenSplit,
-             FeatureStackingStrategy::kSplitThenStack}),
+            {FeatureStackingStrategy::kSplitThenStack}),
         // Domain for enable_minibatching
         fuzztest::Arbitrary<bool>());
 
@@ -1465,8 +1351,7 @@ FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)
         fuzztest::ElementOf<int>({1, 2, 4}),
         // Domain for feature_stacking_strategy
         fuzztest::ElementOf<FeatureStackingStrategy>(
-            {FeatureStackingStrategy::kStackThenSplit,
-             FeatureStackingStrategy::kSplitThenStack}));
+            {FeatureStackingStrategy::kSplitThenStack}));
 
 }  // namespace
 }  // namespace jax_sc_embedding
