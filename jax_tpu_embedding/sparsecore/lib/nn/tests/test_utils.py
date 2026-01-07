@@ -188,6 +188,9 @@ def skip_if_tpu_unavailable(f):
     A wrapper function that skips the test if TPU initialization fails.
   """
   def wrapper(*args, **kwargs):
+    # Handle silent fallback to CPU.
+    if jax.default_backend() == "cpu":
+      raise absltest.SkipTest("TPU not available")
     try:
       return f(*args, **kwargs)
     except RuntimeError as e:
