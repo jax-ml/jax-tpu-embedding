@@ -222,29 +222,30 @@ struct ExtractedCooTensors {
   }
 
   template <bool kHasVariableWeights>
-  CooFormat GetCooFormatWithGain(uint64_t key, uint32_t col_id,
-                                 RowCombiner combiner) const {
-    float gain = 1.0f;
-    uint32_t row_id;
+  inline uint32_t GetRowId(uint64_t key) const {
     if constexpr (kHasVariableWeights) {
-      const uint32_t index = CooFormat::GetDataFromKey(key);
-      row_id = ids[index].row_id;
-      gain = gains[index];
+      return ids[CooFormat::GetDataFromKey(key)].row_id;
     } else {
-      row_id = CooFormat::GetDataFromKey(key);
+      return CooFormat::GetDataFromKey(key);
+    }
+  }
+
+  template <bool kHasVariableWeights>
+  inline float GetGain(uint64_t key, RowCombiner combiner) const {
+    if constexpr (kHasVariableWeights) {
+      return gains[CooFormat::GetDataFromKey(key)];
+    } else {
+      const uint32_t row_id = CooFormat::GetDataFromKey(key);
       switch (combiner) {
         case RowCombiner::kMean:
-          gain = 1.0f / static_cast<float>(row_token_counts[row_id]);
-          break;
+          return 1.0f / static_cast<float>(row_token_counts[row_id]);
         case RowCombiner::kSum:
-          gain = 1.0f;
-          break;
+          return 1.0f;
         case RowCombiner::kSqrtn:
-          gain = row_gains[row_id];
-          break;
+          return row_gains[row_id];
       }
     }
-    return CooFormat(row_id, col_id, gain);
+    return 1.0f;
   }
 
   // For test only.

@@ -234,22 +234,16 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
         absl::rotl(CooFormat::GetRotatedColIdFromKey(key), num_sc_bits);
     const uint32_t global_sc_id = col_id & (global_sc_count - 1);
 
-    const CooFormat coo_tensor =
-        context.extracted_coo_tensors.GetCooFormatWithGain<kHasVariableWeights>(
-            key, col_id, context.stacked_table_metadata.row_combiner);
-    const uint32_t row_id = coo_tensor.row_id;
+    const uint32_t row_id =
+        context.extracted_coo_tensors.GetRowId<kHasVariableWeights>(key);
 
     // Step 2: Handle duplicates.
-    // An ID that is a duplicate of a previously non-dropped ID is merged.
-    // It does not count as a new ID for stats and does not go through dropping
-    // logic.
-    if (grouped_coo_tensors.MaybeMerge(coo_tensor)) {
-      continue;
-    }
-    // If the ID is a duplicate of the last seen ID, it must have been dropped
-    // (otherwise it would have been merged above), so drop this one too.
-    if (perform_id_dropping && row_id == prev_row_id && col_id == prev_col_id) {
-      ++stats.dropped_id_count;
+    if (row_id == prev_row_id && col_id == prev_col_id) {
+      if (perform_id_dropping) {
+        ++stats.dropped_id_count;
+      } else {
+        grouped_coo_tensors.Add(bucket_id, row_id, col_id, 1.0f);
+      }
       continue;
     }
 
@@ -269,8 +263,11 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     }
 
     // Step 4: Add ID to result or drop it.
+    const float gain =
+        context.extracted_coo_tensors.GetGain<kHasVariableWeights>(
+            key, context.stacked_table_metadata.row_combiner);
     if (!perform_id_dropping) {
-      grouped_coo_tensors.Add(bucket_id, coo_tensor);
+      grouped_coo_tensors.Add(bucket_id, row_id, col_id, gain);
     } else {
       // Check limits.
       const bool exceeds_ids_limit =
@@ -286,7 +283,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
         // Dropped id.
         ++stats.dropped_id_count;
       } else {
-        grouped_coo_tensors.Add(bucket_id, coo_tensor);
+        grouped_coo_tensors.Add(bucket_id, row_id, col_id, gain);
       }
 
       // Update kept counts.

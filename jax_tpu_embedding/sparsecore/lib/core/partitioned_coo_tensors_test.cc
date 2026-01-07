@@ -40,8 +40,8 @@ TEST(PartitionedCooTensorsTest, SingleScSingleBucket) {
       /*bucket_count_per_sc=*/1);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
-  tensors.Add(0, coo1);
-  tensors.Add(0, coo2);
+  tensors.Add(0, coo1.row_id, coo1.col_id, coo1.gain);
+  tensors.Add(0, coo2.row_id, coo2.col_id, coo2.gain);
   tensors.FillRemainingScBuckets();
 
   EXPECT_THAT(tensors(0), ElementsAre(coo1, coo2));
