@@ -126,7 +126,6 @@ cc_test(
         "@com_google_fuzztest//fuzztest",
         "@com_google_googletest//:gtest_main",
         "@eigen_archive//:eigen3",
-        "@xla//xla/tsl/concurrency:async_value",
     ],
 )
 
@@ -404,7 +403,6 @@ cc_library(
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
         "@highway//hwy/contrib/sort:vqsort",

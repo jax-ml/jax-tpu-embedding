@@ -163,7 +163,7 @@ TEST(SortAndGroupTest, Base) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -251,7 +251,7 @@ TEST(SortAndGroupTest, TwoScs) {
                               /*num_sc_per_device=*/2);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -320,7 +320,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -371,7 +371,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -427,7 +427,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -484,7 +484,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -536,7 +536,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -587,7 +587,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
                               /*num_sc_per_device=*/4);
   auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -640,7 +640,7 @@ TEST(SortAndGroupTest, IdDropping) {
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
                               /*num_sc_per_device=*/4);
   auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -732,7 +732,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -865,7 +865,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -995,7 +995,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors coo_tensors_by_id =
+  DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
           extracted_coo_tensors, stacked_table_metadata, options,
           stats_per_device, minibatching_split);
@@ -1174,7 +1174,7 @@ TEST(InputPreprocessingUtilTest,
                               /*num_sc_per_device=*/1);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
+  DevicePartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
       extracted, meta, opts, stats_per_device, minibatching_required);
   int dropped_sort = stats_per_device.dropped_id_count;
 
@@ -1241,7 +1241,7 @@ TEST(InputPreprocessingUtilTest,
                               /*num_sc_per_device=*/1);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  PartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
+  DevicePartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
       extracted, meta, opts, stats_per_device, minibatching_split);
 
   // Create 2 minibatches by splitting based on bucket ID.

@@ -158,7 +158,7 @@ struct TableState {
   bool table_minibatching_required = false;
   MinibatchingSplit table_minibatching_split = 0;
   std::vector<ExtractedCooTensors> extracted_coo_tensors_per_device;
-  std::vector<PartitionedCooTensors> partitioned_coo_tensors_per_device;
+  std::vector<DevicePartitionedCooTensors> partitioned_coo_tensors_per_device;
   std::vector<int> dropped_id_count_per_device;
 
   TableState(absl::string_view name,
@@ -184,7 +184,7 @@ struct TableState {
 };
 
 template <typename SplitType>
-tsl::AsyncValueRef<std::pair<PartitionedCooTensors, int>>
+tsl::AsyncValueRef<DeviceSortingTaskResult>
 SortAndGroupCooTensorsForTableStateAsync(
     TableState& state, int local_device,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -233,8 +233,9 @@ void ExtractSortAndGroupCooTensorsForTable(
           result_av.AndThen([result_av, &state, local_device, &counter] {
             auto& result = result_av.get();
             state.partitioned_coo_tensors_per_device[local_device] =
-                std::move(result.first);
-            state.dropped_id_count_per_device[local_device] = result.second;
+                std::move(result.grouped_coo_tensors);
+            state.dropped_id_count_per_device[local_device] =
+                result.total_dropped_id_count;
             counter.DecrementCount();
           });
         });
@@ -287,8 +288,9 @@ void CreateMinibatchingBucketsForTable(
           [result_av, &state, local_device, &counter, dummy_stats_host] {
             auto& result = result_av.get();
             state.partitioned_coo_tensors_per_device[local_device] =
-                std::move(result.first);
-            state.dropped_id_count_per_device[local_device] = result.second;
+                std::move(result.grouped_coo_tensors);
+            state.dropped_id_count_per_device[local_device] =
+                result.total_dropped_id_count;
             counter.DecrementCount();
           });
     });
@@ -583,7 +585,7 @@ void FillDeviceBuffersForTable(
                                   row_pointers_size_per_bucket,
                                   global_minibatching_required,
                                   global_minibatching_split] {
-      PartitionedCooTensors& grouped_coo_tensors =
+      DevicePartitionedCooTensors& grouped_coo_tensors =
           state.partitioned_coo_tensors_per_device[local_device];
       if (options.enable_minibatching && global_minibatching_required) {
         grouped_coo_tensors.Merge(global_minibatching_split);

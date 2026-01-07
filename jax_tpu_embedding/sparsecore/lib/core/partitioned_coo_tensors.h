@@ -18,9 +18,7 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <limits>
-#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
@@ -47,6 +45,8 @@ class PartitionedCooTensors {
         merged_(false),
         dedup_col_id_(std::numeric_limits<uint32_t>::max()),
         dedup_row_id_(std::numeric_limits<uint32_t>::max()) {
+    // TODO: b/444292437 - Remove this parameter and default to 1.
+    DCHECK_EQ(num_sc_per_device, 1);
     coo_tensors_.reserve(reserve_count);
     bucket_offsets_.reserve(1 + num_sc_per_device * bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
@@ -206,56 +206,7 @@ class PartitionedCooTensors {
   // Minibatches (after merging) or Max buckets (before merging).
   int GetNumMinibatches() const { return bucket_count_per_sc_; }
 
-  static PartitionedCooTensors MergeAll(
-      std::vector<PartitionedCooTensors>&& parts) {
-    DCHECK(!parts.empty());
-    // If there is only one part, no merging is needed.
-    if (parts.size() == 1) {
-      return std::move(parts[0]);
-    }
-    int num_sc_per_device = 0;
-    size_t total_coo_size = 0;
-    int bucket_count = parts[0].bucket_count_per_sc_;
-    uint32_t global_sc_count = parts[0].global_sc_count_;
-
-    for (const auto& part : parts) {
-      num_sc_per_device += part.num_sc_per_device_;
-      total_coo_size += part.coo_tensors_.size();
-      CHECK_EQ(part.bucket_count_per_sc_, bucket_count);
-      CHECK_EQ(part.global_sc_count_, global_sc_count);
-      // Ensure each part is fully populated/finalized.
-      // part.bucket_offsets_ should have size 1 + num_sc * bucket_count
-      CHECK_EQ(part.bucket_offsets_.size(),
-               1 + part.num_sc_per_device_ * bucket_count);
-    }
-
-    PartitionedCooTensors result(total_coo_size, num_sc_per_device,
-                                 global_sc_count, bucket_count);
-
-    size_t current_coo_offset = 0;
-
-    for (const auto& part : parts) {
-      // Append COO tensors
-      result.coo_tensors_.insert(
-          result.coo_tensors_.end(),
-          std::make_move_iterator(part.coo_tensors_.begin()),
-          std::make_move_iterator(part.coo_tensors_.end()));
-
-      // Append offsets, adjusting for the current offset.
-      // Skip the first offset (0) of each part as it corresponds to the
-      // end of the previous part (or start of 0).
-      for (size_t i = 1; i < part.bucket_offsets_.size(); ++i) {
-        result.bucket_offsets_.push_back(current_coo_offset +
-                                         part.bucket_offsets_[i]);
-      }
-      current_coo_offset += part.coo_tensors_.size();
-    }
-    // Update state variables to appear "full".
-    result.curr_sc_id_ = num_sc_per_device;
-    result.curr_bucket_id_ = 0;
-
-    return result;
-  }
+  int GetNumSparseCores() const { return num_sc_per_device_; }
 
  private:
   // Advance bucket offsets to the given `target_sc_id` and `target_bucket_id`.
@@ -298,6 +249,41 @@ class PartitionedCooTensors {
   // dropped.
   uint32_t dedup_col_id_;
   uint32_t dedup_row_id_;
+};
+
+struct DevicePartitionedCooTensors {
+  std::vector<PartitionedCooTensors> grouped_coo_tensors;
+
+  template <size_t N = CooFormat::kMaxMinibatchingBuckets>
+  void Merge(const std::bitset<N - 1> split) {
+    for (auto& grouped_coo_tensor : grouped_coo_tensors) {
+      grouped_coo_tensor.Merge<N>(split);
+    }
+  }
+
+  void MergeAll() {
+    for (auto& grouped_coo_tensor : grouped_coo_tensors) {
+      grouped_coo_tensor.MergeAll();
+    }
+  }
+
+  absl::Span<const CooFormat> operator()(int local_sc_id, int bucket_id) const {
+    DCHECK_EQ(grouped_coo_tensors[local_sc_id].GetNumSparseCores(), 1);
+    return grouped_coo_tensors[local_sc_id](0, bucket_id);
+  }
+
+  void Add(int local_sc_id, int bucket_id, const CooFormat& coo_tensor) {
+    DCHECK_EQ(grouped_coo_tensors[local_sc_id].GetNumSparseCores(), 1);
+    grouped_coo_tensors[local_sc_id].Add(0, bucket_id, coo_tensor);
+  }
+
+  int GetNumMinibatches() const {
+    for (const auto& grouped_coo_tensor : grouped_coo_tensors) {
+      DCHECK_EQ(grouped_coo_tensor.GetNumMinibatches(),
+                grouped_coo_tensors[0].GetNumMinibatches());
+    }
+    return grouped_coo_tensors[0].GetNumMinibatches();
+  }
 };
 
 }  // namespace jax_sc_embedding

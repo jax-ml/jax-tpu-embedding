@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -318,7 +319,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
 // could be a separate function.
 template <bool kHasVariableWeights = false, bool kCreateBuckets,
           typename SplitType>
-tsl::AsyncValueRef<std::pair<PartitionedCooTensors, int>>
+tsl::AsyncValueRef<DeviceSortingTaskResult>
 SortAndGroupCooTensorsPerLocalDeviceImpl(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
@@ -351,8 +352,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   const int bucket_count =
       kCreateBuckets ? CooFormat::kMaxMinibatchingBuckets : 1;
 
-  struct SparseCoreTaskResult {
-    PartitionedCooTensors grouped_coo_tensors;
+  struct SortingTaskResult {
+    std::vector<PartitionedCooTensors> grouped_coo_tensors;
     StatsPerHost stats_host;
     int dropped_id_count = 0;
     SplitType split_val = {};
@@ -381,7 +382,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     ranges[i] = {start, coo_tensor_index};
   }
 
-  std::vector<tsl::AsyncValueRef<SparseCoreTaskResult>> task_results;
+  std::vector<tsl::AsyncValueRef<SortingTaskResult>> task_results;
   task_results.reserve(num_tasks);
 
   // Loop over tasks
@@ -389,8 +390,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     int start_sc = task_idx * sc_per_task;
     int end_sc = std::min(start_sc + sc_per_task, num_sc_per_device);
 
-    auto result_av =
-        tsl::MakeUnconstructedAsyncValueRef<SparseCoreTaskResult>();
+    auto result_av = tsl::MakeUnconstructedAsyncValueRef<SortingTaskResult>();
     task_results.push_back(result_av);
 
     options.async_task_scheduler([start_sc, end_sc, ranges, result_av,
@@ -425,15 +425,16 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
         internal::ValidateKeyCapacity(local_sc_id,
                                       range.end_index - range.start_index);
 
-        for (uint32_t j = range.start_index; j < range.end_index; ++j) {
+        for (uint32_t coo_index = range.start_index;
+             coo_index < range.end_index; ++coo_index) {
           // The key here is [bucket_id(6 bits), global_sc_id(num_scs bits),
           // local_embedding_id(32-num_scs bits), index(26 bits)].
           //  Note that this assumes `num_scs` is a power of 2.
           uint32_t data = kHasVariableWeights
-                              ? j
-                              : extracted_coo_tensors.ids[j].row_id;
+                              ? coo_index
+                              : extracted_coo_tensors.ids[coo_index].row_id;
           keys.push_back(CooFormat::GetGroupingKey(
-              extracted_coo_tensors.ids[j].col_id, data, num_sc_bits,
+              extracted_coo_tensors.ids[coo_index].col_id, data, num_sc_bits,
               kCreateBuckets, options.minibatching_bucketing_hash_fn));
         }
 
@@ -521,9 +522,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
       }
 
       // Merge the parts for this task.
-      SparseCoreTaskResult task_result = {
-          .grouped_coo_tensors =
-              PartitionedCooTensors::MergeAll(std::move(sc_parts)),
+      SortingTaskResult task_result = {
+          .grouped_coo_tensors = std::move(sc_parts),
           .stats_host = std::move(local_stats_host),
           .dropped_id_count = total_dropped,
           .split_val = task_split};
@@ -532,26 +532,26 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     });
   }
 
-  auto final_result = tsl::MakeUnconstructedAsyncValueRef<
-      std::pair<PartitionedCooTensors, int>>();
+  auto device_result =
+      tsl::MakeUnconstructedAsyncValueRef<DeviceSortingTaskResult>();
 
   // Aggregate results when all tasks are done.
   tsl::RunWhenReady(
       absl::MakeConstSpan(task_results),
-      [task_results = std::move(task_results), final_result, stats,
+      [task_results = std::move(task_results), device_result, stats,
        split_ptr = &minibatching_split,
-       enable_minibatching = options.enable_minibatching]() mutable {
-        // TODO(b/469153631): This merge runs on the thread that completes the
-        // last task. If this becomes a bottleneck, consider scheduling it as a
-        // separate task or distributing the merge.
+       enable_minibatching = options.enable_minibatching,
+       num_sc_per_device]() mutable {
         tsl::profiler::TraceMe t("MergeTaskResults");
         std::vector<PartitionedCooTensors> parts;
-        parts.reserve(task_results.size());
+        parts.reserve(num_sc_per_device);
 
         int total_dropped = 0;
-        for (auto& res_av : task_results) {
+        for (tsl::AsyncValueRef<SortingTaskResult>& res_av : task_results) {
           auto& res = res_av.get();
-          parts.push_back(std::move(res.grouped_coo_tensors));
+          parts.insert(parts.end(),
+                       std::make_move_iterator(res.grouped_coo_tensors.begin()),
+                       std::make_move_iterator(res.grouped_coo_tensors.end()));
 
           total_dropped += res.dropped_id_count;
 
@@ -574,21 +574,23 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
           }
         }
 
-        PartitionedCooTensors merged =
-            PartitionedCooTensors::MergeAll(std::move(parts));
-        final_result.emplace(std::make_pair(std::move(merged), total_dropped));
+        device_result.emplace(DeviceSortingTaskResult{
+            .grouped_coo_tensors =
+                DevicePartitionedCooTensors{.grouped_coo_tensors =
+                                                std::move(parts)},
+            .total_dropped_id_count = total_dropped});
       });
 
-  return final_result;
+  return device_result;
 }
 
 template <bool kHasVariableWeights = false, typename SplitType>
-tsl::AsyncValueRef<std::pair<PartitionedCooTensors, int>>
+tsl::AsyncValueRef<DeviceSortingTaskResult>
 SortAndGroupCooTensorsPerLocalDeviceAsync(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::StatsPerDevice& stats, SplitType& minibatching_split) {
+    internal::StatsPerDevice stats, SplitType& minibatching_split) {
   const bool create_buckets =
       options.enable_minibatching &&
       std::is_same_v<SplitType, MinibatchingSplit>;
@@ -605,18 +607,19 @@ SortAndGroupCooTensorsPerLocalDeviceAsync(
 
 // Blocking version for test only.
 template <bool kHasVariableWeights = false, typename SplitType>
-PartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
+DevicePartitionedCooTensors SortAndGroupCooTensorsPerLocalDevice(
     const ExtractedCooTensors& extracted_coo_tensors,
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice& stats, SplitType& minibatching_split) {
-  auto av = SortAndGroupCooTensorsPerLocalDeviceAsync<kHasVariableWeights>(
-      extracted_coo_tensors, stacked_table_metadata, options, stats,
-      minibatching_split);
+  tsl::AsyncValueRef<DeviceSortingTaskResult> av =
+      SortAndGroupCooTensorsPerLocalDeviceAsync<kHasVariableWeights>(
+          extracted_coo_tensors, stacked_table_metadata, options, stats,
+          minibatching_split);
   tsl::BlockUntilReady(av);
-  auto result = std::move(av.get());
-  stats.dropped_id_count = result.second;
-  return std::move(result.first);
+  DeviceSortingTaskResult result = std::move(av.get());
+  stats.dropped_id_count = result.total_dropped_id_count;
+  return std::move(result.grouped_coo_tensors);
 }
 
 }  // namespace jax_sc_embedding

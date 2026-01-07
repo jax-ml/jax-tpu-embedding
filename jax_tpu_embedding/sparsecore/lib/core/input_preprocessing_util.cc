@@ -18,7 +18,6 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
-#include <string>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
@@ -310,7 +309,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
 // `gains` because we fill values in a loop to a bigger array.
 void FillLocalDeviceBuffer(
-    const PartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
     const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,

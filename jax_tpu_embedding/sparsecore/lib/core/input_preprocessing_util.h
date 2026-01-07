@@ -243,6 +243,11 @@ struct ExtractedCooTensors {
   }
 };
 
+struct DeviceSortingTaskResult {
+  DevicePartitionedCooTensors grouped_coo_tensors;
+  int total_dropped_id_count = 0;
+};
+
 namespace internal {
 
 struct CsrArraysPerDevice {
@@ -472,7 +477,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
 void FillLocalDeviceBuffer(
-    const PartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
