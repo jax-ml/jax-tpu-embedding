@@ -25,9 +25,6 @@ tpu_py_strict_test(
     srcs = [
         "sparse_dense_matmul_csr_test.py",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
@@ -49,9 +46,6 @@ pytype_strict_contrib_test(
         # TODO(b/433283451): remove this flag once this is fixed.
         "--xla_tpu_num_embedding_devices=1",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",
@@ -75,9 +69,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",
@@ -102,9 +93,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",
@@ -129,9 +117,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",
@@ -182,9 +167,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",
@@ -209,9 +191,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",
@@ -283,9 +262,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     tags = [
         "exclusive-if-local",
         "requires-tpu",

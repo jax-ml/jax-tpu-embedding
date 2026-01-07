@@ -33,9 +33,6 @@ pytype_strict_contrib_test(
 tpu_py_strict_test(
     name = "jax_sc_shakespeare_tests",
     srcs = ["jax_sc_shakespeare_tests.py"],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
@@ -55,9 +52,6 @@ tpu_py_strict_test(
 tpu_py_strict_test(
     name = "jax_spmd_tc_with_sc_tests",
     srcs = ["jax_spmd_tc_with_sc_tests.py"],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

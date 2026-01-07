@@ -24,10 +24,6 @@ tpu_py_strict_test(
     srcs = [
         "autograd_test.py",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-        "JAX_TRACEBACK_FILTERING": "off",
-    },
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_nnx_model",
@@ -47,10 +43,6 @@ tpu_py_strict_test(
 tpu_py_strict_test(
     name = "embed_test",
     srcs = ["embed_test.py"],
-    env = {
-        # "XLA_FLAGS": "--xla_dump_to=sponge",
-        "JAX_TRACEBACK_FILTERING": "off",
-    },
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

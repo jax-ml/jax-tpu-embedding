@@ -117,9 +117,6 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--xla_sc_pack_quantization_compute=true",
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-    },
     main = "tpu_sparse_dense_matmul_test.py",
     tags = [
         "exclusive-if-local",
@@ -147,10 +144,6 @@ pytype_strict_contrib_test(
     args = [
         # TPU chip configuration,
     ],
-    env = {
-        "XLA_FLAGS": "--xla_dump_to=sponge",
-        "JAX_TRACEBACK_FILTERING": "off",
-    },
     main = "tpu_sparse_dense_matmul_grad_test.py",
     tags = [
         "exclusive-if-local",
