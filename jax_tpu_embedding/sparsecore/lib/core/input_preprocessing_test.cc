@@ -224,7 +224,7 @@ TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
       .local_device_count = 1,
       .global_device_count = 2,
       .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
+  };
 
   ExtractedCooTensors extracted_coo_tensors =
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
@@ -289,7 +289,7 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
+  };
 
   ExtractedCooTensors extracted_coo_tensors =
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
@@ -317,7 +317,7 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
       .local_device_count = 2,
       .global_device_count = 2,
       .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
+  };
 
   std::vector<int> expected_ids_per_sc[] = {{1 + 9, 2 + 10, 3 + 11, 4 + 12},
                                             {5 + 13, 6 + 14, 7 + 15, 8 + 16}};
@@ -357,7 +357,6 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
       .local_device_count = local_device_count,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack,
   };
 
   const int num_scs = num_sc_per_device * global_device_count;
@@ -492,7 +491,7 @@ TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
-      .feature_stacking_strategy = FeatureStackingStrategy::kSplitThenStack};
+  };
 
   ExtractedCooTensors extracted_coo_tensors =
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
@@ -978,7 +977,6 @@ void RunPreprocessingOutputIsValidTest(
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
     int max_unique_ids_per_partition,
-    FeatureStackingStrategy feature_stacking_strategy,
     bool enable_minibatching) {
   // Max unique ids should be less than or equal to max ids.
   max_unique_ids_per_partition =
@@ -1023,7 +1021,6 @@ void RunPreprocessingOutputIsValidTest(
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
-      .feature_stacking_strategy = feature_stacking_strategy,
       .enable_minibatching = enable_minibatching,
       .batch_number = 42};
 
@@ -1087,7 +1084,6 @@ void PreprocessingOutputIsValidComplex(
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
     int max_unique_ids_per_partition,
-    FeatureStackingStrategy feature_stacking_strategy,
     bool enable_minibatching) {
   std::vector<std::vector<std::vector<int64_t>>> samples_vector;
   std::apply(
@@ -1098,7 +1094,7 @@ void PreprocessingOutputIsValidComplex(
   RunPreprocessingOutputIsValidTest(
       samples_vector, table_vocabs, num_sc_per_device, global_device_count,
       max_ids_per_partition, max_unique_ids_per_partition,
-      feature_stacking_strategy, enable_minibatching);
+      enable_minibatching);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
@@ -1141,9 +1137,6 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
         fuzztest::InRange(1, 1024),
         // Domain for max_unique_ids_per_partition
         fuzztest::InRange(1, 1024),
-        // Domain for feature_stacking_strategy
-        fuzztest::ElementOf<FeatureStackingStrategy>(
-            {FeatureStackingStrategy::kSplitThenStack}),
         // Domain for enable_minibatching
         fuzztest::Arbitrary<bool>());
 
@@ -1152,12 +1145,11 @@ void PreprocessingOutputIsValidSimple(
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
     int max_unique_ids_per_partition,
-    FeatureStackingStrategy feature_stacking_strategy,
     bool enable_minibatching) {
   RunPreprocessingOutputIsValidTest(
       {samples}, table_vocabs, num_sc_per_device, global_device_count,
       max_ids_per_partition, max_unique_ids_per_partition,
-      feature_stacking_strategy, enable_minibatching);
+      enable_minibatching);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
@@ -1177,15 +1169,11 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
         fuzztest::InRange(1, 128),
         // Domain for max_unique_ids_per_partition
         fuzztest::InRange(1, 128),
-        // Domain for feature_stacking_strategy
-        fuzztest::ElementOf<FeatureStackingStrategy>(
-            {FeatureStackingStrategy::kSplitThenStack}),
         // Domain for enable_minibatching
         fuzztest::Arbitrary<bool>());
 
 void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
-                         int num_sc_per_device, int global_device_count,
-                         FeatureStackingStrategy feature_stacking_strategy) {
+                         int num_sc_per_device, int global_device_count) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.push_back(CreateInputBatchFromSamples(samples));
 
@@ -1202,7 +1190,6 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
-      .feature_stacking_strategy = feature_stacking_strategy,
       .enable_minibatching = false,
       .batch_number = 1};
   PreprocessSparseDenseMatmulInputOptions options_no_dropping{
@@ -1210,7 +1197,6 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = false,
-      .feature_stacking_strategy = feature_stacking_strategy,
       .enable_minibatching = false,
       .batch_number = 1};
 
@@ -1348,10 +1334,7 @@ FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)
         // Domain for num_sc_per_device
         fuzztest::ElementOf<int>({1, 2, 4}),
         // Domain for global_device_count
-        fuzztest::ElementOf<int>({1, 2, 4}),
-        // Domain for feature_stacking_strategy
-        fuzztest::ElementOf<FeatureStackingStrategy>(
-            {FeatureStackingStrategy::kSplitThenStack}));
+        fuzztest::ElementOf<int>({1, 2, 4}));
 
 }  // namespace
 }  // namespace jax_sc_embedding

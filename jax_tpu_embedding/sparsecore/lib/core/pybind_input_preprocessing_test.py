@@ -28,9 +28,6 @@ import numpy as np
 import portpicker
 
 
-FeatureStackingStrategy = embedding.FeatureStackingStrategy
-
-
 @dataclasses.dataclass(frozen=True)
 class MockDevice:
   id: int

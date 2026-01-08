@@ -348,13 +348,6 @@ struct StatsPerHost {
 
 using MinibatchingSplit = std::bitset<CooFormat::kMaxMinibatchingBuckets - 1>;
 
-enum class FeatureStackingStrategy {
-  // Split each feature individually, then stack the corresponding shards on
-  // each SparseCore. Generally provides better load balancing, as each
-  // SparseCore processes an equal portion of every feature.
-  kSplitThenStack = 1
-};
-
 enum class ShardingStrategy : int { kMod = 1 };
 
 inline void PreprocessingThreadPoolSchedule(std::function<void()> callback) {
@@ -372,9 +365,6 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
   const bool allow_id_dropping = true;
-  // The strategy used for stacking features from different tables.
-  FeatureStackingStrategy feature_stacking_strategy =
-      FeatureStackingStrategy::kSplitThenStack;
   // Whether mini-batching is enabled.
   const bool enable_minibatching = false;
 

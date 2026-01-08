@@ -28,7 +28,6 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-StackingStrategy = embedding.StackingStrategy
 VariableInfo = collections.namedtuple("VariableInfo", ["shape", "offset"])
 
 

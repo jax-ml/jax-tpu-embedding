@@ -115,8 +115,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
-    bool has_leading_dimension, bool allow_id_dropping,
-    FeatureStackingStrategy feature_stacking_strategy, int batch_number,
+    bool has_leading_dimension, bool allow_id_dropping, int batch_number,
     bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
   CHECK_EQ(input_batches.size(), feature_specs.size());
   PreprocessSparseDenseMatmulInputOptions options = {
@@ -125,7 +124,6 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
       .num_sc_per_device = num_sc_per_device,
       .sharding_strategy = sharding_strategy,
       .allow_id_dropping = allow_id_dropping,
-      .feature_stacking_strategy = feature_stacking_strategy,
       .enable_minibatching = enable_minibatching,
       .batch_number = batch_number,
       .all_reduce_interface = all_reduce_interface,
@@ -174,8 +172,7 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     py::list features, std::optional<py::list> feature_weights,
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
-    bool has_leading_dimension, bool allow_id_dropping,
-    FeatureStackingStrategy feature_stacking_strategy, int batch_number,
+    bool has_leading_dimension, bool allow_id_dropping, int batch_number,
     bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
   if (feature_weights.has_value()) {
     CHECK_EQ(features.size(), feature_weights->size());
@@ -194,16 +191,15 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
       global_device_count, num_sc_per_device, sharding_strategy,
-      has_leading_dimension, allow_id_dropping, feature_stacking_strategy,
-      batch_number, enable_minibatching, all_reduce_interface);
+      has_leading_dimension, allow_id_dropping, batch_number,
+      enable_minibatching, all_reduce_interface);
 }
 
 py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     py::list indices, py::list values, py::list dense_shapes,
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
-    bool has_leading_dimension, bool allow_id_dropping,
-    FeatureStackingStrategy feature_stacking_strategy, int batch_number,
+    bool has_leading_dimension, bool allow_id_dropping, int batch_number,
     bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
   CHECK(indices.size() == values.size());
   CHECK(indices.size() == dense_shapes.size());
@@ -223,17 +219,14 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
       global_device_count, num_sc_per_device, sharding_strategy,
-      has_leading_dimension, allow_id_dropping, feature_stacking_strategy,
-      batch_number, enable_minibatching, all_reduce_interface);
+      has_leading_dimension, allow_id_dropping, batch_number,
+      enable_minibatching, all_reduce_interface);
 }
 }  // namespace
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
   py::enum_<ShardingStrategy>(m, "ShardingStrategy")
       .value("Mod", ShardingStrategy::kMod)
-      .export_values();
-  py::enum_<FeatureStackingStrategy>(m, "FeatureStackingStrategy")
-      .value("SPLIT_THEN_STACK", FeatureStackingStrategy::kSplitThenStack)
       .export_values();
   py::class_<AllReduceInterface> all_reduce_interface(m, "AllReduceInterface");
   py::class_<rpc::MinibatchingNode, std::shared_ptr<rpc::MinibatchingNode>>(
@@ -249,10 +242,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::kw_only(), py::arg("num_sc_per_device"),
         py::arg("sharding_strategy") = ShardingStrategy::kMod,
         py::arg("has_leading_dimension") = false,
-        py::arg("allow_id_dropping") = false,
-        py::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kSplitThenStack,
-        py::arg("batch_number") = 0, py::arg("enable_minibatching") = false,
+        py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
+        py::arg("enable_minibatching") = false,
         py::arg("all_reduce_interface") = nullptr);
   m.def("PreprocessSparseDenseMatmulSparseCooInput",
         &PySparseCooPreprocessSparseDenseMatmulInput, py::arg("indices"),
@@ -261,10 +252,8 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::kw_only(), py::arg("num_sc_per_device"),
         py::arg("sharding_strategy") = ShardingStrategy::kMod,
         py::arg("has_leading_dimension") = false,
-        py::arg("allow_id_dropping") = false,
-        py::arg("feature_stacking_strategy") =
-            FeatureStackingStrategy::kSplitThenStack,
-        py::arg("batch_number") = 0, py::arg("enable_minibatching") = false,
+        py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
+        py::arg("enable_minibatching") = false,
         py::arg("all_reduce_interface") = nullptr);
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())

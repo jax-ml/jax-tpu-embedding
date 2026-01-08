@@ -37,8 +37,6 @@ import numpy as np
 ArrayLike = jnp.ndarray | np.typing.ArrayLike
 
 
-FeatureStackingStrategy = pybind_input_preprocessing.FeatureStackingStrategy
-
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = Union[T, Sequence[T], Mapping[str, T]]
 LimitsCallable: TypeAlias = table_stacking.LimitsCallable
@@ -467,7 +465,6 @@ def preprocess_sparse_dense_matmul_input(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
-    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
     enable_minibatching: bool = False,
     all_reduce_interface: (
@@ -502,7 +499,6 @@ def preprocess_sparse_dense_matmul_input(
       if using jax.pmap and set it to False if using jax.jit.
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
-    feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
     all_reduce_interface: Interface to communicate between multiple hosts. This
@@ -540,7 +536,6 @@ def preprocess_sparse_dense_matmul_input(
           sharding_strategy=sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension=has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
-          feature_stacking_strategy=feature_stacking_strategy,
           batch_number=batch_number,
           enable_minibatching=enable_minibatching,
           all_reduce_interface=all_reduce_interface,
@@ -569,7 +564,6 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
-    feature_stacking_strategy: FeatureStackingStrategy = FeatureStackingStrategy.SPLIT_THEN_STACK,
     batch_number: int = 0,
     enable_minibatching: bool = False,
     all_reduce_interface: (
@@ -610,7 +604,6 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       if using jax.pmap and set it to False if using jax.jit.
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
-    feature_stacking_strategy: The feature stacking strategy.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
     all_reduce_interface: Interface to communicate between multiple hosts. This
@@ -649,7 +642,6 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           sharding_strategy=sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension=has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
-          feature_stacking_strategy=feature_stacking_strategy,
           batch_number=batch_number,
           enable_minibatching=enable_minibatching,
           all_reduce_interface=all_reduce_interface,
@@ -670,7 +662,7 @@ def _get_activation_for_feature(
     feature: embedding_spec.FeatureSpec,
     activations: dict[str, jax.Array],
     global_device_count: int,
-    num_feature_slices_per_device: int = 1,
+    num_feature_slices_per_device: int,
 ) -> jax.Array:
   """Gets the activation slice for a given feature."""
   if feature.output_shape[-1] > feature.table_spec.embedding_dim:
@@ -714,31 +706,19 @@ def _get_activation_for_feature(
   return einops.rearrange(feature_slice, "f b1 d -> (f b1) d")
 
 
-StackingStrategy = pybind_input_preprocessing.FeatureStackingStrategy
-
-
 def unstack_embedding_activations(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
 ) -> Nested[jax.Array]:
   """Unstacks the activations to match the feature specs."""
-
-  match feature_stacking_strategy:
-    case StackingStrategy.SPLIT_THEN_STACK:
-      num_feature_slices_per_device = num_sc_per_device
-    case _:
-      raise ValueError(
-          f"Unsupported feature stacking strategy: {feature_stacking_strategy}"
-      )
 
   get_activation_for = functools.partial(
       _get_activation_for_feature,
       activations=activations,
       global_device_count=global_device_count,
-      num_feature_slices_per_device=num_feature_slices_per_device,
+      num_feature_slices_per_device=num_sc_per_device,
   )
   return jax.tree_util.tree_map(get_activation_for, feature_specs)
 
@@ -751,7 +731,6 @@ def tpu_sparse_dense_matmul(
     *,
     global_device_count: int,
     sharding_strategy: str = "MOD",
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
     perform_unstacking: bool = True,
@@ -768,7 +747,6 @@ def tpu_sparse_dense_matmul(
       global_device_count=mesh.size,
       feature_specs=feature_specs,
       sharding_strategy="MOD",
-      feature_stacking_strategy=StackingStrategy.SPLIT_THEN_STACK,
   )
   sparse_matmul = jax.shard_map(
       sparse_matmul,
@@ -795,7 +773,6 @@ def tpu_sparse_dense_matmul(
     global_device_count: The number of global devices (chips). Typically
       `mesh.size`.
     sharding_strategy: The sharding strategy (e.g., MOD)
-    feature_stacking_strategy: The feature stacking strategy.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
     enable_minibatching: Whether to enable minibatching. Defaults to `False`.
@@ -875,7 +852,6 @@ def tpu_sparse_dense_matmul(
         feature_specs,
         global_device_count,
         num_sc_per_device,
-        feature_stacking_strategy,
     )
 
   return activations
@@ -916,8 +892,6 @@ def stack_embedding_gradients(
     ].append((feature, gradient))
   stacked_table_to_gradients = collections.defaultdict(list)
 
-  feature_slice_per_device = num_sc_per_device
-
   result: dict[str, jax.Array] = {}
 
   for stacked_table_name, stacked_features in stacked_table_to_features.items():
@@ -934,12 +908,12 @@ def stack_embedding_gradients(
       if extra_cols != 0:
         gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
       _verify_input_batch_size(
-          gradient.shape, feature_slice_per_device, name=feature.name
+          gradient.shape, num_sc_per_device, name=feature.name
       )
       # Slice the feature.
       # b: batch size per slice, d: padded embedding dim
       gradient = einops.rearrange(
-          gradient, "(f b) d -> f b d", f=feature_slice_per_device
+          gradient, "(f b) d -> f b d", f=num_sc_per_device
       )
       stacked_table_to_gradients[stacked_table_name].append(gradient)
 
@@ -963,7 +937,6 @@ def tpu_sparse_dense_matmul_grad(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     *,
     sharding_strategy: str = "MOD",
-    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
     label: str = "",
     step: jax.Array | int | None = None,
     num_sc_per_device: int | None = None,
@@ -1006,7 +979,6 @@ def tpu_sparse_dense_matmul_grad(
       variables. The tree structure must be identical to the lhs_row_pointers.
     feature_specs: The input features for the current process.
     sharding_strategy: The sharding strategy (e.g., MOD)
-    feature_stacking_strategy: The feature stacking strategy.
     label: The label for the optimizer computation.
     step: The current step number.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
@@ -1018,7 +990,6 @@ def tpu_sparse_dense_matmul_grad(
   Returns:
     The updated activation embedding variables.
   """
-  del feature_stacking_strategy
   if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
     warnings.warn(
         "SparseDenseMatmulInput is deprecated. Please use PreprocessedInput"
