@@ -26,27 +26,16 @@ template <typename ValuesStream>
 class UnityWeightsStream {
  public:
   UnityWeightsStream(const ValuesStream& value_stream)
-      : value_stream_(value_stream), curr_col_(0) {}
-
-  int size() const { return value_stream_.size(); }
+      : value_stream_(value_stream) {}
 
   int cols() const { return value_stream_.cols(); }
 
-  void NextRow() { curr_col_ = 0; }
-
-  void NextCol() { ++curr_col_; }
-
-  void SeekCol(int col) { curr_col_ = col; }
+  void NextRow() {}
 
   int row() const { return value_stream_.row(); }
 
-  int col() const { return curr_col_; }
-
-  float get() const { return 1.0f; }
-
  private:
   const ValuesStream& value_stream_;
-  int curr_col_;
 };
 
 template <typename T>

@@ -17,6 +17,7 @@
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/unity_weights_stream_impl.h"
@@ -41,7 +42,6 @@ class NumpyDenseInputBatchStream {
                                       int row_start, int row_end)
       : matrix_ref_(matrix.template unchecked<2>()),
         curr_row_(row_start),
-        curr_col_(0),
         row_end_(row_end),
         rows_(row_end - row_start),
         cols_(matrix_ref_.shape(1)),
@@ -53,29 +53,18 @@ class NumpyDenseInputBatchStream {
 
   int cols() const { return cols_; }
 
-  void NextRow() {
-    ++curr_row_;
-    curr_col_ = 0;
+  void NextRow() { ++curr_row_; }
+
+  absl::Span<const T> getRowSpan() const {
+    DCHECK_LT(curr_row_, row_end_);
+    return absl::MakeSpan(&matrix_ref_(curr_row_, 0), cols_);
   }
-
-  void NextCol() { ++curr_col_; }
-
-  void SeekCol(int col) { curr_col_ = col; }
 
   int row() const { return curr_row_; }
-
-  int col() const { return curr_col_; }
-
-  T get() const {
-    DCHECK_LT(curr_row_, row_end_);
-    DCHECK_LT(curr_col_, cols_);
-    return matrix_ref_(curr_row_, curr_col_);
-  }
 
  private:
   py::detail::unchecked_reference<T, 2> matrix_ref_;
   int curr_row_;
-  int curr_col_;
   int row_end_;
   int rows_;
   int cols_;
@@ -93,7 +82,6 @@ class NumpyRaggedInputBatchStream {
         row_ref_(std::make_unique<py::detail::unchecked_reference<T, 1>>(
             rows_ref_(row_start).template unchecked<1>())),
         curr_row_(row_start),
-        curr_col_(0),
         size_(row_end - row_start),
         row_end_(row_end) {}
 
@@ -101,25 +89,19 @@ class NumpyRaggedInputBatchStream {
 
   void NextRow() {
     ++curr_row_;
-    curr_col_ = 0;
     if (curr_row_ < row_end_) {
       row_ref_ = std::make_unique<py::detail::unchecked_reference<T, 1>>(
           rows_ref_(curr_row_).template unchecked<1>());
     }
   }
 
-  void NextCol() { ++curr_col_; }
-
-  void SeekCol(int col) { curr_col_ = col; }
+  absl::Span<const T> getRowSpan() const {
+    return row_ref_->shape(0) == 0
+               ? absl::Span<const T>()
+               : absl::MakeSpan(&(*row_ref_)(0), row_ref_->shape(0));
+  }
 
   int row() const { return curr_row_; }
-
-  int col() const { return curr_col_; }
-
-  T get() const {
-    DCHECK_LT(curr_col_, row_ref_->shape(0));
-    return (*row_ref_)(curr_col_);
-  }
 
  private:
   py::detail::unchecked_reference<py::array_t<T>, 1> rows_ref_;
@@ -127,7 +109,6 @@ class NumpyRaggedInputBatchStream {
   // deleted (due to const dims_ member).
   std::unique_ptr<py::detail::unchecked_reference<T, 1>> row_ref_;
   int curr_row_;
-  int curr_col_;
   int size_;
   int row_end_;
 };

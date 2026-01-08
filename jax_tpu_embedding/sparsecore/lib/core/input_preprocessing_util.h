@@ -182,14 +182,21 @@ struct ExtractedCooTensors {
 
   bool has_variable_weights() const { return has_variable_weights_; }
 
-  void emplace_back(int row_id, int embedding_id, float gain, int col_shift,
+  void emplace_back(int row_id, int embedding_id, int col_shift,
                     int col_offset, int num_scs_mod) {
+    DCHECK(!has_variable_weights_);
     this->ids.push_back({.col_id = CooFormat::GetColId(embedding_id, col_shift,
                                                        col_offset, num_scs_mod),
                          .row_id = row_id});
-    if (has_variable_weights_) {
-      this->gains.push_back(gain);
-    }
+  }
+
+  void emplace_back_with_gain(int row_id, int embedding_id, float gain,
+                              int col_shift, int col_offset, int num_scs_mod) {
+    DCHECK(has_variable_weights_);
+    this->ids.push_back({.col_id = CooFormat::GetColId(embedding_id, col_shift,
+                                                       col_offset, num_scs_mod),
+                         .row_id = row_id});
+    this->gains.push_back(gain);
   }
 
   size_t size() const { return ids.size(); }
@@ -201,9 +208,17 @@ struct ExtractedCooTensors {
     }
   }
 
+  // Test only method to get the CooFormat at index i.
   CooFormat get(int i) const {
-    return CooFormat(ids[i].row_id, ids[i].col_id,
-                     has_variable_weights_ ? gains[i] : 1.0f);
+    float gain = 1.0f;
+    if (has_variable_weights_) {
+      gain = gains[i];
+    } else if (!row_token_counts.empty()) {
+      gain = 1.0f / row_token_counts[ids[i].row_id];
+    } else if (!row_gains.empty()) {
+      gain = row_gains[ids[i].row_id];
+    }
+    return CooFormat(ids[i].row_id, ids[i].col_id, gain);
   }
 
   template <bool kHasVariableWeights>

@@ -461,14 +461,14 @@ class InputPreprocessingTest(parameterized.TestCase):
   )
   ragged_input_features = np.array(
       [
-          np.array([5, 18]),
-          np.array([0, 2, 31]),
-          np.array([18, 0, 20, 6]),
-          np.array([1, 28, 5, 8]),
-          np.array([0]),
-          np.array([12, 7, 3, 11]),
-          np.array([18, 0, 7, 3]),
-          np.array([6, 4, 19, 2]),
+          np.array([5, 18], dtype=np.int32),
+          np.array([0, 2, 31], dtype=np.int32),
+          np.array([18, 0, 20, 6], dtype=np.int32),
+          np.array([1, 28, 5, 8], dtype=np.int32),
+          np.array([0], dtype=np.int32),
+          np.array([12, 7, 3, 11], dtype=np.int32),
+          np.array([18, 0, 7, 3], dtype=np.int32),
+          np.array([6, 4, 19, 2], dtype=np.int32),
       ],
       dtype=object,
   )

@@ -86,7 +86,7 @@ void PySparseCooInputBatch::ExtractCooTensors(
 
   ConstructRowPointersIfRequired();
 
-  SparseCsrInputBatchStream<int64_t,
+  SparseCsrInputBatchStream<int32_t,
                             pybind11::detail::unchecked_reference<int, 1>,
                             absl::Span<const int64_t>>
       values_stream(values_.unchecked<1>(), absl::MakeConstSpan(row_pointers_),

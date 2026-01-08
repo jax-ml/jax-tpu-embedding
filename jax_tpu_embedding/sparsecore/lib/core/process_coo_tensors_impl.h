@@ -15,35 +15,38 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PROCESS_COO_TENSORS_IMPL_H_
 
 #include <cmath>
+#include <type_traits>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/unity_weights_stream_impl.h"
 
 namespace jax_sc_embedding {
 
+// Helper to check if a type is an instantiation of UnityWeightsStream.
+template <typename>
+struct is_unity_weights_stream : std::false_type {};
+template <typename T>
+struct is_unity_weights_stream<UnityWeightsStream<T>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_unity_weights_stream_v =
+    is_unity_weights_stream<T>::value;
+
 // Overload for UnityWeightsStream.
-// This avoids looping when combiner is kMean or kSqrtn because get() always
-// returns 1.0. We can compute the result in O(1) time.
-// The loop cannot be optimized away by the compiler in the generic case because
-// it must preserve the side effect of calling NextCol() on the stream, so this
-// specialization is necessary for top performance with unity weights.
 template <typename ValuesStream>
 float ComputeWeightDivisor(RowCombiner combiner,
                            UnityWeightsStream<ValuesStream>& weights_stream) {
   const int num_cols = weights_stream.cols();
-  // We must advance the stream cursor to the end of the row, as this is an
-  // expected side effect of calling ComputeWeightDivisor in the generic case.
-  weights_stream.SeekCol(num_cols);
   switch (combiner) {
     case RowCombiner::kSum:
-    return 1.0f;
-  case RowCombiner::kMean:
-    return static_cast<float>(num_cols);
-  case RowCombiner::kSqrtn:
-    return std::sqrt(static_cast<float>(num_cols));
+      return 1.0f;
+    case RowCombiner::kMean:
+      return static_cast<float>(num_cols);
+    case RowCombiner::kSqrtn:
+      return std::sqrt(static_cast<float>(num_cols));
   }
 }
 
@@ -51,26 +54,23 @@ float ComputeWeightDivisor(RowCombiner combiner,
 template <typename WeightsStreamT>
 float ComputeWeightDivisor(RowCombiner combiner,
                            WeightsStreamT& weights_stream) {
-  const int num_cols = weights_stream.cols();
   switch (combiner) {
     case RowCombiner::kSum:
       return 1.0f;
     case RowCombiner::kMean: {
       // Sum of elements.
       float sum = 0.0f;
-      for (; weights_stream.col() < num_cols; weights_stream.NextCol()) {
-        sum += weights_stream.get();
+      for (const float weight : weights_stream.getRowSpan()) {
+        sum += weight;
       }
-      weights_stream.SeekCol(0);
       return sum;
     }
     case RowCombiner::kSqrtn: {
       // Sqrt of sum of squares.
       float sum = 0.0f;
-      for (; weights_stream.col() < num_cols; weights_stream.NextCol()) {
-        sum += std::pow(weights_stream.get(), 2);
+      for (const float weight : weights_stream.getRowSpan()) {
+        sum += std::pow(weight, 2);
       }
-      weights_stream.SeekCol(0);
       return std::sqrt(sum);
     }
   }
@@ -99,48 +99,47 @@ void ProcessCooTensors(
     DCHECK_LT(weights_stream.row(), options.slice_end);
     DCHECK_EQ(values_stream.cols(), weights_stream.cols());
     DCHECK_EQ(values_stream.row(), weights_stream.row());
-    DCHECK_EQ(values_stream.col(), weights_stream.col());
-    DCHECK_EQ(values_stream.col(), 0);
 
     const int sample_id =
         values_stream.row() - options.slice_start + options.row_offset;
     const int num_cols = values_stream.cols();
     float divisor = 1.0f;
-
-    if (extracted_coo_tensors.has_variable_weights()) {
-      divisor = ComputeWeightDivisor(options.combiner, weights_stream);
-    } else {
-      switch (options.combiner) {
-        case RowCombiner::kMean:
-          extracted_coo_tensors.row_token_counts[sample_id] = num_cols;
-          break;
-        case RowCombiner::kSqrtn: {
-          extracted_coo_tensors.row_gains[sample_id] =
-              1.0f / std::sqrt(static_cast<float>(num_cols));
-          break;
-        }
-        case RowCombiner::kSum:
-          break;
+    if constexpr (is_unity_weights_stream_v<WeightsStreamT>) {
+      if (options.combiner == RowCombiner::kMean) {
+        extracted_coo_tensors.row_token_counts[sample_id] = num_cols;
+      } else if (options.combiner == RowCombiner::kSqrtn) {
+        divisor = ComputeWeightDivisor(options.combiner, weights_stream);
+        extracted_coo_tensors.row_gains[sample_id] = 1.0f / divisor;
       }
+    } else {
+      divisor = ComputeWeightDivisor(options.combiner, weights_stream);
     }
 
     extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
         num_cols;
+    DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
 
-    for (; values_stream.col() < num_cols; values_stream.NextCol()) {
-      const int embedding_id = values_stream.get();
-      const float gain = extracted_coo_tensors.has_variable_weights()
-                             ? weights_stream.get() / divisor
-                             : 1.0f;
-      if (extracted_coo_tensors.has_variable_weights()) {
-        weights_stream.NextCol();
+    const auto values = values_stream.getRowSpan();  // template-dependent type.
+    if constexpr (!is_unity_weights_stream_v<WeightsStreamT>) {
+      const absl::Span<const float> weights = weights_stream.getRowSpan();
+      for (int i = 0; i < num_cols; ++i) {
+        const int embedding_id = values[i];
+        const float gain = weights[i] / divisor;
+        DCHECK_GE(embedding_id, 0);
+
+        extracted_coo_tensors.emplace_back_with_gain(
+            sample_id, embedding_id, gain, options.col_shift,
+            options.col_offset, num_scs_mod);
       }
-      DCHECK_GE(embedding_id, 0);
-      DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
+    } else {
+      for (int i = 0; i < num_cols; ++i) {
+        const int embedding_id = values[i];
+        DCHECK_GE(embedding_id, 0);
 
-      extracted_coo_tensors.emplace_back(sample_id, embedding_id, gain,
-                                         options.col_shift, options.col_offset,
-                                         num_scs_mod);
+        extracted_coo_tensors.emplace_back(sample_id, embedding_id,
+                                           options.col_shift,
+                                           options.col_offset, num_scs_mod);
+      }
     }
   }
 }
