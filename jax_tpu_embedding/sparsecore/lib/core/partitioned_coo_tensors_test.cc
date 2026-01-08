@@ -26,36 +26,36 @@ using ::testing::ElementsAre;
 using ::testing::SizeIs;
 
 TEST(PartitionedCooTensorsTest, Empty) {
-  PartitionedCooTensors tensors(/*reserve_count=*/0, /*sc_count=*/1,
+  PartitionedCooTensors tensors(/*reserve_count=*/0,
                                 /*global_sc_count=*/1,
                                 /*bucket_count=*/1);
   tensors.FillRemainingScBuckets();
-  EXPECT_THAT(tensors(0, 0), SizeIs(0));
-  EXPECT_EQ(tensors.Size(0), 0);
+  EXPECT_THAT(tensors(0), SizeIs(0));
+  EXPECT_EQ(tensors.Size(), 0);
 }
 
 TEST(PartitionedCooTensorsTest, SingleScSingleBucket) {
-  PartitionedCooTensors tensors(/*reserve_count=*/10, /*sc_count=*/1,
+  PartitionedCooTensors tensors(/*reserve_count=*/10,
                                 /*global_sc_count=*/1,
                                 /*bucket_count=*/1);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
-  tensors.Add(0, 0, coo1);
-  tensors.Add(0, 0, coo2);
+  tensors.Add(0, coo1);
+  tensors.Add(0, coo2);
   tensors.FillRemainingScBuckets();
 
-  EXPECT_THAT(tensors(0, 0), ElementsAre(coo1, coo2));
-  EXPECT_EQ(tensors.Size(0), 2);
+  EXPECT_THAT(tensors(0), ElementsAre(coo1, coo2));
+  EXPECT_EQ(tensors.Size(), 2);
 }
 
 TEST(DevicePartitionedCooTensorsTest, MultiScSingleBucket) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/1);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/1);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
@@ -69,18 +69,18 @@ TEST(DevicePartitionedCooTensorsTest, MultiScSingleBucket) {
 
   EXPECT_THAT(tensors(0, 0), ElementsAre(coo1));
   EXPECT_THAT(tensors(1, 0), ElementsAre(coo2, coo3));
-  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(0), 1);
-  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(0), 2);
+  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(), 1);
+  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(), 2);
 }
 
 TEST(DevicePartitionedCooTensorsTest, MultiScMultiBucket) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -100,18 +100,18 @@ TEST(DevicePartitionedCooTensorsTest, MultiScMultiBucket) {
   EXPECT_THAT(tensors(0, 1), ElementsAre(coo2));
   EXPECT_THAT(tensors(1, 0), ElementsAre(coo3, coo4));
   EXPECT_THAT(tensors(1, 1), ElementsAre(coo5));
-  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(0), 2);
-  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(0), 3);
+  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(), 2);
+  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(), 3);
 }
 
 TEST(DevicePartitionedCooTensorsTest, MergeBuckets) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -125,24 +125,26 @@ TEST(DevicePartitionedCooTensorsTest, MergeBuckets) {
   tensors.Add(1, 0, coo4);
   tensors.Add(1, 1, coo5);
 
+  tensors.grouped_coo_tensors[0].FillRemainingScBuckets();
   tensors.grouped_coo_tensors[0].MergeAll<2>();
+  tensors.grouped_coo_tensors[1].FillRemainingScBuckets();
   tensors.grouped_coo_tensors[1].MergeAll<2>();
 
   EXPECT_EQ(tensors.GetNumMinibatches(), 1);
   EXPECT_THAT(tensors(0, 0), ElementsAre(coo2, coo1));
   EXPECT_THAT(tensors(1, 0), ElementsAre(coo3, coo4, coo5));
-  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(0), 2);
-  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(0), 3);
+  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(), 2);
+  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(), 3);
 }
 
 TEST(DevicePartitionedCooTensorsTest, PartialMerge) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -162,6 +164,7 @@ TEST(DevicePartitionedCooTensorsTest, PartialMerge) {
   tensors.Add(1, 2, coo7);
   tensors.Add(1, 3, coo8);
 
+  tensors.FillRemainingScBuckets();
   // This split ({2,3}) results in minibatches {0,1,2} and {3}.
   tensors.Merge<4>(std::bitset<3>(0b010));
 
@@ -170,18 +173,18 @@ TEST(DevicePartitionedCooTensorsTest, PartialMerge) {
   EXPECT_THAT(tensors(0, 1), ElementsAre(coo4));
   EXPECT_THAT(tensors(1, 0), ElementsAre(coo6, coo5, coo7));
   EXPECT_THAT(tensors(1, 1), ElementsAre(coo8));
-  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(0), 4);
-  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(0), 4);
+  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(), 4);
+  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(), 4);
 }
 
 TEST(DevicePartitionedCooTensorsTest, NoMerge) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5, /*num_sc_per_device=*/1,
+      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -201,6 +204,7 @@ TEST(DevicePartitionedCooTensorsTest, NoMerge) {
   tensors.Add(1, 2, coo7);
   tensors.Add(1, 3, coo8);
 
+  tensors.FillRemainingScBuckets();
   tensors.Merge<4>(std::bitset<3>(0b111));
 
   EXPECT_EQ(tensors.GetNumMinibatches(), 4);
@@ -212,8 +216,8 @@ TEST(DevicePartitionedCooTensorsTest, NoMerge) {
   EXPECT_THAT(tensors(1, 1), ElementsAre(coo6));
   EXPECT_THAT(tensors(1, 2), ElementsAre(coo7));
   EXPECT_THAT(tensors(1, 3), ElementsAre(coo8));
-  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(0), 4);
-  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(0), 4);
+  EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(), 4);
+  EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(), 4);
 }
 
 }  // namespace

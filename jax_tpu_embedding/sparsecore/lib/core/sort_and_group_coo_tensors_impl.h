@@ -169,7 +169,7 @@ inline void LogSparseCoreStats(
               << local_sc_id << ": Total number of ids processed: " << keys_size
               << ", total after deduplication: "
               << ids_per_sc_partition_per_bucket.sum()
-              << ", total after drop id: " << grouped_coo_tensors.Size(0);
+              << ", total after drop id: " << grouped_coo_tensors.Size();
   }
 }
 
@@ -270,7 +270,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
 
     // Step 4: Add ID to result or drop it.
     if (!perform_id_dropping) {
-      grouped_coo_tensors.Add(context.local_sc_id, bucket_id, coo_tensor);
+      grouped_coo_tensors.Add(bucket_id, coo_tensor);
     } else {
       // Check limits.
       const bool exceeds_ids_limit =
@@ -286,7 +286,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
         // Dropped id.
         ++stats.dropped_id_count;
       } else {
-        grouped_coo_tensors.Add(context.local_sc_id, bucket_id, coo_tensor);
+        grouped_coo_tensors.Add(bucket_id, coo_tensor);
       }
 
       // Update kept counts.
@@ -416,7 +416,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
         // Prepare Local Result for ONE SC.
         PartitionedCooTensors grouped_coo_tensors(
             range.end_index - range.start_index,
-            /*num_sc_per_device=*/1, global_sc_count, bucket_count);
+            global_sc_count, bucket_count);
 
         internal::StatsPerDevice stats = local_stats_host.GetStatsPerDevice(0);
 
