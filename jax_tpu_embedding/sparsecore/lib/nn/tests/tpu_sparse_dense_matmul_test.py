@@ -315,8 +315,14 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.product(
       using_pmap=[False, True],
+      feature_stacking_strategy=[
+          StackingStrategy.STACK_THEN_SPLIT,
+          StackingStrategy.SPLIT_THEN_STACK,
+      ],
   )
-  def test_sparse_dense_matmul_two_chips_sharded(self, using_pmap):
+  def test_sparse_dense_matmul_two_chips_sharded(
+      self, using_pmap, feature_stacking_strategy
+  ):
     devices = jax.devices()[:2]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
@@ -343,11 +349,13 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         sharding_strategy="MOD",
         has_leading_dimension=using_pmap,
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
     tpu_sparse_dense_matmul_fn = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
         global_device_count=mesh.size,
     )
     if using_pmap:
@@ -434,8 +442,14 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.product(
       using_pmap=[False, True],
+      feature_stacking_strategy=[
+          StackingStrategy.STACK_THEN_SPLIT,
+          StackingStrategy.SPLIT_THEN_STACK,
+      ],
   )
-  def test_sparse_dense_matmul_two_chips_sharded_stacked(self, using_pmap):
+  def test_sparse_dense_matmul_two_chips_sharded_stacked(
+      self, using_pmap, feature_stacking_strategy
+  ):
     devices = jax.devices()[:2]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
@@ -462,11 +476,13 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         sharding_strategy="MOD",
         has_leading_dimension=using_pmap,
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
     tpu_sparse_dense_matmul_fn = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
         global_device_count=mesh.size,
     )
     if using_pmap:
@@ -576,8 +592,14 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.product(
       using_pmap=[False, True],
+      feature_stacking_strategy=[
+          StackingStrategy.STACK_THEN_SPLIT,
+          StackingStrategy.SPLIT_THEN_STACK,
+      ],
   )
-  def test_sparse_dense_matmul_single_chip(self, using_pmap):
+  def test_sparse_dense_matmul_single_chip(
+      self, using_pmap, feature_stacking_strategy
+  ):
     global_devices = jax.devices()
     devices = [global_devices[0]]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
@@ -605,12 +627,14 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         sharding_strategy="MOD",
         has_leading_dimension=using_pmap,
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
 
     tpu_sparse_dense_matmul_fn = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
         global_device_count=mesh.size,
     )
     if using_pmap:
@@ -680,8 +704,14 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.product(
       using_pmap=[False, True],
+      feature_stacking_strategy=[
+          StackingStrategy.STACK_THEN_SPLIT,
+          StackingStrategy.SPLIT_THEN_STACK,
+      ],
   )
-  def test_sparse_dense_matmul_two_tables(self, using_pmap):
+  def test_sparse_dense_matmul_two_tables(
+      self, using_pmap, feature_stacking_strategy
+  ):
     devices = jax.devices()[:2]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
@@ -709,11 +739,13 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         sharding_strategy="MOD",
         has_leading_dimension=using_pmap,
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
     tpu_sparse_dense_matmul_fn = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
         global_device_count=mesh.size,
     )
     if using_pmap:
@@ -1101,8 +1133,14 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
   @parameterized.product(
       using_pmap=[False, True],
+      feature_stacking_strategy=[
+          StackingStrategy.STACK_THEN_SPLIT,
+          StackingStrategy.SPLIT_THEN_STACK,
+      ],
   )
-  def test_sparse_dense_matmul_four_chips_complex_stacked(self, using_pmap):
+  def test_sparse_dense_matmul_four_chips_complex_stacked(
+      self, using_pmap, feature_stacking_strategy
+  ):
     devices = jax.devices()
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     mesh = jax.sharding.Mesh(devices, "x")
@@ -1209,11 +1247,13 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         sharding_strategy="MOD",
         has_leading_dimension=using_pmap,
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     embedding_variables = {}
     tpu_sparse_dense_matmul_fn = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
         global_device_count=mesh.size,
     )
     if using_pmap:

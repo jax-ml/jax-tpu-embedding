@@ -373,6 +373,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         sharding_strategy=ShardingStrategy.Mod,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
+        feature_stacking_strategy=FeatureStackingStrategy.SPLIT_THEN_STACK,
         batch_number=batch_number,
     )
     stats = embedding.SparseDenseMatmulInputStats.from_cc(stats)

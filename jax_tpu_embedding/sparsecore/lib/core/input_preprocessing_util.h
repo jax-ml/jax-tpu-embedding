@@ -349,6 +349,10 @@ struct StatsPerHost {
 using MinibatchingSplit = std::bitset<CooFormat::kMaxMinibatchingBuckets - 1>;
 
 enum class FeatureStackingStrategy {
+  // Stack all features into one large tensor, then split it across SparseCores.
+  // Simpler data layout but can cause load imbalance if features have different
+  // computational costs.
+  kStackThenSplit = 0,
   // Split each feature individually, then stack the corresponding shards on
   // each SparseCore. Generally provides better load balancing, as each
   // SparseCore processes an equal portion of every feature.

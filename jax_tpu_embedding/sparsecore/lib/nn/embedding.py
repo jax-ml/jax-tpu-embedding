@@ -727,6 +727,8 @@ def unstack_embedding_activations(
   """Unstacks the activations to match the feature specs."""
 
   match feature_stacking_strategy:
+    case StackingStrategy.STACK_THEN_SPLIT:
+      num_feature_slices_per_device = 1
     case StackingStrategy.SPLIT_THEN_STACK:
       num_feature_slices_per_device = num_sc_per_device
     case _:
@@ -898,6 +900,7 @@ def stack_embedding_gradients(
     activation_gradients: Nested[jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     num_sc_per_device: int,
+    feature_stacking_strategy: StackingStrategy = StackingStrategy.SPLIT_THEN_STACK,
 ) -> Mapping[str, jax.Array]:
   """Stacks the gradients for update to embedding variables."""
   stacked_table_to_features: dict[
@@ -916,7 +919,10 @@ def stack_embedding_gradients(
     ].append((feature, gradient))
   stacked_table_to_gradients = collections.defaultdict(list)
 
-  feature_slice_per_device = num_sc_per_device
+  if feature_stacking_strategy == StackingStrategy.STACK_THEN_SPLIT:
+    feature_slice_per_device = 1
+  else:
+    feature_slice_per_device = num_sc_per_device
 
   result: dict[str, jax.Array] = {}
 
@@ -1018,7 +1024,6 @@ def tpu_sparse_dense_matmul_grad(
   Returns:
     The updated activation embedding variables.
   """
-  del feature_stacking_strategy
   if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
     warnings.warn(
         "SparseDenseMatmulInput is deprecated. Please use PreprocessedInput"
@@ -1055,6 +1060,7 @@ def tpu_sparse_dense_matmul_grad(
         activation_gradients,
         feature_specs,
         num_sc_per_device,
+        feature_stacking_strategy,
     )
   else:
     assert isinstance(activation_gradients, Mapping)

@@ -436,7 +436,13 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
     )
 
-  def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(self):
+  @parameterized.parameters(
+      embedding.StackingStrategy.STACK_THEN_SPLIT,
+      embedding.StackingStrategy.SPLIT_THEN_STACK,
+  )
+  def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(
+      self, feature_stacking_strategy
+  ):
     devices = jax.devices()[:2]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
@@ -466,6 +472,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_sc_per_device=4,
         sharding_strategy="MOD",
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     table_dim_a = table_stacking._next_largest_multiple(_DIM_A, 8)
     emb_table_a = (
@@ -579,6 +586,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         embedding.tpu_sparse_dense_matmul_grad,
         feature_specs=feature_specs,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     sharded_grad_update = jax.shard_map(
         sharded_grad_update,
@@ -706,7 +714,13 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
     )
 
-  def test_tpu_sparse_dense_matmul_grad_sharded_two_tables_stacked(self):
+  @parameterized.parameters(
+      embedding.StackingStrategy.STACK_THEN_SPLIT,
+      embedding.StackingStrategy.SPLIT_THEN_STACK,
+  )
+  def test_tpu_sparse_dense_matmul_grad_sharded_two_tables_stacked(
+      self, feature_stacking_strategy
+  ):
     devices = jax.devices()[:2]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
@@ -735,6 +749,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_sc_per_device=4,
         sharding_strategy="MOD",
         batch_number=batch_number,
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     padded_vocab_a = 64
     padded_vocab_b = _VOC_B
@@ -825,6 +840,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         embedding.tpu_sparse_dense_matmul_grad,
         feature_specs=feature_specs,
         sharding_strategy="MOD",
+        feature_stacking_strategy=feature_stacking_strategy,
     )
     sharded_grad_update = jax.shard_map(
         sharded_grad_update,
