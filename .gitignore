@@ -28,3 +28,6 @@ poetry.lock
 
 # Built wheels.
 /*.whl
+
+# Sphinx build documentation
+docs/build/
