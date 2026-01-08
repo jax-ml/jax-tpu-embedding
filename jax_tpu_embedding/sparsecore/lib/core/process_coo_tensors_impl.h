@@ -52,9 +52,6 @@ template <typename WeightsStreamT>
 float ComputeWeightDivisor(RowCombiner combiner,
                            WeightsStreamT& weights_stream) {
   const int num_cols = weights_stream.cols();
-  if (combiner == RowCombiner::kSum) {
-    return 1.0f;
-  }
   switch (combiner) {
     case RowCombiner::kSum:
       return 1.0f;
@@ -64,6 +61,7 @@ float ComputeWeightDivisor(RowCombiner combiner,
       for (; weights_stream.col() < num_cols; weights_stream.NextCol()) {
         sum += weights_stream.get();
       }
+      weights_stream.SeekCol(0);
       return sum;
     }
     case RowCombiner::kSqrtn: {
@@ -72,6 +70,7 @@ float ComputeWeightDivisor(RowCombiner combiner,
       for (; weights_stream.col() < num_cols; weights_stream.NextCol()) {
         sum += std::pow(weights_stream.get(), 2);
       }
+      weights_stream.SeekCol(0);
       return std::sqrt(sum);
     }
   }
@@ -128,12 +127,14 @@ void ProcessCooTensors(
     extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
         num_cols;
 
-    for (weights_stream.SeekCol(0); values_stream.col() < num_cols;
-         values_stream.NextCol(), weights_stream.NextCol()) {
+    for (; values_stream.col() < num_cols; values_stream.NextCol()) {
       const int embedding_id = values_stream.get();
       const float gain = extracted_coo_tensors.has_variable_weights()
                              ? weights_stream.get() / divisor
                              : 1.0f;
+      if (extracted_coo_tensors.has_variable_weights()) {
+        weights_stream.NextCol();
+      }
       DCHECK_GE(embedding_id, 0);
       DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
 
