@@ -414,9 +414,9 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
       for (int local_sc_id = start_sc; local_sc_id < end_sc; ++local_sc_id) {
         CooTensorRange range = ranges[local_sc_id];
         // Prepare Local Result for ONE SC.
-        PartitionedCooTensors grouped_coo_tensors(
-            range.end_index - range.start_index,
-            global_sc_count, bucket_count);
+        PartitionedCooTensors grouped_coo_tensors(global_sc_count,
+                                                  bucket_count);
+        grouped_coo_tensors.Reserve(range.end_index - range.start_index);
 
         internal::StatsPerDevice stats = local_stats_host.GetStatsPerDevice(0);
 

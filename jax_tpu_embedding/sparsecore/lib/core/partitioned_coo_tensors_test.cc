@@ -26,18 +26,18 @@ using ::testing::ElementsAre;
 using ::testing::SizeIs;
 
 TEST(PartitionedCooTensorsTest, Empty) {
-  PartitionedCooTensors tensors(/*reserve_count=*/0,
-                                /*global_sc_count=*/1,
-                                /*bucket_count=*/1);
+  PartitionedCooTensors tensors(
+      /*global_sc_count=*/1,
+      /*bucket_count_per_sc=*/1);
   tensors.FillRemainingScBuckets();
   EXPECT_THAT(tensors(0), SizeIs(0));
   EXPECT_EQ(tensors.Size(), 0);
 }
 
 TEST(PartitionedCooTensorsTest, SingleScSingleBucket) {
-  PartitionedCooTensors tensors(/*reserve_count=*/10,
-                                /*global_sc_count=*/1,
-                                /*bucket_count=*/1);
+  PartitionedCooTensors tensors(
+      /*global_sc_count=*/1,
+      /*bucket_count_per_sc=*/1);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
   tensors.Add(0, coo1);
@@ -52,10 +52,8 @@ TEST(DevicePartitionedCooTensorsTest, MultiScSingleBucket) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/1);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/1);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
@@ -77,10 +75,8 @@ TEST(DevicePartitionedCooTensorsTest, MultiScMultiBucket) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -108,10 +104,8 @@ TEST(DevicePartitionedCooTensorsTest, MergeBuckets) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -141,10 +135,8 @@ TEST(DevicePartitionedCooTensorsTest, PartialMerge) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
@@ -181,10 +173,8 @@ TEST(DevicePartitionedCooTensorsTest, NoMerge) {
   DevicePartitionedCooTensors tensors;
   tensors.grouped_coo_tensors.reserve(2);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   tensors.grouped_coo_tensors.emplace_back(
-      /*reserve_count=*/5,
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);

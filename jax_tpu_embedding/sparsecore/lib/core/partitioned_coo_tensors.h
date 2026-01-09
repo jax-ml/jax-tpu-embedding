@@ -32,9 +32,8 @@ namespace jax_sc_embedding {
 
 class PartitionedCooTensors {
  public:
-  PartitionedCooTensors() : PartitionedCooTensors(0, 0, 1) {}
-  PartitionedCooTensors(int reserve_count, uint32_t global_sc_count,
-                        int bucket_count_per_sc = 1)
+  PartitionedCooTensors() : PartitionedCooTensors(0, 1) {}
+  PartitionedCooTensors(uint32_t global_sc_count, int bucket_count_per_sc = 1)
       : coo_tensors_(),
         bucket_count_per_sc_(bucket_count_per_sc),
         global_sc_count_(global_sc_count),
@@ -43,10 +42,11 @@ class PartitionedCooTensors {
         merged_(false),
         dedup_col_id_(std::numeric_limits<uint32_t>::max()),
         dedup_row_id_(std::numeric_limits<uint32_t>::max()) {
-    coo_tensors_.reserve(reserve_count);
     bucket_offsets_.reserve(1 + bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
   }
+
+  void Reserve(int reserve_count) { coo_tensors_.reserve(reserve_count); }
 
   inline void MergeWithLastCoo(const CooFormat& coo_tensor) {
     DCHECK_GT(coo_tensors_.size(), 0);
