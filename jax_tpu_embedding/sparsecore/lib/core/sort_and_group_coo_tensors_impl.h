@@ -327,8 +327,6 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     internal::StatsPerDevice& stats, SplitType& minibatching_split) {
   tsl::profiler::TraceMe t("SortAndGroupCooTensors");
   const int num_sc_per_device = options.num_sc_per_device;
-  const int batch_size_per_sc = xla::CeilOfRatio(
-      extracted_coo_tensors.batch_size_for_device, options.num_sc_per_device);
   const uint32_t global_sc_count = options.GetNumScs();
   const int num_sc_bits = absl::bit_width(global_sc_count - 1);
   const int max_ids_per_partition =
@@ -370,17 +368,12 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
 
   std::vector<CooTensorRange> ranges(num_sc_per_device);
   uint32_t coo_tensor_index = 0;
-  // We take the advantage of the fact that the row_ids are already sorted
-  // within each batch.
   for (int i = 0; i < num_sc_per_device; ++i) {
     uint32_t start = coo_tensor_index;
-    uint32_t end_row_id = (i + 1) * batch_size_per_sc;
-    while (coo_tensor_index < extracted_coo_tensors.size() &&
-           extracted_coo_tensors.ids[coo_tensor_index].row_id < end_row_id) {
-      coo_tensor_index++;
-    }
+    coo_tensor_index += extracted_coo_tensors.coo_tensors_per_sc[i];
     ranges[i] = {start, coo_tensor_index};
   }
+  DCHECK_EQ(coo_tensor_index, extracted_coo_tensors.size());
 
   std::vector<tsl::AsyncValueRef<SortingTaskResult>> task_results;
   task_results.reserve(num_tasks);
