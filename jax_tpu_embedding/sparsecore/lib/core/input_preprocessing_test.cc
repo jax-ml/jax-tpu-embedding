@@ -230,6 +230,7 @@ TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
           stacked_table_metadata_multi_, absl::MakeSpan(input_batches_multi_),
           /*local_device_id=*/0, options);
+  extracted_coo_tensors.BlockUntilReady();
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
   ASSERT_THAT(extracted_coo_tensors.size(), Eq(24));
@@ -295,15 +296,14 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
           stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
           /*local_device_id=*/0, options);
+  extracted_coo_tensors.BlockUntilReady();
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
   ASSERT_THAT(extracted_coo_tensors.size(), Eq(16 * 17 / 2));
 
-  const int batch_size_per_sc =
-      extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
   std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-  for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
-    ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
+  for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
+    ids_per_sc[sc_id] = extracted_coo_tensors.GetScSize(sc_id);
   }
 
   std::vector<int> expected_ids_per_sc = {1 + 2 + 9 + 10, 3 + 4 + 11 + 12,
@@ -330,11 +330,9 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
             absl::MakeSpan(input_batches_single_), local_device_id, options);
     EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 8);
 
-    const int batch_size_per_sc =
-        extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
     std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
-    for (int i = 0; i < extracted_coo_tensors.size(); ++i) {
-      ids_per_sc[extracted_coo_tensors.ids[i].row_id / batch_size_per_sc]++;
+    for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
+      ids_per_sc[sc_id] = extracted_coo_tensors.GetScSize(sc_id);
     }
 
     EXPECT_EQ(ids_per_sc, expected_ids_per_sc[local_device_id])
@@ -497,14 +495,18 @@ TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
       internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
           stacked_table_metadata_single_, absl::MakeSpan(input_batches_single_),
           /*local_device_id=*/0, options);
+  extracted_coo_tensors.BlockUntilReady();
 
   EXPECT_EQ(extracted_coo_tensors.batch_size_for_device, 16);
   ASSERT_THAT(extracted_coo_tensors.size(), Eq(16 * 17 / 2));
 
-  std::vector<int> expected_coo_tensors_per_sc = {
-      1 + 2 + 9 + 10, 3 + 4 + 11 + 12, 5 + 6 + 13 + 14, 7 + 8 + 15 + 16};
-  EXPECT_EQ(extracted_coo_tensors.coo_tensors_per_sc,
-            expected_coo_tensors_per_sc);
+  std::vector<int> ids_per_sc(options.num_sc_per_device, 0);
+  for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
+    ids_per_sc[sc_id] = extracted_coo_tensors.GetScSize(sc_id);
+  }
+  std::vector<int> expected_ids_per_sc = {1 + 2 + 9 + 10, 3 + 4 + 11 + 12,
+                                          5 + 6 + 13 + 14, 7 + 8 + 15 + 16};
+  EXPECT_EQ(ids_per_sc, expected_ids_per_sc);
 }
 
 class MinibatchingTest : public testing::TestWithParam<bool> {

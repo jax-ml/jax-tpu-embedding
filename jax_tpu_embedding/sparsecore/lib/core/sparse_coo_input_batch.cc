@@ -80,7 +80,8 @@ void PySparseCooInputBatch::ConstructRowPointersIfRequired() const {
 }
 
 void PySparseCooInputBatch::ExtractCooTensors(
-    const ExtractCooTensorsOptions& options, ExtractedCooTensors& coo_tensors) {
+    const ExtractCooTensorsOptions& options,
+    ExtractedCooTensorsPerSparseCore& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL.
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });
 

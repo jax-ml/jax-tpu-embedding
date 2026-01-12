@@ -74,8 +74,9 @@ class NumpySparseInputBatch : public AbstractInputBatch {
 
   bool HasVariableWeights() const override { return weights_.has_value(); }
 
-  void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         ExtractedCooTensors& coo_tensors) override;
+  void ExtractCooTensors(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCore& coo_tensors) override;
 
  private:
   const py::array feature_;

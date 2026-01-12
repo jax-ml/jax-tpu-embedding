@@ -34,10 +34,11 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
   RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
       ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
 
-  ExtractedCooTensors extracted_1(4, 4, false, RowCombiner::kSum);
-  ExtractedCooTensors extracted_2(4, 4, false, RowCombiner::kSum);
-  ExtractedCooTensors extracted_3(4, 20, false,
-                                  RowCombiner::kSum);  // row_offset=16
+  ExtractedCooTensorsPerSparseCore extracted_1(4, false, RowCombiner::kSum);
+  ExtractedCooTensorsPerSparseCore extracted_2(2, false, RowCombiner::kSum);
+  ExtractedCooTensorsPerSparseCore extracted_3(
+      2, false,
+      RowCombiner::kSum);  // row_offset=16
 
   ragged_tensor_feature_input.ExtractCooTensors(
       {
@@ -94,7 +95,7 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
   RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
       ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
 
-  ExtractedCooTensors extracted(4, 4, false, RowCombiner::kMean);
+  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kMean);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -116,7 +117,7 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
 TEST(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
   RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
       ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
-  ExtractedCooTensors extracted(4, 4, false, RowCombiner::kSqrtn);
+  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kSqrtn);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -146,7 +147,7 @@ TEST(RaggedTensorInputBatchTest,
   RaggedTensorInputBatch ragged_tensor_feature_input(
       absl::MakeConstSpan(embedding_ids), row_offsets);
 
-  ExtractedCooTensors extracted(4, 4, false, RowCombiner::kSum);
+  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kSum);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,

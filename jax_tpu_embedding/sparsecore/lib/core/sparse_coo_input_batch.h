@@ -72,8 +72,9 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   bool HasVariableWeights() const override { return false; }
 
   // Extracts COO tensors for each SparseCore.
-  void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         ExtractedCooTensors& coo_tensors) override;
+  void ExtractCooTensors(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCore& coo_tensors) override;
 
  private:
   // (N,2) array, sorted by row_id.

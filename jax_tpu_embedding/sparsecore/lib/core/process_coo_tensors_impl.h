@@ -80,18 +80,12 @@ template <typename ValuesStreamT, typename WeightsStreamT>
 void ProcessCooTensors(
     const AbstractInputBatch::ExtractCooTensorsOptions& options,
     ValuesStreamT& values_stream, WeightsStreamT& weights_stream,
-    ExtractedCooTensors& extracted_coo_tensors) {
+    ExtractedCooTensorsPerSparseCore& extracted_coo_tensors) {
   CHECK(options.num_scs > 0 && (options.num_scs & (options.num_scs - 1)) == 0);
-  CHECK_GT(extracted_coo_tensors.batch_size_for_device, 0);
-  CHECK_GT(options.num_sc_per_device, 0);
 
   const int num_scs_bit = std::log2(options.num_scs);
   const int num_scs_mod = (1 << num_scs_bit) - 1;
-  DCHECK_EQ(
-      extracted_coo_tensors.batch_size_for_device % options.num_sc_per_device,
-      0);
-  const int batch_size_per_sc =
-      extracted_coo_tensors.batch_size_for_device / options.num_sc_per_device;
+  const int batch_size_per_sc = extracted_coo_tensors.batch_size_per_sc_;
   CHECK_GT(batch_size_per_sc, 0);
 
   for (; values_stream.row() < options.slice_end;
@@ -102,22 +96,19 @@ void ProcessCooTensors(
 
     const int sample_id =
         values_stream.row() - options.slice_start + options.row_offset;
+    const int in_sc_sample_id = sample_id % batch_size_per_sc;
     const int num_cols = values_stream.cols();
     float divisor = 1.0f;
     if constexpr (is_unity_weights_stream_v<WeightsStreamT>) {
       if (options.combiner == RowCombiner::kMean) {
-        extracted_coo_tensors.row_token_counts[sample_id] = num_cols;
+        extracted_coo_tensors.row_token_counts[in_sc_sample_id] = num_cols;
       } else if (options.combiner == RowCombiner::kSqrtn) {
         divisor = ComputeWeightDivisor(options.combiner, weights_stream);
-        extracted_coo_tensors.row_gains[sample_id] = 1.0f / divisor;
+        extracted_coo_tensors.row_gains[in_sc_sample_id] = 1.0f / divisor;
       }
     } else {
       divisor = ComputeWeightDivisor(options.combiner, weights_stream);
     }
-
-    extracted_coo_tensors.coo_tensors_per_sc[sample_id / batch_size_per_sc] +=
-        num_cols;
-    DCHECK_LT(sample_id, batch_size_per_sc * options.num_sc_per_device);
 
     const auto values = values_stream.getRowSpan();  // template-dependent type.
     if constexpr (!is_unity_weights_stream_v<WeightsStreamT>) {

@@ -67,6 +67,7 @@ cc_library(
         "@eigen_archive//:eigen3",
         "@tsl//tsl/profiler/lib:traceme",
         "@xla//xla:util",
+        "@xla//xla/tsl/concurrency:async_value",
     ],
 )
 

@@ -159,9 +159,11 @@ void BM_ExtractCooTensors(benchmark::State& state) {
   };
 
   for (auto s : state) {
-    internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-        stacked_table_metadata, absl::MakeSpan(input_batches),
-        /*local_device_id=*/0, options);
+    ExtractedCooTensors extracted_coo_tensors =
+        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+            stacked_table_metadata, absl::MakeSpan(input_batches),
+            /*local_device_id=*/0, options);
+    extracted_coo_tensors.BlockUntilReady();
   }
 }
 BENCHMARK(BM_ExtractCooTensors)

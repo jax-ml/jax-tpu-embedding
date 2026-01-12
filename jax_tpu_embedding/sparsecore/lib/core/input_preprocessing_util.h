@@ -37,6 +37,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -92,7 +93,7 @@ struct IdPair {
   int32_t row_id;
 };
 
-struct ExtractedCooTensors {
+struct ExtractedCooTensorsPerSparseCore {
   std::vector<IdPair> ids;
   // For storing gains, we use different strategies to optimize for memory and
   // performance:
@@ -112,71 +113,33 @@ struct ExtractedCooTensors {
   // data per-row for 'mean' and 'sqrtn', rather than per-tensor. (We only
   // perform 1 push_back per row, rather than per tensor.)
   std::vector<float> gains;
-  // Number of samples these coo_tensors are extracted from.
-  int batch_size_for_device;
   std::vector<int> row_token_counts;
   std::vector<float> row_gains;
-  // Count coo tensors per SC for efficient allocation of vector for sorting and
-  // grouping them. Might be lower after deduplication.
-  std::vector<int> coo_tensors_per_sc;
   bool has_variable_weights_;
+  int batch_size_per_sc_;
+  RowCombiner combiner_;
 
-  ExtractedCooTensors() : ExtractedCooTensors(0, 0) {}
-  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device,
-                      bool has_variable_weights = true,
-                      RowCombiner combiner = RowCombiner::kSum)
-      : batch_size_for_device(batch_size_for_device),
-        coo_tensors_per_sc(num_sc_per_device, 0),
-        has_variable_weights_(has_variable_weights) {
+  ExtractedCooTensorsPerSparseCore()
+      : has_variable_weights_(false),
+        batch_size_per_sc_(0),
+        combiner_(RowCombiner::kSum) {}
+  ExtractedCooTensorsPerSparseCore(int batch_size_per_sc,
+                                   bool has_variable_weights,
+                                   RowCombiner combiner)
+      : has_variable_weights_(has_variable_weights),
+        batch_size_per_sc_(batch_size_per_sc),
+        combiner_(combiner) {
     if (!has_variable_weights_) {
       switch (combiner) {
         case RowCombiner::kMean:
-          row_token_counts.resize(batch_size_for_device);
+          row_token_counts.resize(batch_size_per_sc);
           break;
         case RowCombiner::kSqrtn:
-          row_gains.resize(batch_size_for_device);
+          row_gains.resize(batch_size_per_sc);
           break;
         case RowCombiner::kSum:
           break;
       }
-    }
-  }
-
-  // Test only constructor.
-  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device,
-                      absl::Span<const CooFormat> coos)
-      : batch_size_for_device(batch_size_for_device),
-        coo_tensors_per_sc(num_sc_per_device, 0),
-        has_variable_weights_(false) {
-    ids.reserve(coos.size());
-
-    // Check if any of the gains are not 1.0.
-    for (const auto& coo : coos) {
-      if (coo.gain != 1.0f) {
-        has_variable_weights_ = true;
-        break;
-      }
-    }
-
-    // If we have variable weights, we need to store the gains.
-    if (has_variable_weights_) {
-      gains.reserve(coos.size());
-    }
-
-    // Add all the coos to the extracted coo tensors.
-    for (const auto& coo : coos) {
-      ids.push_back({.col_id = coo.col_id, .row_id = coo.row_id});
-      if (has_variable_weights_) {
-        gains.push_back(coo.gain);
-      }
-    }
-
-    // Populate the coo_tensors_per_sc vector.
-    DCHECK_GT(num_sc_per_device, 0);
-    DCHECK_EQ(batch_size_for_device % num_sc_per_device, 0);
-    const int batch_size_per_sc = batch_size_for_device / num_sc_per_device;
-    for (const auto& id_pair : ids) {
-      coo_tensors_per_sc[id_pair.row_id / batch_size_per_sc]++;
     }
   }
 
@@ -214,16 +177,15 @@ struct ExtractedCooTensors {
     if (has_variable_weights_) {
       gain = gains[i];
     } else if (!row_token_counts.empty()) {
-      gain = 1.0f / row_token_counts[ids[i].row_id];
+      gain = 1.0f / row_token_counts[ids[i].row_id % batch_size_per_sc_];
     } else if (!row_gains.empty()) {
-      gain = row_gains[ids[i].row_id];
+      gain = row_gains[ids[i].row_id % batch_size_per_sc_];
     }
     return CooFormat(ids[i].row_id, ids[i].col_id, gain);
   }
 
   template <bool kHasVariableWeights>
-  CooFormat GetCooFormatWithGain(uint64_t key, uint32_t col_id,
-                                 RowCombiner combiner) const {
+  CooFormat GetCooFormatWithGain(uint64_t key, uint32_t col_id) const {
     float gain = 1.0f;
     uint32_t row_id;
     if constexpr (kHasVariableWeights) {
@@ -232,15 +194,16 @@ struct ExtractedCooTensors {
       gain = gains[index];
     } else {
       row_id = CooFormat::GetDataFromKey(key);
-      switch (combiner) {
+      switch (combiner_) {
         case RowCombiner::kMean:
-          gain = 1.0f / static_cast<float>(row_token_counts[row_id]);
+          gain = 1.0f / static_cast<float>(
+                            row_token_counts[row_id % batch_size_per_sc_]);
           break;
         case RowCombiner::kSum:
           gain = 1.0f;
           break;
         case RowCombiner::kSqrtn:
-          gain = row_gains[row_id];
+          gain = row_gains[row_id % batch_size_per_sc_];
           break;
       }
     }
@@ -253,6 +216,107 @@ struct ExtractedCooTensors {
     coos.reserve(size());
     for (int i = 0; i < size(); ++i) {
       coos.push_back(get(i));
+    }
+    return coos;
+  }
+};
+
+struct ExtractedCooTensors {
+  std::vector<tsl::AsyncValueRef<ExtractedCooTensorsPerSparseCore>>
+      per_sc_tensors_av;
+  int batch_size_for_device;
+  RowCombiner combiner_;
+  bool has_variable_weights_;
+
+  ExtractedCooTensors()
+      : batch_size_for_device(0),
+        combiner_(RowCombiner::kSum),
+        has_variable_weights_(false) {}
+  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device_in,
+                      bool has_variable_weights = true,
+                      RowCombiner combiner = RowCombiner::kSum)
+      : batch_size_for_device(batch_size_for_device_in),
+        combiner_(combiner),
+        has_variable_weights_(has_variable_weights) {
+    per_sc_tensors_av.reserve(num_sc_per_device);
+    for (int i = 0; i < num_sc_per_device; ++i) {
+      per_sc_tensors_av.push_back(tsl::MakeUnconstructedAsyncValueRef<
+                                  ExtractedCooTensorsPerSparseCore>());
+    }
+  }
+
+  // Test only constructor.
+  ExtractedCooTensors(int num_sc_per_device, int batch_size_for_device,
+                      absl::Span<const CooFormat> coos)
+      : batch_size_for_device(batch_size_for_device),
+        combiner_(RowCombiner::kSum),
+        has_variable_weights_(false) {
+    // Check if any of the gains are not 1.0.
+    for (const auto& coo : coos) {
+      if (coo.gain != 1.0f) {
+        has_variable_weights_ = true;
+        break;
+      }
+    }
+
+    per_sc_tensors_av.reserve(num_sc_per_device);
+    int batch_size_per_sc =
+        num_sc_per_device > 0 ? batch_size_for_device / num_sc_per_device : 0;
+    for (int i = 0; i < num_sc_per_device; ++i) {
+      per_sc_tensors_av.push_back(tsl::MakeUnconstructedAsyncValueRef<
+                                  ExtractedCooTensorsPerSparseCore>());
+      per_sc_tensors_av.back().emplace(batch_size_per_sc, has_variable_weights_,
+                                       combiner_);
+    }
+
+    // If we have variable weights, we need to store the gains.
+    for (int i = 0; i < num_sc_per_device; ++i) {
+      per_sc_tensors_av[i].get().reserve(coos.size() / num_sc_per_device);
+    }
+
+    // Add all the coos to the extracted coo tensors.
+    for (const auto& coo : coos) {
+      int sc_id = coo.row_id / batch_size_per_sc;
+      per_sc_tensors_av[sc_id].get().ids.push_back(
+          {.col_id = coo.col_id, .row_id = coo.row_id});
+      if (has_variable_weights_) {
+        per_sc_tensors_av[sc_id].get().gains.push_back(coo.gain);
+      }
+    }
+  }
+
+  bool has_variable_weights() const { return has_variable_weights_; }
+
+  // For test only.
+  void BlockUntilReady() {
+    for (const auto& sc_tensor_av : per_sc_tensors_av) {
+      tsl::BlockUntilReady(sc_tensor_av);
+    }
+  }
+
+  // For test only.
+  size_t size() const {
+    size_t total_size = 0;
+    for (const auto& sc_tensor_av : per_sc_tensors_av) {
+      total_size += sc_tensor_av.get().size();
+    }
+    return total_size;
+  }
+
+  // For test only.
+  size_t GetScSize(int sc_id) const {
+    tsl::BlockUntilReady(per_sc_tensors_av[sc_id]);
+    return per_sc_tensors_av[sc_id].get().size();
+  }
+
+  // For test only.
+  std::vector<CooFormat> ToCooVector() const {
+    std::vector<CooFormat> coos;
+    for (const auto& sc_tensor_av : per_sc_tensors_av) {
+      tsl::BlockUntilReady(sc_tensor_av);
+      for (int i = 0; i < sc_tensor_av.get().size(); ++i) {
+        coos.push_back(sc_tensor_av.get().get(i));
+      }
     }
     return coos;
   }
@@ -402,13 +466,6 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // `PreprocessSparseDenseMatmulInputOptions` instance.
   absl::FunctionRef<void(std::function<void()>)> async_task_scheduler =
       PreprocessingThreadPoolSchedule;
-
-  // Number of SparseCores to group into a single sorting task.
-  // This controls the parallelism of the sorting phase. Defaults to
-  // num_sc_per_device.
-  // TODO(b/469153631): Figure out heuristic to avoid over-parallelization
-  // of small tables (which incur significant overhead).
-  int num_sc_per_sorting_task = num_sc_per_device;
 
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }

@@ -117,7 +117,8 @@ class NumpyRaggedInputBatchStream {
 
 // Must be called without the GIL. Acquires it internally.
 void NumpySparseInputBatch::ExtractCooTensors(
-    const ExtractCooTensorsOptions& options, ExtractedCooTensors& coo_tensors) {
+    const ExtractCooTensorsOptions& options,
+    ExtractedCooTensorsPerSparseCore& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL (only for
                                 // casting).
   tsl::profiler::TraceMe t([] { return "ExtractCooTensors"; });

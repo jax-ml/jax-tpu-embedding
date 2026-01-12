@@ -102,8 +102,9 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
 
   bool HasVariableWeights() const override { return false; }
 
-  void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         ExtractedCooTensors& coo_tensors) override {
+  void ExtractCooTensors(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCore& coo_tensors) override {
     SparseCsrInputBatchStream<int64_t, EmbeddingIdsView, RowOffsetsView>
         values_stream(embedding_ids_, row_offsets_, options.slice_start,
                       options.slice_end, table_name_, max_vocab_id_);
@@ -153,8 +154,9 @@ class RaggedTensorInputBatchWithOwnedData : public AbstractInputBatch {
   bool HasVariableWeights() const override {
     return view_.HasVariableWeights();
   }
-  void ExtractCooTensors(const ExtractCooTensorsOptions& options,
-                         ExtractedCooTensors& coo_tensors) override {
+  void ExtractCooTensors(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCore& coo_tensors) override {
     view_.ExtractCooTensors(options, coo_tensors);
   }
 

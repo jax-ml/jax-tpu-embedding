@@ -65,7 +65,7 @@ class AbstractInputBatch {
 
   virtual void ExtractCooTensors(
       const ExtractCooTensorsOptions& options,
-      ExtractedCooTensors& extracted_coo_tensors) = 0;
+      ExtractedCooTensorsPerSparseCore& extracted_coo_tensors) = 0;
 
   virtual ~AbstractInputBatch() = default;
 };
