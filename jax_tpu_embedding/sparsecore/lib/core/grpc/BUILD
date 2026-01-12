@@ -82,6 +82,7 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
+        "@tsl//tsl/profiler/lib:traceme",
     ],
 )
 

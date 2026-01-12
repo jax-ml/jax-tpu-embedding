@@ -133,6 +133,7 @@ void GrpcAllReduceInterface::SetUp() {
 
 absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
     const AllReduceData& request) {
+  tsl::profiler::TraceMe traceme("GrpcAllReduceInterface::BlockingAllReduce");
   CHECK_EQ(num_tasks_, stubs_.size() + 1);
 
   // Initialize State on the local service. The thread initializing the state
@@ -167,6 +168,7 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
 
 absl::StatusOr<bool> GrpcAllReduceInterface::BlockingAllReduce(
     int sync_key, bool minibatching_required) {
+  tsl::profiler::TraceMe traceme("GrpcAllReduceInterface::BlockingAllReduce");
   AllReduceData request;
   request.set_sync_key(sync_key);
   request.set_src_rank(task_id_);

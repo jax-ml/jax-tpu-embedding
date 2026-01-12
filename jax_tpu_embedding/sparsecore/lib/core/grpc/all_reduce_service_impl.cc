@@ -27,6 +27,7 @@
 #include "include/grpcpp/support/server_callback.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/support/status.h"  // from @com_github_grpc_grpc
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
+#include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
 namespace rpc {
@@ -99,6 +100,8 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
 absl::StatusOr<std::optional<AllReduceData>>
 AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
                                               const AllReduceData& data) {
+  tsl::profiler::TraceMe traceme(
+      "AllReduceServiceImpl::InitializeOrUpdateState");
   absl::MutexLock lock(mutex_);
   auto it = all_reduce_state_map_.find(sync_key);
 
@@ -136,6 +139,7 @@ AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
 }
 
 void AllReduceServiceImpl::WaitIncomingRPCs(int sync_key) {
+  tsl::profiler::TraceMe traceme("AllReduceServiceImpl::WaitIncomingRPCs");
   absl::BlockingCounter* incoming_rpc_counter = nullptr;
   {
     absl::MutexLock lock(mutex_);
@@ -151,6 +155,7 @@ void AllReduceServiceImpl::WaitIncomingRPCs(int sync_key) {
 }
 
 void AllReduceServiceImpl::WaitResults(int sync_key) {
+  tsl::profiler::TraceMe traceme("AllReduceServiceImpl::WaitResults");
   absl::Barrier* global_results_barrier = nullptr;
   {
     absl::MutexLock lock(mutex_);
