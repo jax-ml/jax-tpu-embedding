@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -40,42 +41,38 @@ class PartitionedCooTensors {
         bucket_offsets_(),
         curr_bucket_id_(0),
         merged_(false),
-        dedup_col_id_(std::numeric_limits<uint32_t>::max()),
-        dedup_row_id_(std::numeric_limits<uint32_t>::max()) {
+        pending_col_id_(std::numeric_limits<uint32_t>::max()),
+        pending_row_id_(std::numeric_limits<uint32_t>::max()),
+        gain_for_pending_(0.0f),
+        pending_count_(0),
+        pending_bucket_id_(0) {
     bucket_offsets_.reserve(1 + bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
   }
 
   void Reserve(int reserve_count) { coo_tensors_.reserve(reserve_count); }
 
-  inline void MergeWithLastCoo(const CooFormat& coo_tensor) {
-    DCHECK_GT(coo_tensors_.size(), 0);
-    CooFormat& last = coo_tensors_.back();
-    DCHECK_EQ(last.row_id, coo_tensor.row_id);
-    DCHECK_EQ(last.col_id, coo_tensor.col_id);
-    last.gain += coo_tensor.gain;
-  }
-
-  inline bool MaybeMerge(const CooFormat& coo_tensor) {
-    // If col_id is the same, bucket_id must also be the same.
-    // For fastest short-circuiting, check row_id first, as it's the last
-    // component of the sort key and thus most likely to differ between
-    // consecutive non-identical elements.
-    if (coo_tensor.row_id == dedup_row_id_ &&
-        coo_tensor.col_id == dedup_col_id_) {
-      MergeWithLastCoo(coo_tensor);
-      return true;
-    }
-    return false;
-  }
-
   // Add Coo tensor for given SC and bucket. Similar to std::vector::push_back.
-  void Add(int target_bucket_id, const CooFormat& coo_tensor) {
-    AdvanceBucketOffsets(target_bucket_id);
-
-    coo_tensors_.push_back(coo_tensor);
-    dedup_col_id_ = coo_tensor.col_id;
-    dedup_row_id_ = coo_tensor.row_id;
+  ABSL_ATTRIBUTE_ALWAYS_INLINE void Add(int target_bucket_id, uint32_t row_id,
+                                        uint32_t col_id, float gain) {
+    if (row_id == pending_row_id_ && col_id == pending_col_id_) {
+      DCHECK_EQ(target_bucket_id, pending_bucket_id_);
+      pending_count_++;
+      return;
+    }
+    // If we reach here, it's a new tensor group or bucket. Flush previous if
+    // any.
+    if (pending_count_ > 0) {
+      AdvanceBucketOffsets(pending_bucket_id_);
+      coo_tensors_.emplace_back(pending_row_id_, pending_col_id_,
+                                gain_for_pending_ * pending_count_);
+    }
+    // Start new pending group.
+    pending_bucket_id_ = target_bucket_id;
+    pending_col_id_ = col_id;
+    pending_row_id_ = row_id;
+    gain_for_pending_ = gain;
+    pending_count_ = 1;
   }
 
   // Get size of COO tensors for given SC.
@@ -101,6 +98,7 @@ class PartitionedCooTensors {
 
   // Fill remaining buckets for current SC.
   void FillRemainingScBuckets() {
+    FlushPending();
     AdvanceBucketOffsets(bucket_count_per_sc_);
   }
 
@@ -187,6 +185,15 @@ class PartitionedCooTensors {
   int GetNumMinibatches() const { return bucket_count_per_sc_; }
 
  private:
+  void FlushPending() {
+    if (pending_count_ > 0) {
+      AdvanceBucketOffsets(pending_bucket_id_);
+      coo_tensors_.emplace_back(pending_row_id_, pending_col_id_,
+                                gain_for_pending_ * pending_count_);
+      pending_count_ = 0;  // Mark as flushed
+    }
+  }
+
   // Advance bucket offsets to the given `target_bucket_id`.
   void AdvanceBucketOffsets(int target_bucket_id) {
     DCHECK_LT(curr_bucket_id_, bucket_count_per_sc_)
@@ -211,10 +218,12 @@ class PartitionedCooTensors {
   int curr_bucket_id_;
   // Merged into minibatches?
   bool merged_;
-  // For deduplication, we track the properties of the last ID that was *not*
-  // dropped.
-  uint32_t dedup_col_id_;
-  uint32_t dedup_row_id_;
+  // For deduplication, we track the properties of the pending ID.
+  uint32_t pending_col_id_;
+  uint32_t pending_row_id_;
+  float gain_for_pending_;
+  int pending_count_;
+  int pending_bucket_id_;
 };
 
 struct DevicePartitionedCooTensors {
@@ -244,7 +253,8 @@ struct DevicePartitionedCooTensors {
   }
 
   void Add(int local_sc_id, int bucket_id, const CooFormat& coo_tensor) {
-    grouped_coo_tensors[local_sc_id].Add(bucket_id, coo_tensor);
+    grouped_coo_tensors[local_sc_id].Add(bucket_id, coo_tensor.row_id,
+                                         coo_tensor.col_id, coo_tensor.gain);
   }
 
   int GetNumMinibatches() const {
