@@ -64,7 +64,7 @@ struct FeatureSliceInfo {
 
 struct FeatureSlice {
   FeatureSliceInfo info;
-  const StackedTableMetadata* metadata;
+  const FeatureMetadataInStack* metadata;
 };
 
 void AllocateOutputCsrBuffersIfNeeded(
@@ -79,7 +79,7 @@ void AllocateOutputCsrBuffersIfNeeded(
 
 // Extract the COO tensors for a single feature slice.
 void ExtractCooTensorsForSingleFeatureSlice(
-    const StackedTableMetadata& metadata,
+    const FeatureMetadataInStack& metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const FeatureSliceInfo& slice_info,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -136,7 +136,7 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
 // has explicitly variable weights.
 bool StackHasVariableWeights(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   for (const auto& metadata : stacked_table_metadata) {
     if (input_batches[metadata.feature_index]->HasVariableWeights()) {
       return true;
@@ -150,7 +150,7 @@ bool StackHasVariableWeights(
 // CSR arrays, and statistics.
 struct TableState {
   absl::string_view stacked_table_name;
-  absl::Span<const StackedTableMetadata> stacked_table_metadata;
+  absl::Span<const FeatureMetadataInStack> stacked_table_metadata;
   bool has_variable_weights;
   int coo_buffer_size_per_device;
   CsrArraysPerHost csr_arrays_per_host;
@@ -163,7 +163,7 @@ struct TableState {
       device_sorting_results;
 
   TableState(absl::string_view name,
-             absl::Span<const StackedTableMetadata> metadata,
+             absl::Span<const FeatureMetadataInStack> metadata,
              bool has_variable_weights,
              const PreprocessSparseDenseMatmulInputOptions& options,
              int num_scs, int coo_buffer_size_per_device,
@@ -192,11 +192,13 @@ SortAndGroupCooTensorsForTableStateAsync(
   if (state.has_variable_weights) {
     return SortAndGroupCooTensorsPerLocalDeviceAsync<true, SplitType>(
         state.extracted_coo_tensors_per_device[local_device],
-        state.stacked_table_metadata[0], options, stats);
+        state.stacked_table_name, state.stacked_table_metadata[0], options,
+        stats);
   } else {
     return SortAndGroupCooTensorsPerLocalDeviceAsync<false, SplitType>(
         state.extracted_coo_tensors_per_device[local_device],
-        state.stacked_table_metadata[0], options, stats);
+        state.stacked_table_name, state.stacked_table_metadata[0], options,
+        stats);
   }
 }
 
@@ -311,7 +313,7 @@ inline bool Deserialize(bool value) { return value; }
 
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
-    const absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -605,41 +607,43 @@ void FillDeviceBuffersForTable(
                                &state = state, row_pointers_size_per_bucket,
                                global_minibatching_required,
                                global_minibatching_split] {
-      options.async_task_scheduler([&, local_device, sorting_result_av,
-                                    &state = state,
-                                    row_pointers_size_per_bucket,
-                                    global_minibatching_required,
-                                    global_minibatching_split] {
-        state.batch_size_for_device =
-            state.extracted_coo_tensors_per_device[0].batch_size_for_device;
-        for (const auto& extracted_coo :
-             state.extracted_coo_tensors_per_device) {
-          DCHECK_EQ(state.batch_size_for_device,
-                    extracted_coo.batch_size_for_device);
-        }
+      state.batch_size_for_device =
+          state.extracted_coo_tensors_per_device[0].batch_size_for_device;
+      for (const auto& extracted_coo : state.extracted_coo_tensors_per_device) {
+        DCHECK_EQ(state.batch_size_for_device,
+                  extracted_coo.batch_size_for_device);
+      }
 
-        DevicePartitionedCooTensors& grouped_coo_tensors =
-            sorting_result_av.get().grouped_coo_tensors;
-        // If minibatching is required by any host, merge buckets
-        // according to the globally synchronized split.
-        if (options.enable_minibatching && global_minibatching_required) {
-          grouped_coo_tensors.Merge(global_minibatching_split);
-        }
+      DevicePartitionedCooTensors& grouped_coo_tensors =
+          sorting_result_av.get().grouped_coo_tensors;
+      // If minibatching is required by any host, merge buckets
+      // according to the globally synchronized split.
+      if (options.enable_minibatching && global_minibatching_required) {
+        grouped_coo_tensors.Merge(global_minibatching_split);
+      }
 
-        const int batch_size_per_sc = xla::CeilOfRatio(
-            state.batch_size_for_device, options.num_sc_per_device);
-        const int coo_buffer_size_per_sc =
-            state.coo_buffer_size_per_device / options.num_sc_per_device;
-        internal::CsrArraysPerDevice csr_arrays_per_device =
-            state.csr_arrays_per_host.GetCsrArraysPerDevice(local_device);
-        int static_dropped_ids = 0;
-        FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
-                              coo_buffer_size_per_sc, batch_size_per_sc,
-                              options, state.stacked_table_name,
-                              csr_arrays_per_device, static_dropped_ids);
-        sorting_result_av.get().total_dropped_id_count += static_dropped_ids;
-        counter.DecrementCount();
-      });
+      const int batch_size_per_sc = xla::CeilOfRatio(
+          state.batch_size_for_device, options.num_sc_per_device);
+      const int coo_buffer_size_per_sc =
+          state.coo_buffer_size_per_device / options.num_sc_per_device;
+      internal::CsrArraysRefPerDevice csr_arrays_per_device =
+          state.csr_arrays_per_host.GetCsrArraysRefForDevice(local_device);
+
+      const BlockRow<int>& required_sc_buffer_sizes =
+          state.stats_per_host.GetStatsPerDevice(local_device)
+              .required_buffer_size;
+
+      tsl::AsyncValueRef<int> dropped_id_count_av = FillLocalDeviceBufferAsync(
+          grouped_coo_tensors, row_pointers_size_per_bucket,
+          coo_buffer_size_per_sc, batch_size_per_sc, required_sc_buffer_sizes,
+          options, state.stacked_table_name, csr_arrays_per_device);
+
+      dropped_id_count_av.AndThen(
+          [sorting_result_av, &counter, dropped_id_count_av]() {
+            sorting_result_av.get().total_dropped_id_count +=
+                dropped_id_count_av.get();
+            counter.DecrementCount();
+          });
     });
   }
 }
@@ -733,7 +737,7 @@ void SparseDenseMatmulInputStats::merge(
 absl::StatusOr<PreprocessSparseDenseMatmulOutput>
 PreprocessSparseDenseMatmulInput(
     absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
-    const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
+    const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options,
     OutputCsrArrays* output_csr_arrays) {
