@@ -210,8 +210,7 @@ void ExtractSortAndGroupCooTensorsForTable(
     const PreprocessSparseDenseMatmulInputOptions& options) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
-        absl::StrCat("InputPreprocessingTable-ExtractSortGroup-",
-                     state.stacked_table_name),
+        absl::StrCat("ScheduleExtractSortGroup/", state.stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
   for (int local_device = 0; local_device < options.local_device_count;
@@ -257,7 +256,7 @@ void CreateMinibatchingBucketsForTable(
     TableState& state, const PreprocessSparseDenseMatmulInputOptions& options) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
-        absl::StrCat("InputPreprocessingTable-CreateMinibatchingBuckets-",
+        absl::StrCat("ScheduleCreateMinibatchingBuckets/",
                      state.stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
@@ -412,8 +411,12 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
   for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
     auto av = extracted_coo_tensors.per_sc_tensors_av[sc_id];
     options.async_task_scheduler([=] {
-      tsl::profiler::TraceMe traceme(
-          [&] { return absl::StrCat("ExtractCooTensorsForSc/", sc_id); });
+      tsl::profiler::TraceMe traceme([&] {
+        return tsl::profiler::TraceMeEncode(
+            absl::StrCat("ExtractCooTensors/", stacked_table_metadata[0].name,
+                         "/SC", sc_id),
+            {{"batch_number", options.batch_number}});
+      });
       ExtractedCooTensorsPerSparseCore coo_tensors_per_sc(
           batch_size_per_slice, has_variable_weights,
           stacked_table_metadata[0].row_combiner);
@@ -556,19 +559,20 @@ absl::StatusOr<MinibatchingSplit> SyncMinibatchingSplit(
 // Populates the output structure `out` with the processed data from the
 // `TableState`. This includes moving the CSR arrays and statistics for the
 // current stacked table. The `output_mutex` is used to protect access to `out`.
-void PopulateOutput(TableState& state, PreprocessSparseDenseMatmulOutput& out,
-                    absl::Mutex& output_mutex) {
+void PopulateOutputStats(TableState& state,
+                         SparseDenseMatmulInputStats& stats,
+                         absl::Mutex& output_mutex) {
   state.stats_per_host.Flatten();
 
   absl::MutexLock lock(output_mutex);
 
-  out.stats.max_ids_per_partition[state.stacked_table_name] =
+  stats.max_ids_per_partition[state.stacked_table_name] =
       std::move(state.stats_per_host.max_ids_per_partition);
-  out.stats.max_unique_ids_per_partition[state.stacked_table_name] =
+  stats.max_unique_ids_per_partition[state.stacked_table_name] =
       std::move(state.stats_per_host.max_unique_ids_per_partition);
-  out.stats.required_buffer_sizes[state.stacked_table_name] =
+  stats.required_buffer_sizes[state.stacked_table_name] =
       std::move(state.stats_per_host.required_buffer_size);
-  out.stats.dropped_id_count[state.stacked_table_name] =
+  stats.dropped_id_count[state.stacked_table_name] =
       state.stats_per_host.dropped_id_count;
 }
 
@@ -589,8 +593,7 @@ void FillDeviceBuffersForTable(
     absl::BlockingCounter& counter) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
-        absl::StrCat("InputPreprocessingTable-FillBuffer-",
-                     state.stacked_table_name),
+        absl::StrCat("ScheduleFillBuffer/", state.stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
   for (int local_device = 0; local_device < options.local_device_count;
@@ -632,8 +635,8 @@ void FillDeviceBuffersForTable(
         int static_dropped_ids = 0;
         FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
                               coo_buffer_size_per_sc, batch_size_per_sc,
-                              options, csr_arrays_per_device,
-                              static_dropped_ids);
+                              options, state.stacked_table_name,
+                              csr_arrays_per_device, static_dropped_ids);
         sorting_result_av.get().total_dropped_id_count += static_dropped_ids;
         counter.DecrementCount();
       });
@@ -698,7 +701,7 @@ void FillDeviceBuffersAllTables(
     MinibatchingSplit global_minibatching_split) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
-        "FillDeviceBuffers", {{"batch_number", options.batch_number}});
+        "ScheduleFillDeviceBuffers", {{"batch_number", options.batch_number}});
   });
   absl::BlockingCounter counter(table_states.size() *
                                 options.local_device_count);
@@ -707,6 +710,11 @@ void FillDeviceBuffersAllTables(
                               global_minibatching_required,
                               global_minibatching_split, counter);
   }
+  traceme.Stop();
+  tsl::profiler::TraceMe traceme_wait([&] {
+    return tsl::profiler::TraceMeEncode(
+        "WaitForFillDeviceBuffers", {{"batch_number", options.batch_number}});
+  });
   counter.Wait();
 }
 
@@ -731,8 +739,7 @@ PreprocessSparseDenseMatmulInput(
     OutputCsrArrays* output_csr_arrays) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
-        absl::StrCat("input_preprocessing_cc-", options.local_device_count, "/",
-                     options.global_device_count),
+        absl::StrCat("jax_sc_embedding::PreprocessSparseDenseMatmulInput"),
         {{"batch_number", options.batch_number}});
   });
   if (options.sharding_strategy != ShardingStrategy::kMod) {
@@ -776,7 +783,7 @@ PreprocessSparseDenseMatmulInput(
   {
     tsl::profiler::TraceMe traceme([&] {
       return tsl::profiler::TraceMeEncode(
-          "ExtractSortAndGroupCooTensors",
+          "ScheduleExtractSortGroup",
           {{"batch_number", options.batch_number}});
     });
     std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>> sorting_avs;
@@ -816,6 +823,11 @@ PreprocessSparseDenseMatmulInput(
 
   bool global_minibatching_required = false;
   if (options.enable_minibatching) {
+    tsl::profiler::TraceMe traceme([&] {
+      return tsl::profiler::TraceMeEncode(
+          "WaitForGlobalMinibatchingSync",
+          {{"batch_number", options.batch_number}});
+    });
     tsl::BlockUntilReady(global_minibatching_required_avr);
     TF_ASSIGN_OR_RETURN(global_minibatching_required,
                         *global_minibatching_required_avr);
@@ -828,7 +840,7 @@ PreprocessSparseDenseMatmulInput(
     {
       tsl::profiler::TraceMe traceme([&] {
         return tsl::profiler::TraceMeEncode(
-            "CreateMinibatchingBuckets",
+            "ScheduleCreateMinibatchingBuckets",
             {{"batch_number", options.batch_number}});
       });
       std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>> sorting_avs;
@@ -865,7 +877,7 @@ PreprocessSparseDenseMatmulInput(
         state.coo_buffer_size_per_device, state.stacked_table_name,
         options.batch_number);
 
-    PopulateOutput(state, out, output_mutex);
+    PopulateOutputStats(state, out.stats, output_mutex);
   }
 
   out.num_minibatches = global_minibatching_split.count() + 1;

@@ -22,6 +22,7 @@
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -313,9 +314,14 @@ void FillLocalDeviceBuffer(
     const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
     internal::CsrArraysPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
-  tsl::profiler::TraceMe t("FillLocalDeviceBuffer");
+  tsl::profiler::TraceMe t([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("FillLocalDeviceBuffer/", stacked_table_name),
+        {{"batch_number", options.batch_number}});
+  });
   const int num_sc_per_device = options.num_sc_per_device;
   const int num_scs = options.GetNumScs();
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
@@ -326,6 +332,12 @@ void FillLocalDeviceBuffer(
     for (int minibatch_id = 0;
          minibatch_id < grouped_coo_tensors.GetNumMinibatches();
          ++minibatch_id) {
+      tsl::profiler::TraceMe trace_segment([&] {
+        return tsl::profiler::TraceMeEncode(
+            absl::StrCat("FillBufferSegment/", stacked_table_name, "/SC",
+                         local_sc_id, "/MB", minibatch_id),
+            {{"batch_number", options.batch_number}});
+      });
       const int lhs_row_end = lhs_row_begin + row_pointers_size_per_bucket;
       const int coo_end =
           options.enable_minibatching

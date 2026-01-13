@@ -196,8 +196,11 @@ template <bool kHasVariableWeights, bool kCreateBuckets>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContext context) {
   tsl::profiler::TraceMe group_traceme([&] {
-    return absl::StrCat("GroupAndDeduplicateCooTensorsForLocalSparseCore/",
-                        context.local_sc_id);
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("GroupAndDeduplicateCooTensorsForLocalSparseCore/",
+                     context.stacked_table_metadata.name, "/SC",
+                     context.local_sc_id),
+        {{"batch_number", context.options.batch_number}});
   });
   // Unpack context for readability.
   const PreprocessSparseDenseMatmulInputOptions& options = context.options;
@@ -330,7 +333,12 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     const StackedTableMetadata& stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice& stats) {
-  tsl::profiler::TraceMe t("SortAndGroupCooTensors");
+  tsl::profiler::TraceMe t([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("ScheduleSortAndGroupCooTensors/",
+                     stacked_table_metadata.name),
+        {{"batch_number", options.batch_number}});
+  });
   const int num_sc_per_device = options.num_sc_per_device;
   const uint32_t global_sc_count = options.GetNumScs();
   const int num_sc_bits = absl::bit_width(global_sc_count - 1);
@@ -380,8 +388,10 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
          stacked_table_name]() mutable {
           options.async_task_scheduler([=]() mutable {
             tsl::profiler::TraceMe sort_traceme([&] {
-              return absl::StrCat("SortAndGroupCooTensorsPerSparseCore/",
-                                  local_sc_id);
+              return tsl::profiler::TraceMeEncode(
+                  absl::StrCat("SortAndGroupCooTensorsPerSparseCore/",
+                               stacked_table_name, "/SC", local_sc_id),
+                  {{"batch_number", options.batch_number}});
             });
 
             // We need to aggregate stats and splits as well.
@@ -406,8 +416,12 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
           internal::ValidateKeyCapacity(local_sc_id,
                                         extracted_coo_tensors.size());
 
-          tsl::profiler::TraceMe generate_keys_traceme(
-              [&] { return absl::StrCat("GenerateKeys/", local_sc_id); });
+          tsl::profiler::TraceMe generate_keys_traceme([&] {
+            return tsl::profiler::TraceMeEncode(
+                absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
+                             local_sc_id),
+                {{"batch_number", options.batch_number}});
+          });
           for (uint32_t coo_index = 0; coo_index < extracted_coo_tensors.size();
                ++coo_index) {
             // The key here is [bucket_id(6 bits), global_sc_id(num_scs bits),
@@ -423,8 +437,11 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
           generate_keys_traceme.Stop();
 
           // Sort keys to group by bucket_id, global_sc_id, and column_id.
-          tsl::profiler::TraceMe vqsort_traceme(
-              [&] { return absl::StrCat("VQSort/", local_sc_id); });
+          tsl::profiler::TraceMe vqsort_traceme([&] {
+            return tsl::profiler::TraceMeEncode(
+                absl::StrCat("VQSort/", stacked_table_name, "/SC", local_sc_id),
+                {{"batch_number", options.batch_number}});
+          });
           hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
           vqsort_traceme.Stop();
 

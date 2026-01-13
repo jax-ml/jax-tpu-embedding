@@ -743,7 +743,8 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
-                        /*batch_size_per_sc=*/2, options, csr_array,
+                        /*batch_size_per_sc=*/2, options,
+                        /*stacked_table_name=*/"test_table", csr_array,
                         dropped_static_bound);
 
   std::array<int, 32> expected_row_pointers = {
@@ -874,7 +875,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
-                        /*batch_size_per_sc=*/2, options, csr_array,
+                        /*batch_size_per_sc=*/2, options,
+                        /*stacked_table_name=*/"test_table", csr_array,
                         stats_per_device.dropped_id_count);
 
   std::array<int, 32> expected_row_pointers = {
@@ -1035,7 +1037,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_bucket=*/8,
                         coo_buffer_size_per_sc,
-                        /*batch_size_per_sc=*/2, options, csr_array,
+                        /*batch_size_per_sc=*/2, options,
+                        /*stacked_table_name=*/"test_table", csr_array,
                         stats_per_device.dropped_id_count);
 
   std::array<int, row_pointers_size> expected_row_pointers = {
@@ -1182,7 +1185,7 @@ TEST(InputPreprocessingUtilTest,
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
                         coo_buffer_size_per_sc, batch_size_per_sc, opts,
-                        csr_arrays,
+                        /*stacked_table_name=*/"test_table", csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
 
   EXPECT_EQ(dropped_static, 1);
@@ -1254,7 +1257,7 @@ TEST(InputPreprocessingUtilTest,
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
                         coo_buffer_size_per_sc, batch_size_per_sc, opts,
-                        csr_arrays,
+                        /*stacked_table_name=*/"test_table", csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
 
   EXPECT_EQ(stats_per_device.dropped_id_count, 0);

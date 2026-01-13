@@ -541,7 +541,8 @@ void FillLocalDeviceBuffer(
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::CsrArraysPerDevice& csr, int& dropped_id_count_static_bound);
+    absl::string_view stacked_table_name, internal::CsrArraysPerDevice& csr,
+    int& dropped_id_count_static_bound);
 
 }  // namespace jax_sc_embedding
 
