@@ -630,8 +630,8 @@ void FillDeviceBuffersForTable(
             state.batch_size_for_device, options.num_sc_per_device);
         const int coo_buffer_size_per_sc =
             state.coo_buffer_size_per_device / options.num_sc_per_device;
-        internal::CsrArraysPerDevice csr_arrays_per_device =
-            state.csr_arrays_per_host.GetCsrArraysPerDevice(local_device);
+        internal::CsrArraysRefPerDevice csr_arrays_per_device =
+            state.csr_arrays_per_host.GetCsrArraysRefForDevice(local_device);
         int static_dropped_ids = 0;
         FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
                               coo_buffer_size_per_sc, batch_size_per_sc,

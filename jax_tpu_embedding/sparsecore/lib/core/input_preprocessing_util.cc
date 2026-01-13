@@ -113,7 +113,7 @@ enum class PadType {
 //   `pad_type`: Specifies the padding behavior.
 //   `csr`: CSR arrays to be padded.
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
-                  internal::CsrArraysPerDevice& csr) {
+                  internal::CsrArraysRefPerDevice& csr) {
   if (pad_type == PadType::kPadToEnd) {
     coo_index = coo_end;
     return;
@@ -142,7 +142,7 @@ void AdvanceAndPadPartitions(int& current_partition_id,
                              const int target_partition_id, int& lhs_row_index,
                              int& coo_index, int processed,
                              const BufferFillingOptions& options,
-                             internal::CsrArraysPerDevice& csr_arrays) {
+                             internal::CsrArraysRefPerDevice& csr_arrays) {
   DCHECK_LE(current_partition_id, target_partition_id);
   while (current_partition_id < target_partition_id) {
     if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
@@ -160,7 +160,7 @@ void AdvanceAndPadPartitions(int& current_partition_id,
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
 int FillBufferSegment(const BufferFillingOptions& options,
-                      internal::CsrArraysPerDevice& csr_arrays,
+                      internal::CsrArraysRefPerDevice& csr_arrays,
                       int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
@@ -315,7 +315,7 @@ void FillLocalDeviceBuffer(
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
-    internal::CsrArraysPerDevice& csr_arrays,
+    internal::CsrArraysRefPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
   tsl::profiler::TraceMe t([&] {
     return tsl::profiler::TraceMeEncode(

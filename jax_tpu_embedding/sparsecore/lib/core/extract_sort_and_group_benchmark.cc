@@ -304,8 +304,8 @@ void BM_FillBuffer(benchmark::State& state) {
 
   CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
                                        gains);
-  internal::CsrArraysPerDevice csr_arrays =
-      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  internal::CsrArraysRefPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   int dropped_id_count_static_bound = 0;
   const int coo_buffer_size_per_sc =
       coo_buffer_size_for_device / kNumScPerDevice;

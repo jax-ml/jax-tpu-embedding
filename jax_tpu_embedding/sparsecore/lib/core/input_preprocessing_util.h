@@ -333,7 +333,7 @@ struct DeviceSortingTaskResult {
 
 namespace internal {
 
-struct CsrArraysPerDevice {
+struct CsrArraysRefPerDevice {
   Eigen::Ref<RowVectorXi> row_pointers;
   Eigen::Ref<RowVectorXi> embedding_ids;
   Eigen::Ref<RowVectorXi> sample_ids;
@@ -365,9 +365,9 @@ struct CsrArraysPerHost {
         sample_ids(sample_ids.data(), sample_ids.rows(), sample_ids.cols()),
         gains(gains.data(), gains.rows(), gains.cols()) {}
 
-  internal::CsrArraysPerDevice GetCsrArraysPerDevice(int local_device_id)
+  internal::CsrArraysRefPerDevice GetCsrArraysRefForDevice(int local_device_id)
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return internal::CsrArraysPerDevice{
+    return internal::CsrArraysRefPerDevice{
         .row_pointers = row_pointers.row(local_device_id),
         .embedding_ids = embedding_ids.row(local_device_id),
         .sample_ids = sample_ids.row(local_device_id),
@@ -541,7 +541,7 @@ void FillLocalDeviceBuffer(
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::string_view stacked_table_name, internal::CsrArraysPerDevice& csr,
+    absl::string_view stacked_table_name, internal::CsrArraysRefPerDevice& csr,
     int& dropped_id_count_static_bound);
 
 }  // namespace jax_sc_embedding

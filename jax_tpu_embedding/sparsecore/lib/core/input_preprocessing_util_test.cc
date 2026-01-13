@@ -737,8 +737,8 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
                                        gains);
 
-  internal::CsrArraysPerDevice csr_array =
-      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  internal::CsrArraysRefPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   int dropped_static_bound = 0;
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
@@ -870,8 +870,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
                                        gains);
 
-  internal::CsrArraysPerDevice csr_array =
-      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  internal::CsrArraysRefPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_sc=*/8,
                         /*coo_buffer_size_per_sc=*/40,
@@ -1031,8 +1031,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
                                        gains);
 
-  internal::CsrArraysPerDevice csr_array =
-      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  internal::CsrArraysRefPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*row_pointers_size_per_bucket=*/8,
@@ -1179,8 +1179,8 @@ TEST(InputPreprocessingUtilTest,
   CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
                                        gains);
 
-  internal::CsrArraysPerDevice csr_arrays =
-      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  internal::CsrArraysRefPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
@@ -1251,8 +1251,8 @@ TEST(InputPreprocessingUtilTest,
   CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
                                        gains);
 
-  internal::CsrArraysPerDevice csr_arrays =
-      csr_arrays_per_host.GetCsrArraysPerDevice(0);
+  internal::CsrArraysRefPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
