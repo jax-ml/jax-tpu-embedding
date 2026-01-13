@@ -47,6 +47,7 @@
 #include "tsl/platform/statusor.h"  // from @tsl
 #include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
+#include "tsl/profiler/lib/traceme_encode.h"
 
 namespace jax_sc_embedding {
 
@@ -412,6 +413,8 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
   for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
     auto av = extracted_coo_tensors.per_sc_tensors_av[sc_id];
     options.async_task_scheduler([=] {
+      tsl::profiler::TraceMe traceme(
+          [&] { return absl::StrCat("ExtractCooTensorsForSc/", sc_id); });
       ExtractedCooTensorsPerSparseCore coo_tensors_per_sc(
           batch_size_per_slice, has_variable_weights,
           stacked_table_metadata[0].row_combiner);

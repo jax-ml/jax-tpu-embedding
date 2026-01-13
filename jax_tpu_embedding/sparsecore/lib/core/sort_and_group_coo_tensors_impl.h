@@ -24,6 +24,7 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
+#include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -194,6 +195,10 @@ struct LocalSparseCoreTensorGroupingContext {
 template <bool kHasVariableWeights, bool kCreateBuckets>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContext context) {
+  tsl::profiler::TraceMe group_traceme([&] {
+    return absl::StrCat("GroupAndDeduplicateCooTensorsForLocalSparseCore/",
+                        context.local_sc_id);
+  });
   // Unpack context for readability.
   const PreprocessSparseDenseMatmulInputOptions& options = context.options;
   const StackedTableMetadata& stacked_table_metadata =
@@ -374,7 +379,10 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
          max_ids_per_partition, max_unique_ids_per_partition,
          stacked_table_name]() mutable {
           options.async_task_scheduler([=]() mutable {
-            tsl::profiler::TraceMe t("SortAndGroupCooTensorsPerSparseCore");
+            tsl::profiler::TraceMe sort_traceme([&] {
+              return absl::StrCat("SortAndGroupCooTensorsPerSparseCore/",
+                                  local_sc_id);
+            });
 
             // We need to aggregate stats and splits as well.
           int total_dropped = 0;
@@ -398,6 +406,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
           internal::ValidateKeyCapacity(local_sc_id,
                                         extracted_coo_tensors.size());
 
+          tsl::profiler::TraceMe generate_keys_traceme(
+              [&] { return absl::StrCat("GenerateKeys/", local_sc_id); });
           for (uint32_t coo_index = 0; coo_index < extracted_coo_tensors.size();
                ++coo_index) {
             // The key here is [bucket_id(6 bits), global_sc_id(num_scs bits),
@@ -410,8 +420,12 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                 extracted_coo_tensors.ids[coo_index].col_id, data, num_sc_bits,
                 kCreateBuckets, options.minibatching_bucketing_hash_fn));
           }
+          generate_keys_traceme.Stop();
 
+          tsl::profiler::TraceMe vqsort_traceme(
+              [&] { return absl::StrCat("VQSort/", local_sc_id); });
           hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
+          vqsort_traceme.Stop();
 
           // These counters track the number of IDs that are actually kept (not
           // dropped) for each partition and bucket for this device.
