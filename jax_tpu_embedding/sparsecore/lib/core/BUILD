@@ -431,6 +431,7 @@ cc_test(
         ":abstract_input_batch",
         ":input_preprocessing_core",
         ":input_preprocessing_util",
+        ":partitioned_coo_tensors",
         ":ragged_tensor_input_batch",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/random",

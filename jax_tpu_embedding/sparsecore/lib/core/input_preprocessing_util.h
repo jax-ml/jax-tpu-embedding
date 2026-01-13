@@ -38,6 +38,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
+#include "xla/tsl/concurrency/chain.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -333,7 +334,7 @@ struct DeviceSortingTaskResult {
 
 namespace internal {
 
-struct CsrArraysPerDevice {
+struct CsrArraysRefPerDevice {
   Eigen::Ref<RowVectorXi> row_pointers;
   Eigen::Ref<RowVectorXi> embedding_ids;
   Eigen::Ref<RowVectorXi> sample_ids;
@@ -365,9 +366,9 @@ struct CsrArraysPerHost {
         sample_ids(sample_ids.data(), sample_ids.rows(), sample_ids.cols()),
         gains(gains.data(), gains.rows(), gains.cols()) {}
 
-  internal::CsrArraysPerDevice GetCsrArraysPerDevice(int local_device_id)
+  internal::CsrArraysRefPerDevice GetCsrArraysRefForDevice(int local_device_id)
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return internal::CsrArraysPerDevice{
+    return internal::CsrArraysRefPerDevice{
         .row_pointers = row_pointers.row(local_device_id),
         .embedding_ids = embedding_ids.row(local_device_id),
         .sample_ids = sample_ids.row(local_device_id),
@@ -476,9 +477,16 @@ struct PreprocessSparseDenseMatmulInputOptions {
 static_assert(
     std::is_trivially_copyable<PreprocessSparseDenseMatmulInputOptions>());
 
-struct StackedTableMetadata {
-  StackedTableMetadata() = delete;
-  StackedTableMetadata(
+// This represents the metadata for a single feature corresponding to tables in
+// a stack of tables. If multiple features are stacked, for a given table, they
+// will have different row offsets, but same col_offset. If multiple features
+// are stacked for different tables, they may not have different col_offsets
+// (since they correspond to different tables). Both the offsets are global and
+// use global_batch_size. Additionally, the vocabulary sharding may be rotated
+// among the distributed chips by using col_shift.
+struct FeatureMetadataInStack {
+  FeatureMetadataInStack() = delete;
+  FeatureMetadataInStack(
       absl::string_view name, int feature_index, int max_ids_per_partition,
       int max_unique_ids_per_partition, int row_offset, int col_offset,
       int col_shift, int batch_size,
@@ -500,8 +508,8 @@ struct StackedTableMetadata {
 
   std::string name;
 
-  // The batch is given as a list of features (numpy arrays). `feature_index`
-  // represents the index of the feature in the list.
+  // The input batch consists of a list of features. `feature_index` is the
+  // index of the feature in the list.
   int feature_index;
 
   int max_ids_per_partition;
@@ -522,27 +530,38 @@ struct StackedTableMetadata {
   // shard.
   int max_col_id;
 
-  bool operator==(const StackedTableMetadata& other) const = default;
+  bool operator==(const FeatureMetadataInStack& other) const = default;
 };
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     int batch_number = 0, bool use_minibatching = false);
 
 int MaxIdsPerPartitionForStackedTables(
-    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
-    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
+// Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
-    int batch_size_per_sc,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::string_view stacked_table_name, internal::CsrArraysPerDevice& csr,
+    absl::string_view stacked_table_name,
+    internal::CsrArraysRefPerDevice csr_arrays,
     int& dropped_id_count_static_bound);
+
+// Returns the number of dropped IDs.
+tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    internal::CsrArraysRefPerDevice csr_arrays);
 
 }  // namespace jax_sc_embedding
 

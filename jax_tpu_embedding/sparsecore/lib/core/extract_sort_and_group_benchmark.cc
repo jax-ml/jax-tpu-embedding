@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// TODO: b/444292437 - Rename this file to input_preprocessing_benchmark.cc.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +34,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 
@@ -136,10 +139,10 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              kVocabSize, num_features);
 
-  std::vector<StackedTableMetadata> stacked_table_metadata;
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
   stacked_table_metadata.reserve(num_features);
   for (int i = 0; i < num_features; ++i) {
-    stacked_table_metadata.push_back(StackedTableMetadata(
+    stacked_table_metadata.push_back(FeatureMetadataInStack(
         absl::StrCat("table_", i), /*feature_index=*/i,
         /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
         /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
@@ -182,12 +185,12 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              kVocabSize, num_features);
 
-  std::vector<StackedTableMetadata> stacked_table_metadata_list;
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
   stacked_table_metadata_list.reserve(num_features);
   for (int i = 0; i < num_features; ++i) {
     // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
     // the generated data. This doesn't affect performance of grouping itself.
-    stacked_table_metadata_list.push_back(StackedTableMetadata(
+    stacked_table_metadata_list.push_back(FeatureMetadataInStack(
         absl::StrCat("table_", i), /*feature_index=*/i,
         /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
         /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
@@ -221,8 +224,8 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
 
   if (state.thread_index() == 0) {
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-        extracted_coo_tensors, stacked_table_metadata_list[0], options,
-        stats_per_device, minibatching_required);
+        extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
+        options, stats_per_device, minibatching_required);
     LogStats(stats_per_device.max_ids_per_partition,
              "Max ids per partition across all global SCs");
     LogStats(stats_per_device.max_unique_ids_per_partition,
@@ -231,8 +234,8 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
 
   for (auto s : state) {
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-        extracted_coo_tensors, stacked_table_metadata_list[0], options,
-        stats_per_device, minibatching_required);
+        extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
+        options, stats_per_device, minibatching_required);
   }
 }
 BENCHMARK(BM_SortAndGroup_Phase1)
@@ -241,6 +244,83 @@ BENCHMARK(BM_SortAndGroup_Phase1)
     ->Args({20, 2})  // kSqrtn
     ->Threads(8)
     ->UseRealTime();
+
+void BM_FillBuffer(benchmark::State& state) {
+  const int num_features = state.range(0);
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
+                                             kVocabSize, num_features);
+
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
+  stacked_table_metadata_list.reserve(num_features);
+  for (int i = 0; i < num_features; ++i) {
+    stacked_table_metadata_list.push_back(FeatureMetadataInStack(
+        absl::StrCat("table_", i), /*feature_index=*/i,
+        /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
+        /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
+        /*row_offset=*/0,
+        /*col_offset=*/0,
+        /*col_shift=*/0, /*batch_size=*/kBatchSizePerSc,
+        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+        /*row_combiner=*/RowCombiner::kSum));
+  }
+
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = kGlobalDeviceCount,
+      .num_sc_per_device = kNumScPerDevice,
+      .allow_id_dropping = false,
+      .enable_minibatching = true,
+  };
+
+  ExtractedCooTensors extracted_coo_tensors =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+          stacked_table_metadata_list, absl::MakeSpan(input_batches),
+          /*local_device_id=*/0, options);
+
+  bool minibatching_required = false;
+  StatsPerHost stats_per_host(
+      /*local_device_count=*/1,
+      /*global_sc_count=*/kNumScPerDevice * kGlobalDeviceCount,
+      /*num_sc_per_device=*/kNumScPerDevice);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
+  DevicePartitionedCooTensors grouped_coo_tensors =
+      SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
+          extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
+          options, stats_per_device, minibatching_required);
+
+  const int num_scs = kNumScPerDevice * kGlobalDeviceCount;
+  const int row_pointers_size_per_bucket =
+      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  const int coo_buffer_size_for_device =
+      stats_per_device.required_buffer_size.sum();
+  const int row_pointers_size = row_pointers_size_per_bucket * kNumScPerDevice;
+
+  MatrixXi row_pointers(1, row_pointers_size);
+  MatrixXi embedding_ids(1, coo_buffer_size_for_device);
+  MatrixXi sample_ids(1, coo_buffer_size_for_device);
+  MatrixXf gains(1, coo_buffer_size_for_device);
+
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+  internal::CsrArraysRefPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
+  int dropped_id_count_static_bound = 0;
+  const int coo_buffer_size_per_sc =
+      coo_buffer_size_for_device / kNumScPerDevice;
+
+  for (auto s : state) {
+    FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
+                          coo_buffer_size_per_sc, kBatchSizePerSc,
+                          stats_per_device.required_buffer_size, options,
+                          stacked_table_metadata_list[0].name, csr_arrays,
+                          dropped_id_count_static_bound);
+  }
+}
+
+// Buffer filling is independent of the row combiner.
+BENCHMARK(BM_FillBuffer)->Args({20})->Threads(8)->UseRealTime();
 
 }  // namespace
 }  // namespace jax_sc_embedding

@@ -117,26 +117,26 @@ class TableStackingTest : public ::testing::Test {
        16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
       {0, 9, 19, 30, 42, 55, 69, 84, 100}};
 
-  std::vector<StackedTableMetadata> stacked_table_metadata_multi_{
-      StackedTableMetadata(
-          /*name=*/"table_0",
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_multi_{
+      FeatureMetadataInStack(
+          /*name=*/"feature_0",
           /*feature_index=*/0, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
           /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16),
-      StackedTableMetadata(
-          /*name=*/"table_1",
+      FeatureMetadataInStack(
+          /*name=*/"feature_1",
           /*feature_index=*/1, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/16,
           /*col_offset=*/32, /*col_shift=*/0, /*batch_size=*/16)};
 
-  std::vector<StackedTableMetadata> stacked_table_metadata_single_{
-      StackedTableMetadata(
-          /*name=*/"table_0",
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_single_{
+      FeatureMetadataInStack(
+          /*name=*/"feature_0",
           /*feature_index=*/0, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
           /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/8),
-      StackedTableMetadata(
-          /*name=*/"table_1",
+      FeatureMetadataInStack(
+          /*name=*/"feature_1",
           /*feature_index=*/1, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/8,
           /*col_offset=*/32, /*col_shift=*/0, /*batch_size=*/8)};
@@ -364,7 +364,7 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   const int row_pointers_size_per_device =
       row_pointers_size_per_bucket * num_buckets * num_sc_per_device;
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables;
 
   stacked_tables[stacked_table_metadata_multi_[0].name].push_back(
@@ -591,13 +591,13 @@ INSTANTIATE_TEST_SUITE_P(
 
 class MinibatchingCountTest : public ::testing::Test {
  protected:
-  std::vector<StackedTableMetadata> stacked_table_metadata_{
-      StackedTableMetadata(
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_{
+      FeatureMetadataInStack(
           /*name=*/"table_0",
           /*feature_index=*/0, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
           /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16),
-      StackedTableMetadata(
+      FeatureMetadataInStack(
           /*name=*/"table_1",
           /*feature_index=*/1, /*max_ids_per_partition=*/16,
           /*max_unique_ids_per_partition=*/16, /*row_offset=*/16,
@@ -682,7 +682,7 @@ TEST_F(MinibatchingCountTest,
                          /*global_sc_count=*/4,
                          /*local_sc_count=*/4);
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Act
@@ -716,7 +716,7 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
                          /*global_sc_count=*/4,
                          /*local_sc_count=*/4);
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Act
@@ -736,7 +736,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   auto nodes = SetUpMinibatchingNodes(kHosts);
@@ -790,7 +790,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   auto input_batch_host0 =
@@ -839,7 +839,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
   absl::Mutex mutex;
   std::vector<int> minibatches_per_host(kHosts, -1);
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   // Host 0: Requires minibatching
@@ -888,7 +888,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
 
 TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
   // Arrange
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
   auto nodes = SetUpMinibatchingNodes(1);
@@ -1000,10 +1000,10 @@ void RunPreprocessingOutputIsValidTest(
 
   CHECK_EQ(samples_per_table.size(), table_vocabs.size());
 
-  std::vector<StackedTableMetadata> stacked_table_metadata;
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
   int64_t current_col_offset = 0;
   for (int i = 0; i < table_vocabs.size(); ++i) {
-    stacked_table_metadata.push_back(StackedTableMetadata(
+    stacked_table_metadata.push_back(FeatureMetadataInStack(
         /*name=*/absl::StrCat("table_", i),
         /*feature_index=*/i, max_ids_per_partition,
         max_unique_ids_per_partition,
@@ -1015,7 +1015,7 @@ void RunPreprocessingOutputIsValidTest(
     current_col_offset += xla::RoundUpTo(table_vocabs[i], 8 * kNumScs);
   }
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"stacked_table", stacked_table_metadata}});
 
   PreprocessSparseDenseMatmulInputOptions options{
@@ -1179,7 +1179,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.push_back(CreateInputBatchFromSamples(samples));
 
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables;
 
   int observed_max_ids;
@@ -1204,8 +1204,8 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
 
   // Run with large max_ids to get stats.
   {
-    std::vector<StackedTableMetadata> stacked_table_metadata;
-    stacked_table_metadata.push_back(StackedTableMetadata(
+    std::vector<FeatureMetadataInStack> stacked_table_metadata;
+    stacked_table_metadata.push_back(FeatureMetadataInStack(
         /*name=*/"table_0",
         /*feature_index=*/0, /*max_ids_per_partition=*/kInitialMaxIds,
         /*max_unique_ids_per_partition=*/kInitialMaxIds, /*row_offset=*/0,
@@ -1230,7 +1230,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
 
   // Run with exact stats, expect no id dropping.
   {
-    StackedTableMetadata& table_metadata =
+    FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);
     table_metadata.max_unique_ids_per_partition =
@@ -1245,7 +1245,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
 
   // Run with reduced max_ids, expect id dropping if there were any ids.
   if (observed_max_ids > 1) {
-    StackedTableMetadata& table_metadata =
+    FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids - 1);
     table_metadata.max_unique_ids_per_partition =
@@ -1267,7 +1267,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
 
   // Run with reduced max_unique_ids, expect id dropping if there were any ids.
   if (observed_max_unique_ids > 1) {
-    StackedTableMetadata& table_metadata =
+    FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = std::max(1, observed_max_ids);
     table_metadata.max_unique_ids_per_partition =
@@ -1290,7 +1290,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   // Run with suggested_coo_buffer_size_per_device = observed buffer size.
   // Expect no id dropping.
   {
-    StackedTableMetadata& table_metadata =
+    FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = kInitialMaxIds;
     table_metadata.max_unique_ids_per_partition = kInitialMaxIds;
@@ -1309,7 +1309,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   const int kDeviceCooBufferAlignment =
       TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_sc_per_device;
   if (required_buffer_size_per_device > kDeviceCooBufferAlignment) {
-    StackedTableMetadata& table_metadata =
+    FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
     table_metadata.max_ids_per_partition = kInitialMaxIds;
     table_metadata.max_unique_ids_per_partition = kInitialMaxIds;

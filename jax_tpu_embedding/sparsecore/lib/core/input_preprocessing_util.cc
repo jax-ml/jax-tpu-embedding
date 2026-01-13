@@ -17,7 +17,9 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <optional>
+#include <vector>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
@@ -28,6 +30,7 @@
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
 
@@ -113,7 +116,7 @@ enum class PadType {
 //   `pad_type`: Specifies the padding behavior.
 //   `csr`: CSR arrays to be padded.
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
-                  internal::CsrArraysPerDevice& csr) {
+                  internal::CsrArraysRefPerDevice csr) {
   if (pad_type == PadType::kPadToEnd) {
     coo_index = coo_end;
     return;
@@ -142,7 +145,7 @@ void AdvanceAndPadPartitions(int& current_partition_id,
                              const int target_partition_id, int& lhs_row_index,
                              int& coo_index, int processed,
                              const BufferFillingOptions& options,
-                             internal::CsrArraysPerDevice& csr_arrays) {
+                             internal::CsrArraysRefPerDevice csr_arrays) {
   DCHECK_LE(current_partition_id, target_partition_id);
   while (current_partition_id < target_partition_id) {
     if (!ValidIndices(lhs_row_index, coo_index, processed, options)) {
@@ -160,7 +163,7 @@ void AdvanceAndPadPartitions(int& current_partition_id,
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
 int FillBufferSegment(const BufferFillingOptions& options,
-                      internal::CsrArraysPerDevice& csr_arrays,
+                      internal::CsrArraysRefPerDevice csr_arrays,
                       int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
   int coo_index = options.coo_begin;
@@ -236,7 +239,7 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 
 int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     const int batch_number, bool use_minibatching) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
@@ -294,14 +297,14 @@ int ComputeCooBufferSizePerDevice(
 }
 
 int MaxIdsPerPartitionForStackedTables(
-    const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   int max_ids_per_partition = stacked_table_metadata[0].max_ids_per_partition;
   DCHECK_GT(max_ids_per_partition, 0);
   return max_ids_per_partition;
 }
 
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
-    const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   std::optional<int> suggested_coo_buffer_size_per_device =
       stacked_table_metadata[0].suggested_coo_buffer_size_per_device;
   return suggested_coo_buffer_size_per_device;
@@ -309,72 +312,162 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
 // `gains` because we fill values in a loop to a bigger array.
-void FillLocalDeviceBuffer(
+// Returns the number of dropped IDs.
+tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
     const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
-    const int batch_size_per_sc,
+    const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
-    internal::CsrArraysPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound) {
+    internal::CsrArraysRefPerDevice csr_arrays) {
   tsl::profiler::TraceMe t([&] {
     return tsl::profiler::TraceMeEncode(
-        absl::StrCat("FillLocalDeviceBuffer/", stacked_table_name),
+        absl::StrCat("ScheduleFillLocalDeviceBuffer/", stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
+
   const int num_sc_per_device = options.num_sc_per_device;
   const int num_scs = options.GetNumScs();
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
   DCHECK_GT(batch_size_per_sc, 0);
-  int coo_begin = 0;
-  int lhs_row_begin = 0;
-  for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
-    for (int minibatch_id = 0;
-         minibatch_id < grouped_coo_tensors.GetNumMinibatches();
-         ++minibatch_id) {
-      tsl::profiler::TraceMe trace_segment([&] {
-        return tsl::profiler::TraceMeEncode(
-            absl::StrCat("FillBufferSegment/", stacked_table_name, "/SC",
-                         local_sc_id, "/MB", minibatch_id),
-            {{"batch_number", options.batch_number}});
-      });
-      const int lhs_row_end = lhs_row_begin + row_pointers_size_per_bucket;
-      const int coo_end =
-          options.enable_minibatching
-              ? coo_buffer_size                      // use whole buffer
-              : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
-      // Fill Minibatch or SparseCore slice.
-      coo_begin = FillBufferSegment(
-          {
-              .local_sc_id = local_sc_id,
-              .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
-              .lhs_row_begin = lhs_row_begin,
-              .lhs_row_end = lhs_row_end,
-              .coo_begin = coo_begin,
-              .coo_end = coo_end,
-              .batch_size_per_sc = batch_size_per_sc,
-              .num_sc_per_device = num_sc_per_device,
-              .num_scs = num_scs,
-              .coo_buffer_size = coo_buffer_size,
-              .enable_minibatching = options.enable_minibatching,
-          },
 
-          csr_arrays, dropped_id_count_static_bound);
-      lhs_row_begin = lhs_row_end;
-      if (options.enable_minibatching) {
-        // Align minibatch buffer
-        PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
-                     csr_arrays);
+  const int num_minibatches_per_sc = grouped_coo_tensors.GetNumMinibatches();
+  // If we are not minibatching, we only have one segment per SC.
+  const int total_segments = options.enable_minibatching
+                                 ? num_sc_per_device * num_minibatches_per_sc
+                                 : num_sc_per_device;
+
+  struct SharedSegmentData {
+    // We use a vector of AsyncValues to track the beginning index of each COO
+    // buffer segment. This allows us to fill the buffers in parallel (if
+    // only a single minibatch per SC).
+    std::vector<tsl::AsyncValueRef<int>> coo_begins;
+    std::vector<tsl::AsyncValueRef<int>> dropped_id_counts;
+  };
+  auto shared_segment_data = std::make_shared<SharedSegmentData>();
+
+  std::vector<tsl::AsyncValueRef<int>>& coo_begins =
+      shared_segment_data->coo_begins;
+  for (int i = 0; i < total_segments; ++i) {
+    coo_begins.push_back(tsl::MakeUnconstructedAsyncValueRef<int>());
+    shared_segment_data->dropped_id_counts.push_back(
+        tsl::MakeUnconstructedAsyncValueRef<int>());
+  }
+
+  if (num_minibatches_per_sc == 1) {
+    int current_coo_begin = 0;
+    for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
+      coo_begins[sc_id].emplace(current_coo_begin);
+      if (!options.enable_minibatching) {
+        current_coo_begin = (sc_id + 1) * coo_buffer_size_per_sc;
+      } else {
+        current_coo_begin += required_sc_buffer_sizes[sc_id];
       }
-    }  // end minibatch loop
-    if (!options.enable_minibatching) {
-      const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
-      // Pad to end of SparseCore buffer.
-      PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd, csr_arrays);
+      // A values `>=coo_buffer_size` would cause out of bounds, and only fill
+      // row_pointers.
+      current_coo_begin = std::min(current_coo_begin, coo_buffer_size);
     }
+  } else {
+    coo_begins[0].emplace(0);
+  }
+
+  int segment_idx = 0;
+  int current_lhs_row_begin = 0;
+  for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
+    for (int minibatch_id = 0; minibatch_id < num_minibatches_per_sc;
+         ++minibatch_id) {
+      coo_begins[segment_idx].AndThen([=, &grouped_coo_tensors, &options] {
+        options.async_task_scheduler([=, &grouped_coo_tensors, &options] {
+          tsl::profiler::TraceMe trace_segment([&] {
+            return tsl::profiler::TraceMeEncode(
+                absl::StrCat("FillBufferSegment/", stacked_table_name, "/SC",
+                             local_sc_id, "/MB", minibatch_id),
+                {{"batch_number", options.batch_number}});
+          });
+          const int lhs_row_end =
+              current_lhs_row_begin + row_pointers_size_per_bucket;
+          int coo_begin = coo_begins[segment_idx].get();
+          const int coo_end =
+              options.enable_minibatching
+                  ? coo_buffer_size                      // use whole buffer
+                  : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
+          // Fill Minibatch or SparseCore slice.
+          int dropped_ids_in_segment = 0;
+          coo_begin = FillBufferSegment(
+              {
+                  .local_sc_id = local_sc_id,
+                  .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
+                  .lhs_row_begin = current_lhs_row_begin,
+                  .lhs_row_end = lhs_row_end,
+                  .coo_begin = coo_begin,
+                  .coo_end = coo_end,
+                  .batch_size_per_sc = batch_size_per_sc,
+                  .num_sc_per_device = num_sc_per_device,
+                  .num_scs = num_scs,
+                  .coo_buffer_size = coo_buffer_size,
+                  .enable_minibatching = options.enable_minibatching,
+              },
+              csr_arrays, dropped_ids_in_segment);
+          shared_segment_data->dropped_id_counts[segment_idx].emplace(
+              dropped_ids_in_segment);
+          if (options.enable_minibatching) {
+            // Align minibatch buffer
+            PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
+                         csr_arrays);
+          } else {
+            // Align SparseCore buffer (since each SC has only 1 minibatch).
+            const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
+            PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd, csr_arrays);
+          }
+          // We could compute per minibatch buffer size, but we serialize the
+          // filling for multiple (>1) minibatches instead. Also because it lies
+          // on the slow path anyways.
+          if (num_minibatches_per_sc > 1 && segment_idx + 1 < total_segments) {
+            coo_begins[segment_idx + 1].emplace(coo_begin);
+          }
+        });
+      });
+      current_lhs_row_begin += row_pointers_size_per_bucket;
+      ++segment_idx;
+    }  // end minibatch loop
   }  // end SparseCore loop
-  // Pad to end of device buffer.
-  PadCooBuffer(coo_begin, coo_buffer_size, PadType::kPadToEnd, csr_arrays);
+
+  tsl::AsyncValueRef<int> dropped_id_count_av =
+      tsl::MakeUnconstructedAsyncValueRef<int>();
+  tsl::RunWhenReady(
+      absl::MakeConstSpan(shared_segment_data->dropped_id_counts), [=] {
+        // Pad to end of device buffer.
+        int coo_begin =
+            shared_segment_data->coo_begins[total_segments - 1].get();
+        PadCooBuffer(coo_begin, coo_buffer_size, PadType::kPadToEnd,
+                     csr_arrays);
+        // Compute total dropped ID count.
+        int total_dropped_id_count = 0;
+        for (int i = 0; i < total_segments; ++i) {
+          total_dropped_id_count +=
+              shared_segment_data->dropped_id_counts[i].get();
+        }
+        dropped_id_count_av.emplace(total_dropped_id_count);
+      });
+
+  return dropped_id_count_av;
+}
+
+// Blocking version for testing only.
+void FillLocalDeviceBuffer(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
+    const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    internal::CsrArraysRefPerDevice csr_arrays,
+    int& dropped_id_count_static_bound) {
+  tsl::AsyncValueRef<int> dropped_id_count = FillLocalDeviceBufferAsync(
+      grouped_coo_tensors, row_pointers_size_per_bucket, coo_buffer_size_per_sc,
+      batch_size_per_sc, required_sc_buffer_sizes, options, stacked_table_name,
+      csr_arrays);
+  tsl::BlockUntilReady(dropped_id_count);
+  dropped_id_count_static_bound += dropped_id_count.get();
 }
 
 }  // namespace jax_sc_embedding
