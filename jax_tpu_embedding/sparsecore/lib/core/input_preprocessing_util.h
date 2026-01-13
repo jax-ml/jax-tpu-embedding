@@ -88,6 +88,8 @@ enum class RowCombiner {
 
 RowCombiner GetRowCombiner(absl::string_view combiner);
 
+using MinibatchingSplit = std::bitset<CooFormat::kMaxMinibatchingBuckets - 1>;
+
 struct IdPair {
   int32_t col_id;
   int32_t row_id;
@@ -325,6 +327,8 @@ struct ExtractedCooTensors {
 struct DeviceSortingTaskResult {
   DevicePartitionedCooTensors grouped_coo_tensors;
   int total_dropped_id_count = 0;
+  bool table_minibatching_required = false;
+  MinibatchingSplit table_minibatching_split = 0;
 };
 
 namespace internal {
@@ -424,8 +428,6 @@ struct StatsPerHost {
     };
   }
 };
-
-using MinibatchingSplit = std::bitset<CooFormat::kMaxMinibatchingBuckets - 1>;
 
 enum class ShardingStrategy : int { kMod = 1 };
 
