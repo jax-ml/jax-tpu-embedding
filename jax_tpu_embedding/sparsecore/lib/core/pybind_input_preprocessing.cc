@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
@@ -116,7 +117,8 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,
-    bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
+    bool enable_minibatching,
+    AllReduceInterface* absl_nullable all_reduce_interface) {
   CHECK_EQ(input_batches.size(), feature_specs.size());
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = local_device_count,
@@ -173,7 +175,8 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,
-    bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
+    bool enable_minibatching,
+    AllReduceInterface* absl_nullable all_reduce_interface) {
   if (feature_weights.has_value()) {
     CHECK_EQ(features.size(), feature_weights->size());
   }
@@ -200,7 +203,8 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,
-    bool enable_minibatching, AllReduceInterface* all_reduce_interface) {
+    bool enable_minibatching,
+    AllReduceInterface* absl_nullable all_reduce_interface) {
   CHECK(indices.size() == values.size());
   CHECK(indices.size() == dense_shapes.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches(

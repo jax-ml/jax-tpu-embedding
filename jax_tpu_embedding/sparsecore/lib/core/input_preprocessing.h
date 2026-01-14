@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -64,7 +65,7 @@ PreprocessSparseDenseMatmulInput(
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    OutputCsrArrays* output_csr_arrays = nullptr);
+    OutputCsrArrays* absl_nullable output_csr_arrays = nullptr);
 
 }  // namespace jax_sc_embedding
 

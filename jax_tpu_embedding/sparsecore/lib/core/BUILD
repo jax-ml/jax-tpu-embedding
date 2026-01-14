@@ -28,6 +28,7 @@ cc_library(
     srcs = ["input_preprocessing_threads.cc"],
     hdrs = ["input_preprocessing_threads.h"],
     deps = [
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
@@ -143,6 +144,7 @@ cc_library(
         ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -202,6 +204,7 @@ pybind_extension(
         ":numpy_input_batch",
         ":sparse_coo_input_batch",
         "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",

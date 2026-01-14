@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
@@ -650,7 +651,7 @@ GetOutputCsrBuffers(const std::string& stacked_table_name,
                     const PreprocessSparseDenseMatmulInputOptions& options,
                     int row_pointers_size_per_device,
                     int coo_buffer_size_per_device,
-                    OutputCsrArrays* output_csr_arrays,
+                    OutputCsrArrays* absl_nullable output_csr_arrays,
                     PreprocessSparseDenseMatmulOutput& out) {
   if (output_csr_arrays != nullptr) {
     DCHECK(output_csr_arrays->lhs_row_pointers.contains(stacked_table_name))
@@ -736,7 +737,7 @@ PreprocessSparseDenseMatmulInput(
     const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    OutputCsrArrays* output_csr_arrays) {
+    OutputCsrArrays* absl_nullable output_csr_arrays) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
         absl::StrCat("jax_sc_embedding::PreprocessSparseDenseMatmulInput"),

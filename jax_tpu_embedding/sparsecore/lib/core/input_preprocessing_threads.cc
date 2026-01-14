@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/numbers.h"  // from @com_google_absl
@@ -46,8 +47,8 @@ int GetThreadPoolSize() {
 
 }  // namespace
 
-tsl::thread::ThreadPool* PreprocessingThreadPool() {
-  static tsl::thread::ThreadPool* pool = []() {
+tsl::thread::ThreadPool* absl_nonnull PreprocessingThreadPool() {
+  static tsl::thread::ThreadPool* absl_nonnull pool = []() {
     const int num_threads = GetThreadPoolSize();
     DCHECK_GE(num_threads, 1);
     LOG(INFO) << "Creating thread pool for SparseCore input "
