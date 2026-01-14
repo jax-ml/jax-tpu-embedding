@@ -33,7 +33,7 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 
 
-HyperParameterType: TypeAlias = Callable[[], jax.Array] | float
+HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
 # Standard initializers are defined in jax.nn.initializers. See
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
@@ -198,6 +198,7 @@ class AdagradOptimizerSpec(OptimizerSpec):
   for each embedding variable based on its past gradients. This helps in
   reducing the number of steps needed for convergence, especially for sparse
   data.
+
   Attributes:
     learning_rate: The learning rate for the training variables or embeddings.
     initial_accumulator_value: The initial value for the accumulator slot
@@ -207,7 +208,9 @@ class AdagradOptimizerSpec(OptimizerSpec):
 
   def __init__(
       self,
-      learning_rate=0.001,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.001,
       initial_accumulator_value: HyperParameterType = 0.1,
   ):
     super().__init__(
@@ -241,11 +244,10 @@ class AdamOptimizerSpec(OptimizerSpec):
   Adam optimization is a stochastic gradient descent method that is based on
   adaptive estimation of first-order and second-order moments.
 
-  According to
-  [Kingma et al., 2014](http://arxiv.org/abs/1412.6980), the method is
-  "*computationally efficient, has little memory requirement, invariant to
-  diagonal rescaling of gradients, and is well suited for problems that are
-  large in terms of data/parameters*".
+  According to `Kingma et al., 2014 <http://arxiv.org/abs/1412.6980>`__,
+  the method is "*computationally efficient, has little memory requirement,
+  invariant to diagonal rescaling of gradients, and is well suited for problems
+  that are large in terms of data/parameters*".
 
   Attributes:
     learning_rate: The learning rate for the training variables or embeddings.
@@ -285,8 +287,9 @@ class AdamOptimizerSpec(OptimizerSpec):
   ) -> tuple[jax.Array, ...]:
     """Compute the bias-corrected Adam hyperparameters.
 
-    Here we use the bias-corrected parameters from section 2.1 of the
-    original paper:
+    Here we use the bias-corrected parameters from section 2.1 of
+    the original paper:
+
       alpha_t = alpha * sqrt(1 - beta_2^t) / (1 - beta_1^t)
       epsilon_hat = epsilon * sqrt(1 + beta_2^t)
 
@@ -338,6 +341,7 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
   the benefits of both Adagrad and Momentum. It adjusts the learning rate
   for each embedding variable based on its past gradients, while also
   incorporating momentum to accelerate convergence.
+
   Attributes:
     learning_rate: The learning rate for the training variables or embeddings.
     momentum: The momentum parameter.
@@ -352,7 +356,9 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
 
   def __init__(
       self,
-      learning_rate=0.001,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.001,
       momentum: float = 0.9,
       beta2: float = 1.0,
       epsilon: float = 1e-10,
@@ -643,7 +649,14 @@ class TableSettingInStack:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, kw_only=True)
 class TableSpec:
-  """Specifies one embedding table."""
+  """Specifies one embedding table.
+
+  `TableSpec` is virtually immutable (for `jax.jit`) using `eq=True` and
+  `unsafe_hash=True`, but has `frozen=False` to allow in-place updates when
+  preparing for feature stacking or table stacking. See [dataclass
+  doc](https://docs.python.org/3/library/dataclasses.html#dataclasses.dataclass)
+  for more information.
+  """
 
   name: str
   """Name of the table."""
@@ -653,8 +666,7 @@ class TableSpec:
   embedding_dim: int
   """The number of columns in the embedding table."""
   initializer: CallableTableInitializer
-  """An initializer for the embedding table. See
-  [jax.nn.initializers](https://docs.jax.dev/en/latest/jax.nn.initializers.html)
+  """An initializer for the embedding table. See :func:`jax.nn.initializers`
   for more details."""
   optimizer: OptimizerSpec
   """An optimizer for the embedding table."""
@@ -773,7 +785,19 @@ class TableSpec:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, kw_only=True)
 class FeatureSpec:
-  """Specification for one embedding feature."""
+  """Specification for one embedding feature.
+
+  NOTE: `FeatureSpec` is virtually immutable (for `jax.jit`) using `eq=True`
+    and
+  `unsafe_hash=True`, but has `frozen=False` to allow in-place updates when
+  preparing for feature stacking or table stacking. See [dataclass
+  doc](https://docs.python.org/3/library/dataclasses.html#dataclasses.dataclass)
+  for more information.
+
+  WARNING: For all other purposes use
+  `embedding.update_preprocessing_parameters`
+  to maintain consistency between features, tables and stacked tables.
+  """
 
   name: str
   """Name of the feature."""

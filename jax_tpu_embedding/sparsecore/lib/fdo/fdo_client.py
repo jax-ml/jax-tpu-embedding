@@ -28,13 +28,14 @@ class FDOClient(abc.ABC):
   processes) stats from the storage location.
 
   Typical usage:
-    1. Create an instance of an implementation of FDOClient.
-    2. Call `record` to record the raw stats to the process local FDO client.
-    3. (Optional) Repeat a few steps of training.
-    3. Call `publish` on the singleton instance to publish the stats to the
-    storage location.
-    4. Call `load` on the singleton instance to get the aggregated (across all
-    processes) stats from the storage location.
+
+  1. Create an instance of an implementation of FDOClient.
+  2. Call ``record`` to record the raw stats to the process local FDO client.
+  3. (Optional) Repeat a few steps of training.
+  4. Call ``publish`` on the singleton instance to publish the stats to the
+     storage location.
+  5. Call ``load`` on the singleton instance to get the aggregated (across all
+     processes) stats from the storage location.
   """
 
   @abc.abstractmethod

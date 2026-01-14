@@ -776,6 +776,7 @@ def stack_tables(
   Then creates new feature specs with updated table specs with relevant
   fields related to stacking setup. The features are updated in-place with the
   new table specs.
+
   Args:
     features: The input features.
     table_names: A list of table names to be stacked.
@@ -794,6 +795,7 @@ def stack_tables(
       dimensions of the tables to stack would lead to excessive padding (i.e. do
       not match when rounded up to the nearest multiple of 8 values).
   """
+
   if not stack_name:
     stack_name = _get_stack_name(table_names)
   flatten_features = jax.tree.leaves(features)
