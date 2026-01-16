@@ -139,10 +139,10 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              kVocabSize, num_features);
 
-  std::vector<StackedTableMetadata> stacked_table_metadata;
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
   stacked_table_metadata.reserve(num_features);
   for (int i = 0; i < num_features; ++i) {
-    stacked_table_metadata.push_back(StackedTableMetadata(
+    stacked_table_metadata.push_back(FeatureMetadataInStack(
         absl::StrCat("table_", i), /*feature_index=*/i,
         /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
         /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
@@ -185,12 +185,12 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              kVocabSize, num_features);
 
-  std::vector<StackedTableMetadata> stacked_table_metadata_list;
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
   stacked_table_metadata_list.reserve(num_features);
   for (int i = 0; i < num_features; ++i) {
     // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
     // the generated data. This doesn't affect performance of grouping itself.
-    stacked_table_metadata_list.push_back(StackedTableMetadata(
+    stacked_table_metadata_list.push_back(FeatureMetadataInStack(
         absl::StrCat("table_", i), /*feature_index=*/i,
         /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
         /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
@@ -224,8 +224,8 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
 
   if (state.thread_index() == 0) {
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-        extracted_coo_tensors, stacked_table_metadata_list[0], options,
-        stats_per_device, minibatching_required);
+        extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
+        options, stats_per_device, minibatching_required);
     LogStats(stats_per_device.max_ids_per_partition,
              "Max ids per partition across all global SCs");
     LogStats(stats_per_device.max_unique_ids_per_partition,
@@ -234,8 +234,8 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
 
   for (auto s : state) {
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-        extracted_coo_tensors, stacked_table_metadata_list[0], options,
-        stats_per_device, minibatching_required);
+        extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
+        options, stats_per_device, minibatching_required);
   }
 }
 BENCHMARK(BM_SortAndGroup_Phase1)
@@ -251,10 +251,10 @@ void BM_FillBuffer(benchmark::State& state) {
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              kVocabSize, num_features);
 
-  std::vector<StackedTableMetadata> stacked_table_metadata_list;
+  std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
   stacked_table_metadata_list.reserve(num_features);
   for (int i = 0; i < num_features; ++i) {
-    stacked_table_metadata_list.push_back(StackedTableMetadata(
+    stacked_table_metadata_list.push_back(FeatureMetadataInStack(
         absl::StrCat("table_", i), /*feature_index=*/i,
         /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
         /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
@@ -287,8 +287,8 @@ void BM_FillBuffer(benchmark::State& state) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors grouped_coo_tensors =
       SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
-          extracted_coo_tensors, stacked_table_metadata_list[0], options,
-          stats_per_device, minibatching_required);
+          extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
+          options, stats_per_device, minibatching_required);
 
   const int num_scs = kNumScPerDevice * kGlobalDeviceCount;
   const int row_pointers_size_per_bucket =

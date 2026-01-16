@@ -82,13 +82,13 @@ FUZZ_TEST(InputPreprocessingUtilTest, GetColIdIsCorrect)
                  /*num_scs_bit=*/fuzztest::InRange(0, 9));
 
 TEST(InputPreprocessingUtilTest, MaxIdsPerPartitionForStackedTables) {
-  std::vector<StackedTableMetadata> stacked_table_metadata;
-  stacked_table_metadata.push_back(StackedTableMetadata(
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_0",
       /*feature_index=*/0, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/8));
-  stacked_table_metadata.push_back(StackedTableMetadata(
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_1",
       /*feature_index=*/1, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
@@ -98,18 +98,18 @@ TEST(InputPreprocessingUtilTest, MaxIdsPerPartitionForStackedTables) {
 
 TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
   // Default case.
-  std::vector<StackedTableMetadata> stacked_table_metadata;
-  stacked_table_metadata.push_back(StackedTableMetadata(
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_0",
       /*feature_index=*/0, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/8));
-  stacked_table_metadata.push_back(StackedTableMetadata(
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_1",
       /*feature_index=*/1, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16));
-  stacked_table_metadata.push_back(StackedTableMetadata(
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_2",
       /*feature_index=*/2, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
@@ -147,7 +147,7 @@ TEST(SortAndGroupTest, Base) {
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -164,7 +164,7 @@ TEST(SortAndGroupTest, Base) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   std::vector<CooFormat> expected_sc_0;
@@ -234,7 +234,7 @@ TEST(SortAndGroupTest, TwoScs) {
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(2, 8, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -251,7 +251,7 @@ TEST(SortAndGroupTest, TwoScs) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -302,7 +302,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -319,7 +319,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -352,7 +352,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/4,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -369,7 +369,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -407,7 +407,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/8,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -424,7 +424,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -463,7 +463,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
     coo_formats.push_back(CooFormat(row, 7, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/64,
       /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -480,7 +480,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -514,7 +514,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
     coo_formats.push_back(CooFormat(row, 16, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/128,
       /*max_unique_ids_per_partition=*/4, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -531,7 +531,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -565,7 +565,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
     coo_formats.push_back(CooFormat(row, row * 4, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -581,7 +581,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
   auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -617,7 +617,7 @@ TEST(SortAndGroupTest, IdDropping) {
   // Force dropping of IDs here with max_ids_per_partition == 2
   // The later 2 samples for each sparsecore will be dropped.
   ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
       /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -633,7 +633,7 @@ TEST(SortAndGroupTest, IdDropping) {
   auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
   EXPECT_THAT(stats_per_device.dropped_id_count, 32);
   EXPECT_THAT(stats_per_device.max_ids_per_partition,
@@ -707,7 +707,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -724,7 +724,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
@@ -838,7 +838,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
     coo_formats.push_back(CooFormat(row, 3, 1.0));
   }
   ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -857,7 +857,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
 
   coo_tensors_by_id.MergeAll();
@@ -969,7 +969,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
     }
   }
   ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
-  StackedTableMetadata stacked_table_metadata(
+  FeatureMetadataInStack feature_metadata(
       "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
       /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
@@ -988,7 +988,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors coo_tensors_by_id =
       SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, stacked_table_metadata, options,
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
           stats_per_device, minibatching_split);
   EXPECT_EQ(stats_per_device.dropped_id_count, 0);
 
@@ -1147,11 +1147,12 @@ TEST(InputPreprocessingUtilTest,
   ExtractedCooTensors extracted(/*num_sc_per_device=*/1,
                                 /*batch_size_for_device=*/4, coo_formats);
 
-  StackedTableMetadata meta("stacked_table", /*feature_index=*/0,
-                            /*max_ids_per_partition=*/32,
-                            /*max_unique_ids_per_partition=*/32,
-                            /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
-                            /*batch_size=*/0);
+  FeatureMetadataInStack meta("stacked_table", /*feature_index=*/0,
+                              /*max_ids_per_partition=*/32,
+                              /*max_unique_ids_per_partition=*/32,
+                              /*row_offset=*/0, /*col_offset=*/0,
+                              /*col_shift=*/0,
+                              /*batch_size=*/0);
 
   PreprocessSparseDenseMatmulInputOptions opts{
       .local_device_count = 1,
@@ -1166,7 +1167,8 @@ TEST(InputPreprocessingUtilTest,
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
-      extracted, meta, opts, stats_per_device, minibatching_required);
+      extracted, "stacked_table", meta, opts, stats_per_device,
+      minibatching_required);
   int dropped_sort = stats_per_device.dropped_id_count;
 
   const int row_ptrs_size_per_bucket = 4;
@@ -1211,11 +1213,12 @@ TEST(InputPreprocessingUtilTest,
   ExtractedCooTensors extracted(/*num_sc_per_device=*/1,
                                 /*batch_size_for_device=*/4, coo_formats);
 
-  StackedTableMetadata meta("stacked_table", /*feature_index=*/0,
-                            /*max_ids_per_partition=*/32,
-                            /*max_unique_ids_per_partition=*/32,
-                            /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
-                            /*batch_size=*/0);
+  FeatureMetadataInStack meta("stacked_table", /*feature_index=*/0,
+                              /*max_ids_per_partition=*/32,
+                              /*max_unique_ids_per_partition=*/32,
+                              /*row_offset=*/0, /*col_offset=*/0,
+                              /*col_shift=*/0,
+                              /*batch_size=*/0);
 
   auto hash_fn = std::identity();  // No hashing for simplicity.
   PreprocessSparseDenseMatmulInputOptions opts{
@@ -1233,7 +1236,8 @@ TEST(InputPreprocessingUtilTest,
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
   DevicePartitionedCooTensors grouped = SortAndGroupCooTensorsPerLocalDevice(
-      extracted, meta, opts, stats_per_device, minibatching_split);
+      extracted, "stacked_table", meta, opts, stats_per_device,
+      minibatching_split);
 
   // Create 2 minibatches by splitting based on bucket ID.
   minibatching_split.set(0);

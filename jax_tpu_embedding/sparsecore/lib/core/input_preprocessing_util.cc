@@ -239,7 +239,7 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 
 int ComputeCooBufferSizePerDevice(
     const int num_scs, const int num_scs_per_device,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     const int batch_number, bool use_minibatching) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
@@ -297,14 +297,14 @@ int ComputeCooBufferSizePerDevice(
 }
 
 int MaxIdsPerPartitionForStackedTables(
-    const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   int max_ids_per_partition = stacked_table_metadata[0].max_ids_per_partition;
   DCHECK_GT(max_ids_per_partition, 0);
   return max_ids_per_partition;
 }
 
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
-    const absl::Span<const StackedTableMetadata> stacked_table_metadata) {
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   std::optional<int> suggested_coo_buffer_size_per_device =
       stacked_table_metadata[0].suggested_coo_buffer_size_per_device;
   return suggested_coo_buffer_size_per_device;

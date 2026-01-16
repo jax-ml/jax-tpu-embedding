@@ -482,9 +482,9 @@ static_assert(
 // will have different row offsets, but same col_offset. Both the offsets are
 // global and use global_batch_size. Additionally, the vocabulary sharding may
 // be rotated among the distributed chips by using col_shift.
-struct StackedTableMetadata {
-  StackedTableMetadata() = delete;
-  StackedTableMetadata(
+struct FeatureMetadataInStack {
+  FeatureMetadataInStack() = delete;
+  FeatureMetadataInStack(
       absl::string_view name, int feature_index, int max_ids_per_partition,
       int max_unique_ids_per_partition, int row_offset, int col_offset,
       int col_shift, int batch_size,
@@ -506,8 +506,8 @@ struct StackedTableMetadata {
 
   std::string name;
 
-  // The batch is given as a list of features (numpy arrays). `feature_index`
-  // represents the index of the feature in the list.
+  // The input batch consists of a list of features. `feature_index` is the
+  // index of the feature in the list.
   int feature_index;
 
   int max_ids_per_partition;
@@ -528,19 +528,19 @@ struct StackedTableMetadata {
   // shard.
   int max_col_id;
 
-  bool operator==(const StackedTableMetadata& other) const = default;
+  bool operator==(const FeatureMetadataInStack& other) const = default;
 };
 
 int ComputeCooBufferSizePerDevice(
     int num_scs, int num_scs_per_device,
-    absl::Span<const StackedTableMetadata> stacked_table_metadata,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     int batch_number = 0, bool use_minibatching = false);
 
 int MaxIdsPerPartitionForStackedTables(
-    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
-    absl::Span<const StackedTableMetadata> stacked_table_metadata);
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(

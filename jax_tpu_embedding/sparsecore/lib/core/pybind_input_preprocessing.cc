@@ -51,11 +51,11 @@ namespace jax_sc_embedding {
 namespace py = ::pybind11;
 
 namespace {
-absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
 GetStackedTableMetadata(py::list& feature_specs) {
   CHECK(PyGILState_Check());  // Requires GIL
   tsl::profiler::TraceMe t([] { return "GetStackedTableMetadata"; });
-  absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_table_metadata;
   for (int i = 0; i < feature_specs.size(); ++i) {
     const py::object& feature_spec = feature_specs[i];
@@ -66,6 +66,8 @@ GetStackedTableMetadata(py::list& feature_specs) {
         py::cast<int64_t>(table_spec.attr("vocabulary_size"));
     const py::list& input_shape =
         feature_spec.attr("input_shape").cast<py::list>();
+    const std::string feature_name =
+        py::cast<std::string>(feature_spec.attr("name"));
     const int batch_size = py::cast<int>(input_shape[0]);
     const py::object& stacked_table_spec =
         table_spec.attr("stacked_table_spec");
@@ -96,18 +98,19 @@ GetStackedTableMetadata(py::list& feature_specs) {
       col_shift = py::cast<int>(feature_transformation.attr("col_shift"));
       col_offset = py::cast<int>(feature_transformation.attr("col_offset"));
     }
-    stacked_table_metadata[stacked_table_name].emplace_back(
-        stacked_table_name, i, max_ids_per_partition,
-        max_unique_ids_per_partition, row_offset, col_offset, col_shift,
+    stacked_table_metadata[stacked_table_name].push_back(FeatureMetadataInStack(
+        feature_name, i, max_ids_per_partition, max_unique_ids_per_partition,
+        row_offset, col_offset, col_shift,
         /*batch_size=*/batch_size, suggested_coo_buffer_size_per_device,
-        GetRowCombiner(row_combiner), max_col_id);
+        GetRowCombiner(row_combiner), max_col_id));
   }
-  // Sort the stacked tables by row_offset.
+  // Sort the features by row_offset for each stacked table.
   for (auto& [_, t] : stacked_table_metadata) {
-    std::sort(t.begin(), t.end(),
-              [](const StackedTableMetadata& a, const StackedTableMetadata& b) {
-                return a.row_offset < b.row_offset;
-              });
+    std::sort(
+        t.begin(), t.end(),
+        [](const FeatureMetadataInStack& a, const FeatureMetadataInStack& b) {
+          return a.row_offset < b.row_offset;
+        });
   }
   return stacked_table_metadata;
 }
@@ -134,7 +137,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
   // The keys are stacked table names (or the table itself if not stacked) and
   // the values are a vector of StackedTableMetadata for each feature that is
   // mapped to the table.
-  const absl::flat_hash_map<std::string, std::vector<StackedTableMetadata>>
+  const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables = GetStackedTableMetadata(feature_specs);
   PreprocessSparseDenseMatmulOutput out;
   {
