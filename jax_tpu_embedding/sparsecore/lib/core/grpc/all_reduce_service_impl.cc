@@ -59,7 +59,7 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
         local_reduced_cv_.WaitWithTimeout(&mutex_, absl::Seconds(7200));
     if (timeout) {
       grpc::Status status = grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED,
-                                   "Timed out waiting for local value.");
+                                         "Timed out waiting for local value.");
       LOG(ERROR) << "Timeout while waiting for local value for sync_key: "
                  << request->sync_key() << " from peer: " << context->peer()
                  << " with status: "
