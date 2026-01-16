@@ -1,0 +1,10 @@
+sphinx
+sphinx-book-theme
+sphinx-design
+pydata-sphinx-theme
+sphinx-autoapi
+sphinx-autodoc2
+jax
+optax
+flax
+orbax

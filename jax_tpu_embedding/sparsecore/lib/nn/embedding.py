@@ -740,30 +740,6 @@ def tpu_sparse_dense_matmul(
   This function can be used with jax.jit and/or shard_map or as a complete
   standalone computation.
 
-  Example invocation:
-
-  sparse_matmul = functools.partial(
-      embedding.tpu_sparse_dense_matmul,
-      global_device_count=mesh.size,
-      feature_specs=feature_specs,
-      sharding_strategy="MOD",
-  )
-  sparse_matmul = jax.shard_map(
-      sparse_matmul,
-      mesh=mesh,
-      in_specs=(
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-      ),
-      out_specs=P(mesh.axis_names[0]),
-      check_vma=False,
-  )
-  sparse_matmul = jax.jit(sparse_matmul)
-  activations = sparse_matmul(
-      preprocessed_inputs=preprocessed_inputs,
-      embedding_variables,
-  )
-
   Args:
     preprocessed_inputs: The preprocessed inputs for sparse dense matmul.
     embedding_variables: A tuple of embedding tables and slot variables. The
@@ -785,7 +761,33 @@ def tpu_sparse_dense_matmul(
   Raises:
     ValueError: The input arrays and tuples are not of the expected structure or
       the sharding strategy is not supported.
+
+  Examples:
+    Example invocation::
+
+      sparse_matmul = functools.partial(
+          embedding.tpu_sparse_dense_matmul,
+          global_device_count=mesh.size,
+          feature_specs=feature_specs,
+          sharding_strategy="MOD",
+      )
+      sparse_matmul = jax.shard_map(
+          sparse_matmul,
+          mesh=mesh,
+          in_specs=(
+              P(mesh.axis_names[0]),
+              P(mesh.axis_names[0]),
+          ),
+          out_specs=P(mesh.axis_names[0]),
+          check_vma=False,
+      )
+      sparse_matmul = jax.jit(sparse_matmul)
+      activations = sparse_matmul(
+          preprocessed_inputs=preprocessed_inputs,
+          embedding_variables,
+      )
   """
+
   if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
     warnings.warn(
         "SparseDenseMatmulInput is deprecated. Please use PreprocessedInput"
@@ -945,32 +947,6 @@ def tpu_sparse_dense_matmul_grad(
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
-  Example invocation with jit + shard_map:
-
-  grad_update = functools.partial(
-      embedding.tpu_sparse_dense_matmul_grad,
-      feature_specs=feature_specs,
-      sharding_strategy="MOD",
-  )
-  grad_update = jax.shard_map(
-      grad_update,
-      mesh=mesh,
-      in_specs=(
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-          P(mesh.axis_names[0]),
-      ),
-      out_specs=P(mesh.axis_names[0]),
-      check_vma=False,
-  )
-
-  grad_update = jax.jit(grad_update)
-  updated_embedding_variables = grad_update(
-      activations_grad,
-      preprocessed_inputs=preprocessed_inputs,
-      embedding_variables,
-  )
-
   Args:
     activation_gradients: The activation gradients.
     preprocessed_inputs: The preprocessed inputs for sparse dense matmul.
@@ -979,6 +955,7 @@ def tpu_sparse_dense_matmul_grad(
       variables. The tree structure must be identical to the lhs_row_pointers.
     feature_specs: The input features for the current process.
     sharding_strategy: The sharding strategy (e.g., MOD)
+    feature_stacking_strategy: The feature stacking strategy.
     label: The label for the optimizer computation.
     step: The current step number.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
@@ -989,6 +966,33 @@ def tpu_sparse_dense_matmul_grad(
 
   Returns:
     The updated activation embedding variables.
+
+  Examples:
+    Example invocation with jit + shard_map::
+
+      grad_update = functools.partial(
+          embedding.tpu_sparse_dense_matmul_grad,
+          feature_specs=feature_specs,
+          sharding_strategy="MOD",
+      )
+      grad_update = jax.shard_map(
+          grad_update,
+          mesh=mesh,
+          in_specs=(
+              P(mesh.axis_names[0]),
+              P(mesh.axis_names[0]),
+              P(mesh.axis_names[0]),
+          ),
+          out_specs=P(mesh.axis_names[0]),
+          check_vma=False,
+      )
+
+      grad_update = jax.jit(grad_update)
+      updated_embedding_variables = grad_update(
+          activations_grad,
+          preprocessed_inputs=preprocessed_inputs,
+          embedding_variables,
+      )
   """
   if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
     warnings.warn(
