@@ -65,40 +65,48 @@ absl::Status SendLocalData(
 
   // Send our data to all other peers asynchronously.
   DCHECK_EQ(stubs.size(), num_hosts - 1);
-  for (const auto& [peer_address, stub] : stubs) {
-    auto args = std::make_shared<ContributeDataArgs>();
-    args->context.set_deadline(
-        absl::ToChronoTime(absl::Now() + absl::Seconds(7200)));
-    args->request = request;
-    VLOG(2) << "Sending RPC to peer: " << peer_address
-            << " for sync_key: " << request.sync_key();
+  {
+    tsl::profiler::TraceMe traceme_send(
+        "GrpcAllReduceInterface::SendLocalData::SendToPeers");
+    for (const auto& [peer_address, stub] : stubs) {
+      auto args = std::make_shared<ContributeDataArgs>();
+      args->context.set_deadline(
+          absl::ToChronoTime(absl::Now() + absl::Seconds(7200)));
+      args->request = request;
+      VLOG(2) << "Sending RPC to peer: " << peer_address
+              << " for sync_key: " << request.sync_key();
 
-    stub->async()->ContributeData(
-        &args->context, &args->request, &args->response,
-        [&, args, peer_address = peer_address](::grpc::Status s) {
-          if (!s.ok()) {
-            LOG(ERROR) << "ContributeData async RPC to peer " << peer_address
-                       << " for sync_key: " << args->request.sync_key()
-                       << " failed with status: "
-                       << absl::Status(
-                              static_cast<absl::StatusCode>(s.error_code()),
-                              s.error_message());
-            absl::MutexLock lock(mutex);
-            failed_peers.push_back(peer_address);
-            if (overall_status.ok()) {
-              overall_status = s;
-            }
-          } else {
-            VLOG(2) << "ContributeData async RPC to peer " << peer_address
+      stub->async()->ContributeData(
+          &args->context, &args->request, &args->response,
+          [&, args, peer_address = peer_address](::grpc::Status s) {
+            if (!s.ok()) {
+              LOG(ERROR) << "ContributeData async RPC to peer " << peer_address
+                         << " for sync_key: " << args->request.sync_key()
+                         << " failed with status: "
+                         << absl::Status(
+                                static_cast<absl::StatusCode>(s.error_code()),
+                                s.error_message());
+              absl::MutexLock lock(mutex);
+              failed_peers.push_back(peer_address);
+              if (overall_status.ok()) {
+                overall_status = s;
+              }
+            } else {
+              VLOG(2) << "ContributeData async RPC to peer " << peer_address
                       << " for sync_key: " << args->request.sync_key()
                       << " completed successfully.";
-          }
-          outgoing_rpcs.DecrementCount();
-        });
+            }
+            outgoing_rpcs.DecrementCount();
+          });
+    }
   }
 
   // Wait for all outgoing RPCs to complete.
-  outgoing_rpcs.Wait();
+  {
+    tsl::profiler::TraceMe traceme_wait(
+        "GrpcAllReduceInterface::SendLocalData::WaitForPeerResponses");
+    outgoing_rpcs.Wait();
+  }
 
   // Propagate any RPC errors.
   if (!overall_status.ok()) {
@@ -133,7 +141,8 @@ void GrpcAllReduceInterface::SetUp() {
 
 absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
     const AllReduceData& request) {
-  tsl::profiler::TraceMe traceme("GrpcAllReduceInterface::BlockingAllReduce");
+  tsl::profiler::TraceMe traceme(
+      "GrpcAllReduceInterface::BlockingAllReduceData");
   CHECK_EQ(num_tasks_, stubs_.size() + 1);
 
   // Initialize State on the local service. The thread initializing the state
@@ -168,7 +177,8 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
 
 absl::StatusOr<bool> GrpcAllReduceInterface::BlockingAllReduce(
     int sync_key, bool minibatching_required) {
-  tsl::profiler::TraceMe traceme("GrpcAllReduceInterface::BlockingAllReduce");
+  tsl::profiler::TraceMe traceme(
+      "GrpcAllReduceInterface::BlockingAllReduceMinibatchingRequired");
   AllReduceData request;
   request.set_sync_key(sync_key);
   request.set_src_rank(task_id_);
