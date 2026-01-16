@@ -477,6 +477,11 @@ struct PreprocessSparseDenseMatmulInputOptions {
 static_assert(
     std::is_trivially_copyable<PreprocessSparseDenseMatmulInputOptions>());
 
+// This represents the metadata for a single feature corresponding to tables in
+// a stack of tables. If multiple features are stacked for a given table, they
+// will have different row offsets, but same col_offset. Both the offsets are
+// global and use global_batch_size. Additionally, the vocabulary sharding may
+// be rotated among the distributed chips by using col_shift.
 struct StackedTableMetadata {
   StackedTableMetadata() = delete;
   StackedTableMetadata(
