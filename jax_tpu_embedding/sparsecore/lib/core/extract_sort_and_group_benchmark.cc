@@ -312,7 +312,8 @@ void BM_FillBuffer(benchmark::State& state) {
 
   for (auto s : state) {
     FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
-                          coo_buffer_size_per_sc, kBatchSizePerSc, options,
+                          coo_buffer_size_per_sc, kBatchSizePerSc,
+                          stats_per_device.required_buffer_size, options,
                           stacked_table_metadata_list[0].name, csr_arrays,
                           dropped_id_count_static_bound);
   }

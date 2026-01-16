@@ -38,6 +38,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_threads.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
+#include "xla/tsl/concurrency/chain.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -536,13 +537,24 @@ int MaxIdsPerPartitionForStackedTables(
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const StackedTableMetadata> stacked_table_metadata);
 
+// Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
     int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
-    int batch_size_per_sc,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::string_view stacked_table_name, internal::CsrArraysRefPerDevice& csr,
+    absl::string_view stacked_table_name,
+    internal::CsrArraysRefPerDevice& csr_arrays,
     int& dropped_id_count_static_bound);
+
+// Returns the number of dropped IDs.
+tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    internal::CsrArraysRefPerDevice csr_arrays);
 
 }  // namespace jax_sc_embedding
 
