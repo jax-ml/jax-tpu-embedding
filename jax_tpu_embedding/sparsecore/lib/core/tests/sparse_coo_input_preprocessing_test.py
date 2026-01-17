@@ -17,8 +17,8 @@ import functools
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
-from jax_tpu_embedding.sparsecore.lib.core import test_utils
 from jax_tpu_embedding.sparsecore.lib.core.pybind_input_preprocessing import ShardingStrategy
+from jax_tpu_embedding.sparsecore.lib.core.tests import test_utils
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
 
