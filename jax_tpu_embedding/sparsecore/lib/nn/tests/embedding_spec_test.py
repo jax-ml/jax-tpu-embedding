@@ -350,7 +350,7 @@ class OptimizerSpecTest(absltest.TestCase):
 
   def test_learning_rate_callable(self):
 
-    def lr_callable():
+    def lr_callable() -> float | jax.Array:
       return 0.1
 
     optimizer_specs = [
