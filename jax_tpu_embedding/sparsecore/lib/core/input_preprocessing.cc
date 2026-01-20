@@ -513,16 +513,8 @@ absl::StatusOr<bool> SyncMinibatchingRequired(
   }
   bool local_minibatching_required = false;
 
-  {
-    tsl::profiler::TraceMe traceme_wait(
-        "SyncMinibatchingRequired::WaitForSortingResults");
-    for (const auto& state : table_states) {
-      for (const auto& sorting_result_av : state.device_sorting_results) {
-        tsl::BlockUntilReady(sorting_result_av);
-        local_minibatching_required |=
-            sorting_result_av.get().table_minibatching_required;
-      }
-    }
+  for (const auto& state : table_states) {
+    local_minibatching_required |= state.table_minibatching_required;
   }
   if (options.all_reduce_interface != nullptr) {
     TF_ASSIGN_OR_RETURN(auto reduced_value,
@@ -796,25 +788,31 @@ PreprocessSparseDenseMatmulInput(
           "ScheduleExtractSortGroup",
           {{"batch_number", options.batch_number}});
     });
-    std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>> sorting_avs;
     for (auto& state : table_states) {
       ExtractSortAndGroupCooTensorsForTable(state, input_batches, options);
-      for (const auto& av : state.device_sorting_results) {
-        sorting_avs.push_back(av);
-      }
     }
   }
 
+  // Sync Minibatching Required.
   tsl::AsyncValueRef<absl::StatusOr<bool>> global_minibatching_required_avr;
-  std::unique_ptr<tsl::Thread> sync_thread;
   if (options.enable_minibatching) {
     global_minibatching_required_avr =
         tsl::MakeUnconstructedAsyncValueRef<absl::StatusOr<bool>>();
-    sync_thread.reset(tsl::Env::Default()->StartThread(
-        tsl::ThreadOptions(), "SyncMinibatchingRequired",
+    std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>>
+        all_sorting_results;
+    for (const auto& state : table_states) {
+      all_sorting_results.insert(all_sorting_results.end(),
+                                 state.device_sorting_results.begin(),
+                                 state.device_sorting_results.end());
+    }
+    tsl::RunWhenReady(
+        absl::MakeConstSpan(all_sorting_results),
         [&options, &table_states, avr = global_minibatching_required_avr]() {
+          for (auto& state : table_states) {
+            PostProcessTableState(state);
+          }
           avr.emplace(SyncMinibatchingRequired(options, table_states));
-        }));
+        });
   }
 
   // If minibatching is not enabled, or if it is enabled, we fill
@@ -825,11 +823,6 @@ PreprocessSparseDenseMatmulInput(
                              row_pointers_size_per_bucket,
                              /* global_minibatching_required= */ false,
                              /* global_minibatching_split= */ 0);
-
-  for (auto& state : table_states) {
-    tsl::RunWhenReady(absl::MakeConstSpan(state.device_sorting_results),
-                      [&state]() { PostProcessTableState(state); });
-  }
 
   bool global_minibatching_required = false;
   if (options.enable_minibatching) {
