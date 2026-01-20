@@ -512,11 +512,16 @@ absl::StatusOr<bool> SyncMinibatchingRequired(
     return false;
   }
   bool local_minibatching_required = false;
-  for (const auto& state : table_states) {
-    for (const auto& sorting_result_av : state.device_sorting_results) {
-      tsl::BlockUntilReady(sorting_result_av);
-      local_minibatching_required |=
-          sorting_result_av.get().table_minibatching_required;
+
+  {
+    tsl::profiler::TraceMe traceme_wait(
+        "SyncMinibatchingRequired::WaitForSortingResults");
+    for (const auto& state : table_states) {
+      for (const auto& sorting_result_av : state.device_sorting_results) {
+        tsl::BlockUntilReady(sorting_result_av);
+        local_minibatching_required |=
+            sorting_result_av.get().table_minibatching_required;
+      }
     }
   }
   if (options.all_reduce_interface != nullptr) {
