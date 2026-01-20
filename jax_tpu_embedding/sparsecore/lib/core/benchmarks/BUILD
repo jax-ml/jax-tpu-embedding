@@ -20,8 +20,8 @@ package(
 )
 
 cc_test(
-    name = "extract_sort_and_group_benchmark",
-    srcs = ["extract_sort_and_group_benchmark.cc"],
+    name = "input_preprocessing_benchmark",
+    srcs = ["input_preprocessing_benchmark.cc"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_core",

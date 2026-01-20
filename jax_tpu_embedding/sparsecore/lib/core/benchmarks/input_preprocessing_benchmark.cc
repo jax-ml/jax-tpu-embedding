@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// TODO: b/444292437 - Rename this file to input_preprocessing_benchmark.cc.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
