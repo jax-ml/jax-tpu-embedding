@@ -6,8 +6,8 @@ build:
     python: "3.12"
 
 sphinx:
-  configuration: sparsecore/docs/conf.py
+  configuration: jax_tpu_embedding/sparsecore/docs/conf.py
 
 python:
   install:
-    - requirements: sparsecore/docs/requirements.txt
+    - requirements: jax_tpu_embedding/sparsecore/docs/requirements.txt
