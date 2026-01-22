@@ -28,8 +28,8 @@ Path = pathlib.Path
 # Skip building package for docs
 sys.path.insert(0, str(Path('..').resolve()))
 shutil.copy(
-    '../jax_tpu_embedding/sparsecore/version.py.in',
-    '../jax_tpu_embedding/sparsecore/version.py',
+    '../version.py.in',
+    '../version.py',
 )
 
 project = 'jax-tpu-embedding'
