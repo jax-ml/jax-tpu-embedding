@@ -145,14 +145,15 @@ absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
       "GrpcAllReduceInterface::BlockingAllReduceData");
   CHECK_EQ(num_tasks_, stubs_.size() + 1);
 
-  // Initialize State on the local service. The thread initializing the state
-  // waits for all other local threads to contribute their values.
+  // Initialize or update state on the local service. The last thread to
+  // contribute data will receive the locally-reduced data.
   TF_ASSIGN_OR_RETURN(
       std::optional<AllReduceData> locally_reduced_data,
       local_service_->InitializeOrUpdateState(request.sync_key(), request));
 
-  // Only send RPCs from the task that initializes state (in case of
-  // multi-task).
+  // Only send RPCs from the thread that receives data from
+  // InitializeOrUpdateState (in case of multi-task), which is the last
+  // thread to contribute.
   if (locally_reduced_data.has_value() && num_tasks_ > 1) {
     // Send our data to all other peers asynchronously and wait for completion.
     TF_RETURN_IF_ERROR(

@@ -63,13 +63,13 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
       AllReduceResponse* response) override;
 
   // Method to register the local data for a given sync_key. Called by the local
-  // client. Returns the locally-reduced data for the initializer thread, or
-  // nullopt for other threads.
+  // client. Returns the locally-reduced data for the last contributing thread,
+  // or nullopt for other threads.
   absl::StatusOr<std::optional<AllReduceData>> InitializeOrUpdateState(
       int sync_key, const AllReduceData& data);
 
   // Waits for incoming RPCs from all other tasks. Should be called from only
-  // the initializer thread.
+  // the thread that receives data from InitializeOrUpdateState.
   void WaitIncomingRPCs(int sync_key);
 
   // A barrier for all local threads to wait on before retrieving the result.
@@ -79,6 +79,9 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   absl::StatusOr<AllReduceData> GetResult(int sync_key);
 
  private:
+  // Helper to initialize AllReduceState.
+  void InitializeState(AllReduceState& state, const AllReduceData& data);
+
   int task_id_;
   int num_tasks_;
   // Number of threads (within the same process) that will participate in the
@@ -88,8 +91,6 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   absl::Mutex mutex_;
   absl::flat_hash_map<int, AllReduceState> all_reduce_state_map_
       ABSL_GUARDED_BY(mutex_);
-  // CV to wait for state to be updated by all local thread.
-  absl::CondVar local_reduced_cv_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace rpc

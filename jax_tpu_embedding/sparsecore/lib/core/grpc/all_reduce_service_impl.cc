@@ -22,7 +22,6 @@
 #include "absl/synchronization/barrier.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
-#include "absl/time/time.h"  // from @com_google_absl
 #include "include/grpcpp/server_context.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/support/server_callback.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/support/status.h"  // from @com_github_grpc_grpc
@@ -44,55 +43,49 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
 }
 }  // namespace
 
+void AllReduceServiceImpl::InitializeState(AllReduceState& state,
+                                           const AllReduceData& data) {
+  state.local_data = data;
+  state.local_contributions_counter =
+      std::make_unique<absl::BlockingCounter>(threads_per_task_);
+  state.results_counter =
+      std::make_unique<absl::BlockingCounter>(threads_per_task_);
+  state.global_results_barrier =
+      std::make_unique<absl::Barrier>(threads_per_task_);
+  state.incoming_rpc_counter =
+      std::make_unique<absl::BlockingCounter>(num_tasks_ - 1);
+}
+
 ::grpc::ServerUnaryReactor* AllReduceServiceImpl::ContributeData(
     ::grpc::CallbackServerContext* context, const AllReduceData* request,
     AllReduceResponse* response) {
   VLOG(2) << "Received data for sync_key: " << request->sync_key()
-            << " from peer: " << context->peer();
+          << " from peer: " << context->peer();
   auto* reactor = context->DefaultReactor();
   absl::MutexLock lock(mutex_);
 
-  // Wait for local state to be finalized.
-  while (all_reduce_state_map_.find(request->sync_key()) ==
-         all_reduce_state_map_.end()) {
-    bool timeout =
-        local_reduced_cv_.WaitWithTimeout(&mutex_, absl::Seconds(7200));
-    if (timeout) {
-      grpc::Status status = grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED,
-                                         "Timed out waiting for local value.");
-      LOG(ERROR) << "Timeout while waiting for local value for sync_key: "
-                 << request->sync_key() << " from peer: " << context->peer()
-                 << " with status: "
-                 << absl::Status(
-                        static_cast<absl::StatusCode>(status.error_code()),
-                        status.error_message());
-      reactor->Finish(status);
+  auto [it, inserted] = all_reduce_state_map_.try_emplace(request->sync_key());
+  AllReduceState& state = it->second;
+  if (inserted) {
+    // If a remote RPC arrives before any local InitializeOrUpdateState call,
+    // the state is initialized with the remote request data.
+    InitializeState(state, *request);
+  } else {
+    // State already exists.
+    if (state.local_data.value_case() != request->value_case()) {
+      state.incoming_rpc_counter->DecrementCount();
+      reactor->Finish(
+          grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+                       "Request data type does not match local data type."));
       return reactor;
     }
+
+    ReduceData(*request, state.local_data);
   }
-
-  // Get the state.
-  auto it = all_reduce_state_map_.find(request->sync_key());
-  CHECK(it != all_reduce_state_map_.end());
-
-  // Combine remote value with local value.
-  AllReduceData& local_data = it->second.local_data;
-
-  if (local_data.value_case() != request->value_case()) {
-    it->second.incoming_rpc_counter->DecrementCount();
-    reactor->Finish(
-        grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
-                     "Request data type does not match local data type."));
-    return reactor;
-  }
-
-  ReduceData(*request, local_data);
-
-  all_reduce_state_map_[request->sync_key()]
-      .incoming_rpc_counter->DecrementCount();
 
   VLOG(2) << "Finished processing data for sync_key: " << request->sync_key()
             << " from peer: " << context->peer();
+  state.incoming_rpc_counter->DecrementCount();
   reactor->Finish(::grpc::Status::OK);
   return reactor;
 }
@@ -103,37 +96,23 @@ AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
   tsl::profiler::TraceMe traceme(
       "AllReduceServiceImpl::InitializeOrUpdateState");
   absl::MutexLock lock(mutex_);
-  auto it = all_reduce_state_map_.find(sync_key);
-
-  if (it == all_reduce_state_map_.end()) {
+  auto result = all_reduce_state_map_.try_emplace(sync_key);
+  AllReduceState& state = result.first->second;
+  if (result.second) {
     // Initialize the state and wait for all other tasks.
-    all_reduce_state_map_[sync_key] = {
-        .local_data = data,
-        .local_contributions_counter =
-            std::make_unique<absl::BlockingCounter>(threads_per_task_ - 1),
-        .results_counter =
-            std::make_unique<absl::BlockingCounter>(threads_per_task_),
-        .global_results_barrier =
-            std::make_unique<absl::Barrier>(threads_per_task_),
-        .incoming_rpc_counter =
-            std::make_unique<absl::BlockingCounter>(num_tasks_ - 1),
-    };
-    auto* local_contributions_counter =
-        all_reduce_state_map_[sync_key].local_contributions_counter.get();
-
-    // Wait without mutex to avoid deadlock.
-    mutex_.unlock();
-    local_contributions_counter->Wait();
-
-    // Lock to update CV.
-    mutex_.lock();
-    local_reduced_cv_.SignalAll();
-
-    return all_reduce_state_map_[sync_key].local_data;
+    InitializeState(state, data);
   } else {
+    if (state.local_data.value_case() != data.value_case()) {
+      state.local_contributions_counter->DecrementCount();
+      return absl::InvalidArgumentError(
+          "Local data type does not match existing state data type.");
+    }
     // Update the state.
-    ReduceData(data, it->second.local_data);
-    it->second.local_contributions_counter->DecrementCount();
+    ReduceData(data, state.local_data);
+  }
+
+  if (state.local_contributions_counter->DecrementCount()) {
+    return state.local_data;
   }
   return std::nullopt;
 }
