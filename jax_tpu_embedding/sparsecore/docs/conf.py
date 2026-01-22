@@ -26,7 +26,7 @@ import sys
 Path = pathlib.Path
 
 # Skip building package for docs
-sys.path.insert(0, str(Path('..').resolve()))
+sys.path.insert(0, str(Path('../../..').resolve()))
 shutil.copy(
     '../version.py.in',
     '../version.py',
