@@ -25,8 +25,8 @@ import sys
 
 Path = pathlib.Path
 
-# Skip building package for docs
-sys.path.insert(0, str(Path('..').resolve()))
+# Skip building package for docs instead add py source files to sys path.
+sys.path.insert(0, str(Path('../../..').resolve()))
 shutil.copy(
     '../version.py.in',
     '../version.py',
