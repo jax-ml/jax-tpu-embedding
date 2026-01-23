@@ -17,7 +17,7 @@ import collections
 import dataclasses
 import functools
 import textwrap
-from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union
+from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union, Optional
 import warnings
 
 from absl import logging
@@ -468,7 +468,7 @@ def preprocess_sparse_dense_matmul_input(
     batch_number: int = 0,
     enable_minibatching: bool = False,
     all_reduce_interface: (
-        pybind_input_preprocessing.AllReduceInterface | None
+        Optional[pybind_input_preprocessing.AllReduceInterface]
     ) = None,
 ) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
@@ -567,7 +567,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     batch_number: int = 0,
     enable_minibatching: bool = False,
     all_reduce_interface: (
-        pybind_input_preprocessing.AllReduceInterface | None
+        Optional[pybind_input_preprocessing.AllReduceInterface]
     ) = None,
 ) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.

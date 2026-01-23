@@ -36,9 +36,9 @@ this is recorded in the `FeatureIdTransformation` structure using these fields:
 .. note::
 
     The sample dimension is interleaved when using `SPLIT_THEN_STACK`
-(the default and only strategy). This interleaving helps distribute embedding
-IDs evenly across SparseCores during embedding lookup and update. This is
-because we split the stacked samples along the batch dimension.
+    (the default and only strategy). This interleaving helps distribute embedding
+    IDs evenly across SparseCores during embedding lookup and update. This is
+    because we split the stacked samples along the batch dimension.
 
 Table Stacking (Optional)
 -------------------------

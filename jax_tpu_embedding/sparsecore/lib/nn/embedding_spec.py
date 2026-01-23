@@ -787,16 +787,17 @@ class TableSpec:
 class FeatureSpec:
   """Specification for one embedding feature.
 
-  NOTE: `FeatureSpec` is virtually immutable (for `jax.jit`) using `eq=True`
-    and
-  `unsafe_hash=True`, but has `frozen=False` to allow in-place updates when
-  preparing for feature stacking or table stacking. See [dataclass
-  doc](https://docs.python.org/3/library/dataclasses.html#dataclasses.dataclass)
-  for more information.
+  Notes:
+    FeatureSpec is virtually immutable (for ``jax.jit``) using ``eq=True`` and
+    ``unsafe_hash=True``, but has ``frozen=False`` to allow in-place updates when
+    preparing for feature stacking or table stacking. See `dataclass
+    doc <https://docs.python.org/3/library/dataclasses.html#dataclasses.dataclass>`_
+    for more information.
 
-  WARNING: For all other purposes use
-  `embedding.update_preprocessing_parameters`
-  to maintain consistency between features, tables and stacked tables.
+    .. warning::
+
+      For all other purposes use ``embedding.update_preprocessing_parameters``
+      to maintain consistency between features, tables and stacked tables.
   """
 
   name: str
