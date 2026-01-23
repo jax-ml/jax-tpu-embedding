@@ -85,6 +85,16 @@ pytype_strict_contrib_test(
 )
 
 pytype_strict_contrib_test(
+    name = "sparse_dense_matmul_activation_unstack_test",
+    srcs = ["sparse_dense_matmul_activation_unstack_test.py"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_activation_unstack",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("jax"),
+    ],
+)
+
+pytype_strict_contrib_test(
     name = "sparse_dense_matmul_grad_with_sgd_minibatching_test",
     srcs = [
         "sparse_dense_matmul_grad_with_sgd_minibatching_test.py",

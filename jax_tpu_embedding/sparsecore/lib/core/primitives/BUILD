@@ -40,6 +40,18 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "sparse_dense_matmul_activation_unstack",
+    srcs = ["sparse_dense_matmul_activation_unstack.py"],
+    deps = [
+        pypi_requirement("jax"),
+        pypi_requirement("jax/experimental:layout"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
+    ],
+)
+
+pytype_strict_library(
     name = "local_sparse_dense_matmul",
     srcs = ["local_sparse_dense_matmul.py"],
     deps = [

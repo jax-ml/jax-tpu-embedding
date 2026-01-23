@@ -26,6 +26,7 @@ from flax import struct
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_activation_unstack
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
@@ -711,16 +712,66 @@ def unstack_embedding_activations(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
+    use_activation_unstack_primitive: bool = False,
 ) -> Nested[jax.Array]:
   """Unstacks the activations to match the feature specs."""
+  if not use_activation_unstack_primitive:
+    get_activation_for = functools.partial(
+        _get_activation_for_feature,
+        activations=activations,
+        global_device_count=global_device_count,
+        num_feature_slices_per_device=num_sc_per_device,
+    )
+    return jax.tree_util.tree_map(get_activation_for, feature_specs)
 
-  get_activation_for = functools.partial(
-      _get_activation_for_feature,
-      activations=activations,
-      global_device_count=global_device_count,
-      num_feature_slices_per_device=num_sc_per_device,
-  )
-  return jax.tree_util.tree_map(get_activation_for, feature_specs)
+  del num_sc_per_device
+  flat_feature_specs, treedef = jax.tree.flatten(feature_specs)
+
+  updated_activations = [None] * len(flat_feature_specs)
+
+  stacked_table_to_features: dict[
+      str, list[tuple[int, embedding_spec.FeatureSpec]]
+  ] = collections.defaultdict(list)
+
+  for feature_index, feature_spec in enumerate(flat_feature_specs):
+    if any(s is None for s in feature_spec.output_shape):
+      raise ValueError(
+          f"Feature {feature_spec.name} has dynamic output shape"
+          f" {feature_spec.output_shape}, which is not supported."
+      )
+    stacked_table_name = feature_spec.table_spec.stacked_table_spec.stack_name
+    stacked_table_to_features[stacked_table_name].append(
+        (feature_index, feature_spec)
+    )
+
+  for stacked_table_name, features in stacked_table_to_features.items():
+    # Sort features by row_offset to match the stacked tensor layout.
+    features.sort(key=lambda x: x[1].id_transformation.row_offset)
+
+    feature_indices = [x[0] for x in features]
+    sorted_specs = [x[1] for x in features]
+
+    per_feature_batch_sizes = tuple(
+        int(np.prod(spec.output_shape[:-1]) // global_device_count)
+        for spec in sorted_specs
+    )
+    per_feature_dims = tuple(
+        spec.table_spec.embedding_dim for spec in sorted_specs
+    )
+
+    stacked_table_activation = activations[stacked_table_name]
+    features_activations = sparse_dense_matmul_activation_unstack.tpu_sparse_dense_matmul_activation_unstack_primitive.bind(
+        stacked_table_activation,
+        per_feature_batch_sizes=per_feature_batch_sizes,
+        per_feature_dims=per_feature_dims,
+    )
+
+    for feature_index, feature_activation in zip(
+        feature_indices, features_activations
+    ):
+      updated_activations[feature_index] = feature_activation
+
+  return jax.tree.unflatten(treedef, updated_activations)
 
 
 @jax.named_call
@@ -734,6 +785,7 @@ def tpu_sparse_dense_matmul(
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
     perform_unstacking: bool = True,
+    use_activation_unstack_primitive: bool = False,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -754,6 +806,8 @@ def tpu_sparse_dense_matmul(
     enable_minibatching: Whether to enable minibatching. Defaults to `False`.
     perform_unstacking: If True, returns per-feature activations by unstacking
       the results. If False, returns raw stacked activations.
+    use_activation_unstack_primitive: If True, uses the new activation unstack
+      primitive. Defaults to False.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -854,6 +908,7 @@ def tpu_sparse_dense_matmul(
         feature_specs,
         global_device_count,
         num_sc_per_device,
+        use_activation_unstack_primitive=use_activation_unstack_primitive,
     )
 
   return activations
