@@ -13,23 +13,17 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_interface.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
-#include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
-#include "absl/status/statusor.h"  // from @com_google_absl
-#include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
-#include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
-#include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/time/clock.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
 #include "include/grpcpp/client_context.h"  // from @com_github_grpc_grpc
@@ -38,8 +32,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/grpc_credentials.h"
-#include "tsl/platform/errors.h"  // from @tsl
-#include "tsl/platform/statusor.h"  // from @tsl
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
@@ -47,15 +40,13 @@ namespace rpc {
 namespace {
 
 // Helper function to send ContributeData RPCs to all peers.
-absl::Status SendLocalData(
+void SendLocalData(
     const absl::flat_hash_map<
         std::string, std::unique_ptr<AllReduceGrpcService::Stub>>& stubs,
-    const AllReduceData& request, int num_hosts) {
+    const AllReduceData& request, int num_hosts,
+    tsl::AsyncValueRef<AllReduceData> result_av,
+    std::shared_ptr<std::atomic<bool>> error_set) {
   tsl::profiler::TraceMe traceme("GrpcAllReduceInterface::SendLocalData");
-  absl::Mutex mutex;
-  grpc::Status overall_status ABSL_GUARDED_BY(mutex) = grpc::Status::OK;
-  std::vector<std::string> failed_peers ABSL_GUARDED_BY(mutex);
-  absl::BlockingCounter outgoing_rpcs(stubs.size());
 
   struct ContributeDataArgs {
     ::grpc::ClientContext context;
@@ -68,60 +59,35 @@ absl::Status SendLocalData(
   {
     tsl::profiler::TraceMe traceme_send(
         "GrpcAllReduceInterface::SendLocalData::SendToPeers");
+    auto deadline = absl::ToChronoTime(absl::Now() + absl::Seconds(7200));
     for (const auto& [peer_address, stub] : stubs) {
       auto args = std::make_shared<ContributeDataArgs>();
-      args->context.set_deadline(
-          absl::ToChronoTime(absl::Now() + absl::Seconds(7200)));
+      args->context.set_deadline(deadline);
       args->request = request;
       VLOG(2) << "Sending RPC to peer: " << peer_address
               << " for sync_key: " << request.sync_key();
 
       stub->async()->ContributeData(
           &args->context, &args->request, &args->response,
-          [&, args, peer_address = peer_address](::grpc::Status s) {
-            if (!s.ok()) {
+          [args, peer_address = peer_address, result_av,
+           error_set](::grpc::Status s) mutable {
+            if (!s.ok() && !result_av.IsAvailable() &&
+                !error_set->exchange(true)) {
+              absl::Status status =
+                  absl::Status(static_cast<absl::StatusCode>(s.error_code()),
+                               s.error_message());
               LOG(ERROR) << "ContributeData async RPC to peer " << peer_address
                          << " for sync_key: " << args->request.sync_key()
-                         << " failed with status: "
-                         << absl::Status(
-                                static_cast<absl::StatusCode>(s.error_code()),
-                                s.error_message());
-              absl::MutexLock lock(mutex);
-              failed_peers.push_back(peer_address);
-              if (overall_status.ok()) {
-                overall_status = s;
-              }
+                         << " failed with status: " << status;
+              result_av.SetError(status);
             } else {
               VLOG(2) << "ContributeData async RPC to peer " << peer_address
                       << " for sync_key: " << args->request.sync_key()
                       << " completed successfully.";
             }
-            outgoing_rpcs.DecrementCount();
           });
     }
   }
-
-  // Wait for all outgoing RPCs to complete.
-  {
-    tsl::profiler::TraceMe traceme_wait(
-        "GrpcAllReduceInterface::SendLocalData::WaitForPeerResponses");
-    outgoing_rpcs.Wait();
-  }
-
-  // Propagate any RPC errors.
-  if (!overall_status.ok()) {
-    absl::MutexLock lock(mutex);
-    return absl::Status(
-        static_cast<absl::StatusCode>(overall_status.error_code()),
-        absl::StrCat("Failed to communicate with peer(s): ",
-                     absl::StrJoin(failed_peers, ","),
-                     " for sync_key: ", request.sync_key(),
-                     ". Please check if the peer task(s) are running "
-                     "correctly and have not crashed (e.g., due to "
-                     "keepalive ping failures). Overall status: ",
-                     overall_status.error_message()));
-  }
-  return absl::OkStatus();
 }
 
 }  // namespace
@@ -139,63 +105,55 @@ void GrpcAllReduceInterface::SetUp() {
             << ", peer_addresses: " << absl::StrJoin(peer_addresses_, ",");
 }
 
-absl::StatusOr<AllReduceData> GrpcAllReduceInterface::BlockingAllReduce(
-    const AllReduceData& request) {
-  tsl::profiler::TraceMe traceme(
-      "GrpcAllReduceInterface::BlockingAllReduceData");
+tsl::AsyncValueRef<AllReduceData>
+GrpcAllReduceInterface::AsyncAllReduceInternal(const AllReduceData& request) {
   CHECK_EQ(num_tasks_, stubs_.size() + 1);
 
-  // Initialize or update state on the local service. The last thread to
-  // contribute data will receive the locally-reduced data.
-  TF_ASSIGN_OR_RETURN(
-      std::optional<AllReduceData> locally_reduced_data,
-      local_service_->InitializeOrUpdateState(request.sync_key(), request));
+  // Initialize or update state on the local service.
+  bool is_last_local =
+      local_service_->InitializeOrUpdateState(request.sync_key(), request);
+  tsl::AsyncValueRef<AllReduceData> result_av =
+      local_service_->GetResult(request.sync_key());
 
-  // Only send RPCs from the thread that receives data from
-  // InitializeOrUpdateState (in case of multi-task), which is the last
-  // thread to contribute.
-  if (locally_reduced_data.has_value() && num_tasks_ > 1) {
+  // If I'm the last local thread to check in, and we are doing distributed
+  // computation, send local data to peers.
+  if (is_last_local && num_tasks_ > 1) {
+    tsl::AsyncValueRef<AllReduceData> local_reduced_value =
+        local_service_->GetLocalReducedValue(request.sync_key());
+    std::shared_ptr<std::atomic<bool>> error_set =
+        std::make_shared<std::atomic<bool>>(false);
+
     // Send our data to all other peers asynchronously and wait for completion.
-    TF_RETURN_IF_ERROR(
-        SendLocalData(stubs_, locally_reduced_data.value(), num_tasks_));
-
-    VLOG(2) << "Done sending local data for sync_key: " << request.sync_key()
-              << " waiting for incoming RPCs from other hosts. " << task_id_;
-    // Wait to receive data from all other hosts (Local service performs the
-    // reduction).
-    local_service_->WaitIncomingRPCs(request.sync_key());
+    local_reduced_value.AndThen(
+        [this, local_reduced_value, result_av, error_set]() mutable {
+          AllReduceData local_data = local_reduced_value.get();
+          SendLocalData(stubs_, local_data, num_tasks_, result_av, error_set);
+        });
   }
 
-  VLOG(2) << "Waiting for results for sync_key: " << request.sync_key();
-  // Wait for one of the threads to aggregate results.
-  local_service_->WaitResults(request.sync_key());
-
-  TF_ASSIGN_OR_RETURN(AllReduceData result,
-                      local_service_->GetResult(request.sync_key()));
-
-  return result;
+  return result_av;
 }
 
-absl::StatusOr<bool> GrpcAllReduceInterface::BlockingAllReduce(
+tsl::AsyncValueRef<bool> GrpcAllReduceInterface::AsyncAllReduce(
     int sync_key, bool minibatching_required) {
-  tsl::profiler::TraceMe traceme(
-      "GrpcAllReduceInterface::BlockingAllReduceMinibatchingRequired");
   AllReduceData request;
   request.set_sync_key(sync_key);
   request.set_src_rank(task_id_);
   request.set_bool_val(minibatching_required);
-  TF_ASSIGN_OR_RETURN(auto response, BlockingAllReduce(request));
-  return response.bool_val();
+  auto response_av = AsyncAllReduceInternal(request);
+  return response_av.Map<bool>(
+      [](const AllReduceData& resp) { return resp.bool_val(); });
 }
 
-absl ::StatusOr<uint64_t> GrpcAllReduceInterface::BlockingAllReduce(
+tsl::AsyncValueRef<uint64_t> GrpcAllReduceInterface::AsyncAllReduce(
     int sync_key, uint64_t minibatching_split) {
   AllReduceData request;
   request.set_sync_key(sync_key);
   request.set_src_rank(task_id_);
   request.set_uint64_val(minibatching_split);
-  TF_ASSIGN_OR_RETURN(auto response, BlockingAllReduce(request));
-  return response.uint64_val();
+  auto response_av = AsyncAllReduceInternal(request);
+  return response_av.Map<uint64_t>(
+      [](const AllReduceData& resp) { return resp.uint64_val(); });
 }
 
 }  // namespace rpc

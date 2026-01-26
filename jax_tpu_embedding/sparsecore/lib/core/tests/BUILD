@@ -81,6 +81,7 @@ cc_test(
         "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:statusor",
         "@xla//xla:util",
+        "@xla//xla/tsl/concurrency:async_value",
     ],
 )
 

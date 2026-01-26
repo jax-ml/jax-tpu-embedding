@@ -27,6 +27,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 
 namespace jax_sc_embedding {
 namespace rpc {
@@ -48,23 +49,24 @@ class GrpcAllReduceInterface final : public AllReduceInterface {
     SetUp();
   }
 
-  // Performs a blocking All-Reduce operation.
+  // Performs a non-blocking All-Reduce operation.
   // `sync_key`: A unique key for this all-reduce operation.
   // `minibatching_required`: The local value to be reduced.
-  absl::StatusOr<bool> BlockingAllReduce(int sync_key,
-                                         bool minibatching_required) override;
+  tsl::AsyncValueRef<bool> AsyncAllReduce(int sync_key,
+                                          bool minibatching_required) override;
 
-  // Performs a blocking All-Reduce operation.
+  // Performs a non-blocking All-Reduce operation.
   // `sync_key`: A unique key for this all-reduce operation.
   // `minibatching_split`: The local value to be reduced.
-  absl::StatusOr<uint64_t> BlockingAllReduce(
+  tsl::AsyncValueRef<uint64_t> AsyncAllReduce(
       int sync_key, uint64_t minibatching_split) override;
 
  private:
-  // Internal helper to perform the gRPC-based blocking All-Reduce.
+  // Internal helper to perform the gRPC-based All-Reduce.
   // `request`: Contains the sync_key, src_rank, and the value to be reduced.
   // Returns the reduced value.
-  absl::StatusOr<AllReduceData> BlockingAllReduce(const AllReduceData& request);
+  tsl::AsyncValueRef<AllReduceData> AsyncAllReduceInternal(
+      const AllReduceData& request);
 
   std::vector<std::string> peer_addresses_;
   int task_id_;

@@ -126,10 +126,7 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@eigen_archive//:eigen3",
-        "@tsl//tsl/platform:env",
-        "@tsl//tsl/platform:statusor",
         "@tsl//tsl/profiler/lib:traceme",
-        "@tsl//tsl/profiler/lib:traceme_encode",
         "@xla//xla:util",
         "@xla//xla/tsl/concurrency:async_value",
     ],
@@ -309,7 +306,10 @@ cc_library(
 cc_library(
     name = "all_reduce_interface",
     hdrs = ["all_reduce_interface.h"],
-    deps = ["@com_google_absl//absl/status:statusor"],
+    deps = [
+        "@com_google_absl//absl/status:statusor",
+        "@xla//xla/tsl/concurrency:async_value",
+    ],
 )
 
 cc_library(

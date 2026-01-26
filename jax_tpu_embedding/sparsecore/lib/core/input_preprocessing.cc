@@ -44,11 +44,8 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "xla/tsl/concurrency/async_value.h"  // from @xla
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
-#include "tsl/platform/env.h"  // from @tsl
-#include "tsl/platform/statusor.h"  // from @tsl
 #include "xla/util.h"  // from @xla
 #include "tsl/profiler/lib/traceme.h"
-#include "tsl/profiler/lib/traceme_encode.h"
 
 namespace jax_sc_embedding {
 
@@ -500,68 +497,93 @@ void MergeStats(
 // Synchronizes the `table_minibatching_required` flag across all participating
 // devices. If `options.all_reduce_interface` is provided, it performs an
 // all-reduce operation to determine if minibatching is required on any device.
-// Otherwise, it returns the locally computed `local_minibatching_required`.
-absl::StatusOr<bool> SyncMinibatchingRequired(
+// Otherwise, it uses the locally computed `local_minibatching_required`.
+void SyncMinibatchingRequired(
     const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::Span<const TableState> table_states) {
+    absl::Span<const TableState> table_states,
+    tsl::AsyncValueRef<bool> result_avr) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
         "SyncMinibatchingRequired", {{"batch_number", options.batch_number}});
   });
-  if (!options.enable_minibatching) {
-    return false;
-  }
-  bool local_minibatching_required = false;
+  DCHECK(options.enable_minibatching);
 
-  {
-    tsl::profiler::TraceMe traceme_wait(
-        "SyncMinibatchingRequired::WaitForSortingResults");
+  std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>>
+      device_sorting_results_av;
+  for (const auto& state : table_states) {
+    for (const auto& sorting_result_av : state.device_sorting_results) {
+      device_sorting_results_av.push_back(sorting_result_av);
+    }
+  }
+  tsl::RunWhenReady(absl::MakeConstSpan(device_sorting_results_av), [=]() {
+    bool local_minibatching_required = false;
     for (const auto& state : table_states) {
       for (const auto& sorting_result_av : state.device_sorting_results) {
-        tsl::BlockUntilReady(sorting_result_av);
         local_minibatching_required |=
             sorting_result_av.get().table_minibatching_required;
       }
     }
-  }
-  if (options.all_reduce_interface != nullptr) {
-    TF_ASSIGN_OR_RETURN(auto reduced_value,
-                        options.all_reduce_interface->BlockingAllReduce(
-                            options.batch_number * 2,
-                            internal::Serialize(local_minibatching_required)));
-    return internal::Deserialize(reduced_value);
-  } else {
-    return local_minibatching_required;
-  }
+    if (options.all_reduce_interface != nullptr) {
+      tsl::AsyncValueRef<bool> reduced_value_av =
+          options.all_reduce_interface->AsyncAllReduce(
+              options.batch_number * 2, local_minibatching_required);
+      reduced_value_av.AndThen([result_avr, reduced_value_av]() mutable {
+        if (reduced_value_av.IsError()) {
+          result_avr.SetError(reduced_value_av.GetError());
+        } else {
+          result_avr.emplace(internal::Deserialize(reduced_value_av.get()));
+        }
+      });
+    } else {
+      result_avr.emplace(local_minibatching_required);
+    }
+  });
 }
 
 // Synchronizes the `MinibatchingSplit` across all participating devices.
 // If `options.all_reduce_interface` is provided, it performs an all-reduce
 // operation to get the combined `MinibatchingSplit` from all local devices.
-// Otherwise, it returns the locally computed `MinibatchingSplit`.
-absl::StatusOr<MinibatchingSplit> SyncMinibatchingSplit(
+// Otherwise, it uses the locally computed `MinibatchingSplit`.
+void SyncMinibatchingSplit(
     const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::Span<const TableState> table_states) {
+    absl::Span<const TableState> table_states,
+    tsl::AsyncValueRef<MinibatchingSplit> result_avr) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
         "SyncMinibatchingSplit", {{"batch_number", options.batch_number}});
   });
-  MinibatchingSplit local_minibatching_split = 0;
+  std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>>
+      device_sorting_results_av;
   for (const auto& state : table_states) {
     for (const auto& sorting_result_av : state.device_sorting_results) {
-      local_minibatching_split |=
-          sorting_result_av.get().table_minibatching_split;
+      device_sorting_results_av.push_back(sorting_result_av);
     }
   }
-  if (options.all_reduce_interface != nullptr) {
-    TF_ASSIGN_OR_RETURN(auto reduced_value,
-                        options.all_reduce_interface->BlockingAllReduce(
-                            options.batch_number * 2 + 1,
-                            internal::Serialize(local_minibatching_split)));
-    return internal::Deserialize(reduced_value);
-  } else {
-    return local_minibatching_split;
-  }
+
+  tsl::RunWhenReady(absl::MakeConstSpan(device_sorting_results_av), [=]() {
+    MinibatchingSplit local_minibatching_split = 0;
+    for (const auto& state : table_states) {
+      for (const auto& sorting_result_av : state.device_sorting_results) {
+        local_minibatching_split |=
+            sorting_result_av.get().table_minibatching_split;
+      }
+    }
+    if (options.all_reduce_interface != nullptr) {
+      tsl::AsyncValueRef<uint64_t> reduced_value_av =
+          options.all_reduce_interface->AsyncAllReduce(
+              options.batch_number * 2 + 1,
+              internal::Serialize(local_minibatching_split));
+      reduced_value_av.AndThen([result_avr, reduced_value_av]() mutable {
+        if (reduced_value_av.IsError()) {
+          result_avr.SetError(reduced_value_av.GetError());
+        } else {
+          result_avr.emplace(internal::Deserialize(reduced_value_av.get()));
+        }
+      });
+    } else {
+      result_avr.emplace(local_minibatching_split);
+    }
+  });
 }
 
 // Populates the output structure `out` with the processed data from the
@@ -796,25 +818,16 @@ PreprocessSparseDenseMatmulInput(
           "ScheduleExtractSortGroup",
           {{"batch_number", options.batch_number}});
     });
-    std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>> sorting_avs;
     for (auto& state : table_states) {
       ExtractSortAndGroupCooTensorsForTable(state, input_batches, options);
-      for (const auto& av : state.device_sorting_results) {
-        sorting_avs.push_back(av);
-      }
     }
   }
 
-  tsl::AsyncValueRef<absl::StatusOr<bool>> global_minibatching_required_avr;
-  std::unique_ptr<tsl::Thread> sync_thread;
+  tsl::AsyncValueRef<bool> global_minibatching_required_avr =
+      tsl::MakeUnconstructedAsyncValueRef<bool>();
   if (options.enable_minibatching) {
-    global_minibatching_required_avr =
-        tsl::MakeUnconstructedAsyncValueRef<absl::StatusOr<bool>>();
-    sync_thread.reset(tsl::Env::Default()->StartThread(
-        tsl::ThreadOptions(), "SyncMinibatchingRequired",
-        [&options, &table_states, avr = global_minibatching_required_avr]() {
-          avr.emplace(SyncMinibatchingRequired(options, table_states));
-        }));
+    SyncMinibatchingRequired(options, table_states,
+                             global_minibatching_required_avr);
   }
 
   // If minibatching is not enabled, or if it is enabled, we fill
@@ -839,8 +852,10 @@ PreprocessSparseDenseMatmulInput(
           {{"batch_number", options.batch_number}});
     });
     tsl::BlockUntilReady(global_minibatching_required_avr);
-    TF_ASSIGN_OR_RETURN(global_minibatching_required,
-                        *global_minibatching_required_avr);
+    if (global_minibatching_required_avr.IsError()) {
+      return global_minibatching_required_avr.GetError();
+    }
+    global_minibatching_required = global_minibatching_required_avr.get();
   }
 
   MinibatchingSplit global_minibatching_split = 0;
@@ -853,12 +868,8 @@ PreprocessSparseDenseMatmulInput(
             "ScheduleCreateMinibatchingBuckets",
             {{"batch_number", options.batch_number}});
       });
-      std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>> sorting_avs;
       for (auto& state : table_states) {
         CreateMinibatchingBucketsForTable(state, options);
-        for (const auto& av : state.device_sorting_results) {
-          sorting_avs.push_back(av);
-        }
       }
       for (auto& state : table_states) {
         tsl::RunWhenReady(absl::MakeConstSpan(state.device_sorting_results),
@@ -866,8 +877,14 @@ PreprocessSparseDenseMatmulInput(
       }
     }
 
-    TF_ASSIGN_OR_RETURN(global_minibatching_split,
-                        SyncMinibatchingSplit(options, table_states));
+    auto global_minibatching_split_avr =
+        tsl::MakeUnconstructedAsyncValueRef<MinibatchingSplit>();
+    SyncMinibatchingSplit(options, table_states, global_minibatching_split_avr);
+    tsl::BlockUntilReady(global_minibatching_split_avr);
+    if (global_minibatching_split_avr.IsError()) {
+      return global_minibatching_split_avr.GetError();
+    }
+    global_minibatching_split = global_minibatching_split_avr.get();
     FillDeviceBuffersAllTables(
         absl::MakeSpan(table_states), options, row_pointers_size_per_bucket,
         global_minibatching_required, global_minibatching_split);

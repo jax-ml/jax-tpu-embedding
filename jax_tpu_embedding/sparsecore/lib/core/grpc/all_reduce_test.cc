@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -23,19 +22,10 @@
 #include "fuzztest/googletest_fixture_adapter.h" // for OSS
 #include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
-#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
-#include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
-#include "include/grpcpp/security/server_credentials.h"  // from @com_github_grpc_grpc
-#include "include/grpcpp/server.h"  // from @com_github_grpc_grpc
-#include "include/grpcpp/server_builder.h"  // from @com_github_grpc_grpc
-#include "include/grpcpp/support/status.h"  // from @com_github_grpc_grpc
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
-#include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_interface.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/grpc/grpc_credentials.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_test_utils.h"
 #include "tsl/platform/env.h"  // from @tsl
@@ -47,7 +37,6 @@ namespace rpc {
 namespace {
 
 using ::absl_testing::IsOkAndHolds;
-using ::absl_testing::StatusIs;
 using ::testing::Each;
 
 class AllReduceTest : public ::testing::Test {
@@ -109,42 +98,41 @@ TEST_F(AllReduceTest, BlockingAllReduceUint64) {
   EXPECT_THAT(results, Each(IsOkAndHolds(expected_result)));
 }
 
-TEST_F(AllReduceTest, BlockingAllReduceDataTypeMismatch) {
+using AllReduceDeathTest = AllReduceTest;
+
+TEST_F(AllReduceDeathTest, BlockingAllReduceDataTypeMismatch) {
   // Arrange
   int sync_key = 789;
-  std::vector<absl::Status> statuses(num_tasks_);
-  absl::BlockingCounter barrier(num_tasks_);
+  auto run = [&]() {
+    absl::BlockingCounter barrier(num_tasks_);
 
-  // Act
-  // Peer 0 will send a bool value.
-  thread_pool_->Schedule([&]() {
-    statuses[0] = nodes_[0]
-                      ->GetAllReduceInterface()
-                      ->BlockingAllReduce(sync_key, true)
-                      .status();
-    barrier.DecrementCount();
-  });
-
-  // Other peers will send uint64_t values.
-  for (int i = 1; i < num_tasks_; ++i) {
-    thread_pool_->Schedule([&, i]() {
-      statuses[i] =
-          nodes_[i]
-              ->GetAllReduceInterface()
-              ->BlockingAllReduce(sync_key, static_cast<uint64_t>(i * 10))
-              .status();
+    // Act
+    // Peer 0 will send a bool value.
+    thread_pool_->Schedule([&]() {
+      auto result =
+          nodes_[0]->GetAllReduceInterface()->BlockingAllReduce(sync_key, true);
       barrier.DecrementCount();
     });
-  }
 
-  barrier.Wait();
+    // Other peers will send uint64_t values.
+    for (int i = 1; i < num_tasks_; ++i) {
+      thread_pool_->Schedule([&, i]() {
+        auto result = nodes_[i]->GetAllReduceInterface()->BlockingAllReduce(
+            sync_key, static_cast<uint64_t>(i * 10));
+        barrier.DecrementCount();
+      });
+    }
+
+    barrier.Wait();
+  };
 
   // Assert
-  // All peers should receive an InvalidArgumentError because of the type
-  // mismatch.
-  EXPECT_THAT(statuses, Each(StatusIs(grpc::StatusCode::INVALID_ARGUMENT)));
+#ifdef NDEBUG
+  run();
+#else
+  EXPECT_DEATH(run(), "Data type mismatch");
+#endif
 }
-
 class AllReduceFuzzTest
     : public fuzztest::PerFuzzTestFixtureAdapter<AllReduceTest> {
  public:

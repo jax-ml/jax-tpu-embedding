@@ -17,6 +17,7 @@
 #include <cstdint>
 
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -27,17 +28,30 @@ namespace jax_sc_embedding {
 class AllReduceInterface {
  public:
   virtual ~AllReduceInterface() = default;
-  // Performs a blocking all-reduce operation for a boolean value.
+  // Performs a non-blocking all-reduce operation for a boolean value.
   // The result is typically the logical OR of all `minibatching_required`
   // values from participants sharing the same `sync_key`.
-  virtual absl::StatusOr<bool> BlockingAllReduce(
+  virtual tsl::AsyncValueRef<bool> AsyncAllReduce(
       int sync_key, bool minibatching_required) = 0;
 
-  // Performs a blocking all-reduce operation for a uint64_t value.
+  // Performs a non-blocking all-reduce operation for a uint64_t value.
   // The result is typically the logical OR of all `minibatching_split`
   // values from participants sharing the same `sync_key`.
-  virtual absl::StatusOr<uint64_t> BlockingAllReduce(
+  virtual tsl::AsyncValueRef<uint64_t> AsyncAllReduce(
       int sync_key, uint64_t minibatching_split) = 0;
+
+  // Performs a blocking all-reduce operation.
+  // This is a blocking wrapper around AsyncAllReduce for convenience and
+  // testing.
+  template <typename T>
+  absl::StatusOr<T> BlockingAllReduce(int sync_key, T value) {
+    tsl::AsyncValueRef<T> avr = AsyncAllReduce(sync_key, value);
+    tsl::BlockUntilReady(avr);
+    if (avr.IsError()) {
+      return avr.GetError();
+    }
+    return avr.get();
+  }
 };
 }  // namespace jax_sc_embedding
 

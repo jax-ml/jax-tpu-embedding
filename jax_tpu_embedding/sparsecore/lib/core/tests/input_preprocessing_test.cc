@@ -44,6 +44,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_test_utils.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/statusor.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
@@ -162,19 +163,19 @@ class AllReduceNoMinibatchingRequired : public AllReduceInterface {
   explicit AllReduceNoMinibatchingRequired(AllReduceInterface* wrapped)
       : wrapped_(wrapped) {}
 
-  absl::StatusOr<bool> BlockingAllReduce(int sync_key,
-                                         bool minibatching_required) override {
-    return wrapped_->BlockingAllReduce(sync_key, minibatching_required);
+  tsl::AsyncValueRef<bool> AsyncAllReduce(int sync_key,
+                                          bool minibatching_required) override {
+    return wrapped_->AsyncAllReduce(sync_key, minibatching_required);
   }
 
-  absl::StatusOr<uint64_t> BlockingAllReduce(
+  tsl::AsyncValueRef<uint64_t> AsyncAllReduce(
       int sync_key, uint64_t minibatching_split) override {
     if (sync_key % 2 == 1) {  // Odd keys are for splits.
       ADD_FAILURE() << "SyncMinibatchingSplit should not be called when no "
                        "host requires minibatching. Called with split: "
                     << minibatching_split;
     }
-    return wrapped_->BlockingAllReduce(sync_key, minibatching_split);
+    return wrapped_->AsyncAllReduce(sync_key, minibatching_split);
   }
 
  private:
@@ -188,22 +189,22 @@ class AllReduceSyncKeyCollector : public AllReduceInterface {
   explicit AllReduceSyncKeyCollector(AllReduceInterface* wrapped)
       : wrapped_(wrapped) {}
 
-  absl::StatusOr<bool> BlockingAllReduce(int sync_key,
-                                         bool minibatching_required) override {
+  tsl::AsyncValueRef<bool> AsyncAllReduce(int sync_key,
+                                          bool minibatching_required) override {
     {
       absl::MutexLock lock(mutex_);
       sync_keys_.push_back(sync_key);
     }
-    return wrapped_->BlockingAllReduce(sync_key, minibatching_required);
+    return wrapped_->AsyncAllReduce(sync_key, minibatching_required);
   }
 
-  absl::StatusOr<uint64_t> BlockingAllReduce(
+  tsl::AsyncValueRef<uint64_t> AsyncAllReduce(
       int sync_key, uint64_t minibatching_split) override {
     {
       absl::MutexLock lock(mutex_);
       sync_keys_.push_back(sync_key);
     }
-    return wrapped_->BlockingAllReduce(sync_key, minibatching_split);
+    return wrapped_->AsyncAllReduce(sync_key, minibatching_split);
   }
 
   std::vector<int> GetSyncKeys() {
