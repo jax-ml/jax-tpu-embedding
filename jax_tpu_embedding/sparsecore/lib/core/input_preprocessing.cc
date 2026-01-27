@@ -26,7 +26,6 @@
 #include <vector>
 
 #include "absl/base/nullability.h"  // from @com_google_absl
-#include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
@@ -34,7 +33,6 @@
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
-#include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
@@ -588,13 +586,10 @@ void SyncMinibatchingSplit(
 
 // Populates the output structure `out` with the processed data from the
 // `TableState`. This includes moving the CSR arrays and statistics for the
-// current stacked table. The `output_mutex` is used to protect access to `out`.
+// current stacked table.
 void PopulateOutputStats(TableState& state,
-                         SparseDenseMatmulInputStats& stats,
-                         absl::Mutex& output_mutex) {
+                         SparseDenseMatmulInputStats& stats) {
   state.stats_per_host.Flatten();
-
-  absl::MutexLock lock(output_mutex);
 
   stats.max_ids_per_partition[state.stacked_table_name] =
       std::move(state.stats_per_host.max_ids_per_partition);
@@ -780,8 +775,7 @@ PreprocessSparseDenseMatmulInput(
   CHECK_GT(options.local_device_count, 0);
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
 
-  absl::Mutex output_mutex;
-  PreprocessSparseDenseMatmulOutput out ABSL_GUARDED_BY(output_mutex);
+  PreprocessSparseDenseMatmulOutput out;
 
   const int num_scs = options.GetNumScs();
   const int row_pointers_size_per_bucket =
@@ -904,7 +898,7 @@ PreprocessSparseDenseMatmulInput(
         state.coo_buffer_size_per_device, state.stacked_table_name,
         options.batch_number);
 
-    PopulateOutputStats(state, out.stats, output_mutex);
+    PopulateOutputStats(state, out.stats);
   }
 
   out.num_minibatches = global_minibatching_split.count() + 1;
