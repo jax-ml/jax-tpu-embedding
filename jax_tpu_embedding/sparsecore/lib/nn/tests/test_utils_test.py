@@ -77,7 +77,9 @@ class TestUtilsTest(parameterized.TestCase):
           remaining_part = process_index_part
         else:
           remaining_part = j / 1000000
-        self.assertEqual(table[i, j], expected_row_base_value + remaining_part)
+        self.assertAlmostEqual(
+            table[i, j], expected_row_base_value + remaining_part, places=6
+        )
 
   def test_stacking_simple(self):
     a = test_utils.row_id_initializer(shape=(4, 3), offset=10)

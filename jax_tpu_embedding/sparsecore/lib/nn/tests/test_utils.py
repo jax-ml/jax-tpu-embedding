@@ -56,13 +56,6 @@ def formatted_array2string(arr: jax.Array) -> str:
   return np.array2string(arr, formatter={"float_kind": lambda x: "%.6f" % x})
 
 
-def row_col_id_initializer_value(
-    leading_value: int, row: int, col: int
-) -> jnp.float32:
-  """Returns the value for row_col_id_initializer."""
-  return leading_value + row / 1000.0 + col / 1000000.0
-
-
 def row_col_id_initializer(
     leading_value: int = 0,
 ) -> jax.nn.initializers.Initializer:
@@ -70,15 +63,13 @@ def row_col_id_initializer(
 
   def create_array(leading_value, shape):
     rows, cols = shape
-    result = jnp.zeros(shape, dtype=jnp.float32)
-    for i in range(rows):
-      for j in range(cols):
-        col_value = j
-        result = result.at[i, j].set(
-            row_col_id_initializer_value(leading_value, i, col_value)
-        )
-
-    return result
+    row_indices = jnp.arange(rows, dtype=jnp.float32)
+    col_indices = jnp.arange(cols, dtype=jnp.float32)
+    return (
+        leading_value
+        + row_indices[:, None] / 1000.0
+        + col_indices[None, :] / 1000000.0
+    )
 
   def init(key, shape) -> jax.Array:
     del key
