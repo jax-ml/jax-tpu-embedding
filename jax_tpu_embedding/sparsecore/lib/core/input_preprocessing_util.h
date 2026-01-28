@@ -510,8 +510,14 @@ struct FeatureMetadataInStack {
   // index of the feature in the list.
   int feature_index;
 
+  // This value will be rounded up to the nearest multiple of
+  // `TPU_VECTOR_REGISTER_ALIGNMENT_SIZE` internally when used for buffer
+  // allocation.
   int max_ids_per_partition;
+  // This value is used as a threshold and does not need to be rounded.
   int max_unique_ids_per_partition;
+  // If provided, this value will be rounded up to the nearest multiple of
+  // `TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_sc_per_device` internally.
   std::optional<int> suggested_coo_buffer_size_per_device;
   // Global row offset for this feature across all devices.
   int row_offset;
