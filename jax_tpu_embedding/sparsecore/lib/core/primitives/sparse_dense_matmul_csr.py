@@ -122,16 +122,21 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     sharding_strategy: int = 1,
     quantization_config: tuple[float, float, int] | None = None,
     enable_minibatching: bool = False,
+    table_name: str = "default_table",
 ) -> jnp.ndarray:
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
+
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  vocab_size = embedding_table_type.get_dim_size(0)
+  feature_width = embedding_table_type.get_dim_size(1)
 
   constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
   activation_init = hlo.broadcast(
       constant_op,
       mlir.dense_int_array([
           device_batch_size,
-          ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+          feature_width,
       ]),
   )
 
@@ -153,6 +158,16 @@ def _tpu_sparse_dense_matmul_csr_lowering(
       "sparse_dense_matmul_config": sdmm_csr_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
+
+  frontend_attributes = {
+      "_xla_table_name": table_name,
+      "_xla_vocab_size": str(vocab_size),
+      "_xla_feature_width": str(feature_width),
+      "_xla_sample_count": str(device_batch_size),
+      "_xla_max_ids_per_partition": str(max_ids_per_partition),
+      "_xla_max_unique_ids_per_partition": str(max_unique_ids_per_partition),
+  }
+
   operands = (
       [
           lhs_row_pointers,
@@ -182,6 +197,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
       result_types=[mlir.aval_to_ir_type(out_aval)],
       api_version=1,
       backend_config=backend_config,
+      frontend_attributes=frontend_attributes,
       skip_ffi_layout_processing=True,
   )(
       ctx, *operands
