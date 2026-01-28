@@ -11,7 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""List of functions for embedding lookup."""
+"""Embedding layer API for SparseCore.
+
+This file contains functions for embedding lookup and update on SparseCore,
+including input preprocessing, forward/backward passes, and embedding table
+initialization and stacking.
+"""
 
 import collections
 import dataclasses
