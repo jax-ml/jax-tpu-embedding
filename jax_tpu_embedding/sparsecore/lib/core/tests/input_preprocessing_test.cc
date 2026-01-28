@@ -341,8 +341,6 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
   }
 }
 
-
-
 TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   const int local_device_count = 1;
   const int global_device_count = 1;
@@ -385,17 +383,17 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
         MatrixXi(local_device_count, row_pointers_size_per_device);
     MatrixXi& row_pointers = row_pointers_store[table_name];
     output_csr_arrays.lhs_row_pointers.insert(
-        {table_name, Eigen::Map<MatrixXi>(row_pointers.data(),
-                                          row_pointers.rows(),
-                                          row_pointers.cols())});
+        {table_name,
+         Eigen::Map<MatrixXi>(row_pointers.data(), row_pointers.rows(),
+                              row_pointers.cols())});
 
     embedding_ids_store[table_name] =
         MatrixXi(local_device_count, coo_buffer_size);
     MatrixXi& embedding_ids = embedding_ids_store[table_name];
     output_csr_arrays.lhs_embedding_ids.insert(
-        {table_name, Eigen::Map<MatrixXi>(embedding_ids.data(),
-                                          embedding_ids.rows(),
-                                          embedding_ids.cols())});
+        {table_name,
+         Eigen::Map<MatrixXi>(embedding_ids.data(), embedding_ids.rows(),
+                              embedding_ids.cols())});
 
     sample_ids_store[table_name] =
         MatrixXi(local_device_count, coo_buffer_size);
@@ -411,11 +409,10 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
          Eigen::Map<MatrixXf>(gains.data(), gains.rows(), gains.cols())});
   }
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      PreprocessSparseDenseMatmulOutput output,
-      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
-                                       stacked_tables, options,
-                                       &output_csr_arrays));
+  TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
+                          PreprocessSparseDenseMatmulInput(
+                              absl::MakeSpan(input_batches), stacked_tables,
+                              options, &output_csr_arrays));
 
   for (const auto& [table_name, _] : stacked_tables) {
     // Verify that the returned output structure has empty matrices for this
@@ -979,8 +976,7 @@ void RunPreprocessingOutputIsValidTest(
     absl::Span<const std::vector<std::vector<int64_t>>> samples_per_table,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition,
-    bool enable_minibatching) {
+    int max_unique_ids_per_partition, bool enable_minibatching) {
   // Max unique ids should be less than or equal to max ids.
   max_unique_ids_per_partition =
       std::min(max_unique_ids_per_partition, max_ids_per_partition);
@@ -1086,8 +1082,7 @@ void PreprocessingOutputIsValidComplex(
         samples_tuple,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition,
-    bool enable_minibatching) {
+    int max_unique_ids_per_partition, bool enable_minibatching) {
   std::vector<std::vector<std::vector<int64_t>>> samples_vector;
   std::apply(
       [&](const auto&... table_samples) {
@@ -1096,8 +1091,7 @@ void PreprocessingOutputIsValidComplex(
       samples_tuple);
   RunPreprocessingOutputIsValidTest(
       samples_vector, table_vocabs, num_sc_per_device, global_device_count,
-      max_ids_per_partition, max_unique_ids_per_partition,
-      enable_minibatching);
+      max_ids_per_partition, max_unique_ids_per_partition, enable_minibatching);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
@@ -1143,16 +1137,16 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
         // Domain for enable_minibatching
         fuzztest::Arbitrary<bool>());
 
-void PreprocessingOutputIsValidSimple(
-    std::vector<std::vector<int64_t>> samples,
-    absl::Span<const int> table_vocabs, int num_sc_per_device,
-    int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition,
-    bool enable_minibatching) {
+void PreprocessingOutputIsValidSimple(std::vector<std::vector<int64_t>> samples,
+                                      absl::Span<const int> table_vocabs,
+                                      int num_sc_per_device,
+                                      int global_device_count,
+                                      int max_ids_per_partition,
+                                      int max_unique_ids_per_partition,
+                                      bool enable_minibatching) {
   RunPreprocessingOutputIsValidTest(
       {samples}, table_vocabs, num_sc_per_device, global_device_count,
-      max_ids_per_partition, max_unique_ids_per_partition,
-      enable_minibatching);
+      max_ids_per_partition, max_unique_ids_per_partition, enable_minibatching);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)

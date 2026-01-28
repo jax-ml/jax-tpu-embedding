@@ -1042,6 +1042,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       /*stacked_table_name=*/"test_table", csr_array,
       stats_per_device.dropped_id_count);
 
+  // clang-format off
   std::array<int, row_pointers_size> expected_row_pointers = {
       // SC0 (Base: 0)
       8,  16,  24,  32,  32,  32,  32,  32,   // MB0
@@ -1064,6 +1065,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       556, 572, 588, 604, 608, 608, 608, 608,  // MB2
       616, 624, 632, 640, 640, 640, 640, 640,  // MB3
   };
+  // clang-format on
+
   EXPECT_THAT(csr_array.row_pointers, ElementsAreArray(expected_row_pointers));
 
   RowVectorXi expected_embedding_ids =
@@ -1105,8 +1108,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
                .finished()
                .replicate(1, 4);
     expected_sample_ids.segment(sc * minibatches_buffer_size_per_sc + 64, 64)
-        << (RowVectorXi(16) << 0, 1, 0, 1, 0, 1
-            , 0, 1, 0, 1, 0, 1, INT_MAX,
+        << (RowVectorXi(16) << 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, INT_MAX,
             INT_MAX, INT_MAX, INT_MAX)
                .finished()
                .replicate(1, 4);

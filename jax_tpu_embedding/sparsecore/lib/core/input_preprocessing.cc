@@ -427,8 +427,7 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
                                                slice.info, options,
                                                coo_tensors_per_sc);
       }
-      av.emplace(
-          std::move(coo_tensors_per_sc));
+      av.emplace(std::move(coo_tensors_per_sc));
     });
   }
   return extracted_coo_tensors;
@@ -818,8 +817,7 @@ PreprocessSparseDenseMatmulInput(
   {
     tsl::profiler::TraceMe traceme([&] {
       return tsl::profiler::TraceMeEncode(
-          "ScheduleExtractSortGroup",
-          {{"batch_number", options.batch_number}});
+          "ScheduleExtractSortGroup", {{"batch_number", options.batch_number}});
     });
     for (auto& state : table_states) {
       ExtractSortAndGroupCooTensorsForTable(state, input_batches, options);
