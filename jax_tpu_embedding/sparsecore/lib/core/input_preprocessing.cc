@@ -448,6 +448,11 @@ namespace {
 void CheckBufferUsage(int max_required_buffer_size_per_device,
                       int coo_buffer_size_per_device,
                       absl::string_view stacked_table_name, int batch_number) {
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        "CheckBufferUsage", {{"batch_number", batch_number},
+                             {"stacked_table_name", stacked_table_name}});
+  });
   CHECK_GT(coo_buffer_size_per_device, 0);
   const double usage_ratio =
       static_cast<double>(max_required_buffer_size_per_device) /
@@ -587,8 +592,12 @@ void SyncMinibatchingSplit(
 // Populates the output structure `out` with the processed data from the
 // `TableState`. This includes moving the CSR arrays and statistics for the
 // current stacked table.
-void PopulateOutputStats(TableState& state,
-                         SparseDenseMatmulInputStats& stats) {
+void PopulateOutputStats(TableState& state, SparseDenseMatmulInputStats& stats,
+                         int batch_number) {
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode("PopulateOutputStats",
+                                        {{"batch_number", batch_number}});
+  });
   state.stats_per_host.Flatten();
 
   stats.max_ids_per_partition[state.stacked_table_name] =
@@ -874,7 +883,14 @@ PreprocessSparseDenseMatmulInput(
     auto global_minibatching_split_avr =
         tsl::MakeUnconstructedAsyncValueRef<MinibatchingSplit>();
     SyncMinibatchingSplit(options, table_states, global_minibatching_split_avr);
-    tsl::BlockUntilReady(global_minibatching_split_avr);
+    {
+      tsl::profiler::TraceMe traceme([&] {
+        return tsl::profiler::TraceMeEncode(
+            "WaitForGlobalMinibatchingSplit",
+            {{"batch_number", options.batch_number}});
+      });
+      tsl::BlockUntilReady(global_minibatching_split_avr);
+    }
     if (global_minibatching_split_avr.IsError()) {
       return global_minibatching_split_avr.GetError();
     }
@@ -898,7 +914,7 @@ PreprocessSparseDenseMatmulInput(
         state.coo_buffer_size_per_device, state.stacked_table_name,
         options.batch_number);
 
-    PopulateOutputStats(state, out.stats);
+    PopulateOutputStats(state, out.stats, options.batch_number);
   }
 
   out.num_minibatches = global_minibatching_split.count() + 1;
