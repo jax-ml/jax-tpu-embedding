@@ -304,12 +304,9 @@ void BM_FillBuffer(benchmark::State& state) {
   internal::CsrArraysRefPerDevice csr_arrays =
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   int dropped_id_count_static_bound = 0;
-  const int coo_buffer_size_per_sc =
-      coo_buffer_size_for_device / kNumScPerDevice;
 
   for (auto s : state) {
-    FillLocalDeviceBuffer(grouped_coo_tensors, coo_buffer_size_per_sc,
-                          kBatchSizePerSc,
+    FillLocalDeviceBuffer(grouped_coo_tensors, kBatchSizePerSc,
                           stats_per_device.required_buffer_size, options,
                           stacked_table_metadata_list[0].name, csr_arrays,
                           dropped_id_count_static_bound);

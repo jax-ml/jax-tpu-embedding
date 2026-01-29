@@ -651,8 +651,6 @@ void FillDeviceBuffersForTable(
 
       const int batch_size_per_sc = xla::CeilOfRatio(
           state.batch_size_for_device, options.num_sc_per_device);
-      const int coo_buffer_size_per_sc =
-          state.coo_buffer_size_per_device / options.num_sc_per_device;
       internal::CsrArraysRefPerDevice csr_arrays_per_device =
           state.csr_arrays_per_host.GetCsrArraysRefForDevice(local_device);
 
@@ -661,9 +659,8 @@ void FillDeviceBuffersForTable(
               .required_buffer_size;
 
       tsl::AsyncValueRef<int> dropped_id_count_av = FillLocalDeviceBufferAsync(
-          grouped_coo_tensors, coo_buffer_size_per_sc, batch_size_per_sc,
-          required_sc_buffer_sizes, options, state.stacked_table_name,
-          csr_arrays_per_device);
+          grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes,
+          options, state.stacked_table_name, csr_arrays_per_device);
 
       dropped_id_count_av.AndThen(
           [sorting_result_av, &counter, dropped_id_count_av]() {

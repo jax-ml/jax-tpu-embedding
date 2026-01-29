@@ -737,7 +737,6 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   int dropped_static_bound = 0;
   FillLocalDeviceBuffer(
       coo_tensors_by_id,
-      /*coo_buffer_size_per_sc=*/40,
       /*batch_size_per_sc=*/2, stats_per_device.required_buffer_size, options,
       /*stacked_table_name=*/"test_table", csr_array, dropped_static_bound);
 
@@ -867,7 +866,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   internal::CsrArraysRefPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   FillLocalDeviceBuffer(coo_tensors_by_id,
-                        /*coo_buffer_size_per_sc=*/40,
                         /*batch_size_per_sc=*/2,
                         stats_per_device.required_buffer_size, options,
                         /*stacked_table_name=*/"test_table", csr_array,
@@ -1028,7 +1026,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   internal::CsrArraysRefPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
-  FillLocalDeviceBuffer(coo_tensors_by_id, coo_buffer_size_per_sc,
+  FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*batch_size_per_sc=*/2,
                         stats_per_device.required_buffer_size, options,
                         /*stacked_table_name=*/"test_table", csr_array,
@@ -1179,7 +1177,7 @@ TEST(InputPreprocessingUtilTest,
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   int dropped_static = 0;
-  FillLocalDeviceBuffer(grouped, coo_buffer_size_per_sc, batch_size_per_sc,
+  FillLocalDeviceBuffer(grouped, batch_size_per_sc,
                         stats_per_device.required_buffer_size, opts,
                         /*stacked_table_name=*/"test_table", csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
@@ -1252,7 +1250,7 @@ TEST(InputPreprocessingUtilTest,
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   int dropped_static = 0;
-  FillLocalDeviceBuffer(grouped, coo_buffer_size_per_sc, batch_size_per_sc,
+  FillLocalDeviceBuffer(grouped, batch_size_per_sc,
                         stats_per_device.required_buffer_size, opts,
                         /*stacked_table_name=*/"test_table", csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);

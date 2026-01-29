@@ -318,8 +318,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // Returns the number of dropped IDs.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    const int coo_buffer_size_per_sc, const int batch_size_per_sc,
-    const BlockRow<int>& required_sc_buffer_sizes,
+    const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice csr_arrays) {
@@ -331,6 +330,8 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
   const int row_pointers_size_per_bucket =
       options.GetRowPointersSizePerBucket();
 
+  const int coo_buffer_size_per_sc =
+      csr_arrays.embedding_ids.cols() / options.num_sc_per_device;
   const int num_sc_per_device = options.num_sc_per_device;
   const int num_scs = options.GetNumScs();
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
@@ -462,15 +463,14 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    const int coo_buffer_size_per_sc, const int batch_size_per_sc,
-    const BlockRow<int>& required_sc_buffer_sizes,
+    const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
   tsl::AsyncValueRef<int> dropped_id_count = FillLocalDeviceBufferAsync(
-      grouped_coo_tensors, coo_buffer_size_per_sc, batch_size_per_sc,
-      required_sc_buffer_sizes, options, stacked_table_name, csr_arrays);
+      grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes, options,
+      stacked_table_name, csr_arrays);
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
 }

@@ -570,8 +570,7 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    int coo_buffer_size_per_sc, int batch_size_per_sc,
-    const BlockRow<int>& required_sc_buffer_sizes,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice& csr_arrays,
@@ -580,8 +579,7 @@ void FillLocalDeviceBuffer(
 // Returns the number of dropped IDs.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    int coo_buffer_size_per_sc, int batch_size_per_sc,
-    const BlockRow<int>& required_sc_buffer_sizes,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice csr_arrays);
