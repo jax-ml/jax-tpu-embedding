@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_UTIL_H_
 
+#include <algorithm>
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
@@ -472,6 +473,22 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
+
+  // Returns the number of buckets for minibatching.
+  int GetNumBuckets() const {
+    return enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+  }
+
+  // Returns the size of row pointers per bucket.
+  int GetRowPointersSizePerBucket() const {
+    return std::max(static_cast<int>(GetNumScs()),
+                    TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  }
+
+  // Returns the size of row pointers per device.
+  int GetRowPointersSizePerDevice() const {
+    return GetRowPointersSizePerBucket() * GetNumBuckets() * num_sc_per_device;
+  }
 };
 
 static_assert(
@@ -531,10 +548,18 @@ struct FeatureMetadataInStack {
   bool operator==(const FeatureMetadataInStack& other) const = default;
 };
 
+// Returns the actual size of row pointers per device given the number of
+// minibatches.
+inline int GetActualRowPointersSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    int num_minibatches) {
+  return options.GetRowPointersSizePerBucket() * num_minibatches *
+         options.num_sc_per_device;
+}
+
 int ComputeCooBufferSizePerDevice(
-    int num_scs, int num_scs_per_device,
-    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
-    int batch_number = 0, bool use_minibatching = false);
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
 int MaxIdsPerPartitionForStackedTables(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
@@ -545,8 +570,8 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
-    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    int coo_buffer_size_per_sc, int batch_size_per_sc,
+    const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice& csr_arrays,
@@ -555,8 +580,8 @@ void FillLocalDeviceBuffer(
 // Returns the number of dropped IDs.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    int row_pointers_size_per_bucket, int coo_buffer_size_per_sc,
-    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    int coo_buffer_size_per_sc, int batch_size_per_sc,
+    const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice csr_arrays);

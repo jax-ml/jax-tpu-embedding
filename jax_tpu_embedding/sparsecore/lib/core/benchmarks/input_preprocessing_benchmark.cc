@@ -289,12 +289,10 @@ void BM_FillBuffer(benchmark::State& state) {
           extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
           options, stats_per_device, minibatching_required);
 
-  const int num_scs = kNumScPerDevice * kGlobalDeviceCount;
-  const int row_pointers_size_per_bucket =
-      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   const int coo_buffer_size_for_device =
       stats_per_device.required_buffer_size.sum();
-  const int row_pointers_size = row_pointers_size_per_bucket * kNumScPerDevice;
+  const int row_pointers_size =
+      options.GetRowPointersSizePerBucket() * kNumScPerDevice;
 
   MatrixXi row_pointers(1, row_pointers_size);
   MatrixXi embedding_ids(1, coo_buffer_size_for_device);
@@ -310,8 +308,8 @@ void BM_FillBuffer(benchmark::State& state) {
       coo_buffer_size_for_device / kNumScPerDevice;
 
   for (auto s : state) {
-    FillLocalDeviceBuffer(grouped_coo_tensors, row_pointers_size_per_bucket,
-                          coo_buffer_size_per_sc, kBatchSizePerSc,
+    FillLocalDeviceBuffer(grouped_coo_tensors, coo_buffer_size_per_sc,
+                          kBatchSizePerSc,
                           stats_per_device.required_buffer_size, options,
                           stacked_table_metadata_list[0].name, csr_arrays,
                           dropped_id_count_static_bound);

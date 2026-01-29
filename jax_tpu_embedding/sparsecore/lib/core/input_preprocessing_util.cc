@@ -238,13 +238,16 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 }
 
 int ComputeCooBufferSizePerDevice(
-    const int num_scs, const int num_scs_per_device,
-    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
-    const int batch_number, bool use_minibatching) {
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
   const std::optional<int> suggested_coo_buffer_size_per_device =
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
+  const int num_scs = options.GetNumScs();
+  const int num_scs_per_device = options.num_sc_per_device;
+  const int batch_number = options.batch_number;
+  const bool use_minibatching = options.enable_minibatching;
 
   const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
@@ -256,10 +259,10 @@ int ComputeCooBufferSizePerDevice(
       (use_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
-                       << ": " << theoretical_max
-                       << " (max_ids_rounded_up: " << max_ids_rounded_up
-                       << " num_scs_per_device: " << num_scs_per_device
-                       << " num_scs: " << num_scs << ")";
+                         << ": " << theoretical_max
+                         << " (max_ids_rounded_up: " << max_ids_rounded_up
+                         << " num_scs_per_device: " << num_scs_per_device
+                         << " num_scs: " << num_scs << ")";
   // We do not take the min of `suggested_coo_buffer_size_per_device` and
   // `theoretical_max` because `theoretical_max` is dynamic and depends on
   // `max_ids_per_partition`. Taking the min could cause unexpected changes in
@@ -269,8 +272,8 @@ int ComputeCooBufferSizePerDevice(
   int64_t computed_coo_buffer_size_per_device = theoretical_max;
   if (suggested_coo_buffer_size_per_device.has_value()) {
     VLOG_EVERY_N(2, 10007) << "Suggested Coo Buffer Size for table "
-                         << stacked_table_name << ": "
-                         << suggested_coo_buffer_size_per_device.value();
+                           << stacked_table_name << ": "
+                           << suggested_coo_buffer_size_per_device.value();
     computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
         theoretical_max, suggested_coo_buffer_size_per_device.value(),
         num_scs_per_device, stacked_table_name);
@@ -284,8 +287,8 @@ int ComputeCooBufferSizePerDevice(
            "`embedding.update_preprocessing_parameters`. ";
   }
   VLOG_EVERY_N(2, 10007) << "Computed Coo Buffer Size for table "
-                       << stacked_table_name << ": "
-                       << computed_coo_buffer_size_per_device;
+                         << stacked_table_name << ": "
+                         << computed_coo_buffer_size_per_device;
   // The result could be very large and cause overflow. We need to make
   // sure the result is within the range of int before using it.
   CHECK(computed_coo_buffer_size_per_device > 0 &&
@@ -315,8 +318,8 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // Returns the number of dropped IDs.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
-    const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const int coo_buffer_size_per_sc, const int batch_size_per_sc,
+    const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice csr_arrays) {
@@ -325,6 +328,8 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
         absl::StrCat("ScheduleFillLocalDeviceBuffer/", stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
+  const int row_pointers_size_per_bucket =
+      options.GetRowPointersSizePerBucket();
 
   const int num_sc_per_device = options.num_sc_per_device;
   const int num_scs = options.GetNumScs();
@@ -457,16 +462,15 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
-    const int row_pointers_size_per_bucket, const int coo_buffer_size_per_sc,
-    const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const int coo_buffer_size_per_sc, const int batch_size_per_sc,
+    const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
   tsl::AsyncValueRef<int> dropped_id_count = FillLocalDeviceBufferAsync(
-      grouped_coo_tensors, row_pointers_size_per_bucket, coo_buffer_size_per_sc,
-      batch_size_per_sc, required_sc_buffer_sizes, options, stacked_table_name,
-      csr_arrays);
+      grouped_coo_tensors, coo_buffer_size_per_sc, batch_size_per_sc,
+      required_sc_buffer_sizes, options, stacked_table_name, csr_arrays);
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
 }

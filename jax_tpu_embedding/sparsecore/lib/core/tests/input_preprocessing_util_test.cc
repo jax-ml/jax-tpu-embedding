@@ -114,26 +114,21 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       /*feature_index=*/2, /*max_ids_per_partition=*/16,
       /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/24));
-  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
-                                          /*num_scs_per_device=*/4,
-                                          stacked_table_metadata),
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+  };
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
             16 * 4 * 4);
   stacked_table_metadata[0].suggested_coo_buffer_size_per_device = 48;
-  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
-                                          /*num_scs_per_device=*/4,
-                                          stacked_table_metadata),
-            64);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(options, stacked_table_metadata), 64);
 
   stacked_table_metadata[0].suggested_coo_buffer_size_per_device = 96;
-  EXPECT_EQ(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
-                                          /*num_scs_per_device=*/4,
-                                          stacked_table_metadata),
-            96);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(options, stacked_table_metadata), 96);
   stacked_table_metadata[0].suggested_coo_buffer_size_per_device = 1024;
   // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
-  EXPECT_DEATH(ComputeCooBufferSizePerDevice(/*num_scs=*/4,
-                                             /*num_scs_per_device=*/4,
-                                             stacked_table_metadata),
+  EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
                ".*Check failed: suggested_value <= theoretical_max.*");
 }
 
@@ -742,7 +737,6 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   int dropped_static_bound = 0;
   FillLocalDeviceBuffer(
       coo_tensors_by_id,
-      /*row_pointers_size_per_bucket=*/8,
       /*coo_buffer_size_per_sc=*/40,
       /*batch_size_per_sc=*/2, stats_per_device.required_buffer_size, options,
       /*stacked_table_name=*/"test_table", csr_array, dropped_static_bound);
@@ -873,7 +867,6 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   internal::CsrArraysRefPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   FillLocalDeviceBuffer(coo_tensors_by_id,
-                        /*row_pointers_size_per_bucket=*/8,
                         /*coo_buffer_size_per_sc=*/40,
                         /*batch_size_per_sc=*/2,
                         stats_per_device.required_buffer_size, options,
@@ -1035,12 +1028,11 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   internal::CsrArraysRefPerDevice csr_array =
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
-  FillLocalDeviceBuffer(
-      coo_tensors_by_id,
-      /*row_pointers_size_per_bucket=*/8, coo_buffer_size_per_sc,
-      /*batch_size_per_sc=*/2, stats_per_device.required_buffer_size, options,
-      /*stacked_table_name=*/"test_table", csr_array,
-      stats_per_device.dropped_id_count);
+  FillLocalDeviceBuffer(coo_tensors_by_id, coo_buffer_size_per_sc,
+                        /*batch_size_per_sc=*/2,
+                        stats_per_device.required_buffer_size, options,
+                        /*stacked_table_name=*/"test_table", csr_array,
+                        stats_per_device.dropped_id_count);
 
   // clang-format off
   std::array<int, row_pointers_size> expected_row_pointers = {
@@ -1173,11 +1165,10 @@ TEST(InputPreprocessingUtilTest,
       minibatching_required);
   int dropped_sort = stats_per_device.dropped_id_count;
 
-  const int row_ptrs_size_per_bucket = 4;
   const int coo_buffer_size_per_sc = 3;
   const int batch_size_per_sc = 4;
 
-  MatrixXi row_pointers(1, row_ptrs_size_per_bucket);
+  MatrixXi row_pointers(1, opts.GetRowPointersSizePerBucket());
   MatrixXi embedding_ids(1, coo_buffer_size_per_sc);
   MatrixXi sample_ids(1, coo_buffer_size_per_sc);
   MatrixXf gains(1, coo_buffer_size_per_sc);
@@ -1188,8 +1179,7 @@ TEST(InputPreprocessingUtilTest,
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   int dropped_static = 0;
-  FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
-                        coo_buffer_size_per_sc, batch_size_per_sc,
+  FillLocalDeviceBuffer(grouped, coo_buffer_size_per_sc, batch_size_per_sc,
                         stats_per_device.required_buffer_size, opts,
                         /*stacked_table_name=*/"test_table", csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
@@ -1246,13 +1236,12 @@ TEST(InputPreprocessingUtilTest,
   grouped.Merge(minibatching_split);
   ASSERT_EQ(grouped.GetNumMinibatches(), 2);
 
-  static constexpr int row_ptrs_size_per_bucket = 4;
   // Buffer size is 6, but there are 8 total IDs (4 in each minibatch).
   static constexpr int coo_buffer_size_per_sc = 6;
   static constexpr int batch_size_per_sc = 4;
 
-  MatrixXi row_pointers(1,
-                        row_ptrs_size_per_bucket * grouped.GetNumMinibatches());
+  MatrixXi row_pointers(
+      1, opts.GetRowPointersSizePerBucket() * grouped.GetNumMinibatches());
   MatrixXi embedding_ids(1, coo_buffer_size_per_sc);
   MatrixXi sample_ids(1, coo_buffer_size_per_sc);
   MatrixXf gains(1, coo_buffer_size_per_sc);
@@ -1263,8 +1252,7 @@ TEST(InputPreprocessingUtilTest,
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
 
   int dropped_static = 0;
-  FillLocalDeviceBuffer(grouped, row_ptrs_size_per_bucket,
-                        coo_buffer_size_per_sc, batch_size_per_sc,
+  FillLocalDeviceBuffer(grouped, coo_buffer_size_per_sc, batch_size_per_sc,
                         stats_per_device.required_buffer_size, opts,
                         /*stacked_table_name=*/"test_table", csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
@@ -1280,8 +1268,8 @@ TEST(InputPreprocessingUtilTest,
   // Row pointers for MB0 all point to the end index 4.
   // Row pointers for MB1 start from 4, and since all are dropped, they clamp at
   // the buffer size 6.
-  std::array<int, 2 * row_ptrs_size_per_bucket> expected_row_pointers = {
-      4, 6, 6, 6, 6, 6, 6, 6};
+  std::array<int, 16> expected_row_pointers = {4, 6, 6, 6, 6, 6, 6, 6,
+                                               6, 6, 6, 6, 6, 6, 6, 6};
   EXPECT_THAT(csr_arrays.row_pointers, ElementsAreArray(expected_row_pointers));
 
   // Embedding IDs from MB0 are {0, 0, 0, 0}. MB1 is dropped.

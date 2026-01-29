@@ -356,12 +356,8 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
       .num_sc_per_device = num_sc_per_device,
   };
 
-  const int num_scs = num_sc_per_device * global_device_count;
-  const int row_pointers_size_per_bucket =
-      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
-  const int num_buckets = 1;
   const int row_pointers_size_per_device =
-      row_pointers_size_per_bucket * num_buckets * num_sc_per_device;
+      options.GetRowPointersSizePerDevice();
 
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables;
@@ -375,9 +371,7 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   StackedTableMap<MatrixXf> gains_store;
 
   for (const auto& [table_name, metadata_list] : stacked_tables) {
-    int coo_buffer_size = ComputeCooBufferSizePerDevice(
-        num_scs, num_sc_per_device, metadata_list, options.batch_number,
-        options.enable_minibatching);
+    int coo_buffer_size = ComputeCooBufferSizePerDevice(options, metadata_list);
 
     row_pointers_store[table_name] =
         MatrixXi(local_device_count, row_pointers_size_per_device);

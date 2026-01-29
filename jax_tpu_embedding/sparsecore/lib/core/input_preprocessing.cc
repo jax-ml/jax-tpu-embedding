@@ -36,7 +36,6 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
@@ -162,8 +161,7 @@ struct TableState {
              absl::Span<const FeatureMetadataInStack> metadata,
              bool has_variable_weights,
              const PreprocessSparseDenseMatmulInputOptions& options,
-             int num_scs, int coo_buffer_size_per_device,
-             Eigen::Ref<MatrixXi> row_pointers,
+             int coo_buffer_size_per_device, Eigen::Ref<MatrixXi> row_pointers,
              Eigen::Ref<MatrixXi> embedding_ids,
              Eigen::Ref<MatrixXi> sample_ids, Eigen::Ref<MatrixXf> gains)
       : stacked_table_name(name),
@@ -617,11 +615,10 @@ void PopulateOutputStats(TableState& state, SparseDenseMatmulInputStats& stats,
 // `options`: Preprocessing options.
 // `global_minibatching_required`: Whether minibatching is required across all
 //   devices.
-// `global_minibatching_split`: The determined split for minibatching.
-// `row_pointers_size_per_bucket`: The size of row pointers per bucket.
+// `global_minibatching_split`: The determined split for minibatching
 void FillDeviceBuffersForTable(
     TableState& state, const PreprocessSparseDenseMatmulInputOptions& options,
-    int row_pointers_size_per_bucket, bool global_minibatching_required,
+    bool global_minibatching_required,
     MinibatchingSplit global_minibatching_split,
     absl::BlockingCounter& counter) {
   tsl::profiler::TraceMe traceme([&] {
@@ -635,8 +632,7 @@ void FillDeviceBuffersForTable(
         state.device_sorting_results[local_device];
     // This continuation is scheduled when sorting for `local_device` completes.
     sorting_result_av.AndThen([&, local_device, sorting_result_av,
-                               &state = state, row_pointers_size_per_bucket,
-                               global_minibatching_required,
+                               &state = state, global_minibatching_required,
                                global_minibatching_split] {
       state.batch_size_for_device =
           state.extracted_coo_tensors_per_device[0].batch_size_for_device;
@@ -665,9 +661,9 @@ void FillDeviceBuffersForTable(
               .required_buffer_size;
 
       tsl::AsyncValueRef<int> dropped_id_count_av = FillLocalDeviceBufferAsync(
-          grouped_coo_tensors, row_pointers_size_per_bucket,
-          coo_buffer_size_per_sc, batch_size_per_sc, required_sc_buffer_sizes,
-          options, state.stacked_table_name, csr_arrays_per_device);
+          grouped_coo_tensors, coo_buffer_size_per_sc, batch_size_per_sc,
+          required_sc_buffer_sizes, options, state.stacked_table_name,
+          csr_arrays_per_device);
 
       dropped_id_count_av.AndThen(
           [sorting_result_av, &counter, dropped_id_count_av]() {
@@ -732,7 +728,7 @@ GetOutputCsrBuffers(const std::string& stacked_table_name,
 void FillDeviceBuffersAllTables(
     absl::Span<TableState> table_states,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    int row_pointers_size_per_bucket, bool global_minibatching_required,
+    bool global_minibatching_required,
     MinibatchingSplit global_minibatching_split) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
@@ -741,8 +737,7 @@ void FillDeviceBuffersAllTables(
   absl::BlockingCounter counter(table_states.size() *
                                 options.local_device_count);
   for (auto& state : table_states) {
-    FillDeviceBuffersForTable(state, options, row_pointers_size_per_bucket,
-                              global_minibatching_required,
+    FillDeviceBuffersForTable(state, options, global_minibatching_required,
                               global_minibatching_split, counter);
   }
   traceme.Stop();
@@ -785,13 +780,8 @@ PreprocessSparseDenseMatmulInput(
 
   PreprocessSparseDenseMatmulOutput out;
 
-  const int num_scs = options.GetNumScs();
-  const int row_pointers_size_per_bucket =
-      std::max(num_scs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
-  const int num_buckets =
-      options.enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
   const int row_pointers_size_per_device =
-      row_pointers_size_per_bucket * num_buckets * options.num_sc_per_device;
+      options.GetRowPointersSizePerDevice();
 
   std::vector<TableState> table_states;
   table_states.reserve(stacked_tables.size());
@@ -799,16 +789,15 @@ PreprocessSparseDenseMatmulInput(
        stacked_tables) {
     const bool stack_has_weights =
         StackHasVariableWeights(input_batches, stacked_table_metadata);
-    const int coo_buffer_size_per_device = ComputeCooBufferSizePerDevice(
-        num_scs, options.num_sc_per_device, stacked_table_metadata,
-        options.batch_number, options.enable_minibatching);
+    const int coo_buffer_size_per_device =
+        ComputeCooBufferSizePerDevice(options, stacked_table_metadata);
 
     auto [row_pointers, embedding_ids, sample_ids, gains] = GetOutputCsrBuffers(
         stacked_table_name, options, row_pointers_size_per_device,
         coo_buffer_size_per_device, output_csr_arrays, out);
 
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
-                              stack_has_weights, options, num_scs,
+                              stack_has_weights, options,
                               coo_buffer_size_per_device, row_pointers,
                               embedding_ids, sample_ids, gains);
   }
@@ -836,7 +825,6 @@ PreprocessSparseDenseMatmulInput(
   // If it turns out that minibatching is required globally, we will
   // re-fill the buffers later.
   FillDeviceBuffersAllTables(absl::MakeSpan(table_states), options,
-                             row_pointers_size_per_bucket,
                              /* global_minibatching_required= */ false,
                              /* global_minibatching_split= */ 0);
 
@@ -893,9 +881,9 @@ PreprocessSparseDenseMatmulInput(
       return global_minibatching_split_avr.GetError();
     }
     global_minibatching_split = global_minibatching_split_avr.get();
-    FillDeviceBuffersAllTables(
-        absl::MakeSpan(table_states), options, row_pointers_size_per_bucket,
-        global_minibatching_required, global_minibatching_split);
+    FillDeviceBuffersAllTables(absl::MakeSpan(table_states), options,
+                               global_minibatching_required,
+                               global_minibatching_split);
   }
 
   for (auto& state : table_states) {
