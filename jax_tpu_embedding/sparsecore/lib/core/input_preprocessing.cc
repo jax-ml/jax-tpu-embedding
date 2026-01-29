@@ -445,11 +445,6 @@ namespace {
 void CheckBufferUsage(int max_required_buffer_size_per_device,
                       int coo_buffer_size_per_device,
                       absl::string_view stacked_table_name, int batch_number) {
-  tsl::profiler::TraceMe traceme([&] {
-    return tsl::profiler::TraceMeEncode(
-        "CheckBufferUsage", {{"batch_number", batch_number},
-                             {"stacked_table_name", stacked_table_name}});
-  });
   CHECK_GT(coo_buffer_size_per_device, 0);
   const double usage_ratio =
       static_cast<double>(max_required_buffer_size_per_device) /
@@ -591,10 +586,6 @@ void SyncMinibatchingSplit(
 // current stacked table.
 void PopulateOutputStats(TableState& state, SparseDenseMatmulInputStats& stats,
                          int batch_number) {
-  tsl::profiler::TraceMe traceme([&] {
-    return tsl::profiler::TraceMeEncode("PopulateOutputStats",
-                                        {{"batch_number", batch_number}});
-  });
   state.stats_per_host.Flatten();
 
   stats.max_ids_per_partition[state.stacked_table_name] =
@@ -883,6 +874,10 @@ PreprocessSparseDenseMatmulInput(
                                global_minibatching_split);
   }
 
+  tsl::profiler::TraceMe traceme_post_process([&] {
+    return tsl::profiler::TraceMeEncode(
+        "PostProcessTableStates", {{"batch_number", options.batch_number}});
+  });
   for (auto& state : table_states) {
     state.stats_per_host.dropped_id_count = 0;
     for (const auto& result_av : state.device_sorting_results) {
@@ -899,6 +894,7 @@ PreprocessSparseDenseMatmulInput(
 
     PopulateOutputStats(state, out.stats, options.batch_number);
   }
+  traceme.Stop();
 
   out.num_minibatches = global_minibatching_split.count() + 1;
   DCHECK(options.enable_minibatching || out.num_minibatches == 1)
