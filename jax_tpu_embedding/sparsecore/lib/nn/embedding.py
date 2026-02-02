@@ -33,6 +33,7 @@ import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_activation_unstack
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_gradient_stack
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
@@ -932,10 +933,34 @@ def _verify_input_batch_size(
     )
 
 
+def _prepare_gradient_for_stacking(
+    gradient: jax.Array,
+    feature: embedding_spec.FeatureSpec,
+    num_sc_per_device: int,
+) -> jax.Array:
+  """Prepares the gradient for stacking."""
+  # feature.table_spec.embedding_dim is the original table dim, before
+  # padding
+  gradient = gradient.reshape([-1, feature.table_spec.embedding_dim])
+  # Add padding for extra cols
+  extra_cols = (
+      feature.table_spec.setting_in_stack.padded_embedding_dim
+      - feature.table_spec.embedding_dim
+  )
+  if extra_cols != 0:
+    gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
+  _verify_input_batch_size(
+      gradient.shape, num_sc_per_device, name=feature.name
+  )
+  return gradient
+
+
 def stack_embedding_gradients(
     activation_gradients: Nested[jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     num_sc_per_device: int,
+    global_device_count: int | None = None,
+    use_gradient_stacking_primitive: bool = False,
 ) -> Mapping[str, jax.Array]:
   """Stacks the gradients for update to embedding variables."""
   stacked_table_to_features: dict[
@@ -958,35 +983,51 @@ def stack_embedding_gradients(
 
   for stacked_table_name, stacked_features in stacked_table_to_features.items():
     stacked_features.sort(key=lambda x: x[0].id_transformation.row_offset)
-    for feature, gradient in stacked_features:
-      # feature.table_spec.embedding_dim is the original table dim, before
-      # padding
-      gradient = gradient.reshape([-1, feature.table_spec.embedding_dim])
-      # Add padding for extra cols
-      extra_cols = (
-          feature.table_spec.setting_in_stack.padded_embedding_dim
-          - feature.table_spec.embedding_dim
-      )
-      if extra_cols != 0:
-        gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
-      _verify_input_batch_size(
-          gradient.shape, num_sc_per_device, name=feature.name
-      )
-      # Slice the feature.
-      # b: batch size per slice, d: padded embedding dim
-      gradient = einops.rearrange(
-          gradient, "(f b) d -> f b d", f=num_sc_per_device
-      )
-      stacked_table_to_gradients[stacked_table_name].append(gradient)
 
-    # Concatenate along batch dimension.
-    result[stacked_table_name] = jax.lax.concatenate(
-        stacked_table_to_gradients[stacked_table_name], dimension=1
-    )
-    # Merge the feature slice dimension with the batch dimension.
-    result[stacked_table_name] = einops.rearrange(
-        result[stacked_table_name], "f b d -> (f b) d"
-    )
+    gradients = [
+        _prepare_gradient_for_stacking(gradient, feature, num_sc_per_device)
+        for feature, gradient in stacked_features
+    ]
+
+    if use_gradient_stacking_primitive:
+      if global_device_count is None:
+        raise ValueError(
+            "global_device_count must be provided when"
+            " use_gradient_stacking_primitive is True"
+        )
+
+      stacked_batch_size = (
+          stacked_features[0][
+              0
+          ].table_spec.stacked_table_spec.total_sample_count
+          // global_device_count
+      )
+      stacked_feature_dim = stacked_features[0][
+          0
+      ].table_spec.stacked_table_spec.stack_embedding_dim
+      stacked_gradient = sparse_dense_matmul_gradient_stack.tpu_sparse_dense_matmul_gradient_stack_primitive.bind(
+          *gradients,
+          stacked_batch_size=stacked_batch_size,
+          stacked_feature_dim=stacked_feature_dim,
+      )
+      result[stacked_table_name] = stacked_gradient
+    else:
+      for gradient in gradients:
+        # Slice the feature.
+        # b: batch size per slice, d: padded embedding dim
+        gradient = einops.rearrange(
+            gradient, "(f b) d -> f b d", f=num_sc_per_device
+        )
+        stacked_table_to_gradients[stacked_table_name].append(gradient)
+
+      # Concatenate along batch dimension.
+      result[stacked_table_name] = jax.lax.concatenate(
+          stacked_table_to_gradients[stacked_table_name], dimension=1
+      )
+      # Merge the feature slice dimension with the batch dimension.
+      result[stacked_table_name] = einops.rearrange(
+          result[stacked_table_name], "f b d -> (f b) d"
+      )
 
   return result
 
@@ -998,12 +1039,14 @@ def tpu_sparse_dense_matmul_grad(
     embedding_variables: Mapping[str, EmbeddingVariables],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     *,
+    global_device_count: int | None = None,
     sharding_strategy: str = "MOD",
     label: str = "",
     step: jax.Array | int | None = None,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
     perform_stacking: bool = True,
+    use_gradient_stacking_primitive: bool = False,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -1014,6 +1057,7 @@ def tpu_sparse_dense_matmul_grad(
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
     feature_specs: The input features for the current process.
+    global_device_count: The number of devices in the global job.
     sharding_strategy: The sharding strategy (e.g., MOD)
     label: The label for the optimizer computation.
     step: The current step number.
@@ -1022,6 +1066,8 @@ def tpu_sparse_dense_matmul_grad(
     enable_minibatching: Whether to use minibatching. Defaults to `False`.
     perform_stacking: If True, expects per-feature gradients and stacks them
       internally. If False, assumes activation_gradients are already stacked.
+    use_gradient_stacking_primitive: If True, uses the gradient stacking
+      primitive.
 
   Returns:
     The updated activation embedding variables.
@@ -1089,6 +1135,8 @@ def tpu_sparse_dense_matmul_grad(
         activation_gradients,
         feature_specs,
         num_sc_per_device,
+        global_device_count,
+        use_gradient_stacking_primitive,
     )
   else:
     assert isinstance(activation_gradients, Mapping)

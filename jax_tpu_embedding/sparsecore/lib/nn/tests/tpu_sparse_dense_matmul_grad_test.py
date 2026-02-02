@@ -178,7 +178,12 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         dtype=np.int32,
     )
 
-  def test_sparse_dense_matmul_one_chip_unsharded(self):
+  @parameterized.product(
+      use_gradient_stacking_primitive=[False, True],
+  )
+  def test_sparse_dense_matmul_one_chip_unsharded(
+      self, use_gradient_stacking_primitive
+  ):
     devices = jax.devices()[:1]
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -315,10 +320,16 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         (_BATCH_SIZE, _DIM_C),
         dtype=jnp.float32,
     )
+    kwargs = {}
+    if use_gradient_stacking_primitive:
+      kwargs["global_device_count"] = len(devices)
+
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
         feature_specs=feature_specs,
         sharding_strategy="MOD",
+        use_gradient_stacking_primitive=use_gradient_stacking_primitive,
+        **kwargs,
     )
     sharded_grad_update = jax.jit(sharded_grad_update)
     grad_update = sharded_grad_update(

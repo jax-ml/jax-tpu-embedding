@@ -52,6 +52,17 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "sparse_dense_matmul_gradient_stack",
+    srcs = ["sparse_dense_matmul_gradient_stack.py"],
+    deps = [
+        pypi_requirement("jax"),
+        pypi_requirement("jax/experimental:layout"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir:ir"),
+    ],
+)
+
+pytype_strict_library(
     name = "local_sparse_dense_matmul",
     srcs = ["local_sparse_dense_matmul.py"],
     deps = [
@@ -220,6 +231,7 @@ pytype_strict_library(
         ":sparse_dense_matmul_grad_with_ftrl",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_laprop",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_sgd",  # buildcleaner: keep
+        ":sparse_dense_matmul_gradient_stack",  # buildcleaner: keep
         ":sparse_dense_matmul_optimizer_grad",  # buildcleaner: keep
     ],
 )
