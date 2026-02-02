@@ -713,24 +713,28 @@ def _get_activation_for_feature(
   return einops.rearrange(feature_slice, "f b1 d -> (f b1) d")
 
 
-def unstack_embedding_activations(
+def _unstack_activations_default(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
-    use_activation_unstack_primitive: bool = False,
 ) -> Nested[jax.Array]:
-  """Unstacks the activations to match the feature specs."""
-  if not use_activation_unstack_primitive:
-    get_activation_for = functools.partial(
-        _get_activation_for_feature,
-        activations=activations,
-        global_device_count=global_device_count,
-        num_feature_slices_per_device=num_sc_per_device,
-    )
-    return jax.tree_util.tree_map(get_activation_for, feature_specs)
+  """Unstacks activations using the legacy method."""
+  get_activation_for = functools.partial(
+      _get_activation_for_feature,
+      activations=activations,
+      global_device_count=global_device_count,
+      num_feature_slices_per_device=num_sc_per_device,
+  )
+  return jax.tree_util.tree_map(get_activation_for, feature_specs)
 
-  del num_sc_per_device
+
+def _unstack_activations_with_primitive(
+    activations: dict[str, jax.Array],
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    global_device_count: int,
+) -> Nested[jax.Array]:
+  """Unstacks activations using the activation unstack primitive."""
   flat_feature_specs, treedef = jax.tree.flatten(feature_specs)
 
   updated_activations = [None] * len(flat_feature_specs)
@@ -778,6 +782,24 @@ def unstack_embedding_activations(
       updated_activations[feature_index] = feature_activation
 
   return jax.tree.unflatten(treedef, updated_activations)
+
+
+def unstack_embedding_activations(
+    activations: dict[str, jax.Array],
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    global_device_count: int,
+    num_sc_per_device: int,
+    use_activation_unstack_primitive: bool = False,
+) -> Nested[jax.Array]:
+  """Unstacks the activations to match the feature specs."""
+  if use_activation_unstack_primitive:
+    return _unstack_activations_with_primitive(
+        activations, feature_specs, global_device_count
+    )
+  else:
+    return _unstack_activations_default(
+        activations, feature_specs, global_device_count, num_sc_per_device
+    )
 
 
 @jax.named_call
