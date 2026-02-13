@@ -4,6 +4,7 @@ sphinx-design
 pydata-sphinx-theme
 sphinx-autoapi
 sphinx-autodoc2
+myst-nb
 jax
 optax
 flax
