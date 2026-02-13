@@ -26,7 +26,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
-
+from jax_tpu_embedding.sparsecore.utils import utils
 
 # stubs for user defined types (internal only, users should not use these types)
 
@@ -455,17 +455,21 @@ def get_pipeline_state_sharding(
   Returns:
     The sharding of the pipeline state.
   """
+
+  sc_layout = utils.embedding_table_format_with_sharding(
+      sharding=sparse_input_sharding,
+  )
   return pipeline_state_cls(
       pipeline_step=None,  # pytype: disable=wrong-arg-types
       last_step_inputs=LastStepInput(
           sparse_inputs=sparse_input_sharding,
-          embedding_activations=dense_input_sharding,
+          embedding_activations=sc_layout,
           dense_inputs=dense_input_sharding,
           sc_fwd_aux=dense_input_sharding,
       ),
       step_before_last_step_inputs=StepBeforeLastStepInput(
           sparse_inputs=sparse_input_sharding,
-          embedding_gradients=dense_input_sharding,
+          embedding_gradients=sc_layout,
           tc_aux=tc_aux_sharding,
       ),
       placeholder_output=pipeline_output_sharding,
@@ -516,6 +520,7 @@ def get_initial_state(
   """
   sparse_init_fn = jnp.zeros_like
   dense_init_fn = jnp.zeros_like
+  sc_init_fn = jnp.zeros_like
 
   # Wrap input initialization functions with sharding if provided.
   # TODO(b/436649494): Try sharding the placeholder inputs implicitly.
@@ -523,14 +528,22 @@ def get_initial_state(
     if (
         isinstance(x, int)
         or (hasattr(x, 'ndim') and x.ndim == 0)
-        or sharding.is_fully_replicated
+        or (
+            hasattr(sharding, 'is_fully_replicated')
+            and sharding.is_fully_replicated
+        )
     ):
       return x
+    num_devices = (
+        sharding.num_devices
+        if hasattr(sharding, 'num_devices')
+        else sharding.sharding.num_devices  # This is for type `Layout`.
+    )
     return jax.make_array_from_callback(
         x.shape,
         sharding,
         lambda index: jnp.zeros(
-            [x.shape[0] // sharding.num_devices, *x.shape[1:]],
+            [x.shape[0] // num_devices, *x.shape[1:]],
             dtype=x.dtype,
         ),
     )
@@ -539,6 +552,10 @@ def get_initial_state(
     sparse_init_fn = functools.partial(
         _create_sharded_array, sparse_input_sharding
     )
+    lout = utils.embedding_table_format_with_sharding(
+        sharding=sparse_input_sharding,
+    )
+    sc_init_fn = functools.partial(_create_sharded_array, lout)
   if dense_input_sharding is not None:
     dense_init_fn = functools.partial(
         _create_sharded_array, dense_input_sharding
@@ -566,7 +583,7 @@ def get_initial_state(
       sc_fwd_aux_shapes,
   )
   placeholder_emb_act = jax.tree.map(
-      sparse_init_fn,
+      sc_init_fn,
       emb_act_shapes,
   )
 
@@ -581,7 +598,7 @@ def get_initial_state(
   )
 
   placeholder_emb_grads = jax.tree.map(
-      sparse_init_fn,
+      sc_init_fn,
       emb_grads_shapes,
   )
   placeholder_output = jax.tree.map(_create_output_arrays, output_shapes)

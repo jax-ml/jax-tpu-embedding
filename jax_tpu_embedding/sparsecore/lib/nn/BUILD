@@ -78,6 +78,7 @@ pytype_strict_library(
     deps = [
         ":embedding",
         ":embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
     ],
