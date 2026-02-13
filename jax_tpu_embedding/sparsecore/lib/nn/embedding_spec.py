@@ -806,11 +806,11 @@ class FeatureSpec:
   table_spec: TableSpec
   """The table spec for the feature."""
   input_shape: Sequence[int]
-  """The shape of the input jax array, this is [batch_size, feature_valency].
+  """The shape of the input jax array, this is [global_batch_size, feature_valency].
   The second element can be omitted for ragged input."""
   output_shape: Sequence[int]
   """The expected shape of the output activation jax array, this is
-  [batch_size, embedding_dim]."""
+  [global_batch_size, embedding_dim]."""
   # The transformation to apply to the input feature.
   _id_transformation: FeatureIdTransformation | None = dataclasses.field(
       default=None, compare=False
