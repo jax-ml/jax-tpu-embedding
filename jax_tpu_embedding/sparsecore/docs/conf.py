@@ -42,6 +42,7 @@ author = 'JAX TPU Embedding Team'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
+    'myst_nb',
     'sphinx_design',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
@@ -50,7 +51,7 @@ extensions = [
 ]
 
 templates_path = ['_templates']
-exclude_patterns = []
+exclude_patterns = ['notebooks/*.md']
 
 intersphinx_mapping = {
     'jax': ('https://jax.readthedocs.io/en/latest/', None),
@@ -80,3 +81,7 @@ autodoc_mock_imports = [
     'jax_tpu_embedding.sparsecore.lib.proto.embedding_spec_pb2',
     'einops',
 ]
+
+# -- Myst configurations -------------------------------------------------
+nb_execution_mode = 'off'
+source_suffix = ['.rst', '.ipynb', '.md']
