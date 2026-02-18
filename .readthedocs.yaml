@@ -4,6 +4,8 @@ build:
   os: ubuntu-lts-latest
   tools:
     python: "3.12"
+  apt_packages:
+    - graphviz
 
 sphinx:
   configuration: jax_tpu_embedding/sparsecore/docs/conf.py
