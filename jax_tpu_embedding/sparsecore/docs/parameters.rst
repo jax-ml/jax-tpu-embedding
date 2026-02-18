@@ -66,13 +66,20 @@ The appropriate values for these parameters depend on the model size and input
 training data distribution. However, there are some guidelines to estimate and
 tune these values.
 
+Batch sizes specified in ``FeatureSpec`` input and output shapes are typically
+global batch sizes (i.e., across all devices). However, buffer size parameters
+like ``max_ids_per_partition`` are estimated based on data distribution on
+each SparseCore, which depends on the batch size per device or per SparseCore.
+When using heuristics like the ones below, ensure that ``batch_size`` refers to
+the batch size processed by a single SparseCore.
+
 Firstly, if not much is known, start with the following:
 
 .. code:: python
 
-    max_ids_per_partition = 0.4 * batch_size
-    max_unique_ids_per_partition = 0.1 * batch_size
-    suggested_coo_buffer_size_per_sc = 0.4 * batch_size
+    max_ids_per_partition = 0.4 * global_batch_size
+    max_unique_ids_per_partition = 0.1 * global_batch_size
+    suggested_coo_buffer_size_per_sc = 0.4 * global_batch_size
 
 If these are too low, then ids will be dropped during input preprocessing step
 of training, leading to an error like the following:

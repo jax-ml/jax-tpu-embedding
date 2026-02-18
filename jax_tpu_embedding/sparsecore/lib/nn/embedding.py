@@ -579,16 +579,23 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
 ) -> tuple[PreprocessedInput, SparseDenseMatmulInputStats]:
   """Preprocesses the input for sparse dense matmul.
 
+  Note:
+    This function assumes that the `values` tensors contain embedding IDs and
+    must be of integer type. Custom weights are not supported with this input
+    format; uniform weights (1.0) are assumed for all embedding IDs. If you need
+    to provide custom weights, use `preprocess_sparse_dense_matmul_input`
+    instead.
+
   Args:
     indices: A nested structure of 2-D int64 tensors, where each tensor has
       shape [N, ndims]. It represents the indices of non-zero elements in a
       sparse tensor, with elements being zero-indexed. For instance,
       `indices=[[1,3], [2,4]]` indicates that elements at [1,3] and [2,4] have
       non-zero values.
-    values: A nested structure of 1-D tensors, each with shape [N], representing
-      the values of non-zero elements corresponding to `indices`. For example,
-      with `indices=[[1,3], [2,4]]`, `values=[18, 3.6]` means the element at
-      [1,3] is 18 and at [2,4] is 3.6.
+    values: A nested structure of 1-D int32 tensors, each with shape [N],
+      representing the embedding IDs corresponding to `indices`. For example,
+      with `indices=[[1,3], [2,4]]`, `values=[18, 3]` means the embedding ID at
+      [1,3] is 18 and at [2,4] is 3.
     dense_shapes: A nested structure of 2-element 1-D int64 tensors, defining
       the dense shape of the sparse tensor. It specifies the number of elements
       in each dimension. For example, `dense_shape=[3,6]` represents a 3x6
@@ -620,6 +627,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
+
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(indices, feature_specs, "indices", "feature_specs")
   _assert_same_structure(values, feature_specs, "values", "feature_specs")

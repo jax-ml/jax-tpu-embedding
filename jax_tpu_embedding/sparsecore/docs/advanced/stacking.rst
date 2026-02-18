@@ -23,6 +23,14 @@ can be used to improve the efficiency of models with many tables and features.
     "column" refers to an embedding ID in a given sample. The column maps to a
     vocabulary in an embedding table.
 
+By default, feature stacking is performed implicitly by
+``preprocess_sparse_dense_matmul_input``, and activations are unstacked by
+``tpu_sparse_dense_matmul``. Similarly, gradients are stacked by
+``tpu_sparse_dense_matmul_grad``. If you need to handle stacked activations or
+gradients manually, you can set ``perform_unstacking=False`` in
+``tpu_sparse_dense_matmul`` or ``perform_stacking=False`` in
+``tpu_sparse_dense_matmul_grad``.
+
 Feature Stacking
 ----------------
 
