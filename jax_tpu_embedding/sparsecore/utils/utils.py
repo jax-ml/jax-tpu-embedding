@@ -69,12 +69,8 @@ def embedding_table_format(
     mesh: jax.sharding.Mesh, partition_spec: jax.sharding.PartitionSpec
 ) -> jax.sharding.Sharding:
   """Returns the layout format of the embedding table."""
-  return layout.Format(  # pytype: disable=bad-return-type
-      Layout(
-          major_to_minor=(0, 1),
-          tiling=((8,),),
-      ),
-      jax.sharding.NamedSharding(mesh, partition_spec),
+  return embedding_table_format_with_sharding(
+      jax.sharding.NamedSharding(mesh, partition_spec)
   )
 
 
