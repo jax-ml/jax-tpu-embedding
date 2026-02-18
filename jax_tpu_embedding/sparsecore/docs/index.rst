@@ -22,6 +22,14 @@ JAX TPU Embedding documentation
    advanced/stacking
    advanced/minibatching
 
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Tutorials
+
+   tutorials/shakespeare_flax
+   tutorials/shakespeare_primitives
+
 JAX SparseCore provides support for leveraging the SparseCore accelerators present in
 TPU generations starting with TPU v5. SparseCores are specialized processors designed
 to accelerate workloads with sparse data access patterns, particularly large-scale
