@@ -115,7 +115,7 @@ The Flax project provides a guide for `migrating from Linen to NNX <https://flax
 SparseCore project provides both Linen and NNX layers for large embedding models
 that can be used without the need for modification or extension. These layers
 are built on the primitive API, use the same :doc:`Embedding Specification <embedding>`
-objects to configure the embedding and accept inputs from the :doc:`preprocessing API <input_processing>`.
+objects to configure the embedding and accept inputs from the :doc:`Input Preprocessing <input_processing>` API.
 
 .. currentmodule:: jax_tpu_embedding.sparsecore.lib.flax
 

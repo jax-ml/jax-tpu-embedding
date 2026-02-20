@@ -46,8 +46,8 @@ All the above steps are customizable and a typical flow looks as follows:
     fdo_client = file_fdo_client.NPZFileFDOClient(fdo_dir)
 
     for step in range(100):
-        # Record stats returned from preprocessin step
-        preprocessed_inputs, stats = embedding.preprocess_sparse_dense_matmul_input(
+        # Record stats returned from preprocessing step
+        preprocessed_inputs, stats = :func:`preprocess_sparse_dense_matmul_input`(
             ...
         )
         # Record the stats returned by inputs preprocessing
@@ -56,11 +56,11 @@ All the above steps are customizable and a typical flow looks as follows:
         # At some frequency, publish and update stats.
         if step % 10 == 0:
             fdo_client.publish()
-            # Add a barrier her so that all processes can finish publishing their stats
+            # Add a barrier here so that all processes can finish publishing their stats
             # and so all the processes can read the same data.
             jax.experimental.multihost_utils.sync_global_devices("FDO_publish_barrier")
             # Load FDO stats dumps and update feature specs.
-            loaded_stats: embedding.PreprocessSparseDenseMatmulStats = fdo_client.load()
+            loaded_stats: :class:`PreprocessSparseDenseMatmulStats` = fdo_client.load()
             # Any custom code to adjust the stats can go here.
             # `transform` is a user-defined function to modify the FDO statistics.
             # For example:
@@ -70,7 +70,7 @@ All the above steps are customizable and a typical flow looks as follows:
                 return stats
             updated_stats = transform(loaded_stats)
             # Update the feature specs.
-            embedding.update_preprocessing_parameters(
+            :func:`update_preprocessing_parameters`(
                 feature_specs, updated_stats, num_sc_per_device
             )
 

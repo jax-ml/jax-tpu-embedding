@@ -88,18 +88,13 @@ of training, leading to an error like the following:
     set max ids per partition: 256...
 
 Next, set ``allow_id_dropping = true`` in
-``embedding.preprocess_sparse_dense_matmul_input(...)``. This will get past the
+:func:`preprocess_sparse_dense_matmul_input`. This will get past the
 above error and continue training with dropping any extra ids. While this will
 degrade the model quality, it will allows the trainer to analyze more input
 batches leading to better estimates of the table limits.
 
-To avoid dropping ids, now increase the ``max_ids_per_partition`` etc. by using
-the reported extra ids count in error message above. Note that when
-``allow_id_dropping`` is true, the above error message is logged as a warning so
-you can still see the observed limits in logs.
-
 The main function that you will use for preprocessing the input would be
-``preprocess_sparse_dense_matmul_input`` in ``embedding.py``. It returns the
+:func:`preprocess_sparse_dense_matmul_input` in the :mod:`embedding` module. It returns the
 preprocessed inputs as well as the input statistics (for all the above
 parameters). These can also be used to directly update the feature specs as
 follows. Note, this direct approach to updating the ``feature_specs`` should not

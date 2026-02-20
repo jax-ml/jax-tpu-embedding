@@ -24,12 +24,12 @@ can be used to improve the efficiency of models with many tables and features.
     vocabulary in an embedding table.
 
 By default, feature stacking is performed implicitly by
-``preprocess_sparse_dense_matmul_input``, and activations are unstacked by
-``tpu_sparse_dense_matmul``. Similarly, gradients are stacked by
-``tpu_sparse_dense_matmul_grad``. If you need to handle stacked activations or
+:func:`preprocess_sparse_dense_matmul_input`, and activations are unstacked by
+:func:`tpu_sparse_dense_matmul`. Similarly, gradients are stacked by
+:func:`tpu_sparse_dense_matmul_grad`. If you need to handle stacked activations or
 gradients manually, you can set ``perform_unstacking=False`` in
-``tpu_sparse_dense_matmul`` or ``perform_stacking=False`` in
-``tpu_sparse_dense_matmul_grad``.
+:func:`tpu_sparse_dense_matmul` or ``perform_stacking=False`` in
+:func:`tpu_sparse_dense_matmul_grad`.
 
 Feature Stacking
 ----------------
@@ -57,7 +57,7 @@ Table stacking can help in decreasing training time by combining smaller
 embedding tables to create larger ones there by reducing the number of embedding
 table lookups and updates in forward and backward pass respectively. To do table
 stacking, define the :class:`TableSpec` and :class:`FeatureSpec` as usual and then call
-``auto_stack_tables`` which will update the feature specs and the
+:func:`auto_stack_tables` which will update the feature specs and the
 referenced tables specs with required stacking information. All the downstream
 apis for training refer to the feature specs and account for stacking as
 necessary. You do not need to do anything special with regard stacking in

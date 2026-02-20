@@ -76,10 +76,10 @@ enable minibatching by passing ``enable_minibatching=True`` layer initialization
     )
 
 Low-level API
-^^^^^^^^^^^^^
+-------------
 
-If using the ``embedding`` module directly, pass ``enable_minibatching=True`` to
-``preprocess_sparse_dense_matmul_input`` and ``tpu_sparse_dense_matmul``:
+If using the :mod:`embedding` module directly, pass ``enable_minibatching=True`` to
+:func:`preprocess_sparse_dense_matmul_input` and :func:`tpu_sparse_dense_matmul`:
 
 .. code-block:: python
 
@@ -99,8 +99,8 @@ If using the ``embedding`` module directly, pass ``enable_minibatching=True`` to
     )
 
 Note that for multi-host minibatching, you need to initialize and pass an
-``all_reduce_interface`` object to ``preprocess_sparse_dense_matmul_input``. This
-can be obtained via ``embedding.get_all_reduce_interface(...)``.
+``all_reduce_interface`` object to :func:`preprocess_sparse_dense_matmul_input`. This
+can be obtained via :func:`get_all_reduce_interface`.
 
 Performance Considerations
 --------------------------
