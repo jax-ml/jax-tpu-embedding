@@ -1208,9 +1208,12 @@ def get_row_ids_in_stacked_table(
   stack_shard_size = stack_table_spec.stack_vocab_size // num_sparse_cores
 
   for row_id in row_ids:
-    assert (
-        row_id < table_spec.vocab_size
-    ), f"{row_id} execeeds available vocabulary size [{table_spec.vocab_size}]."
+    if row_id >= table_spec.vocab_size:
+      raise ValueError(
+          f"{row_id} exceeds available vocabulary size"
+          f" [{table_spec.vocab_size}]."
+      )
+
     shard_id = (
         row_id % num_sparse_cores + table_spec.shard_rotation
     ) % num_sparse_cores
@@ -1218,3 +1221,32 @@ def get_row_ids_in_stacked_table(
     ret.append(shard_id * stack_shard_size + sharded_row_id)
 
   return ret
+
+
+def get_row_ids_in_stacked_tables(
+    embedding_spec_proto: embedding_spec_pb2.EmbeddingSpecProto,
+    row_ids: Mapping[str, Sequence[int]],
+) -> Mapping[str, Sequence[int]]:
+  """Translates the unsharded tables' row ids to the stacked tables' row ids.
+
+  Args:
+    embedding_spec_proto: The embedding spec proto.
+    row_ids: A mapping of unsharded tables' row ids. The keys are the table
+      names.
+
+  Returns:
+    A mapping of stacked tables' row ids. The keys are the stacked table
+    names. The values are lists of row ids of the stacked tables.
+  """
+  stacked_row_ids = collections.defaultdict(list)
+
+  for stacked_table_spec in embedding_spec_proto.stacked_table_specs:
+    for table_spec in stacked_table_spec.table_specs:
+      if table_spec.table_name in row_ids:
+        stacked_row_ids[stacked_table_spec.stack_name].extend(
+            get_row_ids_in_stacked_table(
+                stacked_table_spec, table_spec, row_ids[table_spec.table_name]
+            )
+        )
+
+  return stacked_row_ids

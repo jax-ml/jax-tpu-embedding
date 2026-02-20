@@ -1364,7 +1364,7 @@ class TableStackingTest(parameterized.TestCase):
     for tbl in feature_tables.values():
       self.assertEqual(tbl.is_deleted(), delete_input)
 
-  def test_get_stacked_row_ids(self):
+  def _setup_stacking_specs_with_tables(self):
     vocab_size_a = 64
     embedding_dim_a = 4
 
@@ -1431,6 +1431,16 @@ class TableStackingTest(parameterized.TestCase):
         num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
     )
+
+    table_spec_proto = embedding.create_proto_from_feature_specs(
+        feature_specs,
+        global_device_count=jax.device_count(),
+        num_sparsecore_per_device=self.num_sc_per_device,
+    )
+    return feature_specs, table_spec_proto
+
+  def test_get_stacked_row_ids(self):
+    feature_specs, table_spec_proto = self._setup_stacking_specs_with_tables()
     logging.vlog(1, 'feature_specs_a_b: %s', feature_specs)
 
     updated_table_spec_a = feature_specs[0].table_spec
@@ -1445,8 +1455,8 @@ class TableStackingTest(parameterized.TestCase):
     table_a_sharded = jax.device_put(
         test_utils.row_id_initializer(
             (
-                vocab_size_a,
-                embedding_dim_a,
+                updated_table_spec_a.vocabulary_size,
+                updated_table_spec_a.embedding_dim,
             ),
             offset=10,
         ),
@@ -1455,8 +1465,8 @@ class TableStackingTest(parameterized.TestCase):
     table_b_sharded = jax.device_put(
         test_utils.row_id_initializer(
             (
-                vocab_size_b,
-                embedding_dim_b,
+                updated_table_spec_b.vocabulary_size,
+                updated_table_spec_b.embedding_dim,
             ),
             offset=100,
         ),
@@ -1465,8 +1475,8 @@ class TableStackingTest(parameterized.TestCase):
     table_c_sharded = jax.device_put(
         test_utils.row_id_initializer(
             (
-                vocab_size_c,
-                embedding_dim_c,
+                updated_table_spec_c.vocabulary_size,
+                updated_table_spec_c.embedding_dim,
             ),
             offset=1000,
         ),
@@ -1480,12 +1490,12 @@ class TableStackingTest(parameterized.TestCase):
             (
                 0,
                 updated_table_spec_a.setting_in_stack.padded_vocab_size
-                - vocab_size_a,
+                - updated_table_spec_a.vocabulary_size,
             ),
             (
                 0,
                 updated_table_spec_a.setting_in_stack.padded_embedding_dim
-                - embedding_dim_a,
+                - updated_table_spec_a.embedding_dim,
             ),
         ),
     )
@@ -1495,12 +1505,12 @@ class TableStackingTest(parameterized.TestCase):
             (
                 0,
                 updated_table_spec_b.setting_in_stack.padded_vocab_size
-                - vocab_size_b,
+                - updated_table_spec_b.vocabulary_size,
             ),
             (
                 0,
                 updated_table_spec_b.setting_in_stack.padded_embedding_dim
-                - embedding_dim_b,
+                - updated_table_spec_b.embedding_dim,
             ),
         ),
     )
@@ -1510,12 +1520,12 @@ class TableStackingTest(parameterized.TestCase):
             (
                 0,
                 updated_table_spec_c.setting_in_stack.padded_vocab_size
-                - vocab_size_c,
+                - updated_table_spec_c.vocabulary_size,
             ),
             (
                 0,
                 updated_table_spec_c.setting_in_stack.padded_embedding_dim
-                - embedding_dim_c,
+                - updated_table_spec_c.embedding_dim,
             ),
         ),
     )
@@ -1525,15 +1535,10 @@ class TableStackingTest(parameterized.TestCase):
     logging.vlog(1, 'table_c_padded: \n%s', table_c_padded)
 
     feature_tables = {
-        table_a_spec.name: table_a_sharded,
-        table_b_spec.name: table_b_sharded,
-        table_c_spec.name: table_c_sharded,
+        updated_table_spec_a.name: table_a_sharded,
+        updated_table_spec_b.name: table_b_sharded,
+        updated_table_spec_c.name: table_c_sharded,
     }
-    table_spec_proto = embedding.create_proto_from_feature_specs(
-        feature_specs,
-        global_device_count=jax.device_count(),
-        num_sparsecore_per_device=self.num_sc_per_device,
-    )
     stacked_tables = table_stacking.stack_and_shard_feature_tables(
         feature_tables,
         table_spec_proto,
@@ -1565,6 +1570,33 @@ class TableStackingTest(parameterized.TestCase):
               f'{stacked_row}\n'
               f'{feature_tables[table_spec.table_name][i]}',
           )
+
+  def test_get_row_ids_in_stacked_tables(self):
+    feature_specs, table_spec_proto = self._setup_stacking_specs_with_tables()
+
+    row_ids = {
+        'table_a': list(range(feature_specs[0].table_spec.vocabulary_size)),
+        'table_b': list(range(feature_specs[1].table_spec.vocabulary_size)),
+        'table_c': list(range(feature_specs[2].table_spec.vocabulary_size)),
+    }
+
+    stacked_row_ids_map = table_stacking.get_row_ids_in_stacked_tables(
+        table_spec_proto, row_ids
+    )
+
+    for stacked_table_spec in table_spec_proto.stacked_table_specs:
+      expected_ids = []
+      stack_name = stacked_table_spec.stack_name
+
+      for table_spec in stacked_table_spec.table_specs:
+        if table_spec.table_name in row_ids:
+          expected_ids.extend(
+              table_stacking.get_row_ids_in_stacked_table(
+                  stacked_table_spec, table_spec, row_ids[table_spec.table_name]
+              )
+          )
+
+      self.assertEqual(stacked_row_ids_map[stack_name], expected_ids)
 
 
 if __name__ == '__main__':
