@@ -44,9 +44,10 @@ extraction use `-show_from='jax_sc_embedding::ExtractCooTensors'` and so on.
 (See https://github.com/google/pprof/blob/main/doc/README.md for more details.)
 """
 
+from __future__ import annotations
+
 import concurrent
 import sys
-from typing import Optional
 
 from absl import app
 from absl import flags
@@ -172,7 +173,7 @@ def generate_sparse_coo_inputs_for_feature_spec(
 def apply_fdo_stats(
     stats_cc: embedding.SparseDenseMatmulInputStats,
     fdo_headroom: float = 1.0,
-    buffer_size_headroom: Optional[float] = None,
+    buffer_size_headroom: float | None = None,
 ):
   """Applies FDO adjustment to benchmark specs from stats.
 

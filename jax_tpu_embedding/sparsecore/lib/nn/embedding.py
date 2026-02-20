@@ -18,11 +18,14 @@ including input preprocessing, forward/backward passes, and embedding table
 initialization and stacking.
 """
 
+# Required for PEP 604 types (|) with Sphinx mocked imports.
+from __future__ import annotations
+
 import collections
 import dataclasses
 import functools
 import textwrap
-from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar, Union
+from typing import List, Mapping, NamedTuple, Sequence, TypeAlias, TypeVar
 import warnings
 
 from absl import logging
@@ -45,7 +48,7 @@ ArrayLike = jnp.ndarray | np.typing.ArrayLike
 
 
 T: TypeAlias = TypeVar("T")
-Nested: TypeAlias = Union[T, Sequence[T], Mapping[str, T]]
+Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = table_stacking.LimitsCallable
 get_default_limits = table_stacking.get_default_limits
 
@@ -979,9 +982,7 @@ def _prepare_gradient_for_stacking(
   )
   if extra_cols != 0:
     gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
-  _verify_input_batch_size(
-      gradient.shape, num_sc_per_device, name=feature.name
-  )
+  _verify_input_batch_size(gradient.shape, num_sc_per_device, name=feature.name)
   return gradient
 
 

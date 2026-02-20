@@ -26,5 +26,8 @@ poetry.lock
 # Bazel
 /bazel-*
 
+# Generated version file
+jax_tpu_embedding/sparsecore/version.py
+
 # Built wheels.
 /*.whl

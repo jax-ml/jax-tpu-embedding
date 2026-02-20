@@ -102,11 +102,13 @@ operations.
 The easiest way to comply to these limitations is to use our Flax API.
 """
 
+from __future__ import annotations
+
 import dataclasses
 import functools
 import logging
 import os
-from typing import Any, Callable, Concatenate, NamedTuple, Optional, ParamSpec, TypeVar
+from typing import Any, Callable, Concatenate, NamedTuple, ParamSpec, TypeVar
 
 import jax
 import jax.extend as jex
@@ -130,9 +132,9 @@ def dump_jaxpr(jaxpr: jex.core.ClosedJaxpr | jex.core.Jaxpr, name: str) -> None:
 
 
 class EmbeddingPipeliningState(NamedTuple):
-  activations_1: Optional[list[jax.Array]] = None
+  activations_1: list[jax.Array] | None = None
   args_1: Any = None
-  updates_0: Optional[list[jax.Array]] = None
+  updates_0: list[jax.Array] | None = None
 
 
 @dataclasses.dataclass

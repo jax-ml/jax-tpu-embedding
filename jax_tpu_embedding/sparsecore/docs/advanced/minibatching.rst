@@ -1,5 +1,5 @@
 Minibatching for SparseCore Embedding Lookups
-============================================
+=============================================
 
 Overview
 --------
@@ -36,7 +36,7 @@ by ``max_ids_per_partition`` or ``max_unique_ids_per_partition``, which are
 parameters automatically tuned by :doc:`Feedback-Directed Optimization (FDO) <fdo>`.
 
 Enabling Minibatching
---------------------
+---------------------
 
 Minibatching can be enabled by setting the ``enable_minibatching`` flag to ``True``
 in various APIs.

@@ -13,11 +13,13 @@
 # limitations under the License.
 """An example Shakespeare model that uses the SparseCore embedding API."""
 
+from __future__ import annotations
+
 # pylint: disable=g-importing-member
 import collections
 from functools import partial
 import os
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 
 from absl import app
 from absl import flags
@@ -153,7 +155,7 @@ def create_train_state(
 
 def _try_restore_latest_checkpoint(
     chkpt_mgr: ocp.CheckpointManager, init_train_state: TrainState
-) -> tuple[Optional[int], Optional[Mapping[str, Any]]]:
+) -> tuple[int | None, Mapping[str, Any] | None]:
   """Try restoring the latest checkpoint from the checkpoint directory."""
   info(
       'Try restoring latest checkpoint from %s',
