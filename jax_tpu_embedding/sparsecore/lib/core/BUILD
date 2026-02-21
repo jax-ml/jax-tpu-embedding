@@ -194,6 +194,7 @@ pytype_strict_library(
         ":constants",  # buildcleaner: keep
         ":input_preprocessing",  # buildcleaner: keep
         ":pybind_input_preprocessing",  # buildcleaner: keep
+        ":pybind_input_preprocessing_pyi",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep
     ],
 )
@@ -320,5 +321,13 @@ cc_library(
         "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
         "@com_google_absl//absl/strings",
         "@tsl//tsl/platform:test",
+    ],
+)
+
+pytype_strict_library(
+    name = "pybind_input_preprocessing_pyi",
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        pypi_requirement("numpy"),
     ],
 )
