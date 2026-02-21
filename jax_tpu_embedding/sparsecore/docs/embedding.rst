@@ -73,8 +73,7 @@ will be ``mean(embedding(10), embedding(21), embedding(32))``.
 
 The input shape for a batch of such features is ``[batch_size, max_ids_per_sample]``, where
 ``max_ids_per_sample`` is the valency. The output shape is ``[batch_size, embedding_dim]``.
-
-Sequence (Ordered/Concatenated) Features
+ Sequence (Ordered/Concatenated) Features
 ----------------------------------------
 
 For sequence features, each sample is an ordered sequence of items, where each
@@ -116,8 +115,7 @@ SparseCore project provides both Linen and NNX layers for large embedding models
 that can be used without the need for modification or extension. These layers
 are built on the primitive API, use the same :doc:`Embedding Specification <embedding>`
 objects to configure the embedding and accept inputs from the :doc:`preprocessing API <input_processing>`.
-
-.. currentmodule:: jax_tpu_embedding.sparsecore.lib.flax
+ .. currentmodule:: jax_tpu_embedding.sparsecore.lib.flax
 
 You can find the Linen module here: :class:`linen.embed.SparseCoreEmbed`.
 The newer NNX module is here: :class:`nnx.embed.SparseCoreEmbed`.

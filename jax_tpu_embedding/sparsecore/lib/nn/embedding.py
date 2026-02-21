@@ -75,7 +75,7 @@ class EmbeddingVariables(NamedTuple):
 
 
 class SparseDenseMatmulInput(NamedTuple):
-  """The result of preprocessing sparse dense matmul input."""
+  """The result of :func:`preprocess_sparse_dense_matmul_input`."""
 
   lhs_row_pointers: Mapping[str, np.ndarray]
   lhs_embedding_ids: Mapping[str, np.ndarray]
@@ -85,7 +85,7 @@ class SparseDenseMatmulInput(NamedTuple):
 
 @struct.dataclass
 class SparseDenseMatmulInputStats:
-  """The stats of preprocessing sparse dense matmul input.
+  """The stats of :func:`preprocess_sparse_dense_matmul_input`.
 
   Multiple value indicate per partition or per sparsecore values, whereas a
   single value could also be used in cases where maximum is required.
@@ -117,10 +117,10 @@ class SparseDenseMatmulInputStats:
 
 
 class PreprocessedInput(struct.PyTreeNode):
-  """The result of preprocessing input for sparse dense matmul.
+  """The result of :func:`preprocess_sparse_dense_matmul_input`.
 
   Attributes:
-    sparse_dense_matmul_input: The sparse dense matmul input.
+    sparse_dense_matmul_input: The :class:`SparseDenseMatmulInput`.
     num_minibatches: The number of minibatches.
 
   Properties:
@@ -136,7 +136,7 @@ class PreprocessedInput(struct.PyTreeNode):
   )
 
   # Backward compatibility properties and functions. This class acts as a
-  # drop-in replacement for SparseDenseMatmulInput.
+  # drop-in replacement for :class:`SparseDenseMatmulInput`.
   @property
   def lhs_row_pointers(self) -> Mapping[str, np.ndarray]:
     return self.sparse_dense_matmul_input.lhs_row_pointers
@@ -445,9 +445,9 @@ def get_all_reduce_interface(
     minibatching_port: The port number to be used for minibatching
       communication.
     host_id: The current host's index. If `None`, it will be set to
-      `jax.process_index()`.
+      :func:`jax.process_index`.
     host_count: The total number of hosts. If `None`, it will be set to
-      `jax.process_count()`.
+      :func:`jax.process_count`.
 
   Returns:
     An instance of `pybind_input_preprocessing.AllReduceInterface`.
@@ -516,7 +516,8 @@ def preprocess_sparse_dense_matmul_input(
       required for single-host minibatching.
 
   Returns:
-    A tuple of PreprocessResults and SparseDenseMatmulInputStats.
+    A tuple of :class:`PreprocessedInput` and
+    :class:`SparseDenseMatmulInputStats`.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(features, feature_specs, "features", "feature_specs")
@@ -586,7 +587,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     This function assumes that the `values` tensors contain embedding IDs and
     must be of integer type. Custom weights are not supported with this input
     format; uniform weights (1.0) are assumed for all embedding IDs. If you need
-    to provide custom weights, use `preprocess_sparse_dense_matmul_input`
+    to provide custom weights, use :func:`preprocess_sparse_dense_matmul_input`
     instead.
 
   Args:
@@ -628,7 +629,8 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       required for single-host minibatching.
 
   Returns:
-    A tuple of PreprocessResults and SparseDenseMatmulInputStats.
+    A tuple of :class:`PreprocessedInput` and
+    :class:`SparseDenseMatmulInputStats`.
   """
 
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
@@ -826,13 +828,14 @@ def tpu_sparse_dense_matmul(
     perform_unstacking: bool = True,
     use_activation_unstack_primitive: bool = False,
 ) -> Nested[jax.Array]:
-  """Computes the sparse dense matmul.
+  """Computes the :func:`tpu_sparse_dense_matmul`.
 
   This function can be used with jax.jit and/or shard_map or as a complete
   standalone computation.
 
   Args:
-    preprocessed_inputs: The preprocessed inputs for sparse dense matmul.
+    preprocessed_inputs: The :class:`PreprocessedInput` or
+      :class:`SparseDenseMatmulInput`.
     embedding_variables: A tuple of embedding tables and slot variables. The
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
@@ -1079,11 +1082,12 @@ def tpu_sparse_dense_matmul_grad(
     perform_stacking: bool = True,
     use_gradient_stacking_primitive: bool = False,
 ) -> Mapping[str, EmbeddingVariables]:
-  """Computes the updated embedding variables based on the activation gradients.
+  """Computes the updated :class:`EmbeddingVariables` based on the activation gradients.
 
   Args:
     activation_gradients: The activation gradients.
-    preprocessed_inputs: The preprocessed inputs for sparse dense matmul.
+    preprocessed_inputs: The :class:`PreprocessedInput` or
+      :class:`SparseDenseMatmulInput`.
     embedding_variables: A tuple of embedding tables and slot variables. The
       first one is always the embedding table, the following ones are slot
       variables. The tree structure must be identical to the lhs_row_pointers.
@@ -1537,7 +1541,7 @@ def update_preprocessing_parameters(
     updated_params: SparseDenseMatmulInputStats,
     num_sc_per_device: int,
 ) -> None:
-  """Updates the preprocessing parameters in the feature specs.
+  """Updates the preprocessing parameters in the :class:`embedding_spec.FeatureSpec`.
 
   All the features/tables must be stacked already.
 

@@ -28,7 +28,7 @@ costly round-trips of gradients to the host and provides the best performance.
 
 While ``optax`` is a powerful and flexible library for JAX, its role in a SparseCore model is
 for any other non-embedding parameters your model might have. JAX SparseCore provides a helper
-function, ``create_optimizer_for_sc_model``, which applies a given ``optax`` optimizer to your
+function, :func:`create_optimizer_for_sc_model`, which applies a given ``optax`` optimizer to your
 model's other parameters, while ensuring the specialized ``...OptimizerSpec`` logic is used for
 the embedding tables.
 

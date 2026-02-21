@@ -24,18 +24,19 @@ can be used to improve the efficiency of models with many tables and features.
     vocabulary in an embedding table.
 
 By default, feature stacking is performed implicitly by
-``preprocess_sparse_dense_matmul_input``, and activations are unstacked by
-``tpu_sparse_dense_matmul``. Similarly, gradients are stacked by
-``tpu_sparse_dense_matmul_grad``. If you need to handle stacked activations or
-gradients manually, you can set ``perform_unstacking=False`` in
-``tpu_sparse_dense_matmul`` or ``perform_stacking=False`` in
-``tpu_sparse_dense_matmul_grad``.
+:func:`preprocess_sparse_dense_matmul_input`, and activations are unstacked by
+:func:`tpu_sparse_dense_matmul`. Similarly, gradients are stacked by
+:func:`tpu_sparse_dense_matmul_grad`. If you need to handle stacked activations
+or gradients manually, you can set ``perform_unstacking=False`` in
+:func:`tpu_sparse_dense_matmul` or ``perform_stacking=False`` in
+:func:`tpu_sparse_dense_matmul_grad`.
 
 Feature Stacking
 ----------------
 
 Stacking multiple features requires stacking along the batch/sample dimension,
-this is recorded in the `FeatureIdTransformation` structure using these fields:
+this is recorded in the :class:`FeatureIdTransformation` structure using these
+fields:
 
 * Row Offset: records the offset along the batch dimension.
 * Col Shift: rotation of the vocabulary across the embedding table shards to
@@ -43,9 +44,9 @@ this is recorded in the `FeatureIdTransformation` structure using these fields:
 
 .. note::
 
-    The sample dimension is interleaved when using `SPLIT_THEN_STACK`
-    (the default and only strategy). This interleaving helps distribute embedding
-    IDs evenly across SparseCores during embedding lookup and update. This is
+    The sample dimension is interleaved when using `SPLIT_THEN_STACK` (the
+    default and only strategy). This interleaving helps distribute embedding IDs
+    evenly across SparseCores during embedding lookup and update. This is
     because we split the stacked samples along the batch dimension.
 
 Table Stacking (Optional)
@@ -54,14 +55,15 @@ Table Stacking (Optional)
 .. currentmodule:: jax_tpu_embedding.sparsecore.lib.nn.embedding_spec
 
 Table stacking can help in decreasing training time by combining smaller
-embedding tables to create larger ones there by reducing the number of embedding
+embedding tables to create larger ones thereby reducing the number of embedding
 table lookups and updates in forward and backward pass respectively. To do table
-stacking, define the :class:`TableSpec` and :class:`FeatureSpec` as usual and then call
-``auto_stack_tables`` which will update the feature specs and the
-referenced tables specs with required stacking information. All the downstream
-apis for training refer to the feature specs and account for stacking as
-necessary. You do not need to do anything special with regard stacking in
-preparing the inputs. For instance, define ``TableSpecs`` for the embedding tables.
+stacking, define the :class:`TableSpec` and :class:`FeatureSpec` as usual and
+then call :func:`auto_stack_tables` which will update the :class:`FeatureSpec`s
+and the referenced :class:`TableSpec`s with required stacking information. All
+the downstream apis for training refer to the :class:`FeatureSpec`s and account
+for stacking as necessary. You do not need to do anything special with regard to
+stacking in preparing the inputs. For instance, define :class:`TableSpec`s for
+the embedding tables.
 
 .. code:: python
 
@@ -87,7 +89,7 @@ preparing the inputs. For instance, define ``TableSpecs`` for the embedding tabl
     )
 
 
-Define the ``FeatureSpecs`` that would use these tables:
+Define the :class:`FeatureSpec`s that would use these tables:
 
 .. code:: python
 

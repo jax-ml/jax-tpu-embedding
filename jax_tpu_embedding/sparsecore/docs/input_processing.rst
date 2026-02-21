@@ -18,7 +18,8 @@ and :func:`tpu_sparse_dense_matmul_grad` functions.
 
 .. note::
 
-    The resultant preprocess input arrays are instances of :func:`numpy.ndarray`.
+    The resultant preprocess input arrays are instances of
+    :class:`numpy.ndarray`s.
 
 If you have an input that looks similar to
 `tf.SparseTensor <http://www.tensorflow.org/api_docs/python/tf/sparse/SparseTensor>`__
@@ -61,7 +62,7 @@ The algorithm works as follows for each stacked table:
 
 * COO Extraction:
 
-  * From different input source formats such as :func:`numpy.ndarray`,
+  * From different input source formats such as :class:`numpy.ndarray`s,
     ``tf.SparseTensor`` or ``RaggedTensor`` we create an instance of
     ``AbstractInputBatch`` that combines the samples and their weights.
 

@@ -17,12 +17,14 @@ for file storage but users are encouraged to create a custom :class:`FDOClient`
 implementation to better integrate with their training infrastructure.
 
 At some frequency, usually end of epoch, all processes synchronize and load the
-limits from the storage and update the feature specs to use the new limits.
-When the limits are updated in the feature specs the jitted train step needs to
-be recompiled. This can happen automatically if the feature specs object is
-a static argument to the train function. See this
-`JAX document <https://docs.jax.dev/en/latest/jit-compilation.html#marking-arguments-as-static>`__
-that explains how the JIT triggers recompilation when a static argument changes.
+limits from the storage and update the :class:`FeatureSpec`s to use the new
+limits. When the limits are updated in the :class:`FeatureSpec`s the jitted
+train step needs to be recompiled. This can happen automatically if the
+:class:`FeatureSpec`s object is a static argument to the train function. See
+this `JAX document
+<https://docs.jax.dev/en/latest/jit-compilation.html#marking-arguments-as-static>`__
+that explains how the :func:`jax.jit` triggers recompilation when a static
+argument changes.
 
 All the above steps are customizable and a typical flow looks as follows:
 
@@ -42,11 +44,11 @@ All the above steps are customizable and a typical flow looks as follows:
     jit_train_step = jax.jit(train_step, static_argnums=0, ...)
 
     # Create an instance of fdo client
-    fdo_dir = '/tmp/fdo_dumps/"
+    fdo_dir = "/tmp/fdo_dumps/"
     fdo_client = file_fdo_client.NPZFileFDOClient(fdo_dir)
 
     for step in range(100):
-        # Record stats returned from preprocessin step
+        # Record stats returned from preprocessing step
         preprocessed_inputs, stats = embedding.preprocess_sparse_dense_matmul_input(
             ...
         )
@@ -56,14 +58,13 @@ All the above steps are customizable and a typical flow looks as follows:
         # At some frequency, publish and update stats.
         if step % 10 == 0:
             fdo_client.publish()
-            # Add a barrier her so that all processes can finish publishing their stats
-            # and so all the processes can read the same data.
+            # Add a barrier here so that all processes can finish publishing
+            # their stats and so all the processes can read the same data.
             jax.experimental.multihost_utils.sync_global_devices("FDO_publish_barrier")
             # Load FDO stats dumps and update feature specs.
-            loaded_stats: embedding.PreprocessSparseDenseMatmulStats = fdo_client.load()
-            # Any custom code to adjust the stats can go here.
-            # `transform` is a user-defined function to modify the FDO statistics.
-            # For example:
+            loaded_stats: embedding.SparseDenseMatmulInputStats = fdo_client.load()
+            # Any custom code to adjust the stats can go here. `transform` is a
+            # user-defined function to modify the FDO statistics. For example:
             def transform(stats):
                 # Alter stats as desired:
                 # stats.required_buffer_size_per_sc *= 2

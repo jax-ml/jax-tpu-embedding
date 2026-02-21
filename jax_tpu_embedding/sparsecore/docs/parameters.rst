@@ -66,12 +66,12 @@ The appropriate values for these parameters depend on the model size and input
 training data distribution. However, there are some guidelines to estimate and
 tune these values.
 
-Batch sizes specified in ``FeatureSpec`` input and output shapes are typically
-global batch sizes (i.e., across all devices). However, buffer size parameters
-like ``max_ids_per_partition`` are estimated based on data distribution on
-each SparseCore, which depends on the batch size per device or per SparseCore.
-When using heuristics like the ones below, ensure that ``batch_size`` refers to
-the batch size processed by a single SparseCore.
+Batch sizes specified in :class:`FeatureSpec`s' input and output shapes are
+typically global batch sizes (i.e., across all devices). However, buffer size
+parameters like ``max_ids_per_partition`` are estimated based on data
+distribution on each SparseCore, which depends on the batch size per device or
+per SparseCore. When using heuristics like the ones below, ensure that
+``batch_size`` refers to the batch size processed by a single SparseCore.
 
 Firstly, if not much is known, start with the following:
 
@@ -88,7 +88,7 @@ of training, leading to an error like the following:
     set max ids per partition: 256...
 
 Next, set ``allow_id_dropping = true`` in
-``embedding.preprocess_sparse_dense_matmul_input(...)``. This will get past the
+:func:`embedding.preprocess_sparse_dense_matmul_input`. This will get past the
 above error and continue training with dropping any extra ids. While this will
 degrade the model quality, it will allows the trainer to analyze more input
 batches leading to better estimates of the table limits.
@@ -99,14 +99,14 @@ the reported extra ids count in error message above. Note that when
 you can still see the observed limits in logs.
 
 The main function that you will use for preprocessing the input would be
-``preprocess_sparse_dense_matmul_input`` in ``embedding.py``. It returns the
+:func:`preprocess_sparse_dense_matmul_input` in ``embedding.py``. It returns the
 preprocessed inputs as well as the input statistics (for all the above
-parameters). These can also be used to directly update the feature specs as
-follows. Note, this direct approach to updating the ``feature_specs`` should not
-be used in a multi-host setup as different processes will observe different
-stats leading to different buffer sizes. The correct way to update these stats
-is to use the same values across all processes. You can learn more about this
-using :doc:`FDO <advanced/fdo>`.
+parameters). These can also be used to directly update the :class:`FeatureSpec`s
+as follows. Note, this direct approach to updating the :class:`FeatureSpec`s
+should not be used in a multi-host setup as different processes will observe
+different stats leading to different buffer sizes. The correct way to update
+these stats is to use the same values across all processes. You can learn more
+about this using :doc:`FDO <advanced/fdo>`.
 
 .. code:: python
 

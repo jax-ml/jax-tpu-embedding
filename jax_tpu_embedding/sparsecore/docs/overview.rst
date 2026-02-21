@@ -10,14 +10,15 @@ Embedding Specification
 
 .. currentmodule:: jax_tpu_embedding.sparsecore.lib.nn.embedding_spec
 
-Configuring your embedding is done through two primary specs: the :class:`TableSpec`
-and the :class:`FeatureSpec`.
+Configuring your embedding is done through two primary :class:`TableSpec`s and
+:class:`FeatureSpec`s.
 
-A :class:`FeatureSpec` specifies things like the embedding table size (vocabulary and
-embedding sizes) and optimizer.
+A :class:`TableSpec` specifies things like the embedding table size (vocabulary
+and embedding sizes) and optimizer.
 
-A :class:`TableSpec` specifies which table an embedding feature uses (multiple features
-can use the same table) and the input/output shape of the feature lookup.
+A :class:`FeatureSpec` specifies which table an embedding feature uses (multiple
+features can use the same table) and the input/output shape of the feature
+lookup.
 
 Details of the embedding specification are described in the :doc:`Embedding Specification <embedding>`
 page.

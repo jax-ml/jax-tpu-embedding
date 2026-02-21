@@ -75,7 +75,7 @@ def _pad_table(
   """Adds appropriate padding to a table to prepare for stacking.
 
   Args:
-      table_spec: Table specification describing the table to pad.
+      table_spec: :class:`TableSpec` describing the table to pad.
       table_values: Table values array to pad.
       num_shards: Number of shards in the table (typically `global_device_count
         * num_sc_per_device`).
@@ -145,7 +145,7 @@ def stack_and_shard_tables(
   """Stacks and shards tables for use in sparsecore lookups.
 
   Args:
-      table_specs: Nested collection of unstacked table specifications.
+      table_specs: Nested collection of unstacked :class:`TableSpec`s.
       tables: Table values corresponding to the table_specs.
       num_shards: Number of shards in the table (typically `global_device_count
         * num_sc_per_device`).
@@ -274,7 +274,8 @@ def _unshard_and_unstack_table(
 
 
 def _get_stack_name_from_table_spec(table_spec: TableSpec) -> str:
-  """Returns the stack name associated with a single TableSpec."""
+  """Returns the stack name associated with a single :class:`TableSpec`."""
+
   if table_spec.stacked_table_spec:
     return table_spec.stacked_table_spec.stack_name
   return table_spec.name
@@ -288,7 +289,7 @@ def unshard_and_unstack_tables(
   """Unshards and unstacks a collection of tables.
 
   Args:
-      table_specs: Nested collection of unstacked table specifications.
+      table_specs: Nested collection of unstacked :class:`TableSpec`s.
       stacked_tables: Mapping of stacked table names to stacked table values.
       num_shards: Number of shards in the table (typically `global_device_count
         * num_sc_per_device`).
@@ -312,7 +313,7 @@ def get_table_stacks(
   """Extracts lists of tables that are stacked together.
 
   Args:
-      table_specs: Nested collection of table specifications.
+      table_specs: Nested collection of :class:`TableSpec`s.
 
   Returns:
       A mapping of stacked table names to lists of table specifications for

@@ -35,7 +35,7 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
-# Standard initializers are defined in jax.nn.initializers. See
+# Standard initializers are defined in :mod:`jax.nn.initializers`. See
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
 CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
 
@@ -666,7 +666,7 @@ class TableSpec:
   embedding_dim: int
   """The number of columns in the embedding table."""
   initializer: CallableTableInitializer
-  """An initializer for the embedding table. See :func:`jax.nn.initializers`
+  """An initializer for the embedding table. See :mod:`jax.nn.initializers`
   for more details."""
   optimizer: OptimizerSpec
   """An optimizer for the embedding table."""
@@ -797,7 +797,7 @@ class FeatureSpec:
   .. warning::
 
       For all other purposes use
-      `embedding.update_preprocessing_parameters`
+      :func:`embedding.update_preprocessing_parameters`
       to maintain consistency between features, tables and stacked tables.
   """
 
