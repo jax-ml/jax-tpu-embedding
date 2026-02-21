@@ -21,6 +21,7 @@ JAX TPU Embedding documentation
    advanced/optimizers
    advanced/stacking
    advanced/minibatching
+   advanced/embedding_pipelining
 
 JAX SparseCore provides support for leveraging the SparseCore accelerators present in
 TPU generations starting with TPU v5. SparseCores are specialized processors designed
