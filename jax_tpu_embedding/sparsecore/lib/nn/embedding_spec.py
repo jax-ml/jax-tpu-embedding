@@ -11,6 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# Copyright 2024 The JAX SC Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Specs for the SparseCore embedding layer."""
 
 from __future__ import annotations
@@ -788,8 +801,8 @@ class FeatureSpec:
   """Specification for one embedding feature.
 
   Notes:
-    `FeatureSpec` is virtually immutable (for `jax.jit`) using `eq=True` and
-    `unsafe_hash=True`, but has `frozen=False` to allow in-place updates when
+    FeatureSpec is virtually immutable (for ``jax.jit``) using ``eq=True`` and
+    ``unsafe_hash=True``, but has ``frozen=False`` to allow in-place updates when
     preparing for feature stacking or table stacking. See [dataclass
     doc](https://docs.python.org/3/library/dataclasses.html#dataclasses.dataclass)
     for more information.
@@ -806,11 +819,11 @@ class FeatureSpec:
   table_spec: TableSpec
   """The table spec for the feature."""
   input_shape: Sequence[int]
-  """The shape of the input jax array, this is [global_batch_size, feature_valency].
+  """The shape of the input jax array, this is [batch_size, feature_valency].
   The second element can be omitted for ragged input."""
   output_shape: Sequence[int]
   """The expected shape of the output activation jax array, this is
-  [global_batch_size, embedding_dim]."""
+  [batch_size, embedding_dim]."""
   # The transformation to apply to the input feature.
   _id_transformation: FeatureIdTransformation | None = dataclasses.field(
       default=None, compare=False
