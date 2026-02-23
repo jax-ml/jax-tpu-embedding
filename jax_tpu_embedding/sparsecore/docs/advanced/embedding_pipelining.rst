@@ -104,6 +104,47 @@ steps 1 to ``num_steps``, signaling that TC should only run in those steps.
   # Pipeline step num_steps + 1: draining (SC bwd only)
   fake_tc_step = not ep_utils.is_output_valid(step_counter, num_steps)
 
+Performance and Correctness Considerations for Boundary Steps
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+While it might seem tempting to use a single unified step function with internal
+conditional logic (like ``jax.lax.cond``) to handle boundary steps, doing so
+introduces several significant limitations:
+
+* **XLA Optimization and Offloading:** Primitives like ``jax.lax.cond`` can
+  act as barriers that prevent the XLA compiler from effectively scheduling
+  SparseCore (SC) programs in parallel with TensorCore (TC) operations.
+  Avoiding these branches is a prerequisite for advanced optimizations such as
+  **SC Collective Offloading**, where communication primitives are scheduled
+  on SparseCores to hide latency.
+* **Layout and Performance:** Internal branching can lead to inconsistent
+  layout assignments across step boundaries. If activations from a previous
+  step are in a TensorCore layout when the next step expects a SparseCore
+  layout, it can cause "weird interactions" or performance degradation due to
+  unexpected conversions.
+* **Numeric Correctness:** Using ``jax.lax.cond`` within SparseCore embedding
+  programs has been observed to produce incorrect results or numeric
+  inconsistencies in some cases. Handling these steps at the host level (by
+  toggling a **static** ``fake_tc_step`` flag) ensures consistent behavior
+  and model convergence.
+
+.. note::
+   The ``fake_tc_step`` argument should be marked as **static** in your
+   ``jax.jit``'ed train function. This ensures that JAX generates separate,
+   optimized straight-line HLO for the filling, steady-state, and draining
+   phases of the pipeline.
+
+.. warning::
+   When pipelining is enabled, do not manually toggle ``perform_unstacking``
+   or ``perform_stacking`` within your SparseCore stages. The state carried
+   by the pipeline (activations and gradients) should remain in the format
+   expected by the pipeline utilities to avoid suboptimal layout conversions.
+
+If host-side branching is not feasible, an alternative strategy is to use a
+**gradient multiplier** (passing 0 during filling/draining and 1 during
+steady state) to the optimizer. This avoids the use of ``jax.lax.cond``
+while still preventing weight updates during boundary steps.
+
 Providing dummy inputs during pipeline draining
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
