@@ -221,6 +221,99 @@ Additionally, you can use ``jax.lax.with_sharding_constraint`` inside your
 TensorCore function to ensure that activations or intermediate tensors maintain
 the desired sharding layout during the computation.
 
+Performance and Correctness Considerations for Boundary Steps
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+While it might seem tempting to use a single unified step function with internal
+conditional logic (like ``jax.lax.cond``) to handle boundary steps, doing so
+introduces several significant limitations:
+
+* **XLA Optimization and Offloading:** Primitives like ``jax.lax.cond`` can
+  act as barriers that prevent the XLA compiler from effectively scheduling
+  SparseCore (SC) programs in parallel with TensorCore (TC) operations.
+  Avoiding these branches is a prerequisite for advanced optimizations such as
+  **SC Collective Offloading**, where communication primitives are scheduled
+  on SparseCores to hide latency.
+* **Layout and Performance:** Internal branching can lead to inconsistent
+  layout assignments across step boundaries. If activations from a previous
+  step are in a TensorCore layout when the next step expects a SparseCore
+  layout, it can cause "weird interactions" or performance degradation due to
+  unexpected conversions.
+* **Numeric Correctness:** Using ``jax.lax.cond`` within SparseCore embedding
+  programs has been observed to produce incorrect results or numeric
+  inconsistencies in some cases. Handling these steps at the host level (by
+  toggling a **static** ``fake_tc_step`` flag) ensures consistent behavior
+  and model convergence.
+
+.. note::
+   The ``fake_tc_step`` argument should be marked as **static** in your
+   ``jax.jit``'ed train function. This ensures that JAX generates separate,
+   optimized straight-line HLO for the filling, steady-state, and draining
+   phases of the pipeline.
+
+Optimal Ordering of Stacking and Unstacking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For maximum performance, the ordering of data formatting operations relative
+to the pipeline stages is critical. It is recommended to shift unstacking and
+stacking logic into the TensorCore (TC) stage:
+
+1. **SC Forward:** Should return "raw" stacked activations. Disable automatic
+   unstacking (e.g., set ``unstack_embedding_activations=False``).
+2. **TC Stage (Unstack):** Unstack the activations as the **FIRST** operation
+   inside your ``tc_function``.
+3. **TC Stage (Stack):** Stack the gradients as the **LAST** operation
+   inside your ``tc_function``.
+4. **SC Backward:** Should receive stacked gradients and perform the update.
+   Disable automatic stacking (e.g., set ``stack_embedding_gradients=False``).
+
+This pattern typically looks like the following:
+
+.. code-block:: python
+
+  def sc_fwd_fn(sparse_inputs, variables):
+    # Disable unstacking in the SC stage
+    return embedding.embedding_lookup(
+        sparse_inputs, variables, unstack_embedding_activations=False), None
+
+  def tc_fn(activations, dense_inputs, state, sc_fwd_aux):
+    # 1. Unstack activations as the FIRST operation in TC
+    activations = embedding.unstack_embedding_activations(activations)
+
+    # ... Model logic ...
+
+    # 2. Stack gradients as the LAST operation in TC
+    grads = embedding.stack_embedding_gradients(grads)
+    return grads, output, state, tc_aux
+
+  def sc_bwd_fn(sparse_inputs, grads, variables):
+    # Disable stacking in the SC stage
+    return embedding.apply_gradients(
+        grads, sparse_inputs, variables, stack_embedding_gradients=False), None
+
+Following this order—``(SC_BWD -> SC_FWD)@SC`` and
+``(Unstack -> TC_Logic -> Stack)@TC``—allows XLA to optimize scheduling and
+enables collectives offloading without requiring explicit queueing mechanisms.
+This alignment has been shown to reduce step time by **5-6ms** in production
+workloads.
+
+.. warning::
+   **Initializers:** Avoid using all-zero initializers for embedding tables
+   when pipelining is enabled. The interaction between delayed updates and
+   zero-initialized tables can lead to unstable convergence. Use non-zero
+   initialization schemes to ensure healthy training dynamics from step 0.
+
+.. warning::
+   When pipelining is enabled, do not manually toggle ``perform_unstacking``
+   or ``perform_stacking`` within your SparseCore stages. The state carried
+   by the pipeline (activations and gradients) should remain in the format
+   expected by the pipeline utilities to avoid suboptimal layout conversions.
+
+If host-side branching is not feasible, an alternative strategy is to use a
+**gradient multiplier** (passing 0 during filling/draining and 1 during
+steady state) to the optimizer. This avoids the use of ``jax.lax.cond``
+while still preventing weight updates during boundary steps.
+
 Internal Implementation Details
 -------------------------------
 
