@@ -81,60 +81,6 @@ pytype_strict_binary(
     ],
 )
 
-# bazel test -c opt --test_output=all //jax_tpu_embedding/sparsecore/examples/shakespeare:jax_sc_shakespeare_test
-tpu_py_strict_test(
-    name = "jax_sc_shakespeare_pmap_test",
-    srcs = ["jax_sc_shakespeare_pmap.py"],
-    args = [
-        "--dump_dir=sponge",
-        # "--vmodule=jax_sc_shakespeare_pmap=1",
-    ],
-    main = "jax_sc_shakespeare_pmap.py",
-    deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//third_party/jax:tpu_support",
-        pypi_requirement("absl:app"),
-        pypi_requirement("absl/flags"),
-        pypi_requirement("absl/logging"),
-        pypi_requirement("clu:metrics"),
-        pypi_requirement("clu:parameter_overview"),
-        pypi_requirement("flax:core"),
-        pypi_requirement("jax"),
-        pypi_requirement("numpy"),
-        pypi_requirement("optax"),
-    ],
-)
-
-pytype_strict_binary(
-    name = "jax_sc_shakespeare_pmap",
-    srcs = ["jax_sc_shakespeare_pmap.py"],
-    args = [
-        "--alsologtostderr",
-        # TPU chip configuration,
-    ],
-    main = "jax_sc_shakespeare_pmap.py",
-    tags = ["oss_exclude"],
-    deps = [
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
-        "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        "//third_party/jax:tpu_support",
-        pypi_requirement("absl:app"),
-        pypi_requirement("absl/flags"),
-        pypi_requirement("absl/logging"),
-        pypi_requirement("clu:metrics"),
-        pypi_requirement("clu:parameter_overview"),
-        pypi_requirement("flax:core"),
-        pypi_requirement("jax"),
-        pypi_requirement("numpy"),
-        pypi_requirement("optax"),
-    ],
-)
-
 tpu_py_strict_test(
     name = "jax_sc_shakespeare_pipelined_jit_test",
     srcs = ["jax_sc_shakespeare_pipelined_jit_test.py"],
