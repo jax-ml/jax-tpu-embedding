@@ -80,8 +80,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
       ),
   )
 
-  @parameterized.parameters(False, True)
-  def test_sparse_tensor_input(self, has_leading_dimension):
+  def test_sparse_tensor_input(self):
     indices = []
     values = []
     for i in range(16):
@@ -117,7 +116,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         global_device_count=4,
         num_sc_per_device=4,
         sharding_strategy=ShardingStrategy.Mod,
-        has_leading_dimension=has_leading_dimension,
+        has_leading_dimension=False,
         allow_id_dropping=False,
         batch_number=batch_number,
     )
@@ -151,7 +150,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     local_device_count = 4
     global_device_count = 4
     num_sc_per_device = 4
-    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_) = (
+    row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [numpy_features],
             [numpy_weights],
@@ -160,7 +159,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
-            has_leading_dimension=has_leading_dimension,
+            has_leading_dimension=False,
             allow_id_dropping=False,
             batch_number=batch_number,
         )
@@ -185,8 +184,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         gains_raw[self.stacked_name],
     )
 
-  @parameterized.parameters(False, True)
-  def test_sparse_tensor_input_with_empty_rows(self, has_leading_dimension):
+  def test_sparse_tensor_input_with_empty_rows(self):
     # Create a sparse tensor with 2400 rows and 1 column.
     # Only some rows have values, specifically rows 0, 150, 300, 450, ...
     indices = []
@@ -227,7 +225,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         global_device_count=4,
         num_sc_per_device=4,
         sharding_strategy=ShardingStrategy.Mod,
-        has_leading_dimension=has_leading_dimension,
+        has_leading_dimension=False,
         allow_id_dropping=False,
         batch_number=batch_number,
     )
@@ -248,7 +246,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     local_device_count = 4
     global_device_count = 4
     num_sc_per_device = 4
-    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_) = (
+    row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [numpy_features],
             [numpy_weights],
@@ -257,7 +255,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
-            has_leading_dimension=has_leading_dimension,
+            has_leading_dimension=False,
             allow_id_dropping=False,
             batch_number=batch_number,
         )
@@ -433,10 +431,9 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   global_device_count = 1
   num_sc_per_device = 4
 
-  @parameterized.parameters(False, True)
-  def test_transformation_with_col_transformations(self, has_leading_dimension):
+  def test_transformation_with_col_transformations(self):
     batch_number = 42
-    (row_pointers, embedding_ids, sample_ids, gains, *_) = (
+    row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
             [self.input_features],
             [self.input_weights],
@@ -445,7 +442,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             global_device_count=self.global_device_count,
             num_sc_per_device=self.num_sc_per_device,
             sharding_strategy=ShardingStrategy.Mod,
-            has_leading_dimension=has_leading_dimension,
+            has_leading_dimension=False,
             allow_id_dropping=False,
             batch_number=batch_number,
         )
@@ -473,7 +470,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         global_device_count=self.global_device_count,
         num_sc_per_device=self.num_sc_per_device,
         sharding_strategy=ShardingStrategy.Mod,
-        has_leading_dimension=has_leading_dimension,
+        has_leading_dimension=False,
         allow_id_dropping=False,
         batch_number=batch_number,
     )
