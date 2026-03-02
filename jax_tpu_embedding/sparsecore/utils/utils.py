@@ -35,7 +35,7 @@ NUM_SC_PER_DEVICE_MAP = {
 }
 
 
-def num_sparsecores_per_device(device: jax.Device | None = None):
+def num_sparsecores_per_device(device: jax.Device | None = None) -> int:
   """Determine the number of sparsecores available on a device.
 
   Args:
@@ -58,11 +58,6 @@ def num_sparsecores_per_device(device: jax.Device | None = None):
     raise ValueError(f'Unknown sparsecore count for device kind: {device_kind}')
 
   return NUM_SC_PER_DEVICE_MAP[device_kind]
-
-
-def tree_summary(tree):
-  """Returns the shape and dtype of each leaf in the tree."""
-  return jax.tree.map(lambda x: (x.shape, x.dtype), tree)
 
 
 def embedding_table_format(
