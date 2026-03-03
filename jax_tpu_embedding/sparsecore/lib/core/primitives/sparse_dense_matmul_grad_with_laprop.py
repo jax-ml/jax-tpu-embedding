@@ -91,6 +91,8 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_laprop."""
   del enable_minibatching
@@ -106,6 +108,8 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
       max_unique_ids_per_partition,
       computation_name,
       sharding_strategy,
+      min_value,
+      max_value,
   )
 
   utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
@@ -155,6 +159,8 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     computation_name: str = "laprop_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_laprop."""
 
@@ -337,6 +343,9 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     # updated_table = embedding_table - learning_rate * update
     updated_embedding_table = hlo.subtract(
         embedding_table_, hlo.multiply(lr_, update)
+    )
+    updated_embedding_table = utils.maybe_clip_params(
+        updated_embedding_table, min_value, max_value
     )
 
     updated_tables = hlo.tuple([updated_embedding_table, mu_new, nu_new])

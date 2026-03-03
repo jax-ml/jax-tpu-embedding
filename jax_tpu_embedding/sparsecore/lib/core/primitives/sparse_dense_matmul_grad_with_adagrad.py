@@ -75,6 +75,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
   del enable_minibatching
@@ -90,6 +92,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
       max_unique_ids_per_partition,
       computation_name,
       sharding_strategy,
+      min_value,
+      max_value,
   )
 
   utils.ensure_dtype(accumulator, np.float32, "accumulator")
@@ -126,6 +130,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     computation_name: str = "adgrad_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad."""
   sdmm_sgd_config = {
@@ -146,6 +152,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
   embedding_table_dim_size = ir.RankedTensorType(
       embedding_table.type
   ).get_dim_size(1)
+
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
@@ -206,8 +213,11 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
             hlo.sqrt(new_accumulator),
         ),
     )
+    updated_embedding_table_clipped = utils.maybe_clip_params(
+        updated_embedding_table, min_value, max_value
+    )
     updated_embedding_tables = hlo.tuple(
-        [updated_embedding_table, new_accumulator]
+        [updated_embedding_table_clipped, new_accumulator]
     )
     func_dialect.ReturnOp([updated_embedding_tables])
 

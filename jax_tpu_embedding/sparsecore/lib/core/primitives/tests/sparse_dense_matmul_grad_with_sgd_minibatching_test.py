@@ -557,7 +557,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
         dtype=np.float32,
     )
 
-    np.testing.assert_equal(updated_emb_table, expected_emb_activations)
+    np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
   def test_sc_emb_forward_pass_2_batches_per_core(self):
     # Essentialy the inputs are repeated twice, so the expected updates are
@@ -1222,6 +1222,179 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     )
 
     np.testing.assert_equal(updated_emb_table, expected_emb_activations)
+
+  def test_sc_emb_forward_pass_2_batches_per_core_with_bounds(self):
+    # Tests a single SC evaluating gradients from _BATCH_SIZE sequences.
+    # The SC separates this batch logically into _NUM_MINIBATCHES chunks.
+    batch_size = 16
+    num_sc = 1
+    num_minibatches_per_sc = 2
+    max_ids_per_partition = 16
+    assert batch_size % (num_sc * num_minibatches_per_sc) == 0
+    mini_batch_size = batch_size // (num_sc * num_minibatches_per_sc)
+
+    # Process the input.
+    # Total ids = 15. Pad by 1 to reach `max_ids_per_partition=16`.
+    #
+    # Assume 1 SC device, `num_minibatches_per_sc` = 2 minibatches.
+    # Assume 4 samples (rows) per minibatch.
+    #
+    # minibatch 1:
+    #   sample 0: [5]
+    #   sample 1: [3]
+    #   sample 2: [9, 1]
+    #   sample 3: [6, 12, 0]
+    # minibatch 2:
+    #   sample 4: [4]
+    #   sample 5: [15, 13, 11]
+    #   sample 6: [7, 8, 14, 2]
+    #   sample 7: [10]
+
+    # Note that `lhs_local_sample_ids` is expected to be strictly increasing.
+    # Also, `lhs_local_sample_ids` will indicate the sample idx globally
+    # within the minibatches.
+    # That means that if we provide the samples: [s3, s1, s2] and [s4, s2],
+    # the unpadded inputs must be arranged as:
+    # lhs_local_sample_ids = [s1, s2, s3,   s2, s4]
+    # minibatches =            [mb_1]       [mb_2]
+    # Which gives us:
+    # lhs_row_pointers = [0, 1, 2, 3, 4, 5]
+    unpadded_lhs_row_pointers = jnp.array(
+        [0, 1, 2, 4, 7, 8, 11, 15, 16], jnp.int32
+    )
+    unpadded_lhs_local_embedding_ids = jnp.array(
+        [5, 3, 1, 9, 0, 6, 12, 4, 11, 13, 15, 2, 7, 8, 14, 10], jnp.int32
+    )
+    unpadded_lhs_local_sample_ids = jnp.array(
+        [0, 1, 2, 2, 3, 3, 3, 4, 5, 5, 5, 6, 6, 6, 6, 7], jnp.int32
+    )
+    unpadded_lhs_gains = jnp.array(
+        [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        ],
+        jnp.float32,
+    )
+
+    # The primitive expects fixed-size dense tensors.
+    # Padding requirements:
+    # 1. Row pointers require that padding corresponds to empty rows at the end.
+    # 2. Embedding ids, sample ids, and gains must just be right-padded by 0s.
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = _pad_input_tensors(
+        unpadded_lhs_row_pointers,
+        unpadded_lhs_local_embedding_ids,
+        unpadded_lhs_local_sample_ids,
+        unpadded_lhs_gains,
+        mini_batch_size,
+        max_ids_per_partition,
+    )
+
+    emb_table_sharded = einops.rearrange(
+        self.emb_table,
+        "(v c s) f -> c (s v) f",
+        c=1,
+        s=1,
+    )
+
+    # Provide gradients for the physical batch size.
+    z_grad = jnp.full(
+        (
+            self.max_device_batch_size,
+            self.emb_size,
+        ),
+        0.01,
+        np.float32,
+    )
+
+    # Do the embedding update.
+    updated_emb_table = (
+        self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            num_minibatches_per_sc,
+            emb_table_sharded[0],
+            z_grad,
+            0.01,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="sgd_minibatching_test_computation",
+            sharding_strategy=1,
+            enable_minibatching=True,
+            min_value=2.0,
+            max_value=12.0,
+        )
+    )
+
+    expected_emb_activations = np.array(
+        [
+            [0.0] * 8,
+            [1.0] * 8,
+            [2.0] * 8,
+            [2.9999] * 8,
+            [3.9999] * 8,
+            [4.9999] * 8,
+            [5.9999] * 8,
+            [6.9999] * 8,
+            [7.9999] * 8,
+            [8.9999] * 8,
+            [9.9999] * 8,
+            [10.9999] * 8,
+            [11.9999] * 8,
+            [12.0] * 8,
+            [14.0] * 8,
+            [15.0] * 8,
+            [16.0] * 8,
+            [17.0] * 8,
+            [18.0] * 8,
+            [19.0] * 8,
+            [20.0] * 8,
+            [21.0] * 8,
+            [22.0] * 8,
+            [23.0] * 8,
+            [24.0] * 8,
+            [25.0] * 8,
+            [26.0] * 8,
+            [27.0] * 8,
+            [28.0] * 8,
+            [29.0] * 8,
+            [30.0] * 8,
+            [31.0] * 8,
+        ],
+        dtype=np.float32,
+    )
+    updated_emb_table = einops.rearrange(
+        updated_emb_table[jnp.newaxis, :, :],
+        "c (s v) f -> (v c s) f",
+        c=1,
+        s=1,
+    )
+
+    logging.info("updated %s", updated_emb_table)
+    np.testing.assert_allclose(
+        updated_emb_table, expected_emb_activations, rtol=1e-4, atol=1e-4
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -16,7 +16,47 @@
 from typing import Any
 
 from jax import typing as jax_typing
+from jax.extend.mlir import ir
+from jax.extend.mlir.dialects import stablehlo as hlo
 import numpy as np
+
+
+def maybe_clip_params(
+    x: ir.Value,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> ir.OpResult:
+  """Clips the embedding table to the min and max values."""
+  if min_value is None and max_value is None:
+    return x
+
+  x_type = ir.RankedTensorType(x.type)
+  bcast_dims = ir.DenseI64ArrayAttr.get([])
+
+  min_bound = None
+  if min_value is not None:
+    min_scalar = hlo.constant(
+        ir.DenseElementsAttr.get(np.array(min_value, dtype=np.float32))
+    )
+    min_bound = hlo.broadcast_in_dim(
+        result=x_type, operand=min_scalar, broadcast_dimensions=bcast_dims
+    )
+
+  max_bound = None
+  if max_value is not None:
+    max_scalar = hlo.constant(
+        ir.DenseElementsAttr.get(np.array(max_value, dtype=np.float32))
+    )
+    max_bound = hlo.broadcast_in_dim(
+        result=x_type, operand=max_scalar, broadcast_dimensions=bcast_dims
+    )
+
+  if min_bound is not None and max_bound is not None:
+    return hlo.clamp(min_bound, x, max_bound)
+  if min_bound is not None:
+    return hlo.maximum(min_bound, x)
+  assert max_bound is not None
+  return hlo.minimum(max_bound, x)
 
 
 def ensure_dtype(check: Any, expected_type: Any, object_name: str):
@@ -45,6 +85,8 @@ def validate_abstract_eval_params(
     max_unique_ids_per_partition: int,
     computation_name: str,
     sharding_strategy: int,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ):
   """Validate parameters common to all sparsecore grad primitives."""
   ensure_dtype(lhs_row_pointers, np.int32, "lhs_row_pointers")
@@ -99,3 +141,9 @@ def validate_abstract_eval_params(
     )
   if not computation_name:
     raise ValueError("computation_name must be non-empty")
+
+  if min_value is not None and max_value is not None and min_value > max_value:
+    raise ValueError(
+        "min_value must be less than or equal to max_value, got"
+        f" {min_value} and {max_value}"
+    )

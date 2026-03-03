@@ -95,6 +95,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_ftrl."""
   del multiply_linear_by_learning_rate
@@ -112,6 +114,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
       max_unique_ids_per_partition,
       computation_name,
       sharding_strategy,
+      min_value,
+      max_value,
   )
 
   utils.ensure_dtype(accumulator, np.float32, "accumulator")
@@ -167,6 +171,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     computation_name: str = "ftrl_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_ftrl."""
 
@@ -323,7 +329,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
 
     # Weight update
     w_new = hlo.divide(numerator, denominator)
-
+    w_new = utils.maybe_clip_params(w_new, min_value, max_value)
     func_dialect.ReturnOp([hlo.tuple([w_new, accumulator_new, linear_new])])
 
     operands = [

@@ -93,6 +93,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
     computation_name: str = "adagrad_momentum_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adagrad_momentum."""
   del enable_minibatching
@@ -108,6 +110,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
       max_unique_ids_per_partition,
       computation_name,
       sharding_strategy,
+      min_value,
+      max_value,
   )
   utils.ensure_dtype(accumulator, np.float32, "accumulator")
   utils.ensure_dtype(momentum, np.float32, "momentum")
@@ -157,6 +161,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     computation_name: str = "adagrad_momentum_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[ir.Value, ir.Value, ir.Value]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad_momentum."""
   sdmm_config = {
@@ -292,6 +298,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
 
     # Weight update
     w_new_ = hlo.subtract(embedding_table_, lr_update_)
+    w_new_ = utils.maybe_clip_params(w_new_, min_value, max_value)
 
     out_tuple = hlo.tuple([w_new_, accum_new_, m_new_])
     func_dialect.ReturnOp([out_tuple])

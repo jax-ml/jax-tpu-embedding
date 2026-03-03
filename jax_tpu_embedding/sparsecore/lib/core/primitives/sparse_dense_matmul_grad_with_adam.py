@@ -92,6 +92,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Abstract eval for sparse_dense_matmul_adam."""
   del enable_minibatching
@@ -107,6 +109,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
       max_unique_ids_per_partition,
       computation_name,
       sharding_strategy,
+      min_value,
+      max_value,
   )
 
   utils.ensure_dtype(alpha_t, np.float32, "alpha_t")
@@ -156,6 +160,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
     computation_name: str = "adam_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Lowering for sparse_dense_matmul_grad_with_adam."""
 
@@ -338,6 +344,7 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
     )
 
     theta = hlo.subtract(embedding_table_, update)
+    theta = utils.maybe_clip_params(theta, min_value, max_value)
 
     updated_tables = hlo.tuple([theta, momentum_new, velocity_new])
 

@@ -62,6 +62,8 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_abstract_eval(
     sharding_strategy: int = 1,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> np.ndarray:
   """Abstract eval for sparse_dense_matmul_sgd."""
   del enable_minibatching
@@ -78,6 +80,8 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_abstract_eval(
       max_unique_ids_per_partition,
       computation_name,
       sharding_strategy,
+      min_value,
+      max_value,
   )
 
   return embedding_table
@@ -104,6 +108,8 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
     computation_name: str = "sgd_optimizer_update",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ) -> np.ndarray:
   """Lowering for sdmm_sgd."""
   sdmm_sgd_config = {
@@ -190,6 +196,9 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
     # updated_embedding_table = embedding_table - lr * grad
     updated_embedding_table = hlo.subtract(
         entry_block.arguments[1], gradient_update
+    )
+    updated_embedding_table = utils.maybe_clip_params(
+        updated_embedding_table, min_value, max_value
     )
     updated_embedding_tables = hlo.tuple([updated_embedding_table])
     func_dialect.ReturnOp([updated_embedding_tables])

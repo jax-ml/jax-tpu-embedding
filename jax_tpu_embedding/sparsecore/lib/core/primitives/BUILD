@@ -241,6 +241,8 @@ pytype_strict_library(
     srcs = ["utils.py"],
     deps = [
         pypi_requirement("jax"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
         pypi_requirement("numpy"),
     ],
 )

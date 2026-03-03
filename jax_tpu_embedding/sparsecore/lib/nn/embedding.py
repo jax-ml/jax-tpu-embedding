@@ -1078,6 +1078,9 @@ def tpu_sparse_dense_matmul_grad(
     enable_minibatching: bool = False,
     perform_stacking: bool = True,
     use_gradient_stacking_primitive: bool = False,
+    embedding_var_limits: (
+        Mapping[str, tuple[None | float, None | float]] | None
+    ) = None,
 ) -> Mapping[str, EmbeddingVariables]:
   """Computes the updated embedding variables based on the activation gradients.
 
@@ -1099,6 +1102,8 @@ def tpu_sparse_dense_matmul_grad(
       internally. If False, assumes activation_gradients are already stacked.
     use_gradient_stacking_primitive: If True, uses the gradient stacking
       primitive.
+    embedding_var_limits: The minimum and maximum values of the embedding table.
+      If None, no bounds are applied.
 
   Returns:
     The updated activation embedding variables.
@@ -1206,6 +1211,10 @@ def tpu_sparse_dense_matmul_grad(
     if isinstance(stack_table_spec.optimizer, embedding_spec.FTRLOptimizerSpec):
       extra_kwargs["multiply_linear_by_learning_rate"] = (
           stack_table_spec.optimizer.multiply_linear_by_learning_rate
+      )
+    if embedding_var_limits is not None:
+      extra_kwargs["min_value"], extra_kwargs["max_value"] = (
+          embedding_var_limits[stacked_table_name]
       )
     updated_variables = optimizer_primitive.bind(
         row_pointer,

@@ -47,9 +47,9 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
       [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32
   )
   learning_rate = 0.001
-  beta_1 = 0.9
-  beta_2 = 0.999
-  epsilon = 1e-8
+  beta_1 = np.float32(0.9)
+  beta_2 = np.float32(0.999)
+  epsilon = np.float32(1e-8)
   max_ids_per_partition = 16
   max_unique_ids_per_partition = 16
 
@@ -492,15 +492,15 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     embedding_table_sharded = self._shard_table(embedding_table)
 
     momentum = jnp.full(embedding_table.shape, 0.002, np.float32)
-    momentum_sharded = self._shard_table(momentum)
+    momentum_sharded = self._shard_table(np.asarray(momentum))
 
     velocity = jnp.full(embedding_table.shape, 0.004, np.float32)
-    velocity_sharded = self._shard_table(velocity)
+    velocity_sharded = self._shard_table(np.asarray(velocity))
 
-    learning_rate = 0.1
-    beta_1 = 0.9
-    beta_2 = 0.999
-    epsilon = 1e-8
+    learning_rate = np.float32(0.1)
+    beta_1 = np.float32(0.9)
+    beta_2 = np.float32(0.999)
+    epsilon = np.float32(1e-8)
 
     activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.012, np.float32)
     table_grad = self._compute_table_grad(
@@ -514,10 +514,10 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
     expected_embedding_table, expected_momentum, expected_velocity = (
         self._compute_adam(
-            embedding_table,
-            table_grad,
-            momentum,
-            velocity,
+            np.asarray(embedding_table),
+            np.asarray(table_grad),
+            np.asarray(momentum),
+            np.asarray(velocity),
             learning_rate,
             beta_1,
             beta_2,
@@ -559,6 +559,141 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
+        )
+    )
+    updated_table = self._unshard_table(updated_table[jnp.newaxis, :, :])
+    updated_momentum = self._unshard_table(updated_momentum[jnp.newaxis, :, :])
+    updated_velocity = self._unshard_table(updated_velocity[jnp.newaxis, :, :])
+
+    np.testing.assert_allclose(expected_momentum, updated_momentum)
+    np.testing.assert_allclose(expected_velocity, updated_velocity)
+    np.testing.assert_allclose(expected_embedding_table, updated_table)
+
+  def test_adam_optimizer_update_with_bounds(self):
+    # Process the input.
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(16)],
+        dtype=np.float32,
+    )
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
+    )
+    embedding_table = (
+        np.array(
+            [[(i + 1) for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)]
+        )
+        .reshape(_VOCAB_SIZE, _EMB_SIZE)
+        .astype(np.float32)
+    )
+    embedding_table_sharded = self._shard_table(embedding_table)
+
+    momentum = jnp.full(embedding_table.shape, 0.002, np.float32)
+    momentum_sharded = self._shard_table(np.asarray(momentum))
+
+    velocity = jnp.full(embedding_table.shape, 0.004, np.float32)
+    velocity_sharded = self._shard_table(np.asarray(velocity))
+
+    learning_rate = np.float32(0.1)
+    beta_1 = np.float32(0.9)
+    beta_2 = np.float32(0.999)
+    epsilon = np.float32(1e-8)
+
+    activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.012, np.float32)
+    table_grad = self._compute_table_grad(
+        input_tensor, input_weights, activations_grad
+    )
+
+    # Compute the expected values.  The optimizer only applies a sparse update:
+    # only rows involved in the forward pass are updated.
+    sparse_rows = jnp.unique(jnp.concatenate(np.unstack(input_tensor)))
+    sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
+    expected_embedding_table, expected_momentum, expected_velocity = (
+        self._compute_adam(
+            np.asarray(embedding_table),
+            np.asarray(table_grad),
+            np.asarray(momentum),
+            np.asarray(velocity),
+            learning_rate,
+            beta_1,
+            beta_2,
+            epsilon,
+            t=0,
+        )
+    )
+
+    # Apply manual bounds clamping matching exactly what SparseCore should do.
+    # Applying limits matching `min_value=2.0` and `max_value=10.0`.
+    expected_embedding_table = jnp.clip(expected_embedding_table, 2.0, 10.0)
+
+    # Restore unaffected rows.
+    expected_embedding_table = jnp.where(
+        sparse_update_mask, expected_embedding_table, embedding_table
+    )
+    expected_momentum = jnp.where(
+        sparse_update_mask, expected_momentum, momentum
+    )
+    expected_velocity = jnp.where(
+        sparse_update_mask, expected_velocity, velocity
+    )
+
+    c_2 = jnp.sqrt(1.0 - beta_2)
+    alpha_t = learning_rate * c_2 / (1.0 - beta_1)
+    epsilon_hat = epsilon * c_2
+
+    updated_table, updated_momentum, updated_velocity = (
+        sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive.bind(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,  # num_minibatches_per_physical_sparse_core
+            embedding_table_sharded[0],
+            momentum_sharded[0],
+            velocity_sharded[0],
+            activations_grad,
+            alpha_t,
+            beta_1,
+            beta_2,
+            epsilon_hat,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="optimizer_test_computation",
+            sharding_strategy=1,
+            min_value=2.0,
+            max_value=10.0,
         )
     )
     updated_table = self._unshard_table(updated_table[jnp.newaxis, :, :])
