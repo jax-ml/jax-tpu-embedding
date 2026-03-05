@@ -68,3 +68,14 @@ tpu_py_strict_test(
         pypi_requirement("optax"),
     ],
 )
+
+tpu_py_strict_test(
+    name = "jax2tf_tpu_test",
+    srcs = ["jax2tf_tpu_test.py"],
+    deps = [
+        "//third_party/jax:tpu_support",
+        pypi_requirement("jax"),
+        pypi_requirement("jax/experimental/jax2tf"),
+        pypi_requirement("tensorflow"),
+    ],
+)
