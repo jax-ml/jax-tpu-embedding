@@ -449,8 +449,10 @@ void CheckBufferUsage(int max_required_buffer_size_per_device,
   const double usage_ratio =
       static_cast<double>(max_required_buffer_size_per_device) /
       static_cast<double>(coo_buffer_size_per_device);
-  static constexpr double kUsageDivergence = 0.2;
-  if (std::abs(usage_ratio - 1.0) >= kUsageDivergence) {
+  static constexpr double kBufferUsageTolerance = 0.8;
+  // If either we use less than 80% of what was allocated, or if the required
+  // buffer size is larger than what was allocated, log a warning.
+  if (usage_ratio < kBufferUsageTolerance || usage_ratio > 1.0) {
     // The size of one element in the COO buffer, which consists of an embedding
     // ID (int), a sample ID (int), and a gain value (float).
     static constexpr int kElementSize =
