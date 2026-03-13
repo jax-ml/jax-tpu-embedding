@@ -464,6 +464,37 @@ def get_all_reduce_interface(
   ).get_all_reduce_interface()
 
 
+def _check_has_leading_dimension(has_leading_dimension: bool) -> None:
+  """Issues a deprecation warning if has_leading_dimension is True."""
+  if has_leading_dimension:
+    warnings.warn(
+        "The 'has_leading_dimension=True' option is deprecated and will be"
+        " removed in a future version. This option was used to support"
+        " jax.pmap, which is deprecated. Please migrate to jax.jit and"
+        " jax.shard_map, and use 'has_leading_dimension=False'. See"
+        " https://docs.jax.dev/en/latest/migrate_pmap.html for guidance.",
+        DeprecationWarning,
+    )
+
+
+def _check_minibatching_args(
+    enable_minibatching: bool,
+    all_reduce_interface: pybind_input_preprocessing.AllReduceInterface | None,
+    local_device_count: int,
+    global_device_count: int,
+) -> None:
+  """Checks arguments related to minibatching."""
+  if (
+      enable_minibatching
+      and all_reduce_interface is None
+      and local_device_count < global_device_count
+  ):
+    raise ValueError(
+        "all_reduce_interface must be provided when minibatching is enabled for"
+        " multi-host."
+    )
+
+
 def preprocess_sparse_dense_matmul_input(
     features: Nested[ArrayLike],
     features_weights: Nested[ArrayLike] | None,
@@ -519,21 +550,21 @@ def preprocess_sparse_dense_matmul_input(
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+
+  _check_has_leading_dimension(has_leading_dimension)
+
   _assert_same_structure(features, feature_specs, "features", "feature_specs")
   if features_weights is not None:
     _assert_same_structure(
         features_weights, feature_specs, "features_weights", "feature_specs"
     )
 
-  if (
-      enable_minibatching
-      and all_reduce_interface is None
-      and local_device_count < global_device_count
-  ):
-    raise ValueError(
-        "all_reduce_interface must be provided when minibatching is enabled for"
-        " multi-host."
-    )
+  _check_minibatching_args(
+      enable_minibatching,
+      all_reduce_interface,
+      local_device_count,
+      global_device_count,
+  )
 
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
@@ -630,6 +661,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
+  _check_has_leading_dimension(has_leading_dimension)
 
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(indices, feature_specs, "indices", "feature_specs")
@@ -638,15 +670,12 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       dense_shapes, feature_specs, "dense_shapes", "feature_specs"
   )
 
-  if (
-      enable_minibatching
-      and all_reduce_interface is None
-      and local_device_count < global_device_count
-  ):
-    raise ValueError(
-        "all_reduce_interface must be provided when minibatching is enabled for"
-        " multi-host."
-    )
+  _check_minibatching_args(
+      enable_minibatching,
+      all_reduce_interface,
+      local_device_count,
+      global_device_count,
+  )
 
   *csr_inputs, num_minibatches, stats = (
       pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
