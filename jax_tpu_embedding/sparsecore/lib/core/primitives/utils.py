@@ -109,19 +109,19 @@ def validate_abstract_eval_params(
   )
   ensure_dim(activations_grad, 2, "activations_grad")
   if (
-      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape
-      or lhs_gains.shape != lhs_local_embedding_ids.shape
-      or len(lhs_local_sample_ids.shape) != 1
+      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape  # pytype: disable=attribute-error  # jax-arraylike
+      or lhs_gains.shape != lhs_local_embedding_ids.shape  # pytype: disable=attribute-error  # jax-arraylike
+      or len(lhs_local_sample_ids.shape) != 1  # pytype: disable=attribute-error  # jax-arraylike
   ):
     raise ValueError(
         "LHS sample IDs, embedding IDs, and gains must all have "
-        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "
-        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"
+        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "  # pytype: disable=attribute-error  # jax-arraylike
+        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"  # pytype: disable=attribute-error  # jax-arraylike
     )
-  if embedding_table.shape[-1] != activations_grad.shape[-1]:
+  if embedding_table.shape[-1] != activations_grad.shape[-1]:  # pytype: disable=attribute-error  # jax-arraylike
     raise ValueError(
         "embedding_table and activations_grad must have equal feature (minor)"
-        f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"
+        f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"  # pytype: disable=attribute-error  # jax-arraylike
     )
 
   if sharding_strategy != 1:
