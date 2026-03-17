@@ -188,6 +188,6 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   )  # type: ignore
 
 
-mlir.register_lowering(
+mlir.register_lowering(  # pytype: disable=wrong-arg-types
     tpu_sparse_dense_matmul_csr_primitive, _tpu_sparse_dense_matmul_csr_lowering
 )

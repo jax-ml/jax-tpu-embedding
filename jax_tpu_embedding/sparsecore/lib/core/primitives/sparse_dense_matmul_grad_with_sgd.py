@@ -240,7 +240,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
 
   tuple_op = hlo.GetTupleElementOp(op, 0)
   tuple_op = _annotate_sparse_compute_type(tuple_op)
-  return tuple_op.results
+  return tuple_op.results  # pytype: disable=bad-return-type
 
 
 mlir.register_lowering(

@@ -268,7 +268,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
   accumulator_tuple_op = hlo.GetTupleElementOp(op, 1)
   accumulator_tuple_op = _annotate_sparse_compute_type(accumulator_tuple_op)
 
-  return (
+  return (  # pytype: disable=bad-return-type
       table_tuple_op.results,
       accumulator_tuple_op.results,
   )

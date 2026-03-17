@@ -28,7 +28,7 @@ def maybe_clip_params(
 ) -> ir.OpResult:
   """Clips the embedding table to the min and max values."""
   if min_value is None and max_value is None:
-    return x
+    return x  # pytype: disable=bad-return-type
 
   x_type = ir.RankedTensorType(x.type)
   bcast_dims = ir.DenseI64ArrayAttr.get([])

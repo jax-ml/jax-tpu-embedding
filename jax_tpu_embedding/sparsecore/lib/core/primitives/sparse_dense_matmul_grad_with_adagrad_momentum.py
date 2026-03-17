@@ -361,7 +361,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
       hlo.GetTupleElementOp(custom_call_op, 2)
   )
 
-  return (
+  return (  # pytype: disable=bad-return-type
       updated_table_op.results,
       updated_accumulator_op.results,
       updated_momentum_op.results,

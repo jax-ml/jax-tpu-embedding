@@ -405,7 +405,7 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
   velocity_tuple_op = hlo.GetTupleElementOp(op, 2)
   velocity_tuple_op = _annotate_sparse_compute_type(velocity_tuple_op)
 
-  return (
+  return (  # pytype: disable=bad-return-type
       table_tuple_op.results,
       momentum_tuple_op.results,
       velocity_tuple_op.results,
