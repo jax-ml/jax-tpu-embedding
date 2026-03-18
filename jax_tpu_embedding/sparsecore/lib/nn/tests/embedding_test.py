@@ -1192,6 +1192,106 @@ class EmbeddingTest(parameterized.TestCase):
         preprocessed_inputs_ragged.lhs_gains["table_a"],
     )
 
+  def test_get_symbolic_sparse_dense_matmul_input(self):
+    # Arrange
+    devices = jax.devices()[:1]
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=6,
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_a",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_spec_a = embedding_spec.FeatureSpec(
+        table_spec=table_spec_a,
+        input_shape=(16, 1),
+        output_shape=(16, table_spec_a.embedding_dim),
+        name="feature_spec_a",
+    )
+    feature_specs = {
+        "feature_spec_a": feature_spec_a,
+    }
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        global_device_count=1,
+        num_sc_per_device=num_sc_per_device,
+    )
+    input_tensor = np.array(
+        [
+            np.array([5, 4, 2], dtype=np.int32),
+            np.array([3], dtype=np.int32),
+            np.array([9], dtype=np.int32),
+            np.array([1, 9, 16], dtype=np.int32),
+            np.array([6, 12, 1, 10], dtype=np.int32),
+            np.array([12, 19], dtype=np.int32),
+            np.array([0, 15, 2], dtype=np.int32),
+            np.array([4, 28, 25], dtype=np.int32),
+            np.array([15, 0], dtype=np.int32),
+            np.array([13], dtype=np.int32),
+            np.array([11], dtype=np.int32),
+            np.array([7, 1], dtype=np.int32),
+            np.array([8, 9], dtype=np.int32),
+            np.array([14, 14, 14], dtype=np.int32),
+            np.array([2, 28], dtype=np.int32),
+            np.array([10, 16], dtype=np.int32),
+        ],
+        dtype=object,
+    )
+    # Get actual shapes via eager eval
+    preprocessed_inputs_actual, _ = (
+        embedding.preprocess_sparse_dense_matmul_input(
+            {"feature_spec_a": input_tensor},
+            features_weights=None,
+            feature_specs=feature_specs,
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=num_sc_per_device,
+            sharding_strategy="MOD",
+            batch_number=0,
+            has_leading_dimension=False,
+            enable_minibatching=False,
+        )
+    )
+
+    # Act
+    preprocessed_inputs_symbolic = (
+        embedding.get_symbolic_sparse_dense_matmul_input(
+            feature_specs,
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=num_sc_per_device,
+            sharding_strategy="MOD",
+            has_leading_dimension=False,
+            enable_minibatching=False,
+        )
+    )
+
+    # Assert
+    self.assertEqual(
+        preprocessed_inputs_symbolic.lhs_row_pointers["table_a"].shape,
+        preprocessed_inputs_actual.lhs_row_pointers["table_a"].shape,
+    )
+    self.assertEqual(
+        preprocessed_inputs_symbolic.lhs_embedding_ids["table_a"].shape,
+        preprocessed_inputs_actual.lhs_embedding_ids["table_a"].shape,
+    )
+    self.assertEqual(
+        preprocessed_inputs_symbolic.lhs_sample_ids["table_a"].shape,
+        preprocessed_inputs_actual.lhs_sample_ids["table_a"].shape,
+    )
+    self.assertEqual(
+        preprocessed_inputs_symbolic.lhs_gains["table_a"].shape,
+        preprocessed_inputs_actual.lhs_gains["table_a"].shape,
+    )
+    self.assertEqual(
+        preprocessed_inputs_symbolic.num_minibatches.shape,
+        preprocessed_inputs_actual.num_minibatches.shape,
+    )
+
 
 class UpdatePreprocessingParametersTest(absltest.TestCase):
 

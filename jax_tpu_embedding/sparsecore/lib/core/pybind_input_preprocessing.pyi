@@ -66,3 +66,23 @@ def PreprocessSparseDenseMatmulSparseCooInput(
     enable_minibatching: bool = False,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
+
+# Type alias for the return tuple of the GetSparseDenseMatmulInputShapes function
+PreprocessShapesOutput = tuple[
+    dict[str, tuple[int, ...]],  # lhs_row_pointers
+    dict[str, tuple[int, ...]],  # lhs_embedding_ids
+    dict[str, tuple[int, ...]],  # lhs_sample_ids
+    dict[str, tuple[int, ...]],  # lhs_gains
+    tuple[int, ...],  # num_minibatches_arr shape
+]
+
+def GetSparseDenseMatmulInputShapes(
+    feature_specs: Sequence[embedding_spec.FeatureSpec],
+    local_device_count: int,
+    global_device_count: int,
+    *,
+    num_sc_per_device: int,
+    sharding_strategy: ShardingStrategy = ShardingStrategy.MOD,
+    has_leading_dimension: bool = False,
+    enable_minibatching: bool = False
+) -> PreprocessShapesOutput: ...
