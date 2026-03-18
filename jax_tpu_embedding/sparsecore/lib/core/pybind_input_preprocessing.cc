@@ -229,6 +229,68 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
       has_leading_dimension, allow_id_dropping, batch_number,
       enable_minibatching, all_reduce_interface);
 }
+
+py::tuple PyGetSparseDenseMatmulInputShapes(
+    py::list feature_specs, int local_device_count, int global_device_count,
+    int num_sc_per_device, ShardingStrategy sharding_strategy,
+    bool has_leading_dimension, bool enable_minibatching) {
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = local_device_count,
+      .global_device_count = global_device_count,
+      .num_sc_per_device = num_sc_per_device,
+      .sharding_strategy = sharding_strategy,
+      .allow_id_dropping = false,
+      .enable_minibatching = enable_minibatching,
+      .batch_number = 0,
+      .all_reduce_interface = nullptr,
+  };
+  const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables = GetStackedTableMetadata(feature_specs);
+
+  py::dict lhs_row_pointers_shape;
+  py::dict lhs_embedding_ids_shape;
+  py::dict lhs_sample_ids_shape;
+  py::dict lhs_gains_shape;
+
+  int row_pointers_size_per_device = options.GetRowPointersSizePerDevice();
+
+  for (const auto& [stacked_table_name, stacked_table_metadata] :
+       stacked_tables) {
+    int coo_buffer_size_per_device =
+        ComputeCooBufferSizePerDevice(options, stacked_table_metadata);
+
+    if (has_leading_dimension) {
+      lhs_row_pointers_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count, row_pointers_size_per_device);
+      lhs_embedding_ids_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count, coo_buffer_size_per_device);
+      lhs_sample_ids_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count, coo_buffer_size_per_device);
+      lhs_gains_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count, coo_buffer_size_per_device);
+    } else {
+      lhs_row_pointers_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count * row_pointers_size_per_device);
+      lhs_embedding_ids_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count * coo_buffer_size_per_device);
+      lhs_sample_ids_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count * coo_buffer_size_per_device);
+      lhs_gains_shape[py::str(stacked_table_name)] =
+          py::make_tuple(local_device_count * coo_buffer_size_per_device);
+    }
+  }
+
+  py::tuple minibatches_arr_shape;
+  if (has_leading_dimension) {
+    minibatches_arr_shape = py::make_tuple(local_device_count, 1);
+  } else {
+    minibatches_arr_shape = py::make_tuple(local_device_count);
+  }
+
+  return py::make_tuple(lhs_row_pointers_shape, lhs_embedding_ids_shape,
+                        lhs_sample_ids_shape, lhs_gains_shape, minibatches_arr_shape);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
@@ -262,6 +324,13 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
         py::arg("enable_minibatching") = false,
         py::arg("all_reduce_interface") = nullptr);
+  m.def("GetSparseDenseMatmulInputShapes",
+        &PyGetSparseDenseMatmulInputShapes, py::arg("feature_specs"),
+        py::arg("local_device_count"), py::arg("global_device_count"),
+        py::kw_only(), py::arg("num_sc_per_device"),
+        py::arg("sharding_strategy") = ShardingStrategy::kMod,
+        py::arg("has_leading_dimension") = false,
+        py::arg("enable_minibatching") = false);
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())
       .def_readonly("max_ids_per_partition",

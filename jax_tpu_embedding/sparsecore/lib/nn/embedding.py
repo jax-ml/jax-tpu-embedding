@@ -83,6 +83,15 @@ class SparseDenseMatmulInput(NamedTuple):
   lhs_gains: Mapping[str, np.ndarray]
 
 
+class SymbolicSparseDenseMatmulInput(NamedTuple):
+  """Symbolic equivalent of SparseDenseMatmulInput."""
+
+  lhs_row_pointers: Mapping[str, jax.ShapeDtypeStruct]
+  lhs_embedding_ids: Mapping[str, jax.ShapeDtypeStruct]
+  lhs_sample_ids: Mapping[str, jax.ShapeDtypeStruct]
+  lhs_gains: Mapping[str, jax.ShapeDtypeStruct]
+
+
 @struct.dataclass
 class SparseDenseMatmulInputStats:
   """The stats of preprocessing sparse dense matmul input.
@@ -151,6 +160,36 @@ class PreprocessedInput(struct.PyTreeNode):
 
   @property
   def lhs_gains(self) -> Mapping[str, np.ndarray]:
+    return self.sparse_dense_matmul_input.lhs_gains
+
+  def __iter__(self):
+    warnings.warn(
+        "Please use attributed lookup on sparse_dense_matmul_input attribute.",
+        DeprecationWarning,
+    )
+    return iter(self.sparse_dense_matmul_input)
+
+
+class SymbolicPreprocessedInput(struct.PyTreeNode):
+  """Symbolic equivalent of PreprocessedInput."""
+
+  sparse_dense_matmul_input: SymbolicSparseDenseMatmulInput
+  num_minibatches: jax.ShapeDtypeStruct
+
+  @property
+  def lhs_row_pointers(self) -> Mapping[str, jax.ShapeDtypeStruct]:
+    return self.sparse_dense_matmul_input.lhs_row_pointers
+
+  @property
+  def lhs_embedding_ids(self) -> Mapping[str, jax.ShapeDtypeStruct]:
+    return self.sparse_dense_matmul_input.lhs_embedding_ids
+
+  @property
+  def lhs_sample_ids(self) -> Mapping[str, jax.ShapeDtypeStruct]:
+    return self.sparse_dense_matmul_input.lhs_sample_ids
+
+  @property
+  def lhs_gains(self) -> Mapping[str, jax.ShapeDtypeStruct]:
     return self.sparse_dense_matmul_input.lhs_gains
 
   def __iter__(self):
@@ -673,6 +712,69 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   return (
       PreprocessedInput(SparseDenseMatmulInput(*csr_inputs), minibatches_arr),
       SparseDenseMatmulInputStats.from_cc(stats),
+  )
+
+
+def get_symbolic_sparse_dense_matmul_input(
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    local_device_count: int,
+    global_device_count: int,
+    *,
+    num_sc_per_device: int | None = None,
+    sharding_strategy: str = "MOD",
+    has_leading_dimension: bool = False,
+    enable_minibatching: bool = False,
+) -> SymbolicPreprocessedInput:
+  """Computes the shapes of the preprocessed sparse dense matmul input.
+
+  This avoids evaluating the actual Pybind payload and executing C++ data logic
+  on dummy tensors. It statically infers the shape configuration for JAX
+  tracing.
+
+  Args:
+    feature_specs: The feature specs.
+    local_device_count: The number of local devices.
+    global_device_count: The number of global devices.
+    num_sc_per_device: The number of sparse cores per device.
+    sharding_strategy: The sharding strategy.
+    has_leading_dimension: Whether the output has a leading dimension.
+    enable_minibatching: Whether minibatching is enabled.
+
+  Returns:
+    A SymbolicPreprocessedInput containing jax.ShapeDtypeStructs for elements.
+  """
+
+  num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  (
+      lhs_row_pointers_shape,
+      lhs_embedding_ids_shape,
+      lhs_sample_ids_shape,
+      lhs_gains_shape,
+      minibatches_shape,
+  ) = pybind_input_preprocessing.GetSparseDenseMatmulInputShapes(
+      jax.tree.leaves(feature_specs),
+      local_device_count,
+      global_device_count,
+      num_sc_per_device=num_sc_per_device,
+      sharding_strategy=sharding_strategy_to_enum(sharding_strategy),
+      has_leading_dimension=has_leading_dimension,
+      enable_minibatching=enable_minibatching,
+  )
+
+  def _to_shapedtypestruct(shape_dict: dict[str, tuple[int, ...]], dtype):
+    return {k: jax.ShapeDtypeStruct(v, dtype) for k, v in shape_dict.items()}
+
+  lhs_row_pointers = _to_shapedtypestruct(lhs_row_pointers_shape, np.int32)
+  lhs_embedding_ids = _to_shapedtypestruct(lhs_embedding_ids_shape, np.int32)
+  lhs_sample_ids = _to_shapedtypestruct(lhs_sample_ids_shape, np.int32)
+  lhs_gains = _to_shapedtypestruct(lhs_gains_shape, np.float32)
+  minibatches_arr = jax.ShapeDtypeStruct(minibatches_shape, np.int32)
+
+  return SymbolicPreprocessedInput(
+      SymbolicSparseDenseMatmulInput(
+          lhs_row_pointers, lhs_embedding_ids, lhs_sample_ids, lhs_gains
+      ),
+      minibatches_arr,
   )
 
 
