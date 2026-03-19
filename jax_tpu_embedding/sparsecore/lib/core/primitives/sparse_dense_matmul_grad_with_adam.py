@@ -24,9 +24,11 @@ as inputs and returns the updated embedding table and momentum, velocity values.
 
 import functools
 import json
+from typing import Sequence
 from typing import Tuple
 
 import jax
+from jax import core
 import jax.extend as jex
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
@@ -59,7 +61,7 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _hlo_const(x: np.ndarray) -> ir.Value:
+def _hlo_const(x: core.ShapedArray) -> ir.Value:
   return hlo.constant(
       ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
   )
@@ -72,15 +74,15 @@ def _hlo_f32(x: float, emb_dim: int):
 
 
 def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    momentum: np.ndarray,
-    velocity: np.ndarray,
-    activations_grad: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
+    momentum: core.ShapedArray,
+    velocity: core.ShapedArray,
+    activations_grad: core.ShapedArray,
     alpha_t: np.float32,
     beta_1: np.float32,
     beta_2: np.float32,
@@ -94,7 +96,7 @@ def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[core.ShapedArray, core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_adam."""
   del enable_minibatching
   utils.validate_abstract_eval_params(
@@ -141,19 +143,19 @@ tpu_sparse_dense_matmul_grad_with_adam_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    momentum: np.ndarray,
-    velocity: np.ndarray,
-    activations_grad: np.ndarray,
-    alpha_t: np.ndarray,
-    beta_1: np.ndarray,
-    beta_2: np.ndarray,
-    epsilon_hat: np.ndarray,
+    lhs_row_pointers: ir.BlockArgument,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: ir.BlockArgument,
+    embedding_table: ir.BlockArgument,
+    momentum: ir.BlockArgument,
+    velocity: ir.BlockArgument,
+    activations_grad: ir.BlockArgument,
+    alpha_t: ir.BlockArgument,
+    beta_1: ir.BlockArgument,
+    beta_2: ir.BlockArgument,
+    epsilon_hat: ir.BlockArgument,
     *_,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -162,7 +164,7 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[Sequence[ir.Value], Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for sparse_dense_matmul_grad_with_adam."""
 
   sdmm_adam_config = {
@@ -405,7 +407,7 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
   velocity_tuple_op = hlo.GetTupleElementOp(op, 2)
   velocity_tuple_op = _annotate_sparse_compute_type(velocity_tuple_op)
 
-  return (  # pytype: disable=bad-return-type
+  return (
       table_tuple_op.results,
       momentum_tuple_op.results,
       velocity_tuple_op.results,

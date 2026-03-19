@@ -15,6 +15,7 @@
 
 import functools
 import json
+from typing import Sequence
 
 import jax
 from jax import core
@@ -44,12 +45,12 @@ tpu_sparse_dense_matmul_csr_primitive.def_impl(
 
 # Define the abstract eval function for the sparse dense matmul primitive.
 def _tpu_sparse_dense_matmul_csr_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
     *,
     device_batch_size: int,
     max_ids_per_partition: int,
@@ -58,7 +59,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
     quantization_config: tuple[float, float, int] | None = None,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
-):
+) -> core.ShapedArray:
   """Abstract eval for sdmm_csr."""
 
   del enable_minibatching
@@ -108,13 +109,13 @@ tpu_sparse_dense_matmul_csr_primitive.def_abstract_eval(
 
 # Define the mlir lowering rule for the sparse dense matmul primitive.
 def _tpu_sparse_dense_matmul_csr_lowering(
-    ctx,
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
+    ctx: mlir.LoweringRuleContext,
+    lhs_row_pointers: ir.BlockArgument,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: ir.BlockArgument,
+    embedding_table: ir.BlockArgument,
     *,
     device_batch_size: int,
     max_ids_per_partition: int,
@@ -122,7 +123,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     sharding_strategy: int = 1,
     quantization_config: tuple[float, float, int] | None = None,
     enable_minibatching: bool = False,
-) -> jnp.ndarray:
+) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
 
@@ -188,6 +189,6 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   )  # type: ignore
 
 
-mlir.register_lowering(  # pytype: disable=wrong-arg-types
+mlir.register_lowering(
     tpu_sparse_dense_matmul_csr_primitive, _tpu_sparse_dense_matmul_csr_lowering
 )

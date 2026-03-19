@@ -15,7 +15,7 @@
 
 from typing import Any
 
-from jax import typing as jax_typing
+from jax import core
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import stablehlo as hlo
 import numpy as np
@@ -25,10 +25,10 @@ def maybe_clip_params(
     x: ir.Value,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> ir.OpResult:
+) -> ir.Value:
   """Clips the embedding table to the min and max values."""
   if min_value is None and max_value is None:
-    return x  # pytype: disable=bad-return-type
+    return x
 
   x_type = ir.RankedTensorType(x.type)
   bcast_dims = ir.DenseI64ArrayAttr.get([])
@@ -74,13 +74,13 @@ def ensure_dim(check: Any, expected_dim: int, object_name: str):
 
 
 def validate_abstract_eval_params(
-    lhs_row_pointers: jax_typing.ArrayLike,
-    lhs_local_embedding_ids: jax_typing.ArrayLike,
-    lhs_local_sample_ids: jax_typing.ArrayLike,
-    lhs_gains: jax_typing.ArrayLike,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: jax_typing.ArrayLike,
-    activations_grad: jax_typing.ArrayLike,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
+    activations_grad: core.ShapedArray,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str,
@@ -109,19 +109,19 @@ def validate_abstract_eval_params(
   )
   ensure_dim(activations_grad, 2, "activations_grad")
   if (
-      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape  # pytype: disable=attribute-error  # jax-arraylike
-      or lhs_gains.shape != lhs_local_embedding_ids.shape  # pytype: disable=attribute-error  # jax-arraylike
-      or len(lhs_local_sample_ids.shape) != 1  # pytype: disable=attribute-error  # jax-arraylike
+      lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape
+      or lhs_gains.shape != lhs_local_embedding_ids.shape
+      or len(lhs_local_sample_ids.shape) != 1
   ):
     raise ValueError(
         "LHS sample IDs, embedding IDs, and gains must all have "
-        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "  # pytype: disable=attribute-error  # jax-arraylike
-        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"  # pytype: disable=attribute-error  # jax-arraylike
+        f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "
+        f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"
     )
-  if embedding_table.shape[-1] != activations_grad.shape[-1]:  # pytype: disable=attribute-error  # jax-arraylike
+  if embedding_table.shape[-1] != activations_grad.shape[-1]:
     raise ValueError(
         "embedding_table and activations_grad must have equal feature (minor)"
-        f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"  # pytype: disable=attribute-error  # jax-arraylike
+        f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"
     )
 
   if sharding_strategy != 1:

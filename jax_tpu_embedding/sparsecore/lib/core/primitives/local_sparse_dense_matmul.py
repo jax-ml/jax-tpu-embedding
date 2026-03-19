@@ -15,6 +15,7 @@
 
 import functools
 import json
+from typing import Sequence
 
 import jax
 from jax import core
@@ -25,6 +26,7 @@ from jax.interpreters import mlir
 from jax.interpreters import xla
 import jax.numpy as jnp
 import numpy as np
+
 
 # Define the local sparse dense matmul primitive.
 tpu_local_sparse_dense_matmul_primitive = jex.core.Primitive(
@@ -42,13 +44,13 @@ tpu_local_sparse_dense_matmul_primitive.def_impl(
 
 # Define the abstract eval function for the sparse dense matmul primitive.
 def _tpu_local_sparse_dense_matmul_abstract_eval(
-    lhs_local_embedding_ids: jnp.ndarray,
-    lhs_local_sample_ids: jnp.ndarray,
-    lhs_gains: jnp.ndarray,
-    embedding_table: jnp.ndarray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    embedding_table: core.ShapedArray,
     *_,
     device_batch_size: int,
-):
+) -> core.ShapedArray:
   """Abstract eval for sdmm."""
 
   if lhs_local_sample_ids.dtype != np.int32:
@@ -100,14 +102,14 @@ tpu_local_sparse_dense_matmul_primitive.def_abstract_eval(
 
 # Define the mlir lowering rule for the local sparse dense matmul primitive.
 def _tpu_local_sparse_dense_matmul_lowering(
-    ctx,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    embedding_table: np.ndarray,
+    ctx: mlir.LoweringRuleContext,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    embedding_table: ir.BlockArgument,
     *,
     device_batch_size: int,
-) -> jnp.ndarray:
+) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul."""
   (out_aval,) = ctx.avals_out
 

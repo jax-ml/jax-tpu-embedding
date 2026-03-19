@@ -39,6 +39,7 @@ index 0.
 import functools
 import json
 from typing import Callable, Tuple
+from typing import Sequence
 
 import jax
 from jax import core
@@ -69,21 +70,21 @@ tpu_sparse_dense_matmul_optimizer_grad_primitive.def_impl(
 
 
 def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_variables: np.ndarray,
-    activations_grad: np.ndarray,
-    hyperparameters: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_variables: core.ShapedArray,
+    activations_grad: core.ShapedArray,
+    hyperparameters: core.ShapedArray,
     *_,
     optimizer_generator: Callable[[mlir.LoweringRuleContext, str, int], None],
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
-):
+) -> Tuple[core.ShapedArray, ...]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
   utils.validate_abstract_eval_params(
       lhs_row_pointers=lhs_row_pointers,
@@ -130,21 +131,21 @@ tpu_sparse_dense_matmul_optimizer_grad_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: mlir.ir.BlockArgument,
-    lhs_local_embedding_ids: mlir.ir.BlockArgument,
-    lhs_local_sample_ids: mlir.ir.BlockArgument,
-    lhs_gains: mlir.ir.BlockArgument,
-    num_minibatches_per_physical_sparse_core: mlir.ir.BlockArgument,
-    embedding_variables: mlir.ir.BlockArgument,
-    activations_grad: mlir.ir.BlockArgument,
-    hyperparameters: mlir.ir.BlockArgument,
+    lhs_row_pointers: ir.BlockArgument,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: ir.BlockArgument,
+    embedding_variables: ir.BlockArgument,
+    activations_grad: ir.BlockArgument,
+    hyperparameters: ir.BlockArgument,
     *,
     optimizer_generator: Callable[[mlir.LoweringRuleContext, str, int], None],
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
-) -> Tuple[np.ndarray, ...]:
+) -> Tuple[Sequence[ir.Value], ...]:
   """Lowering for sparse_dense_matmul_optimizer_grad."""
   del num_minibatches_per_physical_sparse_core
   num_slot_variables = (

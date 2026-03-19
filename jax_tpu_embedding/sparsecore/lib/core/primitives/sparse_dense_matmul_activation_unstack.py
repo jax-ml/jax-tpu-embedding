@@ -14,7 +14,7 @@
 """Primitive tpu_sparse_dense_matmul_activation_unstack."""
 
 import functools
-
+from typing import Sequence
 import jax
 from jax import core
 from jax.experimental.layout import Layout
@@ -40,11 +40,11 @@ tpu_sparse_dense_matmul_activation_unstack_primitive.def_impl(
 
 
 def _tpu_sparse_dense_matmul_activation_unstack_abstract_eval(
-    stacked_activations,
+    stacked_activations: core.ShapedArray,
     *,
     per_feature_batch_sizes: tuple[int, ...],
     per_feature_dims: tuple[int, ...],
-):
+) -> Sequence[core.ShapedArray]:
   """Abstract evaluation for tpu_sparse_dense_matmul_activation_unstack."""
   del stacked_activations
   activations = []
@@ -61,12 +61,12 @@ tpu_sparse_dense_matmul_activation_unstack_primitive.def_abstract_eval(
 
 
 def _tpu_sparse_dense_matmul_activation_unstack_lowering(
-    ctx,
-    stacked_activations,
+    ctx: mlir.LoweringRuleContext,
+    stacked_activations: ir.BlockArgument,
     *,
     per_feature_batch_sizes: tuple[int, ...],
     per_feature_dims: tuple[int, ...],
-):
+) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_activation_unstack."""
 
   result_types = [

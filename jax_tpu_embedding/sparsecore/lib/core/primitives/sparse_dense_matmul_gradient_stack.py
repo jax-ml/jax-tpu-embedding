@@ -14,7 +14,7 @@
 """Primitive tpu_sparse_dense_matmul_gradient_stack."""
 
 import functools
-
+from typing import Sequence
 import jax
 from jax import core
 from jax.experimental.layout import Layout
@@ -39,10 +39,10 @@ tpu_sparse_dense_matmul_gradient_stack_primitive.def_impl(
 
 
 def _tpu_sparse_dense_matmul_gradient_stack_abstract_eval(
-    *unstacked_gradients,
+    *unstacked_gradients: core.ShapedArray,
     stacked_batch_size: int,
     stacked_feature_dim: int,
-):
+) -> core.ShapedArray:
   """Abstract evaluation for tpu_sparse_dense_matmul_gradient_stack."""
   del unstacked_gradients
   return core.ShapedArray(
@@ -56,11 +56,11 @@ tpu_sparse_dense_matmul_gradient_stack_primitive.def_abstract_eval(
 
 
 def _tpu_sparse_dense_matmul_gradient_stack_lowering(
-    ctx,
-    *stacked_activations,
+    ctx: mlir.LoweringRuleContext,
+    *stacked_activations: ir.BlockArgument,
     stacked_batch_size: int,
     stacked_feature_dim: int,
-):
+) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_gradient_stack."""
   # ensure stacked_activations have greater or equal to one element.
   assert len(stacked_activations) >= 1

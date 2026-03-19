@@ -27,6 +27,7 @@ import json
 from typing import Tuple
 
 import jax
+from jax import core
 import jax.extend as jex
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
@@ -36,6 +37,7 @@ from jax.interpreters import xla
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
+
 
 tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive = (
     jex.core.Primitive("sparse_dense_matmul_grad_with_adagrad_momentum")
@@ -59,7 +61,7 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _hlo_const(arr: np.ndarray) -> ir.Value:
+def _hlo_const(arr: core.ShapedArray) -> ir.Value:
   """Return an HLO constant from a NumPy array (any rank)."""
   return hlo.constant(
       ir.DenseElementsAttr.get(arr, type=mlir.dtype_to_ir_type(arr.dtype))
@@ -72,15 +74,15 @@ def _hlo_f32(x: float, emb_dim: int) -> ir.Value:
 
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    momentum: np.ndarray,
-    activations_grad: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
+    accumulator: core.ShapedArray,
+    momentum: core.ShapedArray,
+    activations_grad: core.ShapedArray,
     learning_rate: np.float32,
     momentum_param: np.float32,
     beta2: np.float32,
@@ -140,21 +142,21 @@ tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: mlir.ir.BlockArgument,
-    lhs_local_embedding_ids: mlir.ir.BlockArgument,
-    lhs_local_sample_ids: mlir.ir.BlockArgument,
-    lhs_gains: mlir.ir.BlockArgument,
-    num_minibatches_per_physical_sparse_core: mlir.ir.BlockArgument,
-    embedding_table: mlir.ir.BlockArgument,
-    accumulator: mlir.ir.BlockArgument,
-    momentum: mlir.ir.BlockArgument,
-    activations_grad: mlir.ir.BlockArgument,
-    learning_rate: mlir.ir.BlockArgument,
-    momentum_param: mlir.ir.BlockArgument,
-    beta2: mlir.ir.BlockArgument,
-    epsilon: mlir.ir.BlockArgument,
-    exponent: mlir.ir.BlockArgument,
-    use_nesterov: mlir.ir.BlockArgument,
+    lhs_row_pointers: ir.BlockArgument,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: ir.BlockArgument,
+    embedding_table: ir.BlockArgument,
+    accumulator: ir.BlockArgument,
+    momentum: ir.BlockArgument,
+    activations_grad: ir.BlockArgument,
+    learning_rate: ir.BlockArgument,
+    momentum_param: ir.BlockArgument,
+    beta2: ir.BlockArgument,
+    epsilon: ir.BlockArgument,
+    exponent: ir.BlockArgument,
+    use_nesterov: ir.BlockArgument,
     *,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -361,7 +363,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
       hlo.GetTupleElementOp(custom_call_op, 2)
   )
 
-  return (  # pytype: disable=bad-return-type
+  return (
       updated_table_op.results,
       updated_accumulator_op.results,
       updated_momentum_op.results,

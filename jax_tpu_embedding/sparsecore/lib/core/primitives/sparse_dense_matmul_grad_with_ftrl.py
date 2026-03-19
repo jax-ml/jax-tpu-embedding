@@ -25,9 +25,11 @@ embedding table and FTRL states.
 
 import functools
 import json
+from typing import Sequence
 from typing import Tuple
 
 import jax
+from jax import core
 import jax.extend as jex
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
@@ -60,7 +62,7 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _hlo_const(x: np.ndarray) -> ir.Value:
+def _hlo_const(x: core.ShapedArray) -> ir.Value:
   return hlo.constant(
       ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
   )
@@ -73,15 +75,15 @@ def _hlo_f32(x: float, emb_dim: int):
 
 
 def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    linear: np.ndarray,
-    activations_grad: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
+    accumulator: core.ShapedArray,
+    linear: core.ShapedArray,
+    activations_grad: core.ShapedArray,
     learning_rate: np.float32,
     learning_rate_power: np.float32,
     l1_regularization_strength: np.float32,
@@ -97,7 +99,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[core.ShapedArray, core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_ftrl."""
   del multiply_linear_by_learning_rate
   del enable_minibatching
@@ -150,20 +152,20 @@ tpu_sparse_dense_matmul_grad_with_ftrl_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: mlir.ir.BlockArgument,
-    lhs_local_embedding_ids: mlir.ir.BlockArgument,
-    lhs_local_sample_ids: mlir.ir.BlockArgument,
-    lhs_gains: mlir.ir.BlockArgument,
-    num_minibatches_per_physical_sparse_core: mlir.ir.BlockArgument,
-    embedding_table: mlir.ir.BlockArgument,
-    accumulator: mlir.ir.BlockArgument,
-    linear: mlir.ir.BlockArgument,
-    activations_grad: mlir.ir.BlockArgument,
-    learning_rate: mlir.ir.BlockArgument,
-    learning_rate_power: mlir.ir.BlockArgument,
-    l1_regularization_strength: mlir.ir.BlockArgument,
-    l2_regularization_strength: mlir.ir.BlockArgument,
-    beta: mlir.ir.BlockArgument,
+    lhs_row_pointers: ir.BlockArgument,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: ir.BlockArgument,
+    embedding_table: ir.BlockArgument,
+    accumulator: ir.BlockArgument,
+    linear: ir.BlockArgument,
+    activations_grad: ir.BlockArgument,
+    learning_rate: ir.BlockArgument,
+    learning_rate_power: ir.BlockArgument,
+    l1_regularization_strength: ir.BlockArgument,
+    l2_regularization_strength: ir.BlockArgument,
+    beta: ir.BlockArgument,
     *,
     multiply_linear_by_learning_rate: bool = False,
     max_ids_per_partition: int,
@@ -173,7 +175,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[Sequence[ir.Value], Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for sparse_dense_matmul_grad_with_ftrl."""
 
   sdmm_ftrl_config = {
@@ -390,7 +392,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
       hlo.GetTupleElementOp(custom_call_op, 2)
   )
 
-  return (  # pytype: disable=bad-return-type
+  return (
       updated_table_op.result,
       updated_accumulator_op.result,
       updated_linear_op.result,

@@ -22,9 +22,11 @@ inputs and returns the updated embedding table and accumulator.
 
 import functools
 import json
+from typing import Sequence
 from typing import Tuple
 
 import jax
+from jax import core
 import jax.extend as jex
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
@@ -59,14 +61,14 @@ def _annotate_sparse_compute_type(op: ir.OpView):
 
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    activations_grad: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
+    accumulator: core.ShapedArray,
+    activations_grad: core.ShapedArray,
     learning_rate: np.float32,
     *_,
     max_ids_per_partition: int,
@@ -77,7 +79,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
   del enable_minibatching
   utils.validate_abstract_eval_params(
@@ -115,15 +117,15 @@ tpu_sparse_dense_matmul_grad_with_adagrad_primitive.def_abstract_eval(
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     ctx: mlir.LoweringRuleContext,
-    lhs_row_pointers: mlir.ir.BlockArgument,
-    lhs_local_embedding_ids: mlir.ir.BlockArgument,
-    lhs_local_sample_ids: mlir.ir.BlockArgument,
-    lhs_gains: mlir.ir.BlockArgument,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: mlir.ir.BlockArgument,
-    accumulator: mlir.ir.BlockArgument,
-    activations_grad: mlir.ir.BlockArgument,
-    learning_rate: mlir.ir.BlockArgument,
+    lhs_row_pointers: ir.BlockArgument,
+    lhs_local_embedding_ids: ir.BlockArgument,
+    lhs_local_sample_ids: ir.BlockArgument,
+    lhs_gains: ir.BlockArgument,
+    num_minibatches_per_physical_sparse_core: ir.BlockArgument,
+    embedding_table: ir.BlockArgument,
+    accumulator: ir.BlockArgument,
+    activations_grad: ir.BlockArgument,
+    learning_rate: ir.BlockArgument,
     *,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -132,7 +134,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad."""
   sdmm_sgd_config = {
       "max_ids_per_partition": max_ids_per_partition,
@@ -268,7 +270,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
   accumulator_tuple_op = hlo.GetTupleElementOp(op, 1)
   accumulator_tuple_op = _annotate_sparse_compute_type(accumulator_tuple_op)
 
-  return (  # pytype: disable=bad-return-type
+  return (
       table_tuple_op.results,
       accumulator_tuple_op.results,
   )
