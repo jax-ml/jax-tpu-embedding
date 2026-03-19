@@ -237,6 +237,20 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
   return suggested_value;
 }
 
+int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
+                                       int global_device_count,
+                                       int num_sc_per_device,
+                                       bool enable_minibatching) {
+  const int num_scs = global_device_count * num_sc_per_device;
+  const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
+      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  // If minibatching is enabled, `theoretical_max` is multiplied by
+  // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
+  // core are packed into a single buffer.
+  return max_ids_rounded_up * num_sc_per_device * num_scs *
+      (enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
+}
+
 int ComputeCooBufferSizePerDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
@@ -247,16 +261,12 @@ int ComputeCooBufferSizePerDevice(
   const int num_scs = options.GetNumScs();
   const int num_scs_per_device = options.num_sc_per_device;
   const int batch_number = options.batch_number;
-  const bool use_minibatching = options.enable_minibatching;
 
   const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
-  // If minibatching is enabled, `theoretical_max` is multiplied by
-  // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
-  // core are packed into a single buffer.
-  const int64_t theoretical_max =
-      max_ids_rounded_up * num_scs_per_device * num_scs *
-      (use_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
+  const int64_t theoretical_max = ComputeTheoreticalMaxCooBufferSize(
+      max_ids_per_partition, options.global_device_count,
+      options.num_sc_per_device, options.enable_minibatching);
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                          << ": " << theoretical_max

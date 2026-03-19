@@ -1207,9 +1207,7 @@ class SparseDenseMatmulInputStatsTest(parameterized.TestCase):
     self.assertEqual(
         stats.get_required_buffer_size_per_device("table_a", 4), 160
     )
-    self.assertEqual(
-        stats.get_required_buffer_size_per_device("table_a"), 160
-    )
+    self.assertEqual(stats.get_required_buffer_size_per_device("table_a"), 160)
     self.assertEqual(
         stats.get_required_buffer_size_per_device("table_b", 2), 20
     )
