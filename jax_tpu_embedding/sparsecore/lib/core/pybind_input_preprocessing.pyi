@@ -66,3 +66,21 @@ def preprocess_sparse_dense_matmul_sparse_coo_input(
     enable_minibatching: bool = False,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
+
+def compute_row_pointers_size_per_device(
+    global_device_count: int,
+    num_sc_per_device: int,
+    enable_minibatching: bool = False,
+) -> int: ...
+def compute_theoretical_max_coo_buffer_size(
+    max_ids_per_partition: int,
+    global_device_count: int,
+    num_sc_per_device: int,
+    enable_minibatching: bool = False,
+) -> int: ...
+def compute_coo_buffer_size_per_device(
+    feature_specs: Sequence[embedding_spec.FeatureSpec],
+    global_device_count: int,
+    num_sc_per_device: int,
+    enable_minibatching: bool = False,
+) -> dict[str, int]: ...

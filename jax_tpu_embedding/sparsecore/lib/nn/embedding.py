@@ -447,6 +447,70 @@ def auto_stack_tables(
   )
 
 
+def compute_row_pointers_size_per_device(
+    *,
+    global_device_count: int,
+    num_sc_per_device: int | None = None,
+    enable_minibatching: bool = False,
+) -> int:
+  """Computes the required row pointers buffer size per device."""
+  resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  return pybind_input_preprocessing.compute_row_pointers_size_per_device(
+      global_device_count=global_device_count,
+      num_sc_per_device=resolved_num_sc_per_device,
+      enable_minibatching=enable_minibatching,
+  )
+
+
+def compute_theoretical_max_coo_buffer_size(
+    max_ids_per_partition: int,
+    global_device_count: int,
+    num_sc_per_device: int | None = None,
+    enable_minibatching: bool = False,
+) -> int:
+  """Computes the theoretical max COO buffer size per device."""
+  resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  return pybind_input_preprocessing.compute_theoretical_max_coo_buffer_size(
+      max_ids_per_partition=max_ids_per_partition,
+      global_device_count=global_device_count,
+      num_sc_per_device=resolved_num_sc_per_device,
+      enable_minibatching=enable_minibatching,
+  )
+
+
+def compute_coo_buffer_size_per_device(
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    global_device_count: int,
+    num_sc_per_device: int | None = None,
+    enable_minibatching: bool = False,
+) -> dict[str, int]:
+  """Computes the required COO buffer size per device.
+
+  Args:
+    feature_specs: A Nested (e.g., list, dict etc.) of FeatureSpec.
+    global_device_count: The number of global devices (chips). Typically
+      `mesh.size`.
+    num_sc_per_device: The number of sparse cores per device. If `None`, it will
+      be set to the number of sparse cores on the current host machine.
+    enable_minibatching: Whether to enable minibatching.
+
+  Returns:
+    A dictionary mapping stacked table names to their required COO buffer size
+    per device.
+  """
+  resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  # TODO: b/491557196 - Evaluate if passing deconstructed feature specs (e.g.,
+  # max_ids_per_partition, suggested_buffer_size) to the pybind boundary is
+  # better than passing the full FeatureSpec objects, similar to what we do for
+  # compute_theoretical_max_coo_buffer_size.
+  return pybind_input_preprocessing.compute_coo_buffer_size_per_device(
+      feature_specs=jax.tree.leaves(feature_specs),
+      global_device_count=global_device_count,
+      num_sc_per_device=resolved_num_sc_per_device,
+      enable_minibatching=enable_minibatching,
+  )
+
+
 def sharding_strategy_to_enum(
     sharding_strategy: str,
 ) -> pybind_input_preprocessing.ShardingStrategy:
@@ -703,6 +767,84 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   return (
       PreprocessedInput(SparseDenseMatmulInput(*csr_inputs), minibatches_arr),
       SparseDenseMatmulInputStats.from_cc(stats),
+  )
+
+
+def eval_preprocess_sparse_dense_matmul_input_shape(
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    local_device_count: int,
+    global_device_count: int,
+    *,
+    num_sc_per_device: int | None = None,
+    has_leading_dimension: bool = False,
+    enable_minibatching: bool = False,
+) -> PreprocessedInput:
+  """Evaluates the shape and dtype of the preprocessed input.
+
+  This is similar to `jax.eval_shape` but specialized for sparse dense matmul
+  preprocessing. It computes the output shapes statically based on the feature
+  specs and buffer sizes without requiring the actual input tensors.
+
+  Args:
+    feature_specs: A Nested (e.g., list, dict etc.) of FeatureSpec.
+    local_device_count: The number of local devices (chips).
+    global_device_count: The number of global devices (chips).
+    num_sc_per_device: The number of sparse cores per device.
+    has_leading_dimension: Whether the output has a leading dimension for local
+      devices.
+    enable_minibatching: Whether to enable minibatching.
+
+  Returns:
+    A PreprocessedInput object containing jax.ShapeDtypeStructs.
+  """
+  coo_buffer_sizes = compute_coo_buffer_size_per_device(
+      feature_specs,
+      global_device_count,
+      num_sc_per_device=num_sc_per_device,
+      enable_minibatching=enable_minibatching,
+  )
+
+  row_pointers_size = compute_row_pointers_size_per_device(
+      global_device_count=global_device_count,
+      num_sc_per_device=num_sc_per_device,
+      enable_minibatching=enable_minibatching,
+  )
+
+  def _make_shape_dtype_struct(
+      size: int, dtype: jnp.dtype
+  ) -> jax.ShapeDtypeStruct:
+    return jax.ShapeDtypeStruct((local_device_count * size,), dtype)
+
+  lhs_row_pointers = {
+      stack_name: _make_shape_dtype_struct(row_pointers_size, jnp.int32)
+      for stack_name in coo_buffer_sizes
+  }
+  lhs_embedding_ids = {
+      stack_name: _make_shape_dtype_struct(size, jnp.int32)
+      for stack_name, size in coo_buffer_sizes.items()
+  }
+  lhs_sample_ids = {
+      stack_name: _make_shape_dtype_struct(size, jnp.int32)
+      for stack_name, size in coo_buffer_sizes.items()
+  }
+  lhs_gains = {
+      stack_name: _make_shape_dtype_struct(size, jnp.float32)
+      for stack_name, size in coo_buffer_sizes.items()
+  }
+
+  if has_leading_dimension:
+    num_minibatches = jax.ShapeDtypeStruct((local_device_count, 1), jnp.int32)
+  else:
+    num_minibatches = jax.ShapeDtypeStruct((local_device_count,), jnp.int32)
+
+  return PreprocessedInput(
+      sparse_dense_matmul_input=SparseDenseMatmulInput(
+          lhs_row_pointers=lhs_row_pointers,
+          lhs_embedding_ids=lhs_embedding_ids,
+          lhs_sample_ids=lhs_sample_ids,
+          lhs_gains=lhs_gains,
+      ),
+      num_minibatches=num_minibatches,
   )
 
 
