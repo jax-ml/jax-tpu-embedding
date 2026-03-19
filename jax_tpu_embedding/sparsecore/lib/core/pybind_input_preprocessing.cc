@@ -233,7 +233,7 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
 
 PYBIND11_MODULE(pybind_input_preprocessing, m) {
   py::enum_<ShardingStrategy>(m, "ShardingStrategy")
-      .value("Mod", ShardingStrategy::kMod)
+      .value("MOD", ShardingStrategy::kMod)
       .export_values();
   py::class_<AllReduceInterface> all_reduce_interface(m, "AllReduceInterface");
   py::class_<rpc::MinibatchingNode, std::shared_ptr<rpc::MinibatchingNode>>(
@@ -242,7 +242,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
       .def("get_all_reduce_interface",
            &rpc::MinibatchingNode::GetAllReduceInterface,
            py::return_value_policy::reference_internal);
-  m.def("PreprocessSparseDenseMatmulInput",
+  m.def("preprocess_sparse_dense_matmul_input",
         &PyNumpyPreprocessSparseDenseMatmulInput, py::arg("features"),
         py::arg("feature_weights"), py::arg("feature_specs"),
         py::arg("local_device_count"), py::arg("global_device_count"),
@@ -252,7 +252,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
         py::arg("enable_minibatching") = false,
         py::arg("all_reduce_interface") = nullptr);
-  m.def("PreprocessSparseDenseMatmulSparseCooInput",
+  m.def("preprocess_sparse_dense_matmul_sparse_coo_input",
         &PySparseCooPreprocessSparseDenseMatmulInput, py::arg("indices"),
         py::arg("values"), py::arg("dense_shapes"), py::arg("feature_specs"),
         py::arg("local_device_count"), py::arg("global_device_count"),

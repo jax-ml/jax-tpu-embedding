@@ -452,7 +452,7 @@ def sharding_strategy_to_enum(
 ) -> pybind_input_preprocessing.ShardingStrategy:
   """Converts the sharding strategy string to the enum."""
   if sharding_strategy.upper() == "MOD":
-    return pybind_input_preprocessing.ShardingStrategy.Mod
+    return pybind_input_preprocessing.ShardingStrategy.MOD
   else:
     raise ValueError(
         f"Unsupported sharding strategy: {sharding_strategy}. Only MOD is"
@@ -566,7 +566,7 @@ def preprocess_sparse_dense_matmul_input(
     )
 
   *csr_inputs, num_minibatches, stats = (
-      pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
           jax.tree.leaves(features),
           jax.tree.leaves(features_weights) if features_weights else None,
           jax.tree.leaves(feature_specs),
@@ -679,7 +679,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     )
 
   *csr_inputs, num_minibatches, stats = (
-      pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
           jax.tree.leaves(indices),
           jax.tree.leaves(values),
           jax.tree.leaves(dense_shapes),

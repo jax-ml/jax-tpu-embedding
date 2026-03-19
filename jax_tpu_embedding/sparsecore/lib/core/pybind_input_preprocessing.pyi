@@ -35,7 +35,7 @@ PreprocessOutput = tuple[
     SparseDenseMatmulInputStats,  # stats
 ]
 
-def PreprocessSparseDenseMatmulInput(
+def preprocess_sparse_dense_matmul_input(
     features: Sequence[np.ndarray],
     feature_weights: Sequence[np.ndarray] | None,
     feature_specs: Sequence[embedding_spec.FeatureSpec],
@@ -50,7 +50,7 @@ def PreprocessSparseDenseMatmulInput(
     enable_minibatching: bool = False,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
-def PreprocessSparseDenseMatmulSparseCooInput(
+def preprocess_sparse_dense_matmul_sparse_coo_input(
     indices: Sequence[np.ndarray],
     values: Sequence[np.ndarray],
     dense_shapes: Sequence[np.ndarray],

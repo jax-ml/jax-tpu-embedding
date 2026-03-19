@@ -112,15 +112,15 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   @parameterized.parameters(False, True)
   def test_transformation_with_col_transformations(self, has_leading_dimension):
     batch_number = 42
-    (row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_) = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+    row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
             local_device_count=self.local_device_count,
             global_device_count=self.global_device_count,
             num_sc_per_device=self.num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -153,15 +153,15 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         + self.feature_spec.id_transformation.col_offset
     )
     batch_number = 42
-    (row_pointers, embedding_ids, sample_ids, gains, *_) = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+    row_pointers, embedding_ids, sample_ids, gains, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [input_features_shifted],
             [self.input_weights],
             [feature_spec_no_col_shift],
             local_device_count=self.local_device_count,
             global_device_count=self.global_device_count,
             num_sc_per_device=self.num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -360,14 +360,14 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     out_path = self.create_tempdir().full_path
     fdo_client = file_fdo_client.NPZFileFDOClient(out_path)
     batch_number = 42
-    *_, stats = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+    *_, stats = pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
         [self.input_features_a, self.input_features_b],
         [self.input_weights_a, self.input_weights_b],
         [feature_spec_1, feature_spec_2],
         local_device_count=1,
         global_device_count=2,
         num_sc_per_device=4,
-        sharding_strategy=ShardingStrategy.Mod,
+        sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
         batch_number=batch_number,
@@ -563,14 +563,14 @@ class InputPreprocessingTest(parameterized.TestCase):
     num_sc_per_device = 4
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.singleton_input_features],
             [self.singleton_input_weights],
             [self.singleton_input_feature_spec],
             local_device_count=local_device_count,
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=False,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -732,14 +732,14 @@ class InputPreprocessingTest(parameterized.TestCase):
     num_sc_per_device = 4
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features],
             [self.input_weights],
             [self.feature_spec],
             local_device_count=local_device_count,
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -1006,14 +1006,14 @@ class InputPreprocessingTest(parameterized.TestCase):
     local_device_count = 1
     num_sc_per_device = 4
     row_pointers, _, _, gains, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features],
             [self.input_weights],
             [feature_spec],
             local_device_count=local_device_count,
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -1091,7 +1091,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     num_sc_per_device = 4
     batch_number = 42
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [
                 self.singleton_input_features,
                 self.ragged_input_features,
@@ -1107,7 +1107,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             local_device_count=local_device_count,
             global_device_count=4,
             num_sc_per_device=num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=True,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -1121,7 +1121,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         sample_ids_flattened,
         gains_flattened,
         *_,
-    ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+    ) = pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
         [
             self.singleton_input_features,
             self.ragged_input_features,
@@ -1137,7 +1137,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         local_device_count=2,
         global_device_count=4,
         num_sc_per_device=4,
-        sharding_strategy=ShardingStrategy.Mod,
+        sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=False,
         allow_id_dropping=False,
         batch_number=batch_number,
@@ -1753,14 +1753,14 @@ class InputPreprocessingTest(parameterized.TestCase):
     global_device_count = 1
     num_sc_per_device = 4
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [input_features],
             [input_weights],
             [feature_spec],
             local_device_count=local_device_count,
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
-            sharding_strategy=ShardingStrategy.Mod,
+            sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=False,
             allow_id_dropping=False,
             batch_number=batch_number,
@@ -1785,14 +1785,14 @@ class InputPreprocessingTest(parameterized.TestCase):
         expected_sample_ids,
         expected_gains,
         *_,
-    ) = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+    ) = pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
         [input_features],
         [input_weights],
         [feature_spec_for_expectation],
         local_device_count=1,
         global_device_count=1,
         num_sc_per_device=4,
-        sharding_strategy=ShardingStrategy.Mod,
+        sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=False,
         allow_id_dropping=False,
         batch_number=batch_number,
@@ -1828,7 +1828,7 @@ class InputPreprocessingTest(parameterized.TestCase):
 
     # With explicit unity weights
     row_pointers_w, embedding_ids_w, sample_ids_w, gains_w, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             features=[self.input_features],
             feature_weights=[self.input_weights],
             feature_specs=[feature_spec],
@@ -1841,7 +1841,7 @@ class InputPreprocessingTest(parameterized.TestCase):
 
     # With feature_weights=None
     row_pointers_n, embedding_ids_n, sample_ids_n, gains_n, *_ = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             features=[self.input_features],
             feature_weights=None,
             feature_specs=[feature_spec],

@@ -225,15 +225,17 @@ def preprocess_numpy(state: google_benchmark.State):
   while state:
     if batch_num == 0:
       state.pause_timing()
-    *_, stats_cc = pybind_input_preprocessing.PreprocessSparseDenseMatmulInput(
-        features,
-        feature_weights,
-        _GLOBAL_SPECS,
-        local_device_count=4,
-        global_device_count=16,
-        num_sc_per_device=4,
-        batch_number=batch_num,
-        allow_id_dropping=batch_num == 0,
+    *_, stats_cc = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+            features,
+            feature_weights,
+            _GLOBAL_SPECS,
+            local_device_count=4,
+            global_device_count=16,
+            num_sc_per_device=4,
+            batch_number=batch_num,
+            allow_id_dropping=batch_num == 0,
+        )
     )
     if batch_num == 0:
       apply_fdo_stats(stats_cc)
@@ -251,7 +253,7 @@ def preprocess_sparse_coo(state: google_benchmark.State):
     if batch_num == 0:
       state.pause_timing()
     *_, stats_cc = (
-        pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
             _GLOBAL_RAGGED_INDICES,
             _GLOBAL_RAGGED_VALUES,
             _GLOBAL_RAGGED_DENSE_SHAPES,
@@ -296,7 +298,7 @@ def preprocess_minibatching(
     )
 
   def worker(host_id: int, batch_number: int):
-    return pybind_input_preprocessing.PreprocessSparseDenseMatmulSparseCooInput(
+    return pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
         _GLOBAL_RAGGED_INDICES,
         _GLOBAL_RAGGED_VALUES,
         _GLOBAL_RAGGED_DENSE_SHAPES,
