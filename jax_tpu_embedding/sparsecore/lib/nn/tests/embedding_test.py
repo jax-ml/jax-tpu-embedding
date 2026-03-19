@@ -1193,6 +1193,66 @@ class EmbeddingTest(parameterized.TestCase):
     )
 
 
+class SparseDenseMatmulInputStatsTest(parameterized.TestCase):
+
+  def test_get_required_buffer_size_per_device(self):
+    stats = embedding.SparseDenseMatmulInputStats(
+        max_ids_per_partition={},
+        max_unique_ids_per_partition={},
+        required_buffer_size_per_sc={
+            "table_a": np.array([10, 20, 30, 40]),
+            "table_b": np.array([5, 10]),
+        },
+    )
+    self.assertEqual(
+        stats.get_required_buffer_size_per_device("table_a", 4), 160
+    )
+    self.assertEqual(
+        stats.get_required_buffer_size_per_device("table_a"), 160
+    )
+    self.assertEqual(
+        stats.get_required_buffer_size_per_device("table_b", 2), 20
+    )
+    self.assertIsNone(stats.get_required_buffer_size_per_device("table_c"))
+
+  def test_set_required_buffer_size_per_device(self):
+    stats = embedding.SparseDenseMatmulInputStats(
+        max_ids_per_partition={},
+        max_unique_ids_per_partition={},
+        required_buffer_size_per_sc={
+            "table_a": np.array([10, 20, 30, 40]),
+        },
+    )
+    stats.set_required_buffer_size_per_device("table_a", 160, 4)
+    np.testing.assert_array_equal(
+        stats.required_buffer_size_per_sc["table_a"], np.full(4, 40)
+    )
+
+    stats.set_required_buffer_size_per_device("table_b", 100, 2)
+    np.testing.assert_array_equal(
+        stats.required_buffer_size_per_sc["table_b"], np.full(2, 50)
+    )
+
+  def test_set_required_buffer_size_per_device_without_num_sc_per_device(self):
+    stats = embedding.SparseDenseMatmulInputStats(
+        max_ids_per_partition={},
+        max_unique_ids_per_partition={},
+        required_buffer_size_per_sc={
+            "table_a": np.array([10, 20, 30, 40]),
+        },
+    )
+    stats.set_required_buffer_size_per_device("table_a", 160)
+    np.testing.assert_array_equal(
+        stats.required_buffer_size_per_sc["table_a"], np.full(4, 40)
+    )
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "num_sc_per_device must be provided if the table is not present.",
+    ):
+      stats.set_required_buffer_size_per_device("table_b", 100)
+
+
 class UpdatePreprocessingParametersTest(absltest.TestCase):
 
   def setUp(self):

@@ -115,6 +115,36 @@ class SparseDenseMatmulInputStats:
         id_drop_counters=stats.dropped_id_count,
     )
 
+  def get_required_buffer_size_per_device(
+      self, table_name: str, num_sc_per_device: int | None = None
+  ) -> int | None:
+    """Returns the required buffer size per device for a table."""
+    if table_name not in self.required_buffer_size_per_sc:
+      return None
+    val = self.required_buffer_size_per_sc[table_name]
+    num_sc = num_sc_per_device or np.size(val)
+    return int(np.max(val) * num_sc)
+
+  def set_required_buffer_size_per_device(
+      self,
+      table_name: str,
+      required_buffer_size_per_device: int,
+      num_sc_per_device: int | None = None,
+  ) -> None:
+    """Sets the required buffer size per device for a table."""
+    val = self.required_buffer_size_per_sc.get(table_name)
+    num_sc = num_sc_per_device or (np.size(val) if val is not None else 0)
+    if not num_sc:
+      raise ValueError(
+          "num_sc_per_device must be provided if the table is not present."
+      )
+    # FWIW, only a single value should suffice, since this will mostly be used
+    # to take a maximum, but for consistency, it might be better to retain the
+    # same length.
+    self.required_buffer_size_per_sc[table_name] = np.full(
+        num_sc, required_buffer_size_per_device / num_sc
+    )
+
 
 class PreprocessedInput(struct.PyTreeNode):
   """The result of preprocessing input for sparse dense matmul.
@@ -1576,12 +1606,12 @@ def update_preprocessing_parameters(
             stack_name, stacked_table_spec.max_unique_ids_per_partition
         )
     )
-    if stack_name in updated_params.required_buffer_size_per_sc:
-      new_buffer_size_per_device = int(
-          np.max(updated_params.required_buffer_size_per_sc[stack_name])
-          * num_sc_per_device
-      )
-    else:
+    new_buffer_size_per_device = (
+        updated_params.get_required_buffer_size_per_device(
+            stack_name, num_sc_per_device
+        )
+    )
+    if new_buffer_size_per_device is None:
       new_buffer_size_per_device = (
           stacked_table_spec.suggested_coo_buffer_size_per_device
       )
