@@ -173,6 +173,21 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "sparse_dense_matmul_grad_with_f2a",
+    srcs = ["sparse_dense_matmul_grad_with_f2a.py"],
+    deps = [
+        ":utils",
+        "//jax_tpu_embedding/sparsecore/lib/core:constants",
+        pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
     name = "optimizers_computation",
     srcs = [
         "optimizers_computation.py",
@@ -211,6 +226,7 @@ pytype_strict_library(
         ":sparse_dense_matmul_csr",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_adagrad",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_adagrad_momentum",  # buildcleaner: keep
+        ":sparse_dense_matmul_grad_with_f2a",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_ftrl",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_laprop",  # buildcleaner: keep
         ":sparse_dense_matmul_grad_with_sgd",  # buildcleaner: keep

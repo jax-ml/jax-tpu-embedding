@@ -28,6 +28,7 @@ import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_momentum
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_f2a
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
@@ -48,6 +49,9 @@ _OptimizerDefinition: TypeAlias = collections.namedtuple(
 SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
 AdagradSlotVariables = collections.namedtuple(
     "AdagradSlotVariables", ["accumulator"]
+)
+F2ASlotVariables = collections.namedtuple(
+    "F2ASlotVariables", ["accumulator", "local_step"]
 )
 AdamSlotVariables = collections.namedtuple(
     "AdamSlotVariables", ["momentum", "velocity"]
@@ -583,6 +587,83 @@ class LaPropOptimizerSpec(OptimizerSpec):
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive
+    )
+
+
+class F2AOptimizerSpec(OptimizerSpec):
+  """Spec for the Frequency Aware Adagrad (F2A) optimizer.
+
+  Attributes:
+    learning_rate: The learning rate.
+    rho: The rho parameter for boosting.
+    epsilon: A small constant for numerical stability in boosting.
+    initial_accumulator_value: Initial value for the accumulator slot.
+    initial_local_step_value: Initial value for the local_step slot.
+    l1_regularization_strength: L1 regularization strength.
+    l2_regularization_strength: L2 regularization strength.
+    max_lr_multiplier: Maximum frequency-aware learning rate multiplier.
+  """
+
+  def __init__(
+      self,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.01,
+      rho: float = 0.5,
+      initial_accumulator_value: float = 0.1,
+      initial_local_step_value: float = 0.0,
+      l1_regularization_strength: float = 0.0,
+      l2_regularization_strength: float = 0.0,
+      max_lr_multiplier: float = 1e6,
+  ):
+    super().__init__(learning_rate=learning_rate)
+    self.rho = rho
+    self.initial_accumulator_value = initial_accumulator_value
+    self.initial_local_step_value = initial_local_step_value
+    self.l1_regularization_strength = l1_regularization_strength
+    self.l2_regularization_strength = l2_regularization_strength
+    self.max_lr_multiplier = max_lr_multiplier
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return F2ASlotVariables(
+        accumulator=jax.nn.initializers.constant(
+            self.initial_accumulator_value
+        ),
+        local_step=jax.nn.initializers.constant(self.initial_local_step_value),
+    )
+
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the F2A hyperparameters."""
+    if step is None:
+      step = 0
+    return (
+        self.get_learning_rate(step),
+        jnp.array(self.rho, dtype=jnp.float32),
+        jnp.array(self.l1_regularization_strength, dtype=jnp.float32),
+        jnp.array(self.l2_regularization_strength, dtype=jnp.float32),
+        jnp.array(self.max_lr_multiplier, dtype=jnp.float32),
+        jnp.array(step, dtype=jnp.float32),
+    )
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.rho,
+        self.initial_accumulator_value,
+        self.initial_local_step_value,
+        self.l1_regularization_strength,
+        self.l2_regularization_strength,
+        self.max_lr_multiplier,
+    ))
+
+  def short_name(self) -> str:
+    return "f2a"
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_grad_with_f2a.tpu_sparse_dense_matmul_grad_with_f2a_primitive
     )
 
 

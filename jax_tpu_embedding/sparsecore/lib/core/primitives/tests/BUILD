@@ -320,3 +320,26 @@ pytype_strict_contrib_test(
         pypi_requirement("numpy"),
     ],
 )
+
+pytype_strict_contrib_test(
+    name = "sparse_dense_matmul_grad_with_f2a_test",
+    srcs = ["sparse_dense_matmul_grad_with_f2a_test.py"],
+    args = [
+        # TPU chip configuration,
+        "--logtostderr",
+    ],
+    tags = [
+        "exclusive-if-local",
+        "requires-tpu",
+    ],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_f2a",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("einops"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
+)

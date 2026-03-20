@@ -18,6 +18,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_momentum
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_f2a
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -196,6 +197,56 @@ class OptimizerSpecTest(absltest.TestCase):
         ),
     )
 
+  def test_compare_f2a(self):
+    self.assertEqual(
+        embedding_spec.F2AOptimizerSpec(
+            learning_rate=0.1,
+            rho=0.5,
+            initial_accumulator_value=0.1,
+            initial_local_step_value=0.0,
+            l1_regularization_strength=0.0,
+            l2_regularization_strength=0.0,
+            max_lr_multiplier=1e6,
+        ),
+        embedding_spec.F2AOptimizerSpec(
+            learning_rate=0.1,
+            rho=0.5,
+            initial_accumulator_value=0.1,
+            initial_local_step_value=0.0,
+            l1_regularization_strength=0.0,
+            l2_regularization_strength=0.0,
+            max_lr_multiplier=1e6,
+        ),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(learning_rate=0.1),
+        embedding_spec.F2AOptimizerSpec(learning_rate=0.2),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(rho=0.5),
+        embedding_spec.F2AOptimizerSpec(rho=0.6),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(initial_accumulator_value=0.1),
+        embedding_spec.F2AOptimizerSpec(initial_accumulator_value=0.2),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(initial_local_step_value=0.0),
+        embedding_spec.F2AOptimizerSpec(initial_local_step_value=1.0),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(l1_regularization_strength=0.0),
+        embedding_spec.F2AOptimizerSpec(l1_regularization_strength=0.01),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(l2_regularization_strength=0.0),
+        embedding_spec.F2AOptimizerSpec(l2_regularization_strength=0.01),
+    )
+    self.assertNotEqual(
+        embedding_spec.F2AOptimizerSpec(max_lr_multiplier=1e6),
+        embedding_spec.F2AOptimizerSpec(max_lr_multiplier=1e5),
+    )
+
   def test_compare_ftrl(self):
     self.assertEqual(
         embedding_spec.FTRLOptimizerSpec(
@@ -348,6 +399,38 @@ class OptimizerSpecTest(absltest.TestCase):
         )
     )
 
+  def test_f2a_optimizer_primitive_and_initializers(self):
+    op = embedding_spec.F2AOptimizerSpec(
+        learning_rate=0.05,
+        rho=0.6,
+        initial_accumulator_value=0.1,
+        initial_local_step_value=0.5,
+    )
+    expected_primitive = (
+        sparse_dense_matmul_grad_with_f2a.tpu_sparse_dense_matmul_grad_with_f2a_primitive
+    )
+    self.assertEqual(op.get_optimizer_primitive(), expected_primitive)
+
+    slot_inits = op.slot_variables_initializers()
+    self.assertIsInstance(slot_inits, embedding_spec.F2ASlotVariables)
+    self.assertTrue(callable(slot_inits.accumulator))
+    self.assertTrue(callable(slot_inits.local_step))
+
+    dummy_key = jax.random.PRNGKey(2)
+    dummy_shape = (1, 5)
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.accumulator(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_accumulator_value),
+        )
+    )
+    self.assertTrue(
+        jnp.allclose(
+            slot_inits.local_step(dummy_key, dummy_shape),
+            jnp.full(dummy_shape, op.initial_local_step_value),
+        )
+    )
+
   def test_learning_rate_callable(self):
 
     def lr_callable() -> float | jax.Array:
@@ -359,6 +442,7 @@ class OptimizerSpecTest(absltest.TestCase):
         embedding_spec.LaPropOptimizerSpec(learning_rate=lr_callable),
         embedding_spec.FTRLOptimizerSpec(learning_rate=lr_callable),
         embedding_spec.AdagradMomentumOptimizerSpec(learning_rate=lr_callable),
+        embedding_spec.F2AOptimizerSpec(learning_rate=lr_callable),
     ]
     for op_spec in optimizer_specs:
       self.assertEqual(op_spec.get_learning_rate(), 0.1)
@@ -457,6 +541,25 @@ class OptimizerSpecTest(absltest.TestCase):
         jnp.array(0.001, dtype=jnp.float32),
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_ftrl)
+
+    op = embedding_spec.F2AOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        ),
+        rho=0.5,
+        l1_regularization_strength=0.01,
+        l2_regularization_strength=0.02,
+        max_lr_multiplier=1e5,
+    )
+    expected_hyperparameters_f2a = (
+        jnp.array(1.0, dtype=jnp.float32),
+        jnp.array(0.5, dtype=jnp.float32),
+        jnp.array(0.01, dtype=jnp.float32),
+        jnp.array(0.02, dtype=jnp.float32),
+        jnp.array(1e5, dtype=jnp.float32),
+        jnp.array(0, dtype=jnp.float32),
+    )
+    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_f2a)
 
   def test_table_spec_quantization_config_equality(self):
     """Tables should compare equal only when the quantization config matches."""
