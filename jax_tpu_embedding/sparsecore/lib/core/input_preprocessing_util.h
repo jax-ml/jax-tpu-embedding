@@ -557,6 +557,11 @@ inline int GetActualRowPointersSizePerDevice(
          options.num_sc_per_device;
 }
 
+int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
+                                           int global_device_count,
+                                           int num_sc_per_device,
+                                           bool enable_minibatching);
+
 int ComputeCooBufferSizePerDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata);

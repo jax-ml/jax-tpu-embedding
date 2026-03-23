@@ -961,6 +961,79 @@ class EmbeddingTest(parameterized.TestCase):
     )
     self.assertEqual(table_spec.stacked_table_spec.stack_embedding_dim % 8, 0)
 
+  def test_compute_theoretical_max_coo_buffer_size(self):
+    self.assertEqual(
+        embedding.compute_theoretical_max_coo_buffer_size(
+            max_ids_per_partition=12,
+            global_device_count=1,
+            num_sc_per_device=4,
+            enable_minibatching=False,
+        ),
+        256,
+    )
+    self.assertEqual(
+        embedding.compute_theoretical_max_coo_buffer_size(
+            max_ids_per_partition=12,
+            global_device_count=1,
+            num_sc_per_device=4,
+            enable_minibatching=True,
+        ),
+        16384,
+    )
+
+  def test_compute_row_pointers_size_per_device(self):
+    self.assertEqual(
+        embedding.compute_row_pointers_size_per_device(
+            global_device_count=1,
+            num_sc_per_device=4,
+            enable_minibatching=False,
+        ),
+        32,
+    )
+    self.assertEqual(
+        embedding.compute_row_pointers_size_per_device(
+            global_device_count=1,
+            num_sc_per_device=4,
+            enable_minibatching=True,
+        ),
+        2048,
+    )
+
+  def test_compute_coo_buffer_size_per_device(self):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=8,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="test_table",
+        max_ids_per_partition=12,
+        max_unique_ids_per_partition=12,
+        suggested_coo_buffer_size_per_device=64,
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=[4, 4],
+        output_shape=[4, table_spec.embedding_dim],
+        name="test_feature",
+    )
+    embedding.prepare_feature_specs_for_training(
+        [feature_spec],
+        global_device_count=1,
+        num_sc_per_device=4,
+    )
+    self.assertEqual(
+        64,
+        feature_spec.table_spec.stacked_table_spec.suggested_coo_buffer_size_per_device,
+    )
+    res = embedding.compute_coo_buffer_size_per_device(
+        [feature_spec],
+        global_device_count=1,
+        num_sc_per_device=4,
+        enable_minibatching=False,
+    )
+    self.assertEqual(res["test_table"], 64)
+
   def test_create_proto_from_feature_specs(self):
     vocab_size_a = 32
     vocab_size_b = 128
@@ -1207,9 +1280,7 @@ class SparseDenseMatmulInputStatsTest(parameterized.TestCase):
     self.assertEqual(
         stats.get_required_buffer_size_per_device("table_a", 4), 160
     )
-    self.assertEqual(
-        stats.get_required_buffer_size_per_device("table_a"), 160
-    )
+    self.assertEqual(stats.get_required_buffer_size_per_device("table_a"), 160)
     self.assertEqual(
         stats.get_required_buffer_size_per_device("table_b", 2), 20
     )

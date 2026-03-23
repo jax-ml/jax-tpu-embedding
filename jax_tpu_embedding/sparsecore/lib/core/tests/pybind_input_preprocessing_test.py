@@ -1867,6 +1867,75 @@ class InputPreprocessingTest(parameterized.TestCase):
     assert_equal_coo_buffer(gains_w[stack_name], gains_n[stack_name])
 
 
+class PybindBufferSizeTest(absltest.TestCase):
+
+  def test_compute_row_pointers_size(self):
+    size = pybind_input_preprocessing.compute_row_pointers_size_per_device(
+        global_device_count=1,
+        num_sc_per_device=4,
+        enable_minibatching=False,
+    )
+    self.assertEqual(size, 32)
+
+  def test_compute_theoretical_max_coo_buffer_size(self):
+    res = pybind_input_preprocessing.compute_theoretical_max_coo_buffer_size(
+        max_ids_per_partition=12,
+        global_device_count=1,
+        num_sc_per_device=4,
+        enable_minibatching=False,
+    )
+    self.assertEqual(res, 256)
+
+  def test_compute_coo_buffer_size_per_device(self):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=8,
+        initializer=lambda: np.zeros((32, 8), dtype=np.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+        combiner="sum",
+        name="test_table",
+        max_ids_per_partition=12,
+        max_unique_ids_per_partition=12,
+        _setting_in_stack=embedding_spec.TableSettingInStack(
+            stack_name="test_table",
+            padded_vocab_size=32,
+            padded_embedding_dim=8,
+            row_offset_in_shard=0,
+            shard_rotation=0,
+        ),
+        _stacked_table_spec=embedding_spec.StackedTableSpec(
+            stack_name="test_table",
+            stack_vocab_size=32,
+            stack_embedding_dim=8,
+            optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+            combiner="sum",
+            total_sample_count=4,
+            max_ids_per_partition=12,
+            max_unique_ids_per_partition=12,
+            suggested_coo_buffer_size_per_device=64,
+        ),
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=[4, 4],
+        output_shape=[4, table_spec.embedding_dim],
+        name="test_feature",
+        _id_transformation=embedding_spec.FeatureIdTransformation(
+            row_offset=0,
+            col_offset=0,
+            col_shift=0,
+        ),
+    )
+
+    res = pybind_input_preprocessing.compute_coo_buffer_size_per_device(
+        [feature_spec],
+        global_device_count=1,
+        num_sc_per_device=4,
+        enable_minibatching=False,
+    )
+    self.assertEqual(res["test_table"], 64)
+
+
 class MinibatchingNodeTest(absltest.TestCase):
 
   def test_minibatching_node_creation(self):
