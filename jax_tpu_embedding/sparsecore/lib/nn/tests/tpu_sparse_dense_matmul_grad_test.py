@@ -36,6 +36,8 @@ _VOC_B = 64
 _DIM_B = 6
 _VOC_C = 32
 _DIM_C = 18
+_VOC_D = 32
+_DIM_D = 8
 _BATCH_SIZE = 16
 
 
@@ -87,6 +89,22 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         combiner="sum",
         name="table_c",
     )
+    self.table_spec_d = embedding_spec.TableSpec(
+        vocabulary_size=_VOC_D,
+        embedding_dim=_DIM_D,
+        initializer=lambda: jnp.zeros((_VOC_D, _DIM_D), dtype=jnp.float32),
+        optimizer=embedding_spec.F2AOptimizerSpec(
+            learning_rate=0.01,
+            rho=0.5,
+            initial_accumulator_value=0.1,
+            initial_local_step_value=0.0,
+            l1_regularization_strength=0.001,
+            l2_regularization_strength=0.002,
+            max_lr_multiplier=100.0,
+        ),
+        combiner="sum",
+        name="table_d",
+    )
     self.feature_spec_a = embedding_spec.FeatureSpec(
         table_spec=self.table_spec_a,
         input_shape=(_BATCH_SIZE, 1),
@@ -113,6 +131,15 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             self.table_spec_c.embedding_dim,
         ),
         name="feature_spec_c",
+    )
+    self.feature_spec_d = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec_d,
+        input_shape=(_BATCH_SIZE, 1),
+        output_shape=(
+            _BATCH_SIZE,
+            self.table_spec_d.embedding_dim,
+        ),
+        name="feature_spec_d",
     )
     self.input_tensor = np.array(
         [
@@ -177,6 +204,27 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ],
         dtype=np.int32,
     )
+    self.input_tensor_table_d = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
 
   @parameterized.product(
       use_gradient_stacking_primitive=[False, True],
@@ -190,6 +238,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         "feature_spec_a": self.feature_spec_a,
         "feature_spec_b": self.feature_spec_b,
         "feature_spec_c": self.feature_spec_c,
+        "feature_spec_d": self.feature_spec_d,
     }
     embedding.prepare_feature_specs_for_training(
         feature_specs,
@@ -202,6 +251,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             "feature_spec_a": self.input_tensor,
             "feature_spec_b": self.input_tensor_table_b,
             "feature_spec_c": self.input_tensor_table_c,
+            "feature_spec_d": self.input_tensor_table_d,
         },
         features_weights=None,  # uniform weights
         feature_specs=feature_specs,
@@ -307,6 +357,58 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ),
     )
 
+    table_dim_d = table_stacking._next_largest_multiple(_DIM_D, 8)
+    emb_table_d = (
+        np.array([[i for _ in range(table_dim_d)] for i in range(_VOC_D)])
+        .reshape(_VOC_D, table_dim_d)
+        .astype(np.float32)
+    )
+    emb_table_d_sharded = einops.rearrange(
+        emb_table_d,
+        "(v c s) f -> c (s v) f",
+        c=1,
+        s=4,
+    )
+    accumulator_d_init = jnp.full(emb_table_d_sharded[0].shape, 0.1, np.float32)
+    local_step_d_init = jnp.zeros(emb_table_d_sharded[0].shape, np.float32)
+    embedding_variables["table_d"] = (
+        [
+            jax.device_put(
+                emb_table_d_sharded[0],
+                device=devices[0],
+            )
+        ],
+        [
+            jax.device_put(
+                accumulator_d_init,
+                device=devices[0],
+            )
+        ],
+        [
+            jax.device_put(
+                local_step_d_init,
+                device=devices[0],
+            )
+        ],
+    )
+    embedding_variables["table_d"] = (
+        jax.make_array_from_single_device_arrays(
+            shape=(_VOC_D, table_dim_d),
+            sharding=sharding,
+            arrays=embedding_variables["table_d"][0],
+        ),
+        jax.make_array_from_single_device_arrays(
+            shape=(_VOC_D, table_dim_d),
+            sharding=sharding,
+            arrays=embedding_variables["table_d"][1],
+        ),
+        jax.make_array_from_single_device_arrays(
+            shape=(_VOC_D, table_dim_d),
+            sharding=sharding,
+            arrays=embedding_variables["table_d"][2],
+        ),
+    )
+
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
         (_BATCH_SIZE, _DIM_A),
@@ -318,6 +420,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )
     activations_grad["feature_spec_c"] = jnp.ones(
         (_BATCH_SIZE, _DIM_C),
+        dtype=jnp.float32,
+    )
+    activations_grad["feature_spec_d"] = jnp.ones(
+        (_BATCH_SIZE, _DIM_D),
         dtype=jnp.float32,
     )
     kwargs = {}
@@ -434,6 +540,87 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         dtype=np.float32,
     )
 
+    expected_table_d = np.array(
+        [
+            [-9.534626e-03] * _DIM_D,
+            [9.904354e-01] * _DIM_D,
+            [1.990415e00] * _DIM_D,
+            [2.990395e00] * _DIM_D,
+            [3.990375e00] * _DIM_D,
+            [4.990355e00] * _DIM_D,
+            [5.990335e00] * _DIM_D,
+            [6.990315e00] * _DIM_D,
+            [7.990295e00] * _DIM_D,
+            [8.990275e00] * _DIM_D,
+            [9.990255e00] * _DIM_D,
+            [1.099024e01] * _DIM_D,
+            [1.199022e01] * _DIM_D,
+            [1.299020e01] * _DIM_D,
+            [1.399018e01] * _DIM_D,
+            [1.499016e01] * _DIM_D,
+            [1.600000e01] * _DIM_D,
+            [1.700000e01] * _DIM_D,
+            [1.800000e01] * _DIM_D,
+            [1.900000e01] * _DIM_D,
+            [2.000000e01] * _DIM_D,
+            [2.100000e01] * _DIM_D,
+            [2.200000e01] * _DIM_D,
+            [2.300000e01] * _DIM_D,
+            [2.400000e01] * _DIM_D,
+            [2.500000e01] * _DIM_D,
+            [2.600000e01] * _DIM_D,
+            [2.700000e01] * _DIM_D,
+            [2.800000e01] * _DIM_D,
+            [2.900000e01] * _DIM_D,
+            [3.000000e01] * _DIM_D,
+            [3.100000e01] * _DIM_D,
+        ],
+        dtype=np.float32,
+    )
+
+    expected_accumulator_d = np.array(
+        [
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.100000e00] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+            [1.000000e-01] * _DIM_D,
+        ],
+        dtype=np.float32,
+    )
+
+    expected_local_step_d = np.array(
+        [[1.0] * 8] * 16 + [[0.0] * 8] * 16,
+        dtype=np.float32,
+    )
+
     np.testing.assert_equal(
         expected_grad_table_a, grad_update["table_a"][0][:, :_DIM_A]
     )
@@ -445,6 +632,35 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )
     np.testing.assert_equal(
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
+    )
+
+    expected_table_d = einops.rearrange(
+        expected_table_d, "(v c s) f -> c (s v) f", c=1, s=4
+    )[0]
+    expected_accumulator_d = einops.rearrange(
+        expected_accumulator_d, "(v c s) f -> c (s v) f", c=1, s=4
+    )[0]
+    expected_local_step_d = einops.rearrange(
+        expected_local_step_d, "(v c s) f -> c (s v) f", c=1, s=4
+    )[0]
+
+    np.testing.assert_allclose(
+        expected_table_d,
+        grad_update["table_d"][0][:, :_DIM_D],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        expected_accumulator_d,
+        grad_update["table_d"][1][:, :_DIM_D],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        expected_local_step_d,
+        grad_update["table_d"][2][:, :_DIM_D],
+        rtol=1e-5,
+        atol=1e-5,
     )
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(self):
