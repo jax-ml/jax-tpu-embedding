@@ -760,7 +760,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       )
   )
 
-  minibatches_arr = np.full(local_device_count, num_minibatches)
+  minibatches_arr = np.full(local_device_count, num_minibatches, dtype=np.int32)
   if has_leading_dimension:
     minibatches_arr = minibatches_arr.reshape(local_device_count, 1)
 
