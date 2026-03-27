@@ -94,7 +94,7 @@ def _tpu_sparse_dense_matmul_activation_unstack_lowering(
       api_version=1,
   )(ctx, stacked_activations)
 
-  return tuple(op)
+  return tuple(op)  # pytype: disable=bad-return-type
 
 
 mlir.register_lowering(

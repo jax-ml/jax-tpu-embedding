@@ -71,7 +71,7 @@ def _tpu_sparse_dense_matmul_gradient_stack_lowering(
 
   call_target = "SparseGradientsStackInterleaved"
 
-  return jax.ffi.ffi_lowering(
+  return jax.ffi.ffi_lowering(  # pytype: disable=bad-return-type
       call_target,
       result_types=[
           ir.RankedTensorType.get(
