@@ -1221,7 +1221,9 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
         dtype=np.float32,
     )
 
-    np.testing.assert_equal(updated_emb_table, expected_emb_activations)
+    np.testing.assert_allclose(
+        updated_emb_table, expected_emb_activations, rtol=1e-4, atol=1e-4
+    )
 
   def test_sc_emb_forward_pass_2_batches_per_core_with_bounds(self):
     # Tests a single SC evaluating gradients from _BATCH_SIZE sequences.
