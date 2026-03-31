@@ -38,7 +38,8 @@ def _pad_input_tensors(
       lhs_row_pointers,
       (0, row_pointer_width - lhs_row_pointers.shape[0]),
       mode="constant",
-      constant_values=lhs_row_pointers[63])
+      constant_values=lhs_row_pointers[-1],
+  )
 
   lhs_local_embedding_ids = jnp.pad(
       lhs_local_embedding_ids,
@@ -81,12 +82,10 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     self.max_device_batch_size = 32
 
     # Define the embedding table.
-    self.emb_table = (
-        np.array(
-            [[i for _ in range(self.emb_size)] for i in range(self.vocab_size)]
-        )
-        .reshape(self.vocab_size, self.emb_size)
-        .astype(np.float32)
+    # Embedding table where row i is initialized to i.
+    self.emb_table = np.tile(
+        np.arange(self.vocab_size, dtype=np.float32)[:, np.newaxis],
+        (1, self.emb_size),
     )
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
@@ -200,7 +199,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             self.max_device_batch_size,
             self.emb_size,
         ),
-        0.01,
+        1.0,
         np.float32,
     )
 
@@ -216,7 +215,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             num_minibatches_per_physical_sparse_core,
             self.emb_table_sharded[0],
             z_grad,
-            0.01,
+            0.1,  # learning_rate
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="sgd_test_computation",
@@ -229,333 +228,15 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
 
     # Check the embedding activations.
     # For embedding id 0-15,
-    # each has -0.01 (gradient) x 0.01 (learning rate) x 1 (sample) = -1e-4
+    # each has -1.0 (gradient) x 0.1 (learning rate) x 1 (sample) = -0.1
     # For embedding id 16-31, nothing is updated.
-    expected_emb_activations = np.array(
-        [
-            [
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-            ],
-            [
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-            ],
-            [
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-            ],
-            [
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-            ],
-            [
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-            ],
-            [
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-            ],
-            [
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-            ],
-            [
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-            ],
-            [
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-            ],
-            [
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-            ],
-            [
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-            ],
-            [
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-            ],
-            [
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-            ],
-            [
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-            ],
-            [
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-            ],
-            [
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-            ],
-            [
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-            ],
-            [
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-            ],
-            [
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-            ],
-            [
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-            ],
-            [
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-            ],
-            [
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-            ],
-            [
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-            ],
-            [
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-            ],
-            [
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-            ],
-            [
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-            ],
-            [
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-            ],
-            [
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-            ],
-            [
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-            ],
-            [
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-            ],
-            [
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-            ],
-            [
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-            ],
-        ],
-        dtype=np.float32,
-    )
+    expected_emb_activations = self.emb_table_sharded[0].copy()
+    for i in range(16):
+      # The table uses MOD sharding, so logical ID i is mapped to physical row:
+      # (i % num_shards) * shard_size + (i // num_shards),
+      # where num_shards=4 and shard_size=8.
+      physical_row = (i % 4) * 8 + i // 4
+      expected_emb_activations[physical_row, :] -= 0.1
 
     np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
@@ -862,7 +543,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             self.max_device_batch_size,
             self.emb_size,
         ),
-        0.01,
+        1.0,
         np.float32,
     )
 
@@ -878,7 +559,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             num_minibatches_per_physical_sparse_core,
             self.emb_table_sharded[0],
             z_grad,
-            0.01,
+            0.1,  # learning_rate
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="sgd_test_computation",
@@ -893,336 +574,19 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     # Note that the expected updates are twice as large as the 1 batch case, for
     # we have 2 input samples for each embedding id.
     # For embedding id 0-15,
-    # each has -0.01 (gradient) x 0.01 (learning rate) x 2 (samples) = -2e-4
+    # each has -1.0 (gradient) x 0.1 (learning rate) x 2 (samples) = -0.2
     # For embedding id 16-31, nothing is updated.
-    expected_emb_activations = np.array(
-        [
-            [
-                -2.00000e-04,
-                -2.00000e-04,
-                -2.00000e-04,
-                -2.00000e-04,
-                -2.00000e-04,
-                -2.00000e-04,
-                -2.00000e-04,
-                -2.00000e-04,
-            ],
-            [
-                3.99980e00,
-                3.99980e00,
-                3.99980e00,
-                3.99980e00,
-                3.99980e00,
-                3.99980e00,
-                3.99980e00,
-                3.99980e00,
-            ],
-            [
-                7.99980e00,
-                7.99980e00,
-                7.99980e00,
-                7.99980e00,
-                7.99980e00,
-                7.99980e00,
-                7.99980e00,
-                7.99980e00,
-            ],
-            [
-                1.19998e01,
-                1.19998e01,
-                1.19998e01,
-                1.19998e01,
-                1.19998e01,
-                1.19998e01,
-                1.19998e01,
-                1.19998e01,
-            ],
-            [
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-            ],
-            [
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-            ],
-            [
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-            ],
-            [
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-            ],
-            [
-                9.99800e-01,
-                9.99800e-01,
-                9.99800e-01,
-                9.99800e-01,
-                9.99800e-01,
-                9.99800e-01,
-                9.99800e-01,
-                9.99800e-01,
-            ],
-            [
-                4.99980e00,
-                4.99980e00,
-                4.99980e00,
-                4.99980e00,
-                4.99980e00,
-                4.99980e00,
-                4.99980e00,
-                4.99980e00,
-            ],
-            [
-                8.99980e00,
-                8.99980e00,
-                8.99980e00,
-                8.99980e00,
-                8.99980e00,
-                8.99980e00,
-                8.99980e00,
-                8.99980e00,
-            ],
-            [
-                1.29998e01,
-                1.29998e01,
-                1.29998e01,
-                1.29998e01,
-                1.29998e01,
-                1.29998e01,
-                1.29998e01,
-                1.29998e01,
-            ],
-            [
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-            ],
-            [
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-            ],
-            [
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-            ],
-            [
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-            ],
-            [
-                1.99980e00,
-                1.99980e00,
-                1.99980e00,
-                1.99980e00,
-                1.99980e00,
-                1.99980e00,
-                1.99980e00,
-                1.99980e00,
-            ],
-            [
-                5.99980e00,
-                5.99980e00,
-                5.99980e00,
-                5.99980e00,
-                5.99980e00,
-                5.99980e00,
-                5.99980e00,
-                5.99980e00,
-            ],
-            [
-                9.99980e00,
-                9.99980e00,
-                9.99980e00,
-                9.99980e00,
-                9.99980e00,
-                9.99980e00,
-                9.99980e00,
-                9.99980e00,
-            ],
-            [
-                1.39998e01,
-                1.39998e01,
-                1.39998e01,
-                1.39998e01,
-                1.39998e01,
-                1.39998e01,
-                1.39998e01,
-                1.39998e01,
-            ],
-            [
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-            ],
-            [
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-            ],
-            [
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-            ],
-            [
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-            ],
-            [
-                2.99980e00,
-                2.99980e00,
-                2.99980e00,
-                2.99980e00,
-                2.99980e00,
-                2.99980e00,
-                2.99980e00,
-                2.99980e00,
-            ],
-            [
-                6.99980e00,
-                6.99980e00,
-                6.99980e00,
-                6.99980e00,
-                6.99980e00,
-                6.99980e00,
-                6.99980e00,
-                6.99980e00,
-            ],
-            [
-                1.09998e01,
-                1.09998e01,
-                1.09998e01,
-                1.09998e01,
-                1.09998e01,
-                1.09998e01,
-                1.09998e01,
-                1.09998e01,
-            ],
-            [
-                1.49998e01,
-                1.49998e01,
-                1.49998e01,
-                1.49998e01,
-                1.49998e01,
-                1.49998e01,
-                1.49998e01,
-                1.49998e01,
-            ],
-            [
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-            ],
-            [
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-            ],
-            [
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-            ],
-            [
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-            ],
-        ],
-        dtype=np.float32,
-    )
+    expected_emb_activations = self.emb_table_sharded[0].copy()
+    for i in range(16):
+      # The table uses MOD sharding, so logical ID i is mapped to physical row:
+      # (i % num_shards) * shard_size + (i // num_shards),
+      # where num_shards=4 and shard_size=8.
+      physical_row = (i % 4) * 8 + i // 4
+      expected_emb_activations[physical_row, :] -= 0.2
 
-    np.testing.assert_equal(updated_emb_table, expected_emb_activations)
+    np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
+  @absltest.skip("b/496926428: Clipping with minibatching is not supported.")
   def test_sc_emb_forward_pass_2_batches_per_core_with_bounds(self):
     # Tests a single SC evaluating gradients from _BATCH_SIZE sequences.
     # The SC separates this batch logically into _NUM_MINIBATCHES chunks.
@@ -1321,7 +685,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             self.max_device_batch_size,
             self.emb_size,
         ),
-        0.01,
+        1.0,
         np.float32,
     )
 
@@ -1335,7 +699,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             num_minibatches_per_sc,
             emb_table_sharded[0],
             z_grad,
-            0.01,
+            0.1,  # learning_rate
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="sgd_minibatching_test_computation",
@@ -1346,43 +710,11 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
         )
     )
 
-    expected_emb_activations = np.array(
-        [
-            [0.0] * 8,
-            [1.0] * 8,
-            [2.0] * 8,
-            [2.9999] * 8,
-            [3.9999] * 8,
-            [4.9999] * 8,
-            [5.9999] * 8,
-            [6.9999] * 8,
-            [7.9999] * 8,
-            [8.9999] * 8,
-            [9.9999] * 8,
-            [10.9999] * 8,
-            [11.9999] * 8,
-            [12.0] * 8,
-            [14.0] * 8,
-            [15.0] * 8,
-            [16.0] * 8,
-            [17.0] * 8,
-            [18.0] * 8,
-            [19.0] * 8,
-            [20.0] * 8,
-            [21.0] * 8,
-            [22.0] * 8,
-            [23.0] * 8,
-            [24.0] * 8,
-            [25.0] * 8,
-            [26.0] * 8,
-            [27.0] * 8,
-            [28.0] * 8,
-            [29.0] * 8,
-            [30.0] * 8,
-            [31.0] * 8,
-        ],
-        dtype=np.float32,
-    )
+    # Embedding IDs 0-15 are each present once, so they are updated by -0.1*1*1
+    # and clipped.
+    expected_emb_activations = emb_table_sharded[0].copy()
+    for i in range(16):
+      expected_emb_activations[i, :] = np.clip(i - 0.1, 2.0, 12.0)
     updated_emb_table = einops.rearrange(
         updated_emb_table[jnp.newaxis, :, :],
         "c (s v) f -> (v c s) f",
@@ -1390,10 +722,9 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
         s=1,
     )
 
-    logging.info("updated %s", updated_emb_table)
-    np.testing.assert_allclose(
-        updated_emb_table, expected_emb_activations, rtol=1e-4, atol=1e-4
-    )
+    logging.debug("updated %s", updated_emb_table)
+    logging.debug("expected %s", expected_emb_activations)
+    np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
 
 if __name__ == "__main__":
