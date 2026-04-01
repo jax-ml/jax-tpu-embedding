@@ -11,9 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""SparseCore input preprocessing functions."""
+"""Reference implementation for SparseCore input preprocessing.
 
-from typing import Tuple
+This module provides a readable, non-performant reference implementation of the
+input preprocessing logic for SparseCore. It handles partitioning, sorting,
+deduplication, and packing into CSR-formatted buffers.
+
+This is intended for testing and verification purposes and does not necessarily
+follow the most performant patterns used in production.
+"""
+
+import collections
+from collections.abc import Sequence
 
 import jax
 from jax import numpy as jnp
@@ -23,214 +32,316 @@ import numpy as np
 
 ArrayLike = jnp.ndarray | np.ndarray
 
+# (local_sc_id, global_sc_id)
+PartitionKey = tuple[int, int]
+# (local_col_id, local_row_id)
+LocalCoordinate = tuple[int, int]
+# List of (Coordinate, weight/gain)
+PartitionData = list[tuple[LocalCoordinate, float]]
+# Mapping from partition key to its data
+PartitionMap = dict[PartitionKey, PartitionData]
 
-def preprocess_sparse_dense_matmul_input(
-    features: ArrayLike,
-    features_weights: ArrayLike,
-    mesh: jax.sharding.Mesh,
-    max_ids_per_partition: int = 64,
-    num_sc_per_device: int = -1,
-    sharding_strategy: str = "MOD",
-) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-  """Preprocesses the input for the sparse-dense matmul.
+Sample = Sequence[int]
+SampleWeight = Sequence[float]
+
+Feature2D = ArrayLike
+Weight2D = ArrayLike
+
+FeatureBatch = Feature2D | Sequence[Sample]
+WeightBatch = Weight2D | Sequence[SampleWeight]
+
+MinibatchedFeatures = Sequence[FeatureBatch]
+MinibatchedWeights = Sequence[WeightBatch]
+
+
+################################################################################
+# Helper Functions
+################################################################################
+
+
+def _preprocess_batch_to_partitions(
+    features: FeatureBatch,
+    features_weights: WeightBatch,
+    num_scs: int,
+    num_sc_per_device: int,
+) -> PartitionMap:
+  """Core logic: converts a single batch to structured partitions.
 
   Args:
-    features: Input feature array. The input feature array must either be a 2D
-      array or a 1D numpy array of lists (in cases of ragged tensors). In the 2D
-      array case, the first dimension is the batch size and the second dimension
-      is the feature length. In the 1D case, the first dimension is the batch
-      size and the individual nested arrays are the training samples.
-    features_weights: Input weights corresponding to each feature. The shape of
-      the features_weights has to be the exact same as the input features.
-    mesh: An instance of the jax.sharding.Mesh object. This contains the global
-      devices info and local devices info which we need to do the preprocessing.
+    features: Input features for the current batch.
+    features_weights: Input weights corresponding to each feature.
+    num_scs: Total number of global SparseCores.
+    num_sc_per_device: Number of SparseCores per device.
+
+  Returns:
+    A mapping from (local_sc_id, global_sc_id) to a list of
+    ((local_col_id, local_row_id), gain) tuples, sorted by (col, row).
+  """
+  ##############################################################################
+  # Step 1: Partitioning and Implicit Deduping
+  ##############################################################################
+  batch_size_per_mb = len(features)
+  batch_size_per_sc = batch_size_per_mb // num_sc_per_device
+
+  # partitions[(local_sc, global_sc)] -> defaultdict(float)
+  # where keys are (col, row)
+  partitions = collections.defaultdict(lambda: collections.defaultdict(float))
+
+  for row_id, (sample_feat, sample_weight) in enumerate(
+      zip(features, features_weights, strict=True)
+  ):
+    local_sc_id = row_id // batch_size_per_sc
+    local_row_id = row_id % batch_size_per_sc
+    for col_id, weight in zip(sample_feat, sample_weight, strict=True):
+      global_sc_id = int(col_id) % num_scs
+      local_col_id = int(col_id) // num_scs
+      # Accumulate gain for the same (col, row) in this partition.
+      # fmt: off
+      partitions[(local_sc_id, global_sc_id)][(local_col_id, local_row_id)] += float(weight)
+      # fmt: on
+
+  ##############################################################################
+  # Step 2: Partition-wise Sorting
+  ##############################################################################
+  return {
+      key: sorted(deduped_data.items())
+      for key, deduped_data in partitions.items()
+  }
+
+
+def _pack_partitions_to_csr(
+    all_minibatch_partitions: Sequence[PartitionMap],
+    num_minibatches: int,
+    num_scs: int,
+    num_sc_per_device: int,
+    max_ids_per_partition: int,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+  """CSR Packer: pads and flattens partitions into final CSR buffers.
+
+  Args:
+    all_minibatch_partitions: List of partition mappings for each minibatch.
+    num_minibatches: Total number of minibatches.
+    num_scs: Total number of global SparseCores.
+    num_sc_per_device: Number of SparseCores per device.
     max_ids_per_partition: Maximum number of ids per SparseCore partition. This
       value is used to determine the size of the static buffer of embedding,
       sample IDs and gains.
-    num_sc_per_device: Number of sparse cores per device.
-    sharding_strategy: The sharding strategy to use to shard the embedding
-      table.
 
   Returns:
-    A tuple of four arrays forms the csr wrapped coo input:
-      row_pointers: Row pointers which points to index for each sparse core
+    A tuple (row_pointers, col_ids, row_ids, gains) forming the CSR wrapped COO
+    input, where:
+      row_pointers: Row pointers which point to the index for each sparse core
       partition.
       col_ids: Embedding ids.
-      row_ids: Sample ids for each embedding ids.
-      gains: The weight for each embedding id.
-
-  Raises:
-    NotImplementedError
+      row_ids: Sample ids for each embedding id.
+      gains: The weights for each embedding id.
   """
+  ##############################################################################
+  # Step 3: CSR Buffer Initialization
+  ##############################################################################
+  row_pointers_size_per_sc = max(num_scs * num_minibatches, 8)
+
+  coo_buffer_size = (
+      _coo_buffer_tensor_size(max_ids_per_partition, num_scs, num_sc_per_device)
+      * num_minibatches
+  )
+
+  lhs_row_pointers_by_sc_id = np.zeros(
+      (num_sc_per_device, row_pointers_size_per_sc), np.int32
+  )
+  lhs_local_embedding_ids = np.full(
+      coo_buffer_size, constants.PADDING_VALUE, np.int32
+  )
+  lhs_local_sample_ids = np.full(
+      coo_buffer_size, constants.PADDING_VALUE, np.int32
+  )
+  lhs_gains = np.full(coo_buffer_size, np.nan, np.float32)
+
+  ids_per_sc_buffer = coo_buffer_size // num_sc_per_device
+
+  ##############################################################################
+  # Step 4: CSR Serialization and Alignment
+  ##############################################################################
+  for local_sc_id in range(num_sc_per_device):
+    sc_offset = local_sc_id * ids_per_sc_buffer
+    current_ids = 0
+    ptr_idx = 0
+
+    for data_by_partition in all_minibatch_partitions:
+      for global_sc_id in range(num_scs):
+        partition_data = data_by_partition.get((local_sc_id, global_sc_id), [])
+
+        for (col_id, row_id), gain in partition_data:
+          lhs_local_embedding_ids[sc_offset + current_ids] = col_id
+          lhs_local_sample_ids[sc_offset + current_ids] = row_id
+          lhs_gains[sc_offset + current_ids] = gain
+          current_ids += 1
+
+        # Record point (end of data for this partition)
+        lhs_row_pointers_by_sc_id[local_sc_id, ptr_idx] = current_ids
+        ptr_idx += 1
+
+        # Post-pad this partition to 8-word multiple for the next partition's
+        # start.
+        while current_ids % 8 != 0:
+          current_ids += 1
+
+    # Pad remaining pointers to match buffer size
+    if ptr_idx < row_pointers_size_per_sc:
+      lhs_row_pointers_by_sc_id[local_sc_id, ptr_idx:] = current_ids
+
+  return (
+      jnp.asarray(lhs_row_pointers_by_sc_id.reshape(-1)),
+      jnp.asarray(lhs_local_embedding_ids),
+      jnp.asarray(lhs_local_sample_ids),
+      jnp.asarray(lhs_gains),
+  )
+
+
+################################################################################
+# Main Entry Points
+################################################################################
+
+
+def preprocess_sparse_dense_matmul_input(
+    features: FeatureBatch,
+    features_weights: WeightBatch,
+    mesh: jax.sharding.Mesh,
+    *,
+    max_ids_per_partition: int = 64,
+    num_sc_per_device: int = -1,
+    sharding_strategy: str = "MOD",
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+  """Preprocesses standard input into SparseCore CSR wrapped COO format.
+
+  Args:
+    features: Input feature array or ragged list.
+    features_weights: Input weights corresponding to each feature.
+    mesh: JAX sharding mesh containing global and local device info.
+    max_ids_per_partition: Maximum number of ids per SparseCore partition.
+    num_sc_per_device: Number of sparse cores per device.
+    sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
+
+  Returns:
+    A tuple (row_pointers, col_ids, row_ids, gains) forming the CSR wrapped COO
+    input, where:
+      row_pointers: Row pointers which point to the index for each sparse core
+      partition.
+      col_ids: Embedding ids.
+      row_ids: Sample ids for each embedding id.
+      gains: The weights for each embedding id.
+  """
+  if max_ids_per_partition <= 0:
+    raise ValueError(
+        f"max_ids_per_partition must be positive, got {max_ids_per_partition}."
+    )
+  try:
+    features_ndim = np.ndim(features)
+  except ValueError:
+    features_ndim = 1
+  if features_ndim not in (1, 2):
+    raise ValueError(f"features must be 1D or 2D, got {features_ndim}D.")
+  if len(features) != len(features_weights):
+    raise ValueError("features and features_weights must have the same length.")
   if sharding_strategy != "MOD":
     raise ValueError("Currently only MOD sharding strategy is supported")
-
-  if features.shape != features_weights.shape:
-    raise ValueError("features and weights must have the same shape.")
-
-  if np.ndim(features) != 2 and np.ndim(features) != 1:
-    raise ValueError("features must be a 2D array or a 1D numpy array.")
-
-  if max_ids_per_partition <= 0:
-    raise ValueError("max_ids_per_partition must be positive.")
 
   global_device_count = len(mesh.devices)
   if global_device_count <= 0:
     raise ValueError("global_device_count must be positive.")
 
-  if num_sc_per_device <= 0:
-    num_sc_per_device = utils.num_sparsecores_per_device(mesh.devices.item(0))
-
-  # Global number of sparse cores.
+  num_sc_per_device = (
+      num_sc_per_device
+      if num_sc_per_device > 0
+      else utils.num_sparsecores_per_device(mesh.devices.item(0))
+  )
   num_scs = num_sc_per_device * global_device_count
 
-  # `features` is the batch for a single device. The batch_size for each core is
-  # then the length of features divided by the number of cores.
-  batch_size_per_sc = features.shape[0] // num_sc_per_device
-  row_pointers_size_per_sc = max(num_scs, 8)
-  coo_buffer_size = _coo_buffer_tensor_size(
-      max_ids_per_partition, num_scs, num_sc_per_device
+  ##############################################################################
+  # Step 1: Preprocess Minibatch to Partition Map
+  ##############################################################################
+  # Standard case: exactly one minibatch.
+  partitions: PartitionMap = _preprocess_batch_to_partitions(
+      features, features_weights, num_scs, num_sc_per_device
   )
 
   ##############################################################################
-  # Step 1: Convert ragged tensor to COO tensor.
+  # Step 2: Pack to CSR
   ##############################################################################
-  coo_tensor = []
-  for row_id, (sample_input_tensor, sample_input_weights) in enumerate(
-      zip(features, features_weights)
-  ):
-    if len(sample_input_tensor) != len(sample_input_weights):
-      raise ValueError(
-          "features and weights must have the same shape. Detected mismatched"
-          f" shapes at row {row_id}."
+  return _pack_partitions_to_csr(
+      [partitions], 1, num_scs, num_sc_per_device, max_ids_per_partition
+  )
+
+
+def preprocess_sparse_dense_matmul_input_minibatched(
+    features: MinibatchedFeatures,
+    features_weights: MinibatchedWeights,
+    mesh: jax.sharding.Mesh,
+    *,
+    max_ids_per_partition: int = 64,
+    num_sc_per_device: int = -1,
+    sharding_strategy: str = "MOD",
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+  """Preprocesses minibatched input into SparseCore CSR wrapped COO format.
+
+  Args:
+    features: List of batches, each either a 2D array or a ragged list.
+    features_weights: Nested list of weights matching `features` structure.
+    mesh: JAX sharding mesh containing global and local device info.
+    max_ids_per_partition: Maximum number of ids per SparseCore partition.
+    num_sc_per_device: Number of sparse cores per device.
+    sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
+
+  Returns:
+    A tuple (row_pointers, col_ids, row_ids, gains) forming the CSR wrapped COO
+    input, where:
+      row_pointers: Row pointers which point to the index for each sparse core
+      partition.
+      col_ids: Embedding ids.
+      row_ids: Sample ids for each embedding id.
+      gains: The weights for each embedding id.
+  """
+  if max_ids_per_partition <= 0:
+    raise ValueError(
+        f"max_ids_per_partition must be positive, got {max_ids_per_partition}."
+    )
+  if len(features) != len(features_weights):
+    raise ValueError("features and features_weights must have the same length.")
+  if sharding_strategy != "MOD":
+    raise ValueError("Currently only MOD sharding strategy is supported")
+
+  num_minibatches = len(features)
+  global_device_count = len(mesh.devices)
+  if global_device_count <= 0:
+    raise ValueError("global_device_count must be positive.")
+
+  num_sc_per_device = (
+      num_sc_per_device
+      if num_sc_per_device > 0
+      else utils.num_sparsecores_per_device(mesh.devices.item(0))
+  )
+  num_scs = num_sc_per_device * global_device_count
+
+  ##############################################################################
+  # Step 1: Preprocess Each Minibatch to Partition Maps
+  ##############################################################################
+  # Process each minibatch independently.
+  all_partitions: list[PartitionMap] = [
+      _preprocess_batch_to_partitions(
+          mb_feat, mb_weight, num_scs, num_sc_per_device
       )
-
-    for col_id, weight in zip(sample_input_tensor, sample_input_weights):
-      coo_tensor.append((row_id, col_id, weight))
-
-  ##############################################################################
-  # Step 2: Order COO tensor by the sample SC allocation.
-  ##############################################################################
-
-  # Define a function to map a COO tensor element to its SC allocation.
-  sample_to_sc_id = lambda s: (
-      s[0] // batch_size_per_sc,  # Local SC ID of the training sample.
-      s[1] % num_scs,  # Global SC ID of the column.
-  )
-  coo_tensor.sort(
-      key=lambda v: (
-          *sample_to_sc_id(v),
-          v[1],  # Column ID.
-          v[0],  # Training Sample ID.
-          v[2],  # Weight/Gain.
-      )
-  )
+      for mb_feat, mb_weight in zip(features, features_weights, strict=True)
+  ]
 
   ##############################################################################
-  # Step 3: Compute the row pointers for each group of ids.
+  # Step 2: Pack All Minibatches to CSR
   ##############################################################################
-  lhs_row_pointers_by_sc_id = np.empty(
-      (num_sc_per_device, row_pointers_size_per_sc),
-      np.int32,
-  )
-  padded_coo_tensor_by_sc_id = np.empty(
-      (
-          num_sc_per_device,
-          coo_buffer_size // num_sc_per_device,
-      ),
-      object,
-  )
-
-  # Calculate row pointers for each partition.
-  coo_tensor_index = 0
-  prev_row_id = -1
-  prev_col_id = -1
-  for local_sc_id in range(num_sc_per_device):
-    lhs_row_index = 0
-    padded_coo_tensor_index = 0
-
-    # Prepare COO tensor for each global SC.
-    for global_sc_id in range(num_scs):
-      sc_id_tuple = (local_sc_id, global_sc_id)
-
-      # Grab all the samples for the current local and global SC.
-      while (
-          coo_tensor_index < len(coo_tensor)
-          and sample_to_sc_id(coo_tensor[coo_tensor_index]) == sc_id_tuple
-      ):
-        row_id, col_id, gain = coo_tensor[coo_tensor_index]
-        coo_tensor_index += 1
-
-        if row_id == prev_row_id and col_id == prev_col_id:
-          # If the row ids and col ids are both same as the previous one,
-          # dedup the id by adding the gains.
-          padded_coo_tensor_index -= 1
-          gain += padded_coo_tensor_by_sc_id[local_sc_id][
-              padded_coo_tensor_index
-          ][2]
-
-        # Append the sample to the COO tensor.
-        padded_coo_tensor_by_sc_id[local_sc_id][padded_coo_tensor_index] = (
-            row_id % batch_size_per_sc,
-            col_id // num_scs,
-            gain,
-        )
-        padded_coo_tensor_index += 1
-
-        prev_row_id = row_id
-        prev_col_id = col_id
-
-      # Commit the current row pointer.
-      lhs_row_pointers_by_sc_id[local_sc_id][
-          lhs_row_index
-      ] = padded_coo_tensor_index
-      lhs_row_index += 1
-
-      # Add padding to coo tensor to make sure it is rounded up by 8
-      while padded_coo_tensor_index % 8 != 0:
-        padded_coo_tensor_by_sc_id[local_sc_id][padded_coo_tensor_index] = (
-            constants.PADDING_VALUE,
-            constants.PADDING_VALUE,
-            np.nan,
-        )
-        padded_coo_tensor_index += 1
-
-    # Pad the rest of the row pointer buffer for the current chip.
-    while lhs_row_index < row_pointers_size_per_sc:
-      lhs_row_pointers_by_sc_id[local_sc_id][
-          lhs_row_index
-      ] = padded_coo_tensor_index
-      lhs_row_index += 1
-
-    # Pad the rest of the COO tensor values for the current chip.
-    while padded_coo_tensor_index < padded_coo_tensor_by_sc_id.shape[1]:
-      padded_coo_tensor_by_sc_id[local_sc_id][padded_coo_tensor_index] = (
-          constants.PADDING_VALUE,
-          constants.PADDING_VALUE,
-          np.nan,
-      )
-      padded_coo_tensor_index += 1
-
-  ##############################################################################
-  # Step 4: Reassemble the final results.
-  ##############################################################################
-  lhs_row_pointers = lhs_row_pointers_by_sc_id.reshape(-1)
-  padded_coo_tensor = padded_coo_tensor_by_sc_id.reshape(coo_buffer_size)
-
-  lhs_local_sample_ids = np.zeros((coo_buffer_size,), np.int32)
-  lhs_local_embedding_ids = np.zeros((coo_buffer_size,), np.int32)
-  lhs_gains = np.zeros((coo_buffer_size,), np.float32)
-
-  for coo_index, (row_id, col_id, gain) in enumerate(padded_coo_tensor):
-    lhs_local_sample_ids[coo_index] = row_id
-    lhs_local_embedding_ids[coo_index] = col_id
-    lhs_gains[coo_index] = gain
-
-  return (
-      jnp.asarray(lhs_row_pointers),
-      jnp.asarray(lhs_local_embedding_ids),
-      jnp.asarray(lhs_local_sample_ids),
-      jnp.asarray(lhs_gains),
+  return _pack_partitions_to_csr(
+      all_partitions,
+      num_minibatches,
+      num_scs,
+      num_sc_per_device,
+      max_ids_per_partition,
   )
 
 
