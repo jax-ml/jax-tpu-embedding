@@ -45,9 +45,8 @@ def row_id_initializer(
   Returns:
    A jax.Array for testing.
   """
-  return (
-      jnp.ones(shape, dtype=dtype)
-      * jnp.arange(offset, offset + shape[0], dtype=dtype)[:, None]
+  return jnp.broadcast_to(
+      jnp.arange(offset, offset + shape[0], dtype=dtype)[:, None], shape
   )
 
 
@@ -97,14 +96,12 @@ def row_id_with_offset_initializer(
 
   def create_array(offset_value, shape):
     rows, cols = shape
-    result = jnp.zeros(shape, dtype=jnp.float32)
-    for i in range(rows):
-      for j in range(cols):
-        result = result.at[i, j].set(
-            row_id_with_offset_initializer_value(offset_value, i)
-        )
-
-    return result
+    # Create an array of row indices: [0, 1, 2, ..., rows-1]
+    row_indices = jnp.arange(rows, dtype=jnp.float32)
+    # Target value for each row is its index plus the offset.
+    row_values = row_indices + offset_value
+    # Reshape to (rows, 1) and broadcast to (rows, cols)
+    return jnp.broadcast_to(row_values[:, jnp.newaxis], (rows, cols))
 
   def init(key, shape) -> jax.Array:
     del key

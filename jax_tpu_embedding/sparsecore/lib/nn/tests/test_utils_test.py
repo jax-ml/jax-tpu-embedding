@@ -56,6 +56,18 @@ class TestUtilsTest(parameterized.TestCase):
     )
     np.testing.assert_array_equal(expected, actual)
 
+  def test_row_id_with_offset_initializer(self):
+    expected = np.array(
+        [
+            [10.0, 10.0, 10.0],
+            [11.0, 11.0, 11.0],
+        ],
+        dtype=np.float32,
+    )
+    initializer = test_utils.row_id_with_offset_initializer(offset_value=10)
+    actual = initializer(jax.random.PRNGKey(0), shape=(2, 3))
+    np.testing.assert_array_equal(expected, actual)
+
   @parameterized.product(
       row_count=[3, 8, 123], col_count=[1, 4, 8], leading_value=[0, 1, 2]
   )
@@ -64,7 +76,7 @@ class TestUtilsTest(parameterized.TestCase):
     initializer = test_utils.row_col_id_initializer(leading_value)
     table = initializer(jax.random.PRNGKey(0), shape)
     self.assertEqual(table.shape, shape)
-    logging.info(
+    logging.debug(
         "Row col id initialized table: shape: %s, content:%s",
         table.shape,
         test_utils.formatted_array2string(table),
