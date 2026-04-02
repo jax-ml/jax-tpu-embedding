@@ -86,11 +86,76 @@ def lookup_params(
 
 def update_params(
     eqn: jex.core.JaxprEqn,
-) -> tuple[list[jax.core.Atom], list[jax.core.Atom]]:
-  return (
-      eqn.invars[:EMBEDDING_UPDATE_DATA_LEN],
-      eqn.invars[EMBEDDING_UPDATE_DATA_LEN:],
-  )
+) -> tuple[list[jax.core.Atom], list[jax.core.Atom], list[jax.core.Atom]]:
+  """Separates update shard_map inputs into data, tables, and unmapped."""
+  jaxpr = eqn.params['jaxpr']
+
+  # Find all update primitive calls.
+  update_eqns = []
+  for eq in jaxpr.eqns:
+    if eq.primitive.name.startswith(EMBEDDING_UPDATE_PRIMITIVE_PREFIX):
+      update_eqns.append(eq)
+
+  if not update_eqns:
+    raise ValueError('No embedding update primitive found in shard_map')
+
+  # Table count mapping by optimizer name substring.
+  optimizer_tables_count = {
+      'adam': 3,
+      'adagrad_momentum': 3,
+      'adagrad': 2,
+      'ftrl': 3,
+      'sgd': 1,
+      'laprop': 3,
+      'f2a': 1,
+  }
+
+  prim_tables_invars = []
+  for update_eqn in update_eqns:
+    prim_name = update_eqn.primitive.name
+    num_tables = 1
+    for opt, count in optimizer_tables_count.items():
+      if opt in prim_name:
+        num_tables = count
+        break
+    prim_tables_invars.extend(update_eqn.invars[5 : 5 + num_tables])
+
+  # Map inner variables to outer variables.
+  tables = []
+  for var in prim_tables_invars:
+    if isinstance(var, jex.core.Var):
+      try:
+        index = jaxpr.invars.index(var)
+        tables.append(eqn.invars[index])
+      except ValueError:
+        pass
+
+  # Remove duplicates while preserving order.
+  tables = list(dict.fromkeys(tables))
+
+  # Find the indices of tables in eqn.invars
+  table_indices = []
+  for t in tables:
+    try:
+      table_indices.append(eqn.invars.index(t))
+    except ValueError:
+      pass
+
+  if not table_indices:
+    # Fallback to old logic if no tables found via primitives.
+    all_tables_and_slots = eqn.invars[EMBEDDING_UPDATE_DATA_LEN:]
+    in_specs = eqn.params['in_specs'][EMBEDDING_UPDATE_DATA_LEN:]
+    tables = [
+        v for v, s in zip(all_tables_and_slots, in_specs) if s is not None
+    ]
+    unmapped = [v for v, s in zip(all_tables_and_slots, in_specs) if s is None]
+    return eqn.invars[:EMBEDDING_UPDATE_DATA_LEN], tables, unmapped
+
+  min_table_idx = min(table_indices)
+  data_inputs = eqn.invars[:min_table_idx]
+  unmapped = [var for var in eqn.invars[min_table_idx:] if var not in tables]
+
+  return data_inputs, tables, unmapped
 
 
 def clone_vars(var_list: Iterable[jex.core.Var]) -> list[jex.core.Var]:
