@@ -38,14 +38,15 @@ index 0.
 
 import functools
 import json
-from typing import Callable, Tuple
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import jax
 from jax import core
 from jax import numpy as jnp
 import jax.extend as jex
+from jax.extend import source_info_util
 from jax.extend.mlir import ir
+from jax.extend.mlir.dialects import func as func_dialect
 from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
@@ -75,26 +76,29 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
     lhs_local_sample_ids: core.ShapedArray,
     lhs_gains: core.ShapedArray,
     num_minibatches_per_physical_sparse_core: core.ShapedArray,
-    embedding_variables: core.ShapedArray,
     activations_grad: core.ShapedArray,
-    hyperparameters: core.ShapedArray,
-    *_,
-    optimizer_generator: Callable[[mlir.LoweringRuleContext, str, int], None],
+    *hyperparams_and_embedding_vars: core.ShapedArray,
+    num_hyperparameters: int,
+    jaxpr: jex.core.ClosedJaxpr,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
 ) -> Tuple[core.ShapedArray, ...]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
+  hyperparameters = hyperparams_and_embedding_vars[:num_hyperparameters]
+  embedding_variables = hyperparams_and_embedding_vars[num_hyperparameters:]
+
+  if not embedding_variables:
+    raise ValueError("At least one embedding variable must be passed.")
+
   utils.validate_abstract_eval_params(
       lhs_row_pointers=lhs_row_pointers,
       lhs_local_embedding_ids=lhs_local_embedding_ids,
       lhs_local_sample_ids=lhs_local_sample_ids,
       lhs_gains=lhs_gains,
       num_minibatches_per_physical_sparse_core=num_minibatches_per_physical_sparse_core,
-      embedding_table=core.ShapedArray(
-          embedding_variables.shape[1:], embedding_variables.dtype
-      ),
+      embedding_table=embedding_variables[0],
       activations_grad=activations_grad,
       max_ids_per_partition=max_ids_per_partition,
       max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -102,25 +106,26 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
       sharding_strategy=sharding_strategy,
   )
 
-  if hyperparameters.dtype != np.float32 or len(hyperparameters.shape) != 1:
-    raise ValueError(
-        "hyperparameters must be 1 dimensional with dtype float32, got"
-        f" {hyperparameters.dtype} and shape {hyperparameters.shape}"
-    )
-  if len(embedding_variables.shape) != 3:
-    raise ValueError(
-        f"embedding_table must have rank 3, got {embedding_variables.shape}"
-    )
-  if not callable(optimizer_generator):
-    raise ValueError("optimizer_generator must be callable")
+  for param in hyperparameters:
+    if param.dtype != np.float32:
+      raise ValueError(f"hyperparameters must be float32, got {param.dtype}")
+    if len(param.shape) != 0 and param.shape != (1,):
+      raise ValueError(
+          f"hyperparameters must be scalars or 1D of size 1, got {param.shape}"
+      )
 
-  num_tables = embedding_variables.shape[0]
+  for var in embedding_variables:
+    if len(var.shape) != 2:
+      raise ValueError(f"embedding variables must have rank 2, got {var.shape}")
+  if not isinstance(jaxpr, jex.core.ClosedJaxpr):
+    raise ValueError("jaxpr must be a ClosedJaxpr")
+
   return tuple(
       core.ShapedArray(
-          (embedding_variables.shape[1], embedding_variables.shape[2]),
+          var.shape,
           dtype=jnp.float32,
       )
-      for _ in range(num_tables)
+      for var in embedding_variables
   )
 
 
@@ -136,11 +141,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     lhs_local_sample_ids: ir.BlockArgument,
     lhs_gains: ir.BlockArgument,
     num_minibatches_per_physical_sparse_core: ir.BlockArgument,
-    embedding_variables: ir.BlockArgument,
     activations_grad: ir.BlockArgument,
-    hyperparameters: ir.BlockArgument,
-    *,
-    optimizer_generator: Callable[[mlir.LoweringRuleContext, str, int], None],
+    *hyperparams_and_embedding_vars: ir.BlockArgument,
+    num_hyperparameters: int,
+    jaxpr: jex.core.ClosedJaxpr,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
@@ -148,12 +152,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
 ) -> Tuple[Sequence[ir.Value], ...]:
   """Lowering for sparse_dense_matmul_optimizer_grad."""
   del num_minibatches_per_physical_sparse_core
-  num_slot_variables = (
-      ir.RankedTensorType(embedding_variables.type).get_dim_size(0) - 1
-  )
-  num_hyperparameters = ir.RankedTensorType(hyperparameters.type).get_dim_size(
-      0
-  )
+  hyperparameters = hyperparams_and_embedding_vars[:num_hyperparameters]
+  embedding_variables = hyperparams_and_embedding_vars[num_hyperparameters:]
+
+  num_slot_variables = len(embedding_variables) - 1
   sdmm_sgd_config = {
       "max_ids_per_partition": max_ids_per_partition,
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
@@ -169,48 +171,75 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  # Because we cannot take in a tuple or list of Nd arrays, we need to slice
-  # the embedding tables into individual tables. The order of the user input
-  # must be kept intact.
-  tables = []
+  tables = list(embedding_variables)
   table_shape = (
-      ir.RankedTensorType(embedding_variables.type).get_dim_size(1),
-      ir.RankedTensorType(embedding_variables.type).get_dim_size(2),
-  )
-  for i in range(num_slot_variables + 1):
-    sliced = hlo.slice(
-        embedding_variables,
-        mlir.dense_int_array([i, 0, 0]),
-        mlir.dense_int_array([i + 1, table_shape[0], table_shape[1]]),
-        mlir.dense_int_array([1, 1, 1]),
-    )
-    sliced = hlo.reshape(
-        ir.RankedTensorType.get(
-            [table_shape[0], table_shape[1]],
-            ir.F32Type.get(),
-        ),
-        sliced,
-    )
-    tables.append(sliced)
-  optimizer_generator(
-      ctx,
-      optimizer_update_computation_name,
+      ir.RankedTensorType(tables[0].type).get_dim_size(0),
       ir.RankedTensorType(tables[0].type).get_dim_size(1),
   )
+  dim_size = table_shape[1]
+  row_tensor_type = ir.RankedTensorType.get([1, dim_size], ir.F32Type.get())
+
+  wrapper_input_types = [row_tensor_type]  # grad
+  for _ in tables:
+    wrapper_input_types.append(row_tensor_type)
+  for _ in range(num_hyperparameters):
+    wrapper_input_types.append(row_tensor_type)
+
+  const_types = [mlir.aval_to_ir_type(v.aval) for v in jaxpr.constvars]
+  wrapper_input_types.extend(const_types)
+
+  output_types = [row_tensor_type for _ in range(num_slot_variables + 1)]
+
+  wrapper_func = func_dialect.FuncOp(
+      optimizer_update_computation_name,
+      (
+          wrapper_input_types,
+          [ir.TupleType.get_tuple(output_types)],
+      ),
+      ip=ctx.module_context.ip,
+      visibility="private",
+  )
+
+  entry_block = wrapper_func.add_entry_block()
+  with ir.InsertionPoint(entry_block):
+    wa = list(entry_block.arguments)
+
+    in_args = wa[: 1 + len(tables) + num_hyperparameters]
+    consts_wa = wa[1 + len(tables) + num_hyperparameters :]
+
+    name_stack = source_info_util.NameStack()
+    tokens_in = mlir.TokenSet()
+
+    out_vals, _ = mlir.jaxpr_subcomp(
+        ctx.module_context,
+        jaxpr.jaxpr,
+        name_stack,
+        tokens_in,
+        consts_wa,
+        *in_args,
+        dim_var_values=[],
+        const_lowering={},
+        outer_traceback=None,
+    )
+
+    flat_out_vals = []
+    for v in out_vals:
+      if isinstance(v, (list, tuple)):
+        flat_out_vals.extend(v)
+      else:
+        flat_out_vals.append(v)
+
+    result_tuple = hlo.tuple(flat_out_vals)
+    func_dialect.ReturnOp([result_tuple])
+
   hyperparams = []
   f32type = mlir.aval_to_ir_type(core.ShapedArray((), np.float32))
-  for i in range(num_hyperparameters):
-    sliced_param = hlo.slice(
-        hyperparameters,
-        mlir.dense_int_array([i]),
-        mlir.dense_int_array([i + 1]),
-        mlir.dense_int_array([1]),
-    )
-    sliced_param = hlo.reshape(
-        f32type,
-        sliced_param,
-    )
-    hyperparams.append(sliced_param)
+  for param in hyperparameters:
+    if ir.RankedTensorType(param.type).rank == 0:
+      hyperparams.append(param)
+    else:
+      reshaped = hlo.reshape(f32type, param)
+      hyperparams.append(reshaped)
 
   operands = (
       [
@@ -226,7 +255,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   op = jax.ffi.ffi_lowering(
       "SparseDenseMatmulGradOpWithOptimizerUpdate",
       result_types=[
-          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])  # pylint: disable=attribute-error
+          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])
       ],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],

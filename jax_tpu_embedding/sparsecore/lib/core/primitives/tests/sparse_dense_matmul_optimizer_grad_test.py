@@ -18,7 +18,6 @@ import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
-from jax_tpu_embedding.sparsecore.lib.core.primitives import optimizers_computation
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
 import numpy as np
 
@@ -79,6 +78,69 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         name="tpu_sparse_dense_matmul_grad_with_optimizer",
     )
 
+  def _get_expected_updated_table(
+      self, emb_table, z_grad, indices, weights, optimizer_fn, *rest_args
+  ):
+    emb_table = jnp.array(emb_table)
+    nz_grads = weights * z_grad
+    grad_table_full = jnp.zeros_like(emb_table)
+    grad_table_full = grad_table_full.at[indices[:, 0]].add(nz_grads)
+
+    unique_indices = jnp.unique(indices[:, 0])
+    accessed_table = emb_table[unique_indices]
+    accessed_grads = grad_table_full[unique_indices]
+
+    accessed_rest_args = []
+    for arg in rest_args:
+      if isinstance(arg, jnp.ndarray) and arg.shape == emb_table.shape:
+        accessed_rest_args.append(arg[unique_indices])
+      else:
+        accessed_rest_args.append(arg)
+
+    outputs = optimizer_fn(accessed_grads, accessed_table, *accessed_rest_args)
+
+    if isinstance(outputs, tuple):
+      updated_table = emb_table.at[unique_indices].set(outputs[0])
+      updated_outputs = [updated_table]
+
+      tensor_arg_indices = [
+          i
+          for i, arg in enumerate(rest_args)
+          if isinstance(arg, jnp.ndarray) and arg.shape == emb_table.shape
+      ]
+
+      for i, out in enumerate(outputs[1:]):
+        if i < len(tensor_arg_indices):
+          arg_idx = tensor_arg_indices[i]
+          var = rest_args[arg_idx]
+          # Pytype might think var can be a float because rest_args contains
+          # floats. We assert it's an array to satisfy Pytype.
+          assert isinstance(
+              var, jnp.ndarray
+          ), f"Expected array, got {type(var)}"
+          updated_var = var.at[unique_indices].set(out)
+          updated_outputs.append(updated_var)
+
+      sharded_outputs = []
+      for out in updated_outputs:
+        sharded_out = einops.rearrange(
+            out,
+            "(v c s) f -> c (s v) f",
+            c=1,
+            s=4,
+        )
+        sharded_outputs.append(sharded_out[0])
+      return tuple(sharded_outputs)
+    else:
+      updated_table = emb_table.at[unique_indices].set(outputs)
+      updated_table_sharded = einops.rearrange(
+          updated_table,
+          "(v c s) f -> c (s v) f",
+          c=1,
+          s=4,
+      )
+      return updated_table_sharded[0]
+
   def test_sc_emb_backward_pass_with_sgd(self):
     # Process the input.
     mesh = jax.sharding.Mesh(self.global_devices, "x")
@@ -110,8 +172,18 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         0.01,
         np.float32,
     )
-    emb_tables = np.array([emb_table_sharded[0]])
-    hyperparams = np.array([0.01])
+    emb_tables = [emb_table_sharded[0]]
+    hyperparams = [0.01]
+
+    def sgd_jax(grad, table, lr):
+      return table - lr * grad
+
+    emb_size = self.emb_size
+    grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    closed_jaxpr = jax.make_jaxpr(sgd_jax)(grad_aval, table_aval, lr_aval)
+
     # Do the embedding update.
     (updated_emb_table,) = self.tpu_sparse_dense_matmul_grad_with_optimizer(
         lhs_row_pointers,
@@ -119,344 +191,26 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
         np.int32(1),
-        emb_tables,
         z_grad,
-        hyperparams,
-        optimizer_generator=optimizers_computation.sgd,
+        *hyperparams,
+        *emb_tables,
+        num_hyperparameters=len(hyperparams),
+        jaxpr=closed_jaxpr,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         computation_name="optimizer_test_computation",
         sharding_strategy=1,
     )
 
-    # Check the embedding activations.
-    expected_emb_activations = np.array(
-        [
-            [
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-                -1.00000e-04,
-            ],
-            [
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-                3.99990e00,
-            ],
-            [
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-                7.99990e00,
-            ],
-            [
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-                1.19999e01,
-            ],
-            [
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-                1.60000e01,
-            ],
-            [
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-                2.00000e01,
-            ],
-            [
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-                2.40000e01,
-            ],
-            [
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-                2.80000e01,
-            ],
-            [
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-                9.99900e-01,
-            ],
-            [
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-                4.99990e00,
-            ],
-            [
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-                8.99990e00,
-            ],
-            [
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-                1.29999e01,
-            ],
-            [
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-                1.70000e01,
-            ],
-            [
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-                2.10000e01,
-            ],
-            [
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-                2.50000e01,
-            ],
-            [
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-                2.90000e01,
-            ],
-            [
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-                1.99990e00,
-            ],
-            [
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-                5.99990e00,
-            ],
-            [
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-                9.99990e00,
-            ],
-            [
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-                1.39999e01,
-            ],
-            [
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-                1.80000e01,
-            ],
-            [
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-                2.20000e01,
-            ],
-            [
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-                2.60000e01,
-            ],
-            [
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-                3.00000e01,
-            ],
-            [
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-                2.99990e00,
-            ],
-            [
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-                6.99990e00,
-            ],
-            [
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-                1.09999e01,
-            ],
-            [
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-                1.49999e01,
-            ],
-            [
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-                1.90000e01,
-            ],
-            [
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-                2.30000e01,
-            ],
-            [
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-                2.70000e01,
-            ],
-            [
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-                3.10000e01,
-            ],
-        ],
-        dtype=np.float32,
+    expected_updated_emb_table = self._get_expected_updated_table(
+        self.emb_table,
+        z_grad,
+        self.input_tensor,
+        self.input_weights,
+        sgd_jax,
+        hyperparams[0],
     )
-
-    np.testing.assert_equal(updated_emb_table, expected_emb_activations)
+    np.testing.assert_allclose(updated_emb_table, expected_updated_emb_table)
 
   def test_sc_emb_backward_pass_with_adagrad(self):
     # Process the input.
@@ -494,102 +248,288 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         np.float32,
     )
 
-    expected_table = np.array(
-        [
-            [-1.000e-02] * 8,
-            [3.990e00] * 8,
-            [7.990e00] * 8,
-            [1.199e01] * 8,
-            [1.600e01] * 8,
-            [2.000e01] * 8,
-            [2.400e01] * 8,
-            [2.800e01] * 8,
-            [9.900e-01] * 8,
-            [4.990e00] * 8,
-            [8.990e00] * 8,
-            [1.299e01] * 8,
-            [1.700e01] * 8,
-            [2.100e01] * 8,
-            [2.500e01] * 8,
-            [2.900e01] * 8,
-            [1.990e00] * 8,
-            [5.990e00] * 8,
-            [9.990e00] * 8,
-            [1.399e01] * 8,
-            [1.800e01] * 8,
-            [2.200e01] * 8,
-            [2.600e01] * 8,
-            [3.000e01] * 8,
-            [2.990e00] * 8,
-            [6.990e00] * 8,
-            [1.099e01] * 8,
-            [1.499e01] * 8,
-            [1.900e01] * 8,
-            [2.300e01] * 8,
-            [2.700e01] * 8,
-            [3.100e01] * 8,
-        ],
-        dtype=np.float32,
+    emb_tables = [emb_table_sharded[0], accumulator_init]
+    hyperparams = [0.01]
+
+    def adagrad_jax(grad, table, accum, lr):
+      new_accum = accum + grad * grad
+      return table - lr * grad / jnp.sqrt(new_accum), new_accum
+
+    emb_size = self.emb_size
+    grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    accum_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    closed_jaxpr = jax.make_jaxpr(adagrad_jax)(
+        grad_aval, table_aval, accum_aval, lr_aval
     )
 
-    expected_accumulator = np.array(
-        [
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-        ],
-        dtype=np.float32,
-    )
-    emb_tables = np.array([emb_table_sharded[0], accumulator_init])
-    hyperparams = np.array([0.01])
-    (updated_table, updated_accumulator) = (
+    updated_table, updated_accumulator = (
         self.tpu_sparse_dense_matmul_grad_with_optimizer(
             lhs_row_pointers,
             lhs_local_embedding_ids,
             lhs_local_sample_ids,
             lhs_gains,
             np.int32(1),
-            emb_tables,
             z_grad,
-            hyperparams,
-            optimizer_generator=optimizers_computation.adagrad,
+            *hyperparams,
+            *emb_tables,
+            num_hyperparameters=len(hyperparams),
+            jaxpr=closed_jaxpr,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
         )
     )
-    np.testing.assert_equal(expected_accumulator, updated_accumulator)
-    np.testing.assert_equal(expected_table, updated_table)
+    global_accum_init = jnp.zeros_like(self.emb_table)
+    expected_updated_table, expected_updated_accum = (
+        self._get_expected_updated_table(
+            self.emb_table,
+            z_grad,
+            self.input_tensor,
+            self.input_weights,
+            adagrad_jax,
+            global_accum_init,
+            hyperparams[0],
+        )
+    )
+    np.testing.assert_allclose(updated_table, expected_updated_table)
+    np.testing.assert_allclose(updated_accumulator, expected_updated_accum)
+
+  def test_sc_emb_backward_pass_with_ftrl(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_sharded = einops.rearrange(
+        self.emb_table,
+        "(v c s) f -> c (s v) f",
+        c=len(self.global_devices),
+        s=4,
+    )
+
+    z_grad = jnp.full(
+        (
+            self.batch_size // self.num_chips,
+            self.emb_size,
+        ),
+        0.01,
+        np.float32,
+    )
+
+    accumulator_init = np.full_like(emb_table_sharded[0], 0.1, np.float32)
+    linear_init = np.full_like(emb_table_sharded[0], 0.01, np.float32)
+    emb_tables = [emb_table_sharded[0], accumulator_init, linear_init]
+
+    hyperparams = [0.1, -0.5, 0.001, 0.002, 0.01]
+
+    def ftrl_jax(grad, table, accum, linear, lr, lr_power, l1, l2, beta):
+      two = jnp.array(2.0, dtype=jnp.float32)
+      zero = jnp.array(0.0, dtype=jnp.float32)
+
+      a_new = accum + grad * grad
+      p_old = jnp.power(accum, -lr_power)
+      p_new = jnp.power(a_new, -lr_power)
+      delta_p = p_new - p_old
+
+      new_linear = linear + grad - (delta_p / lr) * table
+      l_threshold = l1
+      numerator = jnp.sign(new_linear) * l_threshold - new_linear
+      abs_l_new = jnp.abs(new_linear)
+
+      denominator = (p_new + beta) / lr + two * l2
+      w_new = jnp.where(abs_l_new > l_threshold, numerator / denominator, zero)
+
+      return w_new, a_new, new_linear
+
+    emb_size = self.emb_size
+    grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    accum_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    linear_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+
+    lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    lr_power_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    l1_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    l2_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    beta_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+
+    closed_jaxpr = jax.make_jaxpr(ftrl_jax)(
+        grad_aval,
+        table_aval,
+        accum_aval,
+        linear_aval,
+        lr_aval,
+        lr_power_aval,
+        l1_aval,
+        l2_aval,
+        beta_aval,
+    )
+
+    updated_table, updated_accumulator, updated_linear = (
+        self.tpu_sparse_dense_matmul_grad_with_optimizer(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            np.int32(1),
+            z_grad,
+            *hyperparams,
+            *emb_tables,
+            num_hyperparameters=len(hyperparams),
+            jaxpr=closed_jaxpr,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="optimizer_test_computation",
+            sharding_strategy=1,
+        )
+    )
+
+    global_accum_init = jnp.full_like(self.emb_table, 0.1, np.float32)
+    global_linear_init = jnp.full_like(self.emb_table, 0.01, np.float32)
+    expected_updated_table, expected_updated_accum, expected_updated_linear = (
+        self._get_expected_updated_table(
+            self.emb_table,
+            z_grad,
+            self.input_tensor,
+            self.input_weights,
+            ftrl_jax,
+            global_accum_init,
+            global_linear_init,
+            hyperparams[0],
+            hyperparams[1],
+            hyperparams[2],
+            hyperparams[3],
+            hyperparams[4],
+        )
+    )
+    np.testing.assert_allclose(updated_table, expected_updated_table)
+    np.testing.assert_allclose(updated_accumulator, expected_updated_accum)
+    np.testing.assert_allclose(updated_linear, expected_updated_linear)
+
+  def test_sc_emb_backward_pass_with_adam(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_sharded = einops.rearrange(
+        self.emb_table,
+        "(v c s) f -> c (s v) f",
+        c=len(self.global_devices),
+        s=4,
+    )
+
+    z_grad = jnp.full(
+        (
+            self.batch_size // self.num_chips,
+            self.emb_size,
+        ),
+        0.01,
+        np.float32,
+    )
+
+    momentum_init = np.full_like(emb_table_sharded[0], 0.002, np.float32)
+    velocity_init = np.full_like(emb_table_sharded[0], 0.004, np.float32)
+    emb_tables = [emb_table_sharded[0], momentum_init, velocity_init]
+
+    learning_rate = 0.1
+    beta_1 = 0.9
+    beta_2 = 0.999
+    epsilon = 1e-8
+
+    c_2 = np.sqrt(1.0 - beta_2)
+    alpha_t = learning_rate * c_2 / (1.0 - beta_1)
+    epsilon_hat = epsilon * c_2
+
+    hyperparams = [alpha_t, beta_1, beta_2, epsilon_hat]
+
+    def adam_jax(grad, table, m, v, alpha_t, beta_1, beta_2, epsilon_hat):
+      new_m = beta_1 * m + (1.0 - beta_1) * grad
+      new_v = beta_2 * v + (1.0 - beta_2) * (grad * grad)
+      new_table = table - alpha_t * new_m / (jnp.sqrt(new_v) + epsilon_hat)
+      return new_table, new_m, new_v
+
+    emb_size = self.emb_size
+    grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    m_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    v_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+
+    alpha_t_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    beta_1_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    beta_2_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    epsilon_hat_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+
+    closed_jaxpr = jax.make_jaxpr(adam_jax)(
+        grad_aval,
+        table_aval,
+        m_aval,
+        v_aval,
+        alpha_t_aval,
+        beta_1_aval,
+        beta_2_aval,
+        epsilon_hat_aval,
+    )
+
+    updated_table, updated_momentum, updated_velocity = (
+        self.tpu_sparse_dense_matmul_grad_with_optimizer(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            np.int32(1),
+            z_grad,
+            *hyperparams,
+            *emb_tables,
+            num_hyperparameters=len(hyperparams),
+            jaxpr=closed_jaxpr,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="optimizer_test_computation",
+            sharding_strategy=1,
+        )
+    )
+    global_m_init = jnp.full_like(self.emb_table, 0.002, np.float32)
+    global_v_init = jnp.full_like(self.emb_table, 0.004, np.float32)
+    expected_updated_table, expected_updated_m, expected_updated_v = (
+        self._get_expected_updated_table(
+            self.emb_table,
+            z_grad,
+            self.input_tensor,
+            self.input_weights,
+            adam_jax,
+            global_m_init,
+            global_v_init,
+            hyperparams[0],
+            hyperparams[1],
+            hyperparams[2],
+            hyperparams[3],
+        )
+    )
+    np.testing.assert_allclose(updated_table, expected_updated_table)
+    np.testing.assert_allclose(updated_momentum, expected_updated_m)
+    np.testing.assert_allclose(updated_velocity, expected_updated_v)
 
 
 if __name__ == "__main__":
