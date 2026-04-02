@@ -102,6 +102,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         self.input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
@@ -220,6 +221,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         self.input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
@@ -261,6 +263,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         self.input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
@@ -314,6 +317,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         self.input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
     self.emb_table_sharded = einops.rearrange(
@@ -352,6 +356,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         self.input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
     # Shared the embedding table.
@@ -410,6 +415,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
             self.input_weights,
             mesh,
             max_ids_per_partition=16,
+            max_unique_ids_per_partition=64,
             num_sc_per_device=self.num_sc_per_device,
         )
     )
@@ -464,6 +470,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
             self.input_weights,
             mesh,
             max_ids_per_partition=16,
+            max_unique_ids_per_partition=64,
             num_sc_per_device=self.num_sc_per_device,
         )
     )

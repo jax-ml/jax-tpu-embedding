@@ -369,6 +369,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
         input_tensor_weights,
         mesh,
         max_ids_per_partition=self.max_ids_per_partition,
+        max_unique_ids_per_partition=self.max_unique_ids_per_partition,
         num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
@@ -511,6 +512,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
         input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 

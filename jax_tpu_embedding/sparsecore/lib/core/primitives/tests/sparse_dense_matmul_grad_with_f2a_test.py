@@ -551,6 +551,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=4,
     )
 

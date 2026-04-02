@@ -81,6 +81,8 @@ class InputPreprocessingTest(absltest.TestCase):
         bad_input_tensor,
         bad_weights_tensor,
         mesh,
+        max_ids_per_partition=64,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=2,
     )
 
@@ -110,6 +112,8 @@ class InputPreprocessingTest(absltest.TestCase):
         bad_input_features,
         bad_weights,
         mesh,
+        max_ids_per_partition=64,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=2,
     )
 
@@ -134,6 +138,8 @@ class InputPreprocessingTest(absltest.TestCase):
         self.input_features,
         bad_input_weights,
         mesh,
+        max_ids_per_partition=64,
+        max_unique_ids_per_partition=64,
     )
     # Note that the first array is shorter.
     bad_input_weights_2 = np.array(
@@ -151,6 +157,8 @@ class InputPreprocessingTest(absltest.TestCase):
         self.input_features,
         bad_input_weights_2,
         mesh,
+        max_ids_per_partition=64,
+        max_unique_ids_per_partition=64,
     )
 
   def test_error_bad_mesh(self):
@@ -161,6 +169,8 @@ class InputPreprocessingTest(absltest.TestCase):
         self.input_features,
         self.input_weights,
         mesh,
+        max_ids_per_partition=64,
+        max_unique_ids_per_partition=64,
     )
 
   def test_error_non_mod_sharding(self):
@@ -172,6 +182,7 @@ class InputPreprocessingTest(absltest.TestCase):
         self.input_weights,
         mesh,
         max_ids_per_partition=64,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sharding_strategy="DIV",
     )
@@ -231,6 +242,7 @@ class InputPreprocessingTest(absltest.TestCase):
         mesh,
         num_sc_per_device=4,
         max_ids_per_partition=12,
+        max_unique_ids_per_partition=64,
     )
     logging.info(lhs_local_embedding_ids.shape)
 
@@ -360,6 +372,7 @@ class InputPreprocessingTest(absltest.TestCase):
         mesh,
         num_sc_per_device=4,
         max_ids_per_partition=32,
+        max_unique_ids_per_partition=64,
     )
 
     expected_lhs_row_pointers = np.array(
@@ -592,6 +605,7 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
         mesh,
         num_sc_per_device=2,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         enable_minibatching=True,
     )
 
@@ -689,6 +703,7 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
         mesh,
         num_sc_per_device=1,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         enable_minibatching=True,
     )
     row_pointers, col_ids, row_ids, gains = out

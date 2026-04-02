@@ -315,6 +315,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     emb_table = (
@@ -482,6 +483,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         input_weights,
         mesh,
         max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
         num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     embedding_table = (
