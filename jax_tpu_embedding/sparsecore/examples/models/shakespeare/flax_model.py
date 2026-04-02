@@ -59,13 +59,17 @@ class Model(nn.Module):
     )
 
   @nn.compact
-  def __call__(self, embedding_lookup_inputs: embedding.PreprocessedInput):
+  def __call__(
+      self,
+      embedding_lookup_inputs: embedding.PreprocessedInput,
+      step: jax.Array | None = None,
+  ):
     # Run the embedding layer.
     x = embed.SparseCoreEmbed(
         feature_specs=self.feature_specs,
         mesh=self.mesh,
         sharding_axis=self.sharding_axis,
-    )(embedding_lookup_inputs)
+    )(embedding_lookup_inputs, step=step)
 
     # Unpack the activations.
     x = x[self.feature_name]
