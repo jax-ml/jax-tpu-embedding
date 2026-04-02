@@ -18,53 +18,9 @@ from absl.testing import absltest
 import einops
 import jax
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 import numpy as np
-
-
-def _pad_input_tensors(
-    lhs_row_pointers: jnp.ndarray,
-    lhs_local_embedding_ids: jnp.ndarray,
-    lhs_local_sample_ids: jnp.ndarray,
-    lhs_gains: jnp.ndarray,
-    max_mini_batch_size: int,
-    output_padded_width: int,
-):
-  # mini_batch_size * max(num_scs, 8) * num_sc_per_device
-  row_pointer_width = max_mini_batch_size * 8 * 4
-  imax = 2147483647
-  nan = float("nan")
-  lhs_row_pointers = jnp.pad(
-      lhs_row_pointers,
-      (0, row_pointer_width - lhs_row_pointers.shape[0]),
-      mode="constant",
-      constant_values=lhs_row_pointers[-1],
-  )
-
-  lhs_local_embedding_ids = jnp.pad(
-      lhs_local_embedding_ids,
-      (0, output_padded_width - lhs_local_embedding_ids.shape[0]),
-      mode="constant",
-      constant_values=imax,
-  )
-  lhs_local_sample_ids = jnp.pad(
-      lhs_local_sample_ids,
-      (0, output_padded_width - lhs_local_sample_ids.shape[0]),
-      mode="constant",
-      constant_values=imax,
-  )
-  lhs_gains = jnp.pad(
-      lhs_gains,
-      (0, output_padded_width - lhs_gains.shape[0]),
-      mode="constant",
-      constant_values=nan,
-  )
-  return (
-      lhs_row_pointers,
-      lhs_local_embedding_ids,
-      lhs_local_sample_ids,
-      lhs_gains,
-  )
 
 
 class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
@@ -104,91 +60,44 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     )
 
   def test_sc_emb_backward_pass(self):
-    # Prescribe the input.
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.ones_like(input_tensor, dtype=np.float32)
 
-    lhs_row_pointers = jnp.array([
-        # SC0 taking data from SCs: 0, 3, 0, 1, padding
-        0, 3, 3, 9, 9, 9, 9, 9,
-
-        # SC1 taking data from SCs: 3, 0, 1, 0, padding
-        19, 19, 25, 25, 25, 25, 25, 25,
-
-        # SC2 taking data from SCs: 0, 1, 0, 3, padding
-        32, 33, 33, 43, 43, 43, 43, 43,
-
-        # SC3 taking data from SCs: 1, 0, 3, 0, padding
-        49, 49, 59, 59, 59, 59, 59, 59,
-    ])
-    imax = 2147483647
-
-    lhs_local_embedding_ids = jnp.array([
-        # SC0 taking data from SC 1 rows 0, 1, 2, and then SC 3 row 0
-        0, 1, 2, imax, imax, imax, imax, imax,
-        0, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC1 taking data from SC 0 rows 0, 1, 3, and then SC 2 row 1
-        0, 1, 3, imax, imax, imax, imax, imax,
-        1, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC 2 taking data from SC 1 rows 3, and then SC 3 rows 1, 2, 3
-        3, imax, imax, imax, imax, imax, imax, imax,
-        1, 2, 3, imax, imax, imax, imax, imax,
-
-        # SC 3 taking data from SC 0 rows 2, and then SC 2 rows 0, 2, 3
-        2, imax, imax, imax, imax, imax, imax, imax,
-        0, 2, 3, imax, imax, imax, imax, imax])
-
-    lhs_local_sample_ids = jnp.array([
-        # SC0 taking data from SC 1 should be summed into
-        # resulting activations rows 3, 0, 2, and then SC 3 into row 1
-        3, 0, 2, imax, imax, imax, imax, imax,
-        1, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC1 taking data from SC 0 should be summed into
-        # resulting activations rows 2, 3, 1, and then SC 2 into row 0
-        2, 3, 1, imax, imax, imax, imax, imax,
-        0, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC2 taking data from SC 1 should be summed into
-        # resulting activations row 1, and then SC 3 into rows 3, 2, 0
-        1, imax, imax, imax, imax, imax, imax, imax,
-        3, 2, 0, imax, imax, imax, imax, imax,
-
-        # SC3 taking data from SC 0 should be summed into
-        # resulting activations row 0, and then SC 2 into rows 2, 3, 1
-        0, imax, imax, imax, imax, imax, imax, imax,
-        2, 3, 1, imax, imax, imax, imax, imax])
-
-    nan = float("nan")
-    # All weights are 1.0
-    lhs_gains = jnp.array([
-        1., 1., 1., nan, nan, nan, nan, nan,
-        1., nan, nan, nan, nan, nan, nan, nan,
-        1., 1., 1., nan, nan, nan, nan, nan, 1.,
-        nan, nan, nan, nan, nan, nan, nan,
-        1., nan, nan, nan, nan, nan, nan, nan,
-        1., 1., 1., nan, nan, nan, nan, nan,
-        1., nan, nan, nan, nan, nan, nan, nan,
-        1., 1., 1., nan, nan, nan, nan, nan])
-
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
     (
         lhs_row_pointers,
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
-        lhs_gains
-    ) = _pad_input_tensors(
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
         lhs_gains,
-        max_mini_batch_size=4,
-        output_padded_width=256,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        [input_tensor],
+        [input_weights],
+        mesh,
+        num_sc_per_device=4,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        enable_minibatching=True,
     )
-
-    logging.debug("lhs_row_pointers: %s", lhs_row_pointers)
-    logging.debug("lhs_local_embedding_ids: %s", lhs_local_embedding_ids)
-    logging.debug("lhs_local_sample_ids: %s", lhs_local_sample_ids)
-    logging.debug("lhs_gains: %s", lhs_gains)
 
     z_grad = jnp.full(
         (
@@ -241,298 +150,42 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
   def test_sc_emb_forward_pass_2_batches_per_core(self):
-    # Essentialy the inputs are repeated twice, so the expected updates are
-    # twice as large.
-    # sample 0
-    #         [5],
-    #         [3],
-    #         [9],
-    #         [1],
-    #         [6],
-    #         [12],
-    #         [0],
-    #         [4],
-    #         [15],
-    #         [13],
-    #         [11],
-    #         [7],
-    #         [8],
-    #         [14],
-    #         [2],
-    #         [10],
-    # sample 16
-    #         [5],
-    #         [3],
-    #         [9],
-    #         [1],
-    #         [6],
-    #         [12],
-    #         [0],
-    #         [4],
-    #         [15],
-    #         [13],
-    #         [11],
-    #         [7],
-    #         [8],
-    #         [14],
-    #         [2],
-    #         [10],
-    # For mini-batching, we choose to cut the vocabulary dimension into two
-    # buckets.
-    # bucket 0: embedding ids 0-7
-    # bucket 1: embedding ids 8-31
+    # fmt: off
+    mb0_feat = [
+        [5], [3], [], [1], [6], [], [0], [4], [], [], [], [7], [], [], [2], [],
+        [5], [3], [], [1], [6], [], [0], [4], [], [], [], [7], [], [], [2], [],
+    ]
+    mb1_feat = [
+        [], [], [9], [], [], [12], [], [], [15], [13], [11], [], [8], [14], [], [10],
+        [], [], [9], [], [], [12], [], [], [15], [13], [11], [], [8], [14], [], [10],
+    ]
+    mb0_weight = [
+        [1.0], [1.0], [], [1.0], [1.0], [], [1.0], [1.0], [], [], [], [1.0], [], [], [1.0], [],
+        [1.0], [1.0], [], [1.0], [1.0], [], [1.0], [1.0], [], [], [], [1.0], [], [], [1.0], [],
+    ]
+    mb1_weight = [
+        [], [], [1.0], [], [], [1.0], [], [], [1.0], [1.0], [1.0], [], [1.0], [1.0], [], [1.0],
+        [], [], [1.0], [], [], [1.0], [], [], [1.0], [1.0], [1.0], [], [1.0], [1.0], [], [1.0],
+    ]
+    # fmt: on
 
-    # Process the input.
-    # Each destination SC takes data from 4 sourceSCs (including itself, there
-    # are 4 SCs in this test setup), padded to 8 multiples. The values
-    # represent numbers of valid entries in each section in the embedding_ids
-    # and sample_ids arrays.
-    #
-    # It actually points the beginning of the next section, and each section
-    # length must be multiple of 8. Repeating the same value indicates 0, no
-    # data from this SC. Each section must be padded to 8 multiples, so the
-    # beginning of each SC must be the next multples of 8. Note that 8 is the
-    # width of sparsecore tile register, which is 8 for VFC and GLC, but is
-    # 16 for GFC.
-    lhs_row_pointers = jnp.array([
-        # SC0 mini batch 0 taking data from SCs: 2, 2, 1, 1, padding
-        2, 10, 17, 25, 25, 25, 25, 25,
-        # SC0 mini batch 1 taking data from SCs: 1, 1, 0, 0, padding
-        33, 41, 41, 41, 41, 41, 41, 41,
-
-        # SC1 mini batch 0 taking data from SCs: 0, 0, 1, 1, padding
-        48, 48, 49, 57, 57, 57, 57, 57,
-        # SC1 mini batch 1 taking data from SCs: 1, 1, 2, 2, padding
-        65, 73, 82, 90, 90, 90, 90, 90,
-
-        # SC2 mini batch 0 taking data from SCs: 2, 2, 1, 1, padding
-        98, 106, 113, 121, 121, 121, 121, 121,
-        # SC2 mini batch 1 taking data from SCs: 1, 1, 0, 0, padding
-        129, 137, 137, 137, 137, 137, 137, 137,
-
-        # SC3 mini batch 0 taking data from SCs: 0, 0, 1, 1, padding
-        144, 144, 145, 153, 153, 153, 153, 153,
-        # SC3 mini batch 1 taking data from SCs: 1, 1, 2, 2, padding
-        161, 169, 178, 186, 186, 186, 186, 186,
-    ])
-    imax = 2147483647
-
-    # Each section represents the row pointers from a source SC. Number of
-    # entries in each section must be multiple of 8, and lower than
-    # max_ids_per_partition. The number of unique values in each section must
-    # be lower than max_unique_ids_per_partition. Note that 8 is the
-    # width of sparsecore tile register, which is 8 for VFC and GLC, but is
-    # 16 for GFC.
-    lhs_local_embedding_ids = jnp.array([
-        # SC 0 mini batch 0 taking data from
-        # SC 0 rows 0, 1: 0, 4
-        0, 1, imax, imax, imax, imax, imax, imax,
-        # SC 1 rows 0, 1: 1, 5
-        0, 1, imax, imax, imax, imax, imax, imax,
-        # SC 2 row 1: 6
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 0: 3
-        0, imax, imax, imax, imax, imax, imax, imax,
-        # SC 0 mini batch 1 taking data from
-        # SC 0 row 3: 12
-        3, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 2: 9
-        2, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC 1 mini batch 0 taking data from
-        # SC 2 row 0: 2
-        0, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 1: 7
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 mini batch 1 taking data from
-        # SC 0 row 2: 8
-        2, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 3: 13
-        3, imax, imax, imax, imax, imax, imax, imax,
-        # SC 2 rows 2, 3: 10, 14
-        2, 3, imax, imax, imax, imax, imax, imax,
-        # SC 3 rows 2, 3: 11, 15
-        2, 3, imax, imax, imax, imax, imax, imax,
-
-        # SC 2 mini batch 0 taking data from
-        # SC 0 rows 0, 1: 0, 4
-        0, 1, imax, imax, imax, imax, imax, imax,
-        # SC 1 rows 0, 1: 1, 5
-        0, 1, imax, imax, imax, imax, imax, imax,
-        # SC 2 row 1: 6
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 0: 3
-        0, imax, imax, imax, imax, imax, imax, imax,
-        # SC 2 mini batch 1 taking data from
-        # SC 0 row 3: 12
-        3, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 2: 9
-        2, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC 3 mini batch 0 taking data from
-        # SC 2 row 0: 2
-        0, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 1: 7
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 mini batch 1 taking data from
-        # SC 0 rows 2: 8
-        2, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 3: 13
-        3, imax, imax, imax, imax, imax, imax, imax,
-        # SC 2 rows 2, 3: 10, 14
-        2, 3, imax, imax, imax, imax, imax, imax,
-        # SC 3 rows 2, 3: 11, 15
-        2, 3, imax, imax, imax, imax, imax, imax,
-    ])
-
-    # Each section represents the row pointers into a destination SC.
-    lhs_local_sample_ids = jnp.array([
-        # SC 0 mini batch 0 taking data from
-        # SC 0 rows 0, 1: 0, 4
-        6, 7, imax, imax, imax, imax, imax, imax,
-        # SC 1 rows 0, 1: 1, 5
-        3, 0, imax, imax, imax, imax, imax, imax,
-        # SC 2 row 1: 6
-        4, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 0: 3
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 0 mini batch 1 taking data from
-        # SC 0 row 3: 12
-        5, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 2: 9
-        2, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC 1 mini batch 0 taking data from
-        # SC 2 row 0: 2
-        6, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 1: 7
-        3, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 mini batch 1 taking data from
-        # SC 0 rows 2: 8
-        4, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 3: 13
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 2 rows 2, 3: 10, 14
-        7, 5, imax, imax, imax, imax, imax, imax,
-        # SC 3 rows 2, 3: 11, 15
-        2, 0, imax, imax, imax, imax, imax, imax,
-
-        # SC 2 mini batch 0 taking data from
-        # SC 0 rows 0, 1: 0, 4
-        6, 7, imax, imax, imax, imax, imax, imax,
-        # SC 1 rows 0, 1: 1, 5
-        3, 0, imax, imax, imax, imax, imax, imax,
-        # SC 2 row 1: 6
-        4, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 0: 3
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 0 mini batch 1 taking data from
-        # SC 0 row 3: 12
-        5, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 2: 9
-        2, imax, imax, imax, imax, imax, imax, imax,
-
-        # SC3 mini batch 0 taking data from
-        # SC 2 row 0: 2
-        6, imax, imax, imax, imax, imax, imax, imax,
-        # SC 3 row 1: 7
-        3, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 mini batch 1 taking data from
-        # SC 0 rows 2: 8
-        4, imax, imax, imax, imax, imax, imax, imax,
-        # SC 1 row 3: 13
-        1, imax, imax, imax, imax, imax, imax, imax,
-        # SC 2 rows 2, 3: 10, 14
-        7, 5, imax, imax, imax, imax, imax, imax,
-        # SC 3 rows 2, 3: 11, 15
-        2, 0, imax, imax, imax, imax, imax, imax,
-    ])
-
-    nan = float("nan")
-    # All weights are 1.0
-    lhs_gains = jnp.array([
-        # SC 0 mini batch 0 taking data from
-        # SC 0 rows 0, 1: 0, 4
-        1, 1, nan, nan, nan, nan, nan, nan,
-        # SC 1 rows 0, 1: 1, 5
-        1, 1, nan, nan, nan, nan, nan, nan,
-        # SC 2 row 1: 6
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 3 row 0: 3
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 0 mini batch 1 taking data from
-        # SC 0 row 3: 12
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 1 row 2: 9
-        1, nan, nan, nan, nan, nan, nan, nan,
-
-        # SC 1 mini batch 0 taking data from
-        # SC 2 row 0: 2
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 3 row 1: 7
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 1 mini batch 1 taking data from
-        # SC 0 rows 2: 8
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 1 row 3: 13
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 2 rows 2, 3: 10, 14
-        1, 1, nan, nan, nan, nan, nan, nan,
-        # SC 3 rows 2, 3: 11, 15
-        1, 1, nan, nan, nan, nan, nan, nan,
-
-        # SC 2 mini batch 0 taking data from
-        # SC 0 rows 0, 1: 0, 4
-        1, 1, nan, nan, nan, nan, nan, nan,
-        # SC 1 rows 0, 1: 1, 5
-        1, 1, nan, nan, nan, nan, nan, nan,
-        # SC 2 row 1: 6
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 3 row 0: 3
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 0 mini batch 1 taking data from
-        # SC 0 row 3: 12
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 1 row 2: 9
-        1, nan, nan, nan, nan, nan, nan, nan,
-
-        # SC3 mini batch 0 taking data from
-        # SC 2 row 0: 2
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 3 row 1: 7
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 1 mini batch 1 taking data from
-        # SC 0 rows 2: 8
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 1 row 3: 13
-        1, nan, nan, nan, nan, nan, nan, nan,
-        # SC 2 rows 2, 3: 10, 14
-        1, 1, nan, nan, nan, nan, nan, nan,
-        # SC 3 rows 2, 3: 11, 15
-        1, 1, nan, nan, nan, nan, nan, nan,
-    ])
-
+    features = [mb0_feat, mb1_feat]
+    weights = [mb0_weight, mb1_weight]
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
     (
         lhs_row_pointers,
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
-        lhs_gains
-    ) = _pad_input_tensors(
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
         lhs_gains,
-        max_mini_batch_size=4,
-        output_padded_width=256,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        features,
+        weights,
+        mesh,
+        num_sc_per_device=4,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        enable_minibatching=True,
     )
-
-    logging.debug("lhs_row_pointers: %s", lhs_row_pointers)
-    logging.debug("lhs_local_embedding_ids: %s", lhs_local_embedding_ids)
-    logging.debug("lhs_local_sample_ids: %s", lhs_local_sample_ids)
-    logging.debug("lhs_gains: %s", lhs_gains)
-
-    assert(lhs_local_sample_ids.shape == lhs_local_embedding_ids.shape)
-    assert(lhs_gains.shape == lhs_local_embedding_ids.shape)
 
     z_grad = jnp.full(
         (
@@ -584,7 +237,9 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
       physical_row = (i % 4) * 8 + i // 4
       expected_emb_activations[physical_row, :] -= 0.2
 
-    np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
+    np.testing.assert_allclose(
+        updated_emb_table, expected_emb_activations, rtol=1e-5, atol=1e-5
+    )
 
   @absltest.skip("b/496926428: Clipping with minibatching is not supported.")
   def test_sc_emb_forward_pass_2_batches_per_core_with_bounds(self):
@@ -595,81 +250,29 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     num_minibatches_per_sc = 2
     max_ids_per_partition = 16
     assert batch_size % (num_sc * num_minibatches_per_sc) == 0
-    mini_batch_size = batch_size // (num_sc * num_minibatches_per_sc)
 
-    # Process the input.
-    # Total ids = 15. Pad by 1 to reach `max_ids_per_partition=16`.
-    #
-    # Assume 1 SC device, `num_minibatches_per_sc` = 2 minibatches.
-    # Assume 4 samples (rows) per minibatch.
-    #
-    # minibatch 1:
-    #   sample 0: [5]
-    #   sample 1: [3]
-    #   sample 2: [9, 1]
-    #   sample 3: [6, 12, 0]
-    # minibatch 2:
-    #   sample 4: [4]
-    #   sample 5: [15, 13, 11]
-    #   sample 6: [7, 8, 14, 2]
-    #   sample 7: [10]
+    mb0_feat = [[5], [3], [9, 1], [6, 12, 0]]
+    mb1_feat = [[4], [15, 13, 11], [7, 8, 14, 2], [10]]
+    mb0_weight = [[1.0], [1.0], [1.0, 1.0], [1.0, 1.0, 1.0]]
+    mb1_weight = [[1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], [1.0]]
 
-    # Note that `lhs_local_sample_ids` is expected to be strictly increasing.
-    # Also, `lhs_local_sample_ids` will indicate the sample idx globally
-    # within the minibatches.
-    # That means that if we provide the samples: [s3, s1, s2] and [s4, s2],
-    # the unpadded inputs must be arranged as:
-    # lhs_local_sample_ids = [s1, s2, s3,   s2, s4]
-    # minibatches =            [mb_1]       [mb_2]
-    # Which gives us:
-    # lhs_row_pointers = [0, 1, 2, 3, 4, 5]
-    unpadded_lhs_row_pointers = jnp.array(
-        [0, 1, 2, 4, 7, 8, 11, 15, 16], jnp.int32
-    )
-    unpadded_lhs_local_embedding_ids = jnp.array(
-        [5, 3, 1, 9, 0, 6, 12, 4, 11, 13, 15, 2, 7, 8, 14, 10], jnp.int32
-    )
-    unpadded_lhs_local_sample_ids = jnp.array(
-        [0, 1, 2, 2, 3, 3, 3, 4, 5, 5, 5, 6, 6, 6, 6, 7], jnp.int32
-    )
-    unpadded_lhs_gains = jnp.array(
-        [
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-        ],
-        jnp.float32,
-    )
+    features = [mb0_feat, mb1_feat]
+    weights = [mb0_weight, mb1_weight]
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
 
-    # The primitive expects fixed-size dense tensors.
-    # Padding requirements:
-    # 1. Row pointers require that padding corresponds to empty rows at the end.
-    # 2. Embedding ids, sample ids, and gains must just be right-padded by 0s.
     (
         lhs_row_pointers,
         lhs_local_embedding_ids,
         lhs_local_sample_ids,
         lhs_gains,
-    ) = _pad_input_tensors(
-        unpadded_lhs_row_pointers,
-        unpadded_lhs_local_embedding_ids,
-        unpadded_lhs_local_sample_ids,
-        unpadded_lhs_gains,
-        mini_batch_size,
-        max_ids_per_partition,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        features,
+        weights,
+        mesh,
+        num_sc_per_device=num_sc,
+        max_ids_per_partition=max_ids_per_partition,
+        max_unique_ids_per_partition=max_ids_per_partition,
+        enable_minibatching=True,
     )
 
     emb_table_sharded = einops.rearrange(

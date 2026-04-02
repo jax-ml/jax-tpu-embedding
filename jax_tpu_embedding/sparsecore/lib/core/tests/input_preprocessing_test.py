@@ -557,35 +557,6 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
     super().setUp()
     self.global_devices = np.array([MockDevice(id=i) for i in range(4)])
 
-  def test_single_minibatch_parity(self):
-    """Verifies that [[samples]] is equivalent to [samples]."""
-    features = np.array([[5, 18, 0], [18, 0, 6]], dtype=np.int32)
-    weights = np.array([[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], dtype=np.float32)
-    mesh = jax.sharding.Mesh(self.global_devices, "x")
-
-    # Standard input
-    standard_out = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        features,
-        weights,
-        mesh,
-        num_sc_per_device=2,
-        max_ids_per_partition=16,
-    )
-
-    # Minibatched input (nested list)
-    minibatched_out = (
-        input_preprocessing.preprocess_sparse_dense_matmul_input_minibatched(
-            [features.tolist()],
-            [weights.tolist()],
-            mesh,
-            num_sc_per_device=2,
-            max_ids_per_partition=16,
-        )
-    )
-
-    for actual, expected in zip(minibatched_out, standard_out):
-      np.testing.assert_array_equal(actual, expected)
-
   def test_multi_minibatch_exact_contents(self):
     # 4 Samples per minibatch, 2 SCs per chip.
     # So Sample 0,1 -> SC 0, Sample 2,3 -> SC 1.
@@ -615,74 +586,87 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
     weights = [mb1_weight, mb2_weight]
     mesh = jax.sharding.Mesh(self.global_devices[:1], "x")
 
-    out = input_preprocessing.preprocess_sparse_dense_matmul_input_minibatched(
+    out = input_preprocessing.preprocess_sparse_dense_matmul_input(
         features,
         weights,
         mesh,
         num_sc_per_device=2,
         max_ids_per_partition=16,
+        enable_minibatching=True,
     )
 
     row_pointers, col_ids, row_ids, gains = out
 
     with self.subTest(name="RowPointersEquality"):
       expected_rp = [
-          # SC 0
-          0,  # Ptr0 (MB1 Partition 0): len 0, next starts at 0
-          2,  # Ptr1 (MB1 Partition 1): len 2, next starts at 8
-          9,  # Ptr2 (MB2 Partition 0): len 1, next starts at 16
-          19,  # Ptr3 (MB2 Partition 1): len 3, next starts at 24
+          0,
+          2,
+          8,
+          8,
+          8,
+          8,
+          8,
+          8,  #
+          9,
+          19,
           24,
           24,
           24,
-          24,  # Padding to minimum 8 row pointers per SC
-          # SC 1
-          3,  # Ptr0 (MB1 Partition 0): len 3, next starts at 8
-          10,  # Ptr1 (MB1 Partition 1): len 2, next starts at 16
-          20,  # Ptr2 (MB2 Partition 0): len 4, next starts at 24
-          25,  # Ptr3 (MB2 Partition 1): len 1, next starts at 32
-          32,
-          32,
-          32,
-          32,  # Padding to minimum 8 row pointers per SC
+          24,
+          24,
+          24,  #
+          27,
+          34,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,  #
+          44,
+          49,
+          56,
+          56,
+          56,
+          56,
+          56,
+          56,
       ]
       np.testing.assert_array_equal(row_pointers, np.array(expected_rp))
 
     # 2. Complete Buffer Verification
     # Buffer size: rounded(max_ids*2)*scs*scs_per_device = 32 * 2 * 2 = 128
     # Buffer Size per SC = 64. Offset SC 1 = 64.
-    expected_col_ids = np.full((2, 64), constants.PADDING_VALUE, np.int32)
-    expected_row_ids = np.full((2, 64), constants.PADDING_VALUE, np.int32)
-    expected_gains = np.full((2, 64), np.nan, np.float32)
+    expected_col_ids = np.full((128,), constants.PADDING_VALUE, np.int32)
+    expected_row_ids = np.full((128,), constants.PADDING_VALUE, np.int32)
+    expected_gains = np.full((128,), np.nan, np.float32)
 
-    # fmt: off
     # SC 0
     # MB1 Partition 1
-    expected_col_ids[0, 0], expected_row_ids[0, 0], expected_gains[0, 0] = 1, 1, 1.0
-    expected_col_ids[0, 1], expected_row_ids[0, 1], expected_gains[0, 1] = 2, 0, 1.0
+    expected_col_ids[0], expected_row_ids[0], expected_gains[0] = 1, 1, 1.0
+    expected_col_ids[1], expected_row_ids[1], expected_gains[1] = 2, 0, 1.0
     # MB2 Partition 0
-    expected_col_ids[0, 8], expected_row_ids[0, 8], expected_gains[0, 8] = 2, 0, 1.0
-    # MB2 Partition 1
-    expected_col_ids[0, 16], expected_row_ids[0, 16], expected_gains[0, 16] = 5, 1, 1.0
-    expected_col_ids[0, 17], expected_row_ids[0, 17], expected_gains[0, 17] = 6, 1, 1.0
-    expected_col_ids[0, 18], expected_row_ids[0, 18], expected_gains[0, 18] = 7, 1, 1.0
+    expected_col_ids[8], expected_row_ids[8], expected_gains[8] = 2, 0, 1.0
+    # MB2 Partition 1 (sorted by col_id: 11->5, 13->6, 15->7)
+    expected_col_ids[16], expected_row_ids[16], expected_gains[16] = 5, 1, 1.0
+    expected_col_ids[17], expected_row_ids[17], expected_gains[17] = 6, 1, 1.0
+    expected_col_ids[18], expected_row_ids[18], expected_gains[18] = 7, 1, 1.0
 
-    # SC 1
-    # MB1 Partition 0
-    expected_col_ids[1, 0], expected_row_ids[1, 0], expected_gains[1, 0] = 0, 1, 1.0
-    expected_col_ids[1, 1], expected_row_ids[1, 1], expected_gains[1, 1] = 3, 1, 1.0
-    expected_col_ids[1, 2], expected_row_ids[1, 2], expected_gains[1, 2] = 6, 1, 1.0
-    # MB1 Partition 1
-    expected_col_ids[1, 8], expected_row_ids[1, 8], expected_gains[1, 8] = 0, 0, 1.0
-    expected_col_ids[1, 9], expected_row_ids[1, 9], expected_gains[1, 9] = 4, 0, 1.0
-    # MB2 Partition 0
-    expected_col_ids[1, 16], expected_row_ids[1, 16], expected_gains[1, 16] = 1, 0, 1.0
-    expected_col_ids[1, 17], expected_row_ids[1, 17], expected_gains[1, 17] = 4, 0, 1.0
-    expected_col_ids[1, 18], expected_row_ids[1, 18], expected_gains[1, 18] = 5, 1, 1.0
-    expected_col_ids[1, 19], expected_row_ids[1, 19], expected_gains[1, 19] = 7, 0, 1.0
-    # MB2 Partition 1
-    expected_col_ids[1, 24], expected_row_ids[1, 24], expected_gains[1, 24] = 3, 0, 1.0
-    # fmt: on
+    # SC 1 (starts at coo_index 24)
+    # MB1 Partition 0 (ID 0, 6, 12 -> Emb ID 0, 3, 6)
+    expected_col_ids[24], expected_row_ids[24], expected_gains[24] = 0, 1, 1.0
+    expected_col_ids[25], expected_row_ids[25], expected_gains[25] = 3, 1, 1.0
+    expected_col_ids[26], expected_row_ids[26], expected_gains[26] = 6, 1, 1.0
+    # MB1 Partition 1 (ID 1, 9 -> Emb ID 0, 4)
+    expected_col_ids[32], expected_row_ids[32], expected_gains[32] = 0, 0, 1.0
+    expected_col_ids[33], expected_row_ids[33], expected_gains[33] = 4, 0, 1.0
+    # MB2 Partition 0 (ID 8, 14, 2, 10 -> Emb ID 4, 7, 1, 5) -> [1, 4, 5, 7]
+    expected_col_ids[40], expected_row_ids[40], expected_gains[40] = 1, 0, 1.0
+    expected_col_ids[41], expected_row_ids[41], expected_gains[41] = 4, 0, 1.0
+    expected_col_ids[42], expected_row_ids[42], expected_gains[42] = 5, 1, 1.0
+    expected_col_ids[43], expected_row_ids[43], expected_gains[43] = 7, 0, 1.0
+    # MB2 Partition 1 (ID 7 -> Emb ID 3)
+    expected_col_ids[48], expected_row_ids[48], expected_gains[48] = 3, 0, 1.0
 
     with self.subTest(name="ColIdsEquality"):
       np.testing.assert_array_equal(col_ids, expected_col_ids.flatten())
@@ -699,12 +683,13 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
     weights = [[[1.0, 2.0], [3.0]]]
     mesh = jax.sharding.Mesh(self.global_devices[:1], "x")
 
-    out = input_preprocessing.preprocess_sparse_dense_matmul_input_minibatched(
+    out = input_preprocessing.preprocess_sparse_dense_matmul_input(
         features,
         weights,
         mesh,
         num_sc_per_device=1,
         max_ids_per_partition=16,
+        enable_minibatching=True,
     )
     row_pointers, col_ids, row_ids, gains = out
 

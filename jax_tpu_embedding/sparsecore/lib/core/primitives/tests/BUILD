@@ -118,6 +118,7 @@ pytype_strict_contrib_test(
         "requires-tpu",
     ],
     deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/logging"),
@@ -142,6 +143,7 @@ pytype_strict_contrib_test(
         "requires-tpu",
     ],
     deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/logging"),
