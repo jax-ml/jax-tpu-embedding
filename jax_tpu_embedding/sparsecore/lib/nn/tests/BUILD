@@ -145,6 +145,7 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
     ],
     main = "tpu_sparse_dense_matmul_grad_test.py",
+    shard_count = 8,
     tags = [
         "exclusive-if-local",
         "requires-tpu",

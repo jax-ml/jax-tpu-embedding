@@ -32,6 +32,7 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
 
 
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
@@ -156,6 +157,53 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
 
   def __eq__(self, other: OptimizerSpec) -> bool:
     return self.__hash__() == other.__hash__()
+
+
+class CustomOptimizerSpec(OptimizerSpec):
+  """Spec for the Custom Optimizer.
+
+  Attributes:
+    learning_rate: The learning rate for the training variables or embeddings.
+    custom_computation_fn: The python function for the custom optimizer.
+    slot_variable_initializers_tuple: Tuple of initializers for the slot
+      variables.
+    short_name_str: Short name for the optimizer.
+  """
+
+  def __init__(
+      self,
+      learning_rate: (
+          float | jax.Array | Callable[..., float | jax.Array]
+      ) = 0.001,
+      custom_computation_fn: Callable[..., Any] | None = None,
+      slot_variable_initializers_tuple: tuple[
+          CallableTableInitializer, ...
+      ] = (),
+      short_name_str: str = "custom",
+  ):
+    super().__init__(learning_rate=learning_rate)
+    self.custom_computation_fn = custom_computation_fn
+    self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
+    self.short_name_str = short_name_str
+
+  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+    return self.slot_variable_initializers_tuple
+
+  def __hash__(self) -> int:
+    return hash((
+        self.learning_rate,
+        self.custom_computation_fn,
+        self.slot_variable_initializers_tuple,
+        self.short_name_str,
+    ))
+
+  def short_name(self) -> str:
+    return self.short_name_str
+
+  def get_optimizer_primitive(self) -> jex.core.Primitive:
+    return (
+        sparse_dense_matmul_optimizer_grad.tpu_sparse_dense_matmul_optimizer_grad_primitive
+    )
 
 
 class SGDOptimizerSpec(OptimizerSpec):

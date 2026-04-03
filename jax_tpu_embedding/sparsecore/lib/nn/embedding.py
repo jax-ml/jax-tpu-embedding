@@ -1382,31 +1382,68 @@ def tpu_sparse_dense_matmul_grad(
     optimizer_primitive = stack_table_spec.optimizer.get_optimizer_primitive()
 
     flatten_variables, treedef = jax.tree.flatten(embedding_variable)
-    extra_kwargs = {}
-    if isinstance(stack_table_spec.optimizer, embedding_spec.FTRLOptimizerSpec):
-      extra_kwargs["multiply_linear_by_learning_rate"] = (
-          stack_table_spec.optimizer.multiply_linear_by_learning_rate
+    if isinstance(
+        stack_table_spec.optimizer, embedding_spec.CustomOptimizerSpec
+    ):
+      if stack_table_spec.optimizer.custom_computation_fn is None:
+        raise ValueError(
+            "custom_computation_fn must be provided for CustomOptimizerSpec"
+        )
+
+      dim_size = stack_table_spec.stack_embedding_dim
+      num_slots = len(stack_table_spec.optimizer.slot_variables_initializers())
+      num_hyperparams = len(hyper_params)
+      aval = jax.ShapeDtypeStruct((1, dim_size), jnp.float32)
+      # grad, table, slot_0, slot_1, ..., slot_n, hyperparam_0, hyperparam_1,
+      # ..., hyperparam_n
+      in_avals = [aval] * (1 + 1 + num_slots + num_hyperparams)
+      custom_jaxpr = jax.make_jaxpr(
+          stack_table_spec.optimizer.custom_computation_fn
+      )(*in_avals)
+
+      updated_variables = optimizer_primitive.bind(
+          row_pointer,
+          embedding_id,
+          sample_id,
+          gain,
+          num_minibatches,
+          activation_gradient,
+          *hyper_params,
+          *flatten_variables,
+          num_hyperparameters=len(hyper_params),
+          jaxpr=custom_jaxpr,
+          max_ids_per_partition=stack_table_spec.max_ids_per_partition,
+          max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
+          computation_name=symbol_name,
       )
-    if embedding_var_limits is not None:
-      extra_kwargs["min_value"], extra_kwargs["max_value"] = (
-          embedding_var_limits[stacked_table_name]
+    else:
+      extra_kwargs = {}
+      if isinstance(
+          stack_table_spec.optimizer, embedding_spec.FTRLOptimizerSpec
+      ):
+        extra_kwargs["multiply_linear_by_learning_rate"] = (
+            stack_table_spec.optimizer.multiply_linear_by_learning_rate
+        )
+      if embedding_var_limits is not None:
+        extra_kwargs["min_value"], extra_kwargs["max_value"] = (
+            embedding_var_limits[stacked_table_name]
+        )
+      updated_variables = optimizer_primitive.bind(
+          row_pointer,
+          embedding_id,
+          sample_id,
+          gain,
+          num_minibatches,
+          *flatten_variables,
+          activation_gradient,
+          *hyper_params,
+          max_ids_per_partition=stack_table_spec.max_ids_per_partition,
+          max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
+          computation_name=symbol_name,
+          sharding_strategy=sharding_strategy,
+          enable_minibatching=enable_minibatching,
+          **extra_kwargs,
       )
-    updated_variables = optimizer_primitive.bind(
-        row_pointer,
-        embedding_id,
-        sample_id,
-        gain,
-        num_minibatches,
-        *flatten_variables,
-        activation_gradient,
-        *hyper_params,
-        max_ids_per_partition=stack_table_spec.max_ids_per_partition,
-        max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
-        computation_name=symbol_name,
-        sharding_strategy=sharding_strategy,
-        enable_minibatching=enable_minibatching,
-        **extra_kwargs,
-    )
 
     updated_embedding_variables[stacked_table_name] = jax.tree.unflatten(
         treedef,

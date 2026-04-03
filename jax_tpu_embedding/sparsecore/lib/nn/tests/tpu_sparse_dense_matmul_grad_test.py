@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import dataclasses
 import functools
 from typing import Callable
 
@@ -1322,6 +1323,409 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       np.testing.assert_allclose(
           expected_grad_table_a, grad_update["table_a"][0][:, :_DIM_A]
       )
+
+  def test_custom_optimizer_adagrad(self):
+    devices = jax.devices()[:1]
+    mesh = jax.sharding.Mesh(devices, "x")
+
+    def adagrad_jax(grad, table, accum, lr):
+      new_accum = accum + grad * grad
+      return table - lr * grad / jnp.sqrt(new_accum), new_accum
+
+    custom_adagrad_spec = embedding_spec.CustomOptimizerSpec(
+        learning_rate=0.01,
+        custom_computation_fn=adagrad_jax,
+        slot_variable_initializers_tuple=(jax.nn.initializers.constant(0.0),),
+        short_name_str="custom_adagrad",
+    )
+
+    feature_spec_c = dataclasses.replace(
+        self.feature_spec_c,
+        table_spec=dataclasses.replace(
+            self.table_spec_c, optimizer=custom_adagrad_spec
+        ),
+    )
+
+    feature_specs = {"feature_spec_c": feature_spec_c}
+
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        num_sc_per_device=4,
+        global_device_count=len(devices),
+    )
+
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {"feature_spec_c": self.input_tensor_table_c},
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
+
+    table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
+    emb_table_c = (
+        np.array([[i for _ in range(table_dim_c)] for i in range(_VOC_C)])
+        .reshape(_VOC_C, table_dim_c)
+        .astype(np.float32)
+    )
+    emb_table_c_sharded = einops.rearrange(
+        emb_table_c, "(v c s) f -> c (s v) f", c=1, s=4
+    )
+    accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)
+
+    sharding = NamedSharding(mesh, P("x", None))
+    embedding_variables = {
+        "table_c": (
+            jax.make_array_from_single_device_arrays(
+                shape=(_VOC_C, table_dim_c),
+                sharding=sharding,
+                arrays=[
+                    jax.device_put(emb_table_c_sharded[0], device=devices[0])
+                ],
+            ),
+            jax.make_array_from_single_device_arrays(
+                shape=(_VOC_C, table_dim_c),
+                sharding=sharding,
+                arrays=[jax.device_put(accumulator_init, device=devices[0])],
+            ),
+        )
+    }
+
+    activations_grad = {
+        "feature_spec_c": jnp.ones((_BATCH_SIZE, _DIM_C), dtype=jnp.float32)
+    }
+
+    grad_update = jax.jit(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul_grad,
+            feature_specs=feature_specs,
+            sharding_strategy="MOD",
+        )
+    )(activations_grad, preprocessed_inputs, embedding_variables)
+
+    expected_table_c = np.array(
+        [
+            [-1.000e-02] * _DIM_C,
+            [3.990e00] * _DIM_C,
+            [7.990e00] * _DIM_C,
+            [1.199e01] * _DIM_C,
+            [1.600e01] * _DIM_C,
+            [2.000e01] * _DIM_C,
+            [2.400e01] * _DIM_C,
+            [2.800e01] * _DIM_C,
+            [9.900e-01] * _DIM_C,
+            [4.990e00] * _DIM_C,
+            [8.990e00] * _DIM_C,
+            [1.299e01] * _DIM_C,
+            [1.700e01] * _DIM_C,
+            [2.100e01] * _DIM_C,
+            [2.500e01] * _DIM_C,
+            [2.900e01] * _DIM_C,
+            [1.990e00] * _DIM_C,
+            [5.990e00] * _DIM_C,
+            [9.990e00] * _DIM_C,
+            [1.399e01] * _DIM_C,
+            [1.800e01] * _DIM_C,
+            [2.200e01] * _DIM_C,
+            [2.600e01] * _DIM_C,
+            [3.000e01] * _DIM_C,
+            [2.990e00] * _DIM_C,
+            [6.990e00] * _DIM_C,
+            [1.099e01] * _DIM_C,
+            [1.499e01] * _DIM_C,
+            [1.900e01] * _DIM_C,
+            [2.300e01] * _DIM_C,
+            [2.700e01] * _DIM_C,
+            [3.100e01] * _DIM_C,
+        ],
+        dtype=np.float32,
+    )
+
+    expected_accumulator_c = np.array(
+        [
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [1.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+            [0.0] * _DIM_C,
+        ],
+        dtype=np.float32,
+    )
+
+    np.testing.assert_allclose(
+        expected_table_c, grad_update["table_c"][0][:, :_DIM_C]
+    )
+    np.testing.assert_allclose(
+        expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
+    )
+
+  def test_custom_optimizer_stacked(self):
+    devices = jax.devices()[:2]
+    num_sc_per_device = 4
+    num_devices = len(devices)
+    mesh = jax.sharding.Mesh(devices, "x")
+
+    def simple_sgd_jax(grad, table, lr):
+      return table - lr * grad
+
+    def adagrad_jax(grad, table, accum, lr):
+      new_accum = accum + grad * grad
+      return table - lr * grad / (jnp.sqrt(new_accum) + 1e-7), new_accum
+
+    custom_sgd_spec = embedding_spec.CustomOptimizerSpec(
+        learning_rate=0.01,
+        custom_computation_fn=simple_sgd_jax,
+        short_name_str="custom_sgd",
+    )
+
+    custom_adagrad_spec = embedding_spec.CustomOptimizerSpec(
+        learning_rate=0.01,
+        custom_computation_fn=adagrad_jax,
+        slot_variable_initializers_tuple=(jax.nn.initializers.constant(0.0),),
+        short_name_str="custom_adagrad",
+    )
+
+    feature_spec_a = dataclasses.replace(
+        self.feature_spec_a,
+        table_spec=dataclasses.replace(
+            self.table_spec_a, optimizer=custom_sgd_spec
+        ),
+    )
+    feature_spec_b = dataclasses.replace(
+        self.feature_spec_b,
+        table_spec=dataclasses.replace(
+            self.table_spec_b, optimizer=custom_sgd_spec
+        ),
+    )
+    feature_spec_c = dataclasses.replace(
+        self.feature_spec_c,
+        table_spec=dataclasses.replace(
+            self.table_spec_c, optimizer=custom_adagrad_spec
+        ),
+    )
+
+    feature_specs = {
+        "feature_spec_a": feature_spec_a,
+        "feature_spec_b": feature_spec_b,
+        "feature_spec_c": feature_spec_c,
+    }
+
+    embedding.auto_stack_tables(
+        feature_specs,
+        global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
+    )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_b": self.input_tensor_table_b,
+            "feature_spec_c": self.input_tensor_table_c,
+        },
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
+        local_device_count=num_devices,
+        global_device_count=num_devices,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+        batch_number=batch_number,
+    )
+    padded_vocab_a = 64
+    padded_vocab_b = _VOC_B
+    padded_vocab_c = 64
+    table_dim_a = table_stacking._next_largest_multiple(_DIM_A, 8)
+    table_dim_b = table_stacking._next_largest_multiple(_DIM_B, 8)
+    table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
+    emb_table_a = test_utils.row_id_initializer((padded_vocab_a, table_dim_a))
+    # The embedding table B values start at 100 for easy testing.
+    emb_table_b = test_utils.row_id_initializer(
+        (padded_vocab_b, table_dim_b), offset=100
+    )
+    emb_table_c = test_utils.row_id_initializer((padded_vocab_c, table_dim_c))
+    emb_sharded_per_device_ab = (
+        test_utils.create_per_device_sharded_stacked_tables(
+            [emb_table_a, emb_table_b],
+            num_devices=num_devices,
+            num_sparsecore_per_device=4,
+            rotation=4,
+        )
+    )
+    emb_sharded_per_device_c = (
+        test_utils.create_per_device_sharded_stacked_tables(
+            [emb_table_c],
+            num_devices=num_devices,
+            num_sparsecore_per_device=4,
+            rotation=0,
+        )
+    )
+    embedding_variables = {}
+    embedding_variables["table_a_table_b"] = [
+        jax.device_put(
+            emb_sharded_per_device_ab[i],
+            device=local_device,
+        )
+        for i, local_device in enumerate(devices)
+    ]
+    sharding = NamedSharding(mesh, P("x", None))
+    embedding_variables["table_a_table_b"] = tuple([
+        jax.make_array_from_single_device_arrays(
+            shape=(padded_vocab_a + padded_vocab_b, table_dim_a),
+            sharding=sharding,
+            arrays=embedding_variables["table_a_table_b"],
+        )
+    ])
+    embedding_variables["table_c"] = (
+        [
+            jax.device_put(
+                emb_sharded_per_device_c[i],
+                device=local_device,
+            )
+            for i, local_device in enumerate(devices)
+        ],
+        [
+            jax.device_put(
+                np.zeros((padded_vocab_c // num_devices, table_dim_c)),
+                device=local_device,
+            )
+            for _, local_device in enumerate(devices)
+        ],
+    )
+    sharding = NamedSharding(mesh, P("x", None))
+    embedding_variables["table_c"] = tuple([
+        jax.make_array_from_single_device_arrays(
+            shape=(padded_vocab_c, table_dim_c),
+            sharding=sharding,
+            arrays=embedding_variables["table_c"][0],
+        ),
+        jax.make_array_from_single_device_arrays(
+            shape=(padded_vocab_c, table_dim_c),
+            sharding=sharding,
+            arrays=embedding_variables["table_c"][1],
+        ),
+    ])
+    activations_grad = {}
+    activations_grad["feature_spec_a"] = jnp.ones(
+        (_BATCH_SIZE, _DIM_A),
+        dtype=jnp.float32,
+    )
+    activations_grad["feature_spec_b"] = jnp.ones(
+        (_BATCH_SIZE, _DIM_B),
+        dtype=jnp.float32,
+    )
+    activations_grad["feature_spec_c"] = jnp.ones(
+        (_BATCH_SIZE, _DIM_C), dtype=jnp.float32
+    )
+    sharded_grad_update = functools.partial(
+        embedding.tpu_sparse_dense_matmul_grad,
+        feature_specs=feature_specs,
+        sharding_strategy="MOD",
+    )
+    sharded_grad_update = jax.shard_map(
+        sharded_grad_update,
+        mesh=mesh,
+        in_specs=(
+            P(mesh.axis_names[0]),
+            P(mesh.axis_names[0]),
+            P(mesh.axis_names[0], None),
+        ),
+        out_specs=P(mesh.axis_names[0], None),
+        check_vma=False,
+    )
+    sharded_grad_update = jax.jit(sharded_grad_update)
+    grad_update = sharded_grad_update(
+        activations_grad, preprocessed_inputs, embedding_variables
+    )
+    expected_grad_table_ab = np.asarray(emb_sharded_per_device_ab).reshape(
+        -1, table_dim_a
+    )
+    expected_grad_table_c = np.array(embedding_variables["table_c"][0])
+
+    # Generate the expected updates.
+    for i, array in enumerate(embedding_variables["table_a_table_b"][0]):
+      col_id = array[0]
+      if col_id < 100:
+        # Rows for table A
+        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
+        expected_grad_table_ab[i, :_DIM_A] = np.full(
+            (1, _DIM_A), new_col_id, dtype=np.float32
+        )
+      else:
+        # Rows for table B
+        new_col_id = col_id - (
+            count_num(self.input_tensor_table_b, col_id - 100) * 0.01
+        )
+        expected_grad_table_ab[i, :_DIM_B] = np.full(
+            (1, _DIM_B), new_col_id, dtype=np.float32
+        )
+
+    for i, array in enumerate(embedding_variables["table_c"][0]):
+      col_id = array[0]
+      count = count_num(self.input_tensor_table_c, col_id)
+      if count > 0:
+        new_col_id = col_id - 0.01 * count / (count + 1e-7)
+      else:
+        new_col_id = col_id
+      expected_grad_table_c[i, :_DIM_C] = np.full(
+          (1, _DIM_C), new_col_id, dtype=np.float32
+      )
+
+    expected_accumulator_c = np.zeros(
+        (padded_vocab_c, table_dim_c), dtype=np.float32
+    )
+    # SC 0, 1, 2, 3 on Device 0
+    for idx in [0, 1, 8, 9, 16, 17, 24, 25]:
+      expected_accumulator_c[idx, :_DIM_C] = 1.0
+    # SC 4, 5, 6, 7 on Device 1
+    for idx in [32, 33, 40, 41, 48, 49, 56, 57]:
+      expected_accumulator_c[idx, :_DIM_C] = 1.0
+
+    np.testing.assert_equal(
+        expected_grad_table_ab,
+        grad_update["table_a_table_b"][0],
+    )
+    # Check whole table C
+    np.testing.assert_allclose(
+        grad_update["table_c"][0],
+        expected_grad_table_c,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    # Check whole accumulator C
+    np.testing.assert_allclose(
+        grad_update["table_c"][1],
+        expected_accumulator_c,
+        rtol=1e-5,
+        atol=1e-5,
+    )
 
 
 if __name__ == "__main__":
