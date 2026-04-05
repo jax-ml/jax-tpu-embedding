@@ -154,7 +154,9 @@ class SparseCoreEmbed(nn.Module):
     )[0]
 
   def __call__(
-      self, embedding_lookup_inputs: EmbeddingLookupInput
+      self,
+      embedding_lookup_inputs: EmbeddingLookupInput,
+      step: jax.Array | None = None,
   ) -> embedding.Nested[jax.Array]:
     """Computes the embedding activations.
 
@@ -168,12 +170,14 @@ class SparseCoreEmbed(nn.Module):
         self,
         embedding_lookup_inputs,
         self.embedding_table,
+        step=step,
     )
 
   def apply_gradient(
       self,
       gradients: embedding.Nested[jax.Array],
       embedding_lookup_inputs: EmbeddingLookupInput,
+      step: jax.Array | None = None,
   ) -> Mapping[str, Mapping[str, jax.Array]]:
     """Apply the gradients to the embedding variables.
 
@@ -184,9 +188,9 @@ class SparseCoreEmbed(nn.Module):
     Returns:
       The updated activation embedding tables.
     """
-    _, embed_table = _emb_lookup_bwd(
+    _, embed_table, _ = _emb_lookup_bwd(
         self,
-        (embedding_lookup_inputs, self.embedding_table),
+        (embedding_lookup_inputs, self.embedding_table, step),
         gradients,
     )
     path = '/'.join(self.path + (EMBEDDING_PARAM_NAME,))
@@ -201,7 +205,9 @@ def _emb_lookup(
     embedding_layer: SparseCoreEmbed,
     embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
+    step: jax.Array | None = None,
 ):
+  del step  # Unused in body, used for custom_vjp signature matching.
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
   return jax.shard_map(
@@ -226,38 +232,45 @@ def _emb_lookup_fwd(
     embedding_layer: SparseCoreEmbed,
     embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, tuple[jax.Array, ...]],
+    step: jax.Array | None = None,
 ):
   return _emb_lookup(
       embedding_layer,
       embedding_lookup_inputs,
       emb_table,
+      step=step,
   ), (
       embedding_lookup_inputs,
       emb_table,
+      step,
   )
 
 
 def _emb_lookup_bwd(embedding_layer, res, gradients):
   """Backward pass for embedding lookup."""
-  (embedding_lookups, emb_table) = res
+  embedding_lookups, emb_table, step = res
 
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
   emb_table_grads = jax.shard_map(
-      functools.partial(
-          embedding.tpu_sparse_dense_matmul_grad,
+      lambda grads, lookups, table, step: embedding.tpu_sparse_dense_matmul_grad(
+          grads,
+          lookups,
+          table,
           feature_specs=embedding_layer.feature_specs,
           sharding_strategy=embedding_layer.table_sharding_strategy,
           enable_minibatching=embedding_layer.enable_minibatching,
+          step=step,
       ),
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pd, pt),
+      in_specs=(pd, pd, pt, None),
       out_specs=pt,
       check_vma=False,
   )(
       gradients,
       embedding_lookups,
       emb_table,
+      step,
   )
 
   # tpu_sparse_dense_matmul_grad returns a general Mapping (usually a dict).
@@ -270,6 +283,7 @@ def _emb_lookup_bwd(embedding_layer, res, gradients):
   return (
       None,
       emb_table_grads,
+      None,
   )
 
 
