@@ -97,7 +97,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       )
 
   return core.ShapedArray(
-      (device_batch_size, embedding_table.shape[1]),
+      (int(device_batch_size), int(embedding_table.shape[1])),
       dtype=jnp.float32,
   )
 

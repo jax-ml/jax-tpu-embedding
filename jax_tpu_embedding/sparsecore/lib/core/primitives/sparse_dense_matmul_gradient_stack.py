@@ -46,7 +46,8 @@ def _tpu_sparse_dense_matmul_gradient_stack_abstract_eval(
   """Abstract evaluation for tpu_sparse_dense_matmul_gradient_stack."""
   del unstacked_gradients
   return core.ShapedArray(
-      (stacked_batch_size, stacked_feature_dim), dtype=jnp.float32
+      (int(stacked_batch_size), int(stacked_feature_dim)),
+      dtype=jnp.float32,
   )
 
 
