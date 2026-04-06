@@ -82,14 +82,23 @@ item can be one or more embedding IDs. The embeddings for each item in the
 sequence are computed and then concatenated to form the final output.
 
 To handle sequence features, you will need to flatten the sequence dimension
-into the batch dimension before passing the features to the embedding layer. For
-an input of shape ``[batch_size, sequence_length, valency]``, you should reshape
-it to ``[batch_size * sequence_length, valency]``. The embedding lookups and
-combinations (if ``valency > 1``) are performed on this flattened tensor,
-resulting in an output of shape ``[batch_size * sequence_length, embedding_dim]``.
-You can then reshape this output back to ``[batch_size, sequence_length,
-embedding_dim]``, which is equivalent to concatenating the embeddings for each
-item in the sequence.
+into the batch dimension before passing the features to the embedding layer.
+You can then reshape the output back to recover the sequence dimension.
+This is equivalent to concatenating the embeddings for each item in the sequence.
+
+.. code-block:: python
+
+    # input shape: [batch_size, sequence_length, valency]
+
+    # 1. Flatten the sequence dimension into the batch dimension
+    flattened_input = jnp.reshape(input, (batch_size * sequence_length, valency))
+
+    # 2. Perform the embedding lookup and combinations (if valency > 1)
+    flattened_output = embed_layer(flattened_input)
+    # flattened_output shape: [batch_size * sequence_length, embedding_dim]
+
+    # 3. Reshape the output back to the original sequence shape
+    output = jnp.reshape(flattened_output, (batch_size, sequence_length, embedding_dim))
 
 If you have variable sequence lengths, you will need to pad your inputs to a
 ``max_sequence_length``.
