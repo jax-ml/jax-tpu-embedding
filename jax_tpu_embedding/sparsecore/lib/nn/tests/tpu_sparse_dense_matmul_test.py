@@ -16,7 +16,6 @@ import functools
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
@@ -164,11 +163,10 @@ class ErrorHandlingTest(absltest.TestCase):
         .reshape(1000, 8)
         .astype(np.float32)
     )
-    emb_table_a_sharded = einops.rearrange(
+    emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
+        num_devices=1,
+        num_sc_per_device=4,
     )
     embedding_variables = {}
     embedding_variables["table"] = [

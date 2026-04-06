@@ -11,16 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
+
 
 # Constants for the test.
 _BATCH_SIZE = 16
@@ -30,6 +32,18 @@ _NUM_SC_PER_DEVICE = 4
 
 
 class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self._shard_table = functools.partial(
+        utils.shard_emb_table,
+        num_devices=1,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
+    )
+    self._unshard_table = functools.partial(
+        utils.unshard_emb_table, num_sc_per_device=_NUM_SC_PER_DEVICE
+    )
+
   row_pointers = np.array([0, 1, 2, 4], dtype=np.int32)
   sample_ids = np.array([0, 1, 2, 3], dtype=np.int32)
   embedding_ids = np.array([0, 1, 2, 3], dtype=np.int32)
@@ -444,12 +458,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         .reshape(_VOCAB_SIZE, _EMB_SIZE)
         .astype(np.float32)
     )
-    emb_table_sharded = einops.rearrange(
-        emb_table,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
-    )
+    emb_table_sharded = self._shard_table(emb_table)
     mu_init = jnp.full(
         emb_table_sharded[0].shape,
         0.00,
@@ -512,12 +521,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         _EMB_SIZE * [31],
     ])
 
-    expected_embedding_table = einops.rearrange(
-        expected_embedding_table,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
-    )[0]
+    expected_embedding_table = self._shard_table(expected_embedding_table)[0]
 
     # Expected values are computed manually on colab.
     expected_mu = np.array([
@@ -525,12 +529,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         (_VOCAB_SIZE // 2) * _EMB_SIZE * [0.0],
     ]).reshape(_VOCAB_SIZE, _EMB_SIZE)
 
-    expected_mu = einops.rearrange(
-        expected_mu,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
-    )[0]
+    expected_mu = self._shard_table(expected_mu)[0]
 
     # Expected values are computed manually on colab.
     expected_nu = np.array([
@@ -538,14 +537,9 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         (_VOCAB_SIZE // 2) * _EMB_SIZE * [0.0],
     ]).reshape(_VOCAB_SIZE, _EMB_SIZE)
 
-    expected_nu = einops.rearrange(
-        expected_nu,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
-    )[0]
+    expected_nu = self._shard_table(expected_nu)[0]
 
-    (updated_table, updated_mu, updated_nu) = (
+    updated_table, updated_mu, updated_nu = (
         sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive.bind(
             lhs_row_pointers,
             lhs_local_embedding_ids,
@@ -616,22 +610,6 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
-    def _shard_table(table):
-      return einops.rearrange(
-          table,
-          "(v c s) f -> c (s v) f",
-          c=1,  # Devices.
-          s=4,  # SparseCores per device.
-      )
-
-    def _unshard_table(table):
-      return einops.rearrange(
-          table,
-          "c (s v) f -> (v c s) f",
-          c=1,  # Devices.
-          s=4,  # SparseCores per device.
-      )
-
     def _compute_table_grad(inputs, weights, activation_grad):
       batch_size = activation_grad.shape[0]
       sample_lengths = jnp.array([len(sample) for sample in inputs])
@@ -658,13 +636,13 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         .reshape(_VOCAB_SIZE, _EMB_SIZE)
         .astype(np.float32)
     )
-    embedding_table_sharded = _shard_table(embedding_table)
+    embedding_table_sharded = self._shard_table(embedding_table)
 
     mu = jnp.full(embedding_table.shape, 0.002, np.float32)
-    mu_sharded = _shard_table(np.asarray(mu))
+    mu_sharded = self._shard_table(np.asarray(mu))
 
     nu = jnp.full(embedding_table.shape, 0.004, np.float32)
-    nu_sharded = _shard_table(np.asarray(nu))
+    nu_sharded = self._shard_table(np.asarray(nu))
 
     learning_rate = np.float32(0.1)
     b1 = np.float32(0.9)
@@ -726,9 +704,9 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         )
     )
 
-    updated_table = _unshard_table(updated_table[jnp.newaxis, :, :])
-    updated_mu = _unshard_table(updated_mu[jnp.newaxis, :, :])
-    updated_nu = _unshard_table(updated_nu[jnp.newaxis, :, :])
+    updated_table = self._unshard_table(updated_table[jnp.newaxis, :, :])
+    updated_mu = self._unshard_table(updated_mu[jnp.newaxis, :, :])
+    updated_nu = self._unshard_table(updated_nu[jnp.newaxis, :, :])
 
     np.testing.assert_allclose(expected_mu, updated_mu)
     np.testing.assert_allclose(expected_nu, updated_nu)

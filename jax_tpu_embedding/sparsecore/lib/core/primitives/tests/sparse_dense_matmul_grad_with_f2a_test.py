@@ -15,11 +15,11 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_f2a
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 # Constants for the test.
@@ -556,12 +556,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     )
 
     def _shard_table(table):
-      return einops.rearrange(
-          table,
-          "(v c s) f -> c (s v) f",
-          c=1,  # Devices.
-          s=4,  # SparseCores per device.
-      )
+      return utils.shard_emb_table(table, num_devices=1, num_sc_per_device=4)
 
     embedding_table_sharded = _shard_table(np.asarray(embedding_table))
     accumulator_sharded = _shard_table(np.asarray(accumulator))
@@ -679,11 +674,8 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     )
 
     def _unshard_table(table):
-      return einops.rearrange(
-          jnp.expand_dims(table, axis=0),
-          "c (s v) f -> (v c s) f",
-          c=1,  # Devices.
-          s=4,  # SparseCores per device.
+      return utils.unshard_emb_table(
+          jnp.expand_dims(table, axis=0), num_sc_per_device=4
       )
 
     updated_embedding_table_unsharded = _unshard_table(updated_embedding_table)

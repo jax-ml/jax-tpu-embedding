@@ -11,19 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 from unittest import mock
 
 from absl import logging
 from absl.testing import absltest
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
 class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
+
   def setUp(self):
     super().setUp()
     jax.config.update("jax_traceback_filtering", "off")
@@ -45,13 +47,13 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     )
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
-    # Shard the embedding table.
-    self.emb_table_sharded = einops.rearrange(
-        self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
+    self._shard_table = functools.partial(
+        utils.shard_emb_table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=4,
     )
+    # Shard the embedding table.
+    self.emb_table_sharded = self._shard_table(self.emb_table)
     logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
 
     self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching = jax.named_call(
@@ -275,11 +277,8 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
         enable_minibatching=True,
     )
 
-    emb_table_sharded = einops.rearrange(
-        self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=1,
+    emb_table_sharded = self._shard_table(
+        self.emb_table, num_devices=1, num_sc_per_device=1
     )
 
     # Provide gradients for the physical batch size.
@@ -318,11 +317,8 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
     expected_emb_activations = emb_table_sharded[0].copy()
     for i in range(16):
       expected_emb_activations[i, :] = np.clip(i - 0.1, 2.0, 12.0)
-    updated_emb_table = einops.rearrange(
-        updated_emb_table[jnp.newaxis, :, :],
-        "c (s v) f -> (v c s) f",
-        c=1,
-        s=1,
+    updated_emb_table = utils.unshard_emb_table(
+        updated_emb_table[jnp.newaxis, :, :], num_sc_per_device=1
     )
 
     logging.debug("updated %s", updated_emb_table)

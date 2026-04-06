@@ -15,11 +15,11 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 # Constants for the test.
@@ -412,20 +412,12 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     return (theta, m, v)
 
   def _shard_table(self, table):
-    return einops.rearrange(
-        table,
-        "(v c s) f -> c (s v) f",
-        c=1,  # Devices.
-        s=4,  # SparseCores per device.
+    return utils.shard_emb_table(
+        table, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
     )
 
   def _unshard_table(self, table):
-    return einops.rearrange(
-        table,
-        "c (s v) f -> (v c s) f",
-        c=1,  # Devices.
-        s=4,  # SparseCores per device.
-    )
+    return utils.unshard_emb_table(table, num_sc_per_device=_NUM_SC_PER_DEVICE)
 
   def _compute_table_grad(self, inputs, weights, activation_grad):
     # Assemble input as matrix:
@@ -541,7 +533,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     alpha_t = learning_rate * c_2 / (1.0 - beta_1)
     epsilon_hat = epsilon * c_2
 
-    (updated_table, updated_momentum, updated_velocity) = (
+    updated_table, updated_momentum, updated_velocity = (
         sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive.bind(
             lhs_row_pointers,
             lhs_local_embedding_ids,

@@ -16,11 +16,11 @@ from unittest import mock
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -279,6 +279,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingValidatorTest(
 
 
 class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
+
   def setUp(self):
     super().setUp()
     jax.config.update("jax_traceback_filtering", "off")
@@ -303,11 +304,10 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
     # Shard the embedding table.
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=4,
     )
     logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
 

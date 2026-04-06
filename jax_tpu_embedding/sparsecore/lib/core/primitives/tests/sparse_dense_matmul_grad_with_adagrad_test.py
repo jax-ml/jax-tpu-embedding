@@ -11,15 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 # Constants for the test.
@@ -30,6 +31,18 @@ _NUM_SC_PER_DEVICE = 4
 
 
 class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self._shard_table = functools.partial(
+        utils.shard_emb_table,
+        num_devices=1,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
+    )
+    self._unshard_table = functools.partial(
+        utils.unshard_emb_table, num_sc_per_device=_NUM_SC_PER_DEVICE
+    )
+
   row_pointers = np.array([0, 1, 2, 4], dtype=np.int32)
   sample_ids = np.array([0, 1, 2, 3], dtype=np.int32)
   embedding_ids = np.array([0, 1, 2, 3], dtype=np.int32)
@@ -323,12 +336,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         .reshape(_VOCAB_SIZE, _EMB_SIZE)
         .astype(np.float32)
     )
-    emb_table_sharded = einops.rearrange(
-        emb_table,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
-    )
+    emb_table_sharded = self._shard_table(emb_table)
     accumulator_init = jnp.full(
         emb_table_sharded[0].shape,
         0.00,
@@ -421,7 +429,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         dtype=np.float32,
     )
 
-    (updated_table, updated_accumulator) = (
+    updated_table, updated_accumulator = (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive.bind(
             lhs_row_pointers,
             lhs_local_embedding_ids,
@@ -494,18 +502,10 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         .astype(np.float32)
     )
 
-    def _shard_table(table):
-      return einops.rearrange(
-          table,
-          "(v c s) f -> c (s v) f",
-          c=1,  # Devices.
-          s=4,  # SparseCores per device.
-      )
-
-    embedding_table_sharded = _shard_table(embedding_table)
+    embedding_table_sharded = self._shard_table(embedding_table)
 
     accumulator = jnp.full(embedding_table.shape, 0.002, np.float32)
-    accumulator_sharded = _shard_table(np.asarray(accumulator))
+    accumulator_sharded = self._shard_table(np.asarray(accumulator))
 
     learning_rate = np.float32(0.1)
 
@@ -576,18 +576,12 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         )
     )
 
-    def _unshard_table(table):
-      return einops.rearrange(
-          table,
-          "c (s v) f -> (v c s) f",
-          c=1,  # Devices.
-          s=4,  # SparseCores per device.
-      )
-
-    updated_embedding_table = _unshard_table(
+    updated_embedding_table = self._unshard_table(
         updated_embedding_table[jnp.newaxis, :, :]
     )
-    updated_accumulator = _unshard_table(updated_accumulator[jnp.newaxis, :, :])
+    updated_accumulator = self._unshard_table(
+        updated_accumulator[jnp.newaxis, :, :]
+    )
 
     np.testing.assert_allclose(expected_accumulator, updated_accumulator)
     np.testing.assert_allclose(

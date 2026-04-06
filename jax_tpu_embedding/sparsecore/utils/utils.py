@@ -14,6 +14,7 @@
 """Utilities for examples."""
 
 from absl import flags
+import einops
 import jax
 from jax.experimental import layout
 
@@ -66,6 +67,55 @@ def embedding_table_format(
   """Returns the layout format of the embedding table."""
   return embedding_table_format_with_sharding(
       jax.sharding.NamedSharding(mesh, partition_spec)
+  )
+
+
+def shard_emb_table(
+    table: jax.typing.ArrayLike,
+    *,
+    num_devices: int,
+    num_sc_per_device: int,
+    sharding_strategy: str = 'MOD',
+) -> jax.typing.ArrayLike:
+  """Shards an embedding table for SparseCore using MOD sharding.
+
+  Args:
+    table: Unsharded embedding table of shape [vocab_size, emb_dim].
+    num_devices: Number of chips/devices.
+    num_sc_per_device: Number of SparseCores per device.
+    sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
+
+  Returns:
+    Sharded table of shape [num_devices, num_sc_per_device * vocab_size_per_sc,
+    emb_dim].
+  """
+  if sharding_strategy != 'MOD':
+    raise ValueError('Currently only MOD sharding strategy is supported')
+  return einops.rearrange(
+      table, '(v c s) f -> c (s v) f', c=num_devices, s=num_sc_per_device
+  )
+
+
+def unshard_emb_table(
+    sharded_table: jax.typing.ArrayLike,
+    num_sc_per_device: int,
+    sharding_strategy: str = 'MOD',
+) -> jax.typing.ArrayLike:
+  """Unshards embedding table from MOD sharding.
+
+  Args:
+    sharded_table: Sharded embedding table of shape [num_devices,
+      num_sc_per_device * vocab_size_per_sc, emb_dim].
+    num_sc_per_device: Number of SparseCores per device.
+    sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
+
+  Returns:
+    Unsharded table of shape [vocab_size, emb_dim].
+  """
+  if sharding_strategy != 'MOD':
+    raise ValueError('Currently only MOD sharding strategy is supported')
+  return einops.rearrange(
+      sharded_table, 'c (s v) f -> (v c s) f', s=num_sc_per_device
   )
 
 

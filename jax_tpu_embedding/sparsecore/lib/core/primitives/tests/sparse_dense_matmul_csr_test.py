@@ -14,7 +14,6 @@
 from unittest import mock
 
 from absl.testing import absltest
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
@@ -105,11 +104,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     with self.subTest("invalid_row_pointer_type"):
@@ -224,11 +222,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
     with self.subTest("invalid_sample_id_shape"):
       bad_sample_id = jnp.full(
@@ -266,11 +263,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
     self.assertRaises(
         ValueError,
@@ -320,11 +316,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
     self.assertRaises(
         ValueError,
@@ -360,11 +355,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
     # Shared the embedding table.
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
     # Do the embedding lookup.
     emb_activations = self.tpu_sparse_dense_matmul_csr(
@@ -419,11 +413,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
             num_sc_per_device=self.num_sc_per_device,
         )
     )
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     # num_buckets must be >= 2
@@ -474,11 +467,10 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
             num_sc_per_device=self.num_sc_per_device,
         )
     )
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     activations = self.tpu_sparse_dense_matmul_csr(

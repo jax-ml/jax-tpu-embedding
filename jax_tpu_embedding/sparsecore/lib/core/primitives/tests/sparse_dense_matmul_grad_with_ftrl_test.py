@@ -16,12 +16,13 @@ from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
+
 
 _BATCH_SIZE = 16
 _VOCAB_SIZE = 32
@@ -308,21 +309,13 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
 
   def _shard_table(self, table):
     """Shards a dense table for SparseCore input."""
-    return einops.rearrange(
-        table,
-        "(v c s) f -> c (s v) f",
-        c=1,  # Devices.
-        s=_NUM_SC_PER_DEVICE,  # SparseCores per device.
+    return utils.shard_emb_table(
+        table, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
     )
 
   def _unshard_table(self, table):
     """Unshards a table from SparseCore output format."""
-    return einops.rearrange(
-        table,
-        "c (s v) f -> (v c s) f",
-        c=1,  # Devices.
-        s=_NUM_SC_PER_DEVICE,  # SparseCores per device.
-    )
+    return utils.unshard_emb_table(table, num_sc_per_device=_NUM_SC_PER_DEVICE)
 
   def _compute_table_grad(
       self, inputs_ids, inputs_weights, activations_grad_samples
@@ -426,7 +419,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
           multiply_linear_by_learning_rate_flag,
       )
 
-    (updated_table, updated_accumulator, updated_linear) = (
+    updated_table, updated_accumulator, updated_linear = (
         sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive.bind(
             lhs_row_pointers,
             lhs_local_embedding_ids,

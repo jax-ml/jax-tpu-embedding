@@ -14,11 +14,11 @@
 from unittest import mock
 
 from absl.testing import absltest
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -123,21 +123,19 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
 
       sharded_outputs = []
       for out in updated_outputs:
-        sharded_out = einops.rearrange(
+        sharded_out = utils.shard_emb_table(
             out,
-            "(v c s) f -> c (s v) f",
-            c=1,
-            s=4,
+            num_devices=1,
+            num_sc_per_device=4,
         )
         sharded_outputs.append(sharded_out[0])
       return tuple(sharded_outputs)
     else:
       updated_table = emb_table.at[unique_indices].set(outputs)
-      updated_table_sharded = einops.rearrange(
+      updated_table_sharded = utils.shard_emb_table(
           updated_table,
-          "(v c s) f -> c (s v) f",
-          c=1,
-          s=4,
+          num_devices=1,
+          num_sc_per_device=4,
       )
       return updated_table_sharded[0]
 
@@ -158,11 +156,10 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
 
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=4,
     )
 
     z_grad = jnp.full(
@@ -229,11 +226,10 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=4,
     )
 
     accumulator_init = jnp.zeros(
@@ -315,11 +311,10 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
 
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=4,
     )
 
     z_grad = jnp.full(
@@ -437,11 +432,10 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
 
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=4,
     )
 
     z_grad = jnp.full(

@@ -11,14 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 from unittest import mock
 
 from absl.testing import absltest
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -31,6 +32,11 @@ class SparseDenseMatmulGradWithSgdTest(absltest.TestCase):
     self.vocab_size = 32
     self.emb_size = 8
     self.num_sc_per_device = 4
+    self._shard_table = functools.partial(
+        utils.shard_emb_table,
+        num_devices=self.num_chips,
+        num_sc_per_device=self.num_sc_per_device,
+    )
     self.input_tensor = np.array(
         [
             [5],
@@ -95,11 +101,8 @@ class SparseDenseMatmulGradWithSgdTest(absltest.TestCase):
         num_sc_per_device=4,
     )
 
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = self._shard_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
     )
 
     z_grad = jnp.full(
@@ -473,11 +476,8 @@ class SparseDenseMatmulGradWithSgdTest(absltest.TestCase):
         num_sc_per_device=4,
     )
 
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = self._shard_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
     )
 
     z_grad = jnp.full(
@@ -838,11 +838,8 @@ class SparseDenseMatmulGradWithSgdTest(absltest.TestCase):
     sparse_update_mask = jnp.zeros(self.emb_table.shape, dtype=jnp.bool)
     sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
 
-    sparse_update_mask_sharded = einops.rearrange(
+    sparse_update_mask_sharded = self._shard_table(
         sparse_update_mask,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=4,
     )
 
     expected_emb_activations = jnp.where(

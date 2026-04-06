@@ -13,7 +13,7 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -28,7 +28,20 @@ pytype_strict_library(
     ],
     deps = [
         pypi_requirement("absl/flags"),
+        pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("jax/experimental:layout"),
+    ],
+)
+
+pytype_strict_contrib_test(
+    name = "utils_test",
+    srcs = ["utils_test.py"],
+    deps = [
+        ":utils",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
     ],
 )

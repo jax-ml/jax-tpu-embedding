@@ -15,7 +15,6 @@ import functools
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -199,20 +198,18 @@ class EmbeddingLayerTest(parameterized.TestCase):
         self.feature_spec_a.table_spec, pad_value=_PAD_VALUE
     )
 
-    emb_table_a_sharded = einops.rearrange(
+    emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
-        '(v c s) f -> c (s v) f',
-        c=device_count,
-        s=num_sc_per_device,
+        num_devices=device_count,
+        num_sc_per_device=num_sc_per_device,
     )
     emb_table_b = test_utils.row_initialize_with_padding(
         self.feature_spec_b.table_spec, pad_value=_PAD_VALUE
     )
-    emb_table_b_sharded = einops.rearrange(
+    emb_table_b_sharded = utils.shard_emb_table(
         emb_table_b,
-        '(v c s) f -> c (s v) f',
-        c=device_count,
-        s=num_sc_per_device,
+        num_devices=device_count,
+        num_sc_per_device=num_sc_per_device,
     )
 
     embedding_variables = {}

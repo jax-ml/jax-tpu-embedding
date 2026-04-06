@@ -18,7 +18,6 @@ from typing import Any
 from absl import flags
 from absl import logging
 from absl.testing import absltest
-import einops
 import flax.linen as nn
 import jax
 # pylint: disable-next=g-importing-member
@@ -146,11 +145,10 @@ class ShakespeareTest(absltest.TestCase):
     self.feature_batches = feature_batches['words_0']
 
     emb_table = np.zeros([_VOCAB_SIZE.value, _EMBEDDING_SIZE.value])
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         emb_table,
-        '(v c s) f -> c (s v) f',
-        c=len(self.devices),
-        s=self.num_sc_per_device,
+        num_devices=len(self.devices),
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     self.embedding_variables = {}

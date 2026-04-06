@@ -17,7 +17,6 @@ from typing import Callable
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax.sharding import NamedSharding
@@ -269,11 +268,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_A, table_dim_a)
         .astype(np.float32)
     )
-    emb_table_a_sharded = einops.rearrange(
+    emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
+        num_devices=1,
+        num_sc_per_device=4,
     )
     embedding_variables = {}
     embedding_variables["table_a"] = [
@@ -298,11 +296,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_B, table_dim_b)
         .astype(np.float32)
     )
-    emb_table_b_sharded = einops.rearrange(
+    emb_table_b_sharded = utils.shard_emb_table(
         emb_table_b,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
+        num_devices=1,
+        num_sc_per_device=4,
     )
     embedding_variables["table_b"] = [
         jax.device_put(
@@ -323,11 +320,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_C, table_dim_c)
         .astype(np.float32)
     )
-    emb_table_c_sharded = einops.rearrange(
+    emb_table_c_sharded = utils.shard_emb_table(
         emb_table_c,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
+        num_devices=1,
+        num_sc_per_device=4,
     )
     accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)
     embedding_variables["table_c"] = (
@@ -364,11 +360,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_D, table_dim_d)
         .astype(np.float32)
     )
-    emb_table_d_sharded = einops.rearrange(
+    emb_table_d_sharded = utils.shard_emb_table(
         emb_table_d,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=4,
+        num_devices=1,
+        num_sc_per_device=4,
     )
     accumulator_d_init = jnp.full(emb_table_d_sharded[0].shape, 0.1, np.float32)
     local_step_d_init = jnp.zeros(emb_table_d_sharded[0].shape, np.float32)
@@ -635,14 +630,14 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
     )
 
-    expected_table_d = einops.rearrange(
-        expected_table_d, "(v c s) f -> c (s v) f", c=1, s=4
+    expected_table_d = utils.shard_emb_table(
+        expected_table_d, num_devices=1, num_sc_per_device=4
     )[0]
-    expected_accumulator_d = einops.rearrange(
-        expected_accumulator_d, "(v c s) f -> c (s v) f", c=1, s=4
+    expected_accumulator_d = utils.shard_emb_table(
+        expected_accumulator_d, num_devices=1, num_sc_per_device=4
     )[0]
-    expected_local_step_d = einops.rearrange(
-        expected_local_step_d, "(v c s) f -> c (s v) f", c=1, s=4
+    expected_local_step_d = utils.shard_emb_table(
+        expected_local_step_d, num_devices=1, num_sc_per_device=4
     )[0]
 
     np.testing.assert_allclose(
@@ -701,11 +696,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_A, table_dim_a)
         .astype(np.float32)
     )
-    emb_table_a_sharded = einops.rearrange(
+    emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
-        "(v c s) f -> c (s v) f",
-        c=2,
-        s=4,
+        num_devices=2,
+        num_sc_per_device=4,
     )
     embedding_variables = {}
     embedding_variables["table_a"] = [
@@ -730,11 +724,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_B, table_dim_b)
         .astype(np.float32)
     )
-    emb_table_b_sharded = einops.rearrange(
+    emb_table_b_sharded = utils.shard_emb_table(
         emb_table_b,
-        "(v c s) f -> c (s v) f",
-        c=2,
-        s=4,
+        num_devices=2,
+        num_sc_per_device=4,
     )
     embedding_variables["table_b"] = [
         jax.device_put(
@@ -756,11 +749,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_C, table_dim_c)
         .astype(np.float32)
     )
-    emb_table_c_sharded = einops.rearrange(
+    emb_table_c_sharded = utils.shard_emb_table(
         emb_table_c,
-        "(v c s) f -> c (s v) f",
-        c=2,
-        s=4,
+        num_devices=2,
+        num_sc_per_device=4,
     )
     embedding_variables["table_c"] = (
         [
@@ -1238,11 +1230,10 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         [i for _ in range(padded_embedding_dim_a)]
         for i in range(padded_vocab_a)
     ]).astype(np.float32)
-    emb_table_a_sharded = einops.rearrange(
+    emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
-        "(v c s) f -> c (s v) f",
-        c=num_devices,
-        s=num_sc_per_device,
+        num_devices=num_devices,
+        num_sc_per_device=num_sc_per_device,
     )
     embedding_variables = {}
     embedding_variables["table_a"] = [
@@ -1370,8 +1361,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .reshape(_VOC_C, table_dim_c)
         .astype(np.float32)
     )
-    emb_table_c_sharded = einops.rearrange(
-        emb_table_c, "(v c s) f -> c (s v) f", c=1, s=4
+    emb_table_c_sharded = utils.shard_emb_table(
+        emb_table_c, num_devices=1, num_sc_per_device=4
     )
     accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)
 

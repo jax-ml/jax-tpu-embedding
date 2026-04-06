@@ -17,7 +17,6 @@ import os
 from absl import flags
 from absl import logging
 from absl.testing import absltest
-import einops
 import jax
 import jax.numpy as jnp
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
@@ -25,6 +24,7 @@ from jax.sharding import PartitionSpec as P  # pylint: disable=g-importing-membe
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import config as shakespeare_config
 from jax_tpu_embedding.sparsecore.examples.models.shakespeare import model as shakespeare_model
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
@@ -76,11 +76,10 @@ class ShakespeareTest(absltest.TestCase):
 
     # Prepare embedding tables.
     emb_table = np.zeros([config.vocab_size, config.embedding_size])
-    emb_table_sharded = einops.rearrange(
+    emb_table_sharded = utils.shard_emb_table(
         emb_table,
-        '(v c s) f -> c (s v) f',
-        c=config.num_global_devices,
-        s=config.num_sc_per_device,
+        num_devices=config.num_global_devices,
+        num_sc_per_device=config.num_sc_per_device,
     )
 
     embedding_variables = {}

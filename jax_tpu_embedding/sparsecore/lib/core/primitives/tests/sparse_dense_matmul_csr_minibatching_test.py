@@ -15,11 +15,11 @@ import logging
 from unittest import mock
 
 from absl.testing import absltest
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
@@ -27,11 +27,14 @@ _NUM_SC_PER_DEVICE = 4
 
 
 class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
+
   def setUp(self):
     super().setUp()
     jax.config.update("jax_traceback_filtering", "off")
 
+    self.global_devices = np.array([mock.create_autospec(jax.Device)])
     self.num_chips = 1
+    self.num_sc_per_device = 4
     self.vocab_size = 32
     self.emb_size = 8
     self.input_tensor = np.array(
@@ -85,13 +88,11 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         .reshape(self.vocab_size, self.emb_size)
         .astype(np.float32)
     )
-    self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
-    self.emb_table_sharded = einops.rearrange(
+    self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
-        "(v c s) f -> c (s v) f",
-        c=len(self.global_devices),
-        s=_NUM_SC_PER_DEVICE,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
     self.tpu_sparse_dense_matmul_csr_with_mini_batching = jax.named_call(
@@ -380,17 +381,14 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
             [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0],
             [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0],
             [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-
             [6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0],
             [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0],
             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
-
             [15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0],
             [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0],
             [11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0],
             [7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0],
-
             [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0],
             [14.0, 14.0, 14.0, 14.0, 14.0, 14.0, 14.0, 14.0],
             [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
@@ -594,6 +592,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
 
     logging.debug("emb_activations: %s", emb_activations)
     np.testing.assert_equal(emb_activations, expected_emb_activations)
+
 
 if __name__ == "__main__":
   absltest.main()

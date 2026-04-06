@@ -11,18 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 from typing import Tuple
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import einops
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import (
     sparse_dense_matmul_grad_with_adagrad_momentum,
 )
+from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 # Constants for the test.
@@ -34,6 +35,17 @@ _NUM_SC_PER_DEVICE = 4
 
 class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
   """Unit-tests for the Adagrad-Momentum SparseCore gradient/update primitive."""
+
+  def setUp(self):
+    super().setUp()
+    self._shard_table = functools.partial(
+        utils.shard_emb_table,
+        num_devices=1,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
+    )
+    self._unshard_table = functools.partial(
+        utils.unshard_emb_table, num_sc_per_device=_NUM_SC_PER_DEVICE
+    )
 
   row_pointers = np.array([0, 1, 2, 4], dtype=np.int32)
   sample_ids = np.array([0, 1, 2, 3], dtype=np.int32)
@@ -258,24 +270,6 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         vals * activations_grad_jnp[rows, :]
     )
     return np.asarray(table_grad)
-
-  def _shard_table(self, table: np.ndarray) -> np.ndarray:
-    """Shards a dense table for SparseCore input."""
-    return einops.rearrange(
-        table,
-        "(v c s) f -> c (s v) f",
-        c=1,
-        s=_NUM_SC_PER_DEVICE,
-    )
-
-  def _unshard_table(self, table: np.ndarray) -> np.ndarray:
-    """Unshards a table from SparseCore output format."""
-    return einops.rearrange(
-        table,
-        "c (s v) f -> (v c s) f",
-        c=1,  # Devices.
-        s=_NUM_SC_PER_DEVICE,  # SparseCores per device.
-    )
 
   def _compute_adagrad_momentum_update(
       self,
