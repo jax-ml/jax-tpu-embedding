@@ -340,10 +340,10 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     m_update_g = {'embedding_table': sc_module.embedding_table.copy()}
     unused_ = embedding_lookup_input
-    g = ((m_update_g, unused_), activations_grad)
-    res = (sc_module, embedding_lookup_input)
+    g = ((m_update_g, unused_, None), activations_grad)
+    res = (sc_module, embedding_lookup_input, None)
 
-    grads, _ = nnx.jit(embed.embedding_lookup_bwd)(res, g)
+    grads, _, _ = nnx.jit(embed.embedding_lookup_bwd)(res, g)
     nnx.update(sc_module, grads)
 
     expected_grad_table_a = np.full(
@@ -514,10 +514,10 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     m_update_g = {'embedding_table': sc_module.embedding_table.copy()}
     unused_ = embedding_lookup_input
-    g = ((m_update_g, unused_), activations_grad)
-    res = (sc_module, embedding_lookup_input)
+    g = ((m_update_g, unused_, None), activations_grad)
+    res = (sc_module, embedding_lookup_input, None)
 
-    grads, _ = nnx.jit(embed.embedding_lookup_bwd)(res, g)
+    grads, _, _ = nnx.jit(embed.embedding_lookup_bwd)(res, g)
     nnx.update(sc_module, grads)
 
     expected_grad_table_ac = np.full(

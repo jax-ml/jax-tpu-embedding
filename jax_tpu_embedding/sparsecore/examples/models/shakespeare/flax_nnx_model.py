@@ -98,9 +98,13 @@ class Model(nnx.Module):
         ),
     )
 
-  def __call__(self, embedding_lookup_inputs: embedding.PreprocessedInput):
+  def __call__(
+      self,
+      embedding_lookup_inputs: embedding.PreprocessedInput,
+      step: jax.Array | None = None,
+  ) -> jax.Array:
     # Run the embedding layer.
-    x = self.embedding_layer(embedding_lookup_inputs)
+    x = self.embedding_layer(embedding_lookup_inputs, step=step)
 
     # Unpack the activations.
     x = x[self.feature_name]

@@ -183,12 +183,15 @@ class SparseCoreEmbed(nnx.Module):
     )
 
   def __call__(
-      self, embedding_lookup_inputs: embedding.PreprocessedInput
+      self,
+      embedding_lookup_inputs: embedding.PreprocessedInput,
+      step: jax.Array | None = None,
   ) -> embedding.Nested[jax.Array]:
     """Computes the embedding activations.
 
     Args:
       embedding_lookup_inputs: The preprocessed data for embedding lookup.
+      step: The current training step.
 
     Returns:
       The activations structure with the same structure as feature_specs.
@@ -196,6 +199,7 @@ class SparseCoreEmbed(nnx.Module):
     return embedding_lookup(
         self,
         embedding_lookup_inputs,
+        step=step,
     )
 
 
@@ -206,7 +210,9 @@ class SparseCoreEmbed(nnx.Module):
 def embedding_lookup(
     embedding_layer: SparseCoreEmbed,
     embedding_lookup_inputs: embedding.PreprocessedInput,
+    step: jax.Array | None = None,
 ):
+  del step  # Unused in body, used for custom_vjp signature matching.
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
   return nnx.shard_map(
@@ -230,40 +236,51 @@ def embedding_lookup(
 def _embedding_lookup_fwd(
     embedding_layer: SparseCoreEmbed,
     embedding_lookup_inputs: embedding.PreprocessedInput,
+    step: jax.Array | None = None,
 ):
   return embedding_lookup(
       embedding_layer,
       embedding_lookup_inputs,
+      step=step,
   ), (
       embedding_layer,
       embedding_lookup_inputs,
+      step,
   )
 
 
 def embedding_lookup_bwd(res, g):
   """Backward pass for embedding lookup."""
-  (embedding_layer, embedding_lookup_inputs) = res
+  (embedding_layer, embedding_lookup_inputs, step) = res
   # input_updates_g, out_g = g
-  (m_updates_g, unused_), out_g = g
+  (m_updates_g, unused_inputs_g, unused_step_g), out_g = g
   m_g = jax.tree.map(lambda x: x, m_updates_g)  # create a copy
 
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
+
+  def shard_map_grad_fn(out_g, inputs, table, step):
+    return embedding.tpu_sparse_dense_matmul_grad(
+        out_g,
+        inputs,
+        table,
+        embedding_layer.feature_specs,
+        sharding_strategy=embedding_layer.table_sharding_strategy,
+        enable_minibatching=embedding_layer.enable_minibatching,
+        step=step,
+    )
+
   emb_grad_result = nnx.shard_map(
-      functools.partial(
-          embedding.tpu_sparse_dense_matmul_grad,
-          feature_specs=embedding_layer.feature_specs,
-          sharding_strategy=embedding_layer.table_sharding_strategy,
-          enable_minibatching=embedding_layer.enable_minibatching,
-      ),
+      shard_map_grad_fn,
       mesh=embedding_layer.mesh,
-      in_specs=(pd, pd, pt),
+      in_specs=(pd, pd, pt, None),
       out_specs=pt,
       check_vma=False,
   )(
       out_g,
       embedding_lookup_inputs,
       embedding_layer.embedding_table.value,
+      step,
   )
 
   # tpu_sparse_dense_matmul_grad returns a general Mapping (usually a dict).
@@ -276,7 +293,7 @@ def embedding_lookup_bwd(res, g):
 
   m_g['embedding_table'].value = emb_grad_result
 
-  return (m_g, unused_)
+  return (m_g, unused_inputs_g, unused_step_g)
 
 
 embedding_lookup.defvjp(_embedding_lookup_fwd, embedding_lookup_bwd)
