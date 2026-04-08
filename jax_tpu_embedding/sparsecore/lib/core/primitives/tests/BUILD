@@ -123,6 +123,7 @@ pytype_strict_contrib_test(
         "//third_party/jax:tpu_support",
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],

@@ -16,6 +16,7 @@ from unittest import mock
 
 from absl import logging
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
@@ -24,7 +25,7 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
+class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -151,7 +152,19 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
 
     np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
-  def test_sc_emb_forward_pass_2_batches_per_core(self):
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="no_clipping",
+          min_value=None,
+          max_value=None,
+      ),
+      dict(
+          testcase_name="clipping",
+          min_value=2.0,
+          max_value=12.0,
+      ),
+  )
+  def test_sc_emb_forward_pass_2_batches_per_core(self, min_value, max_value):
     # fmt: off
     mb0_feat = [
         [5], [3], [], [1], [6], [], [0], [4], [], [], [], [7], [], [], [2], [],
@@ -220,6 +233,8 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
             computation_name="sgd_test_computation",
             sharding_strategy=1,
             enable_minibatching=True,
+            min_value=min_value,
+            max_value=max_value,
         )
     )
 
@@ -238,92 +253,14 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(absltest.TestCase):
       # where num_shards=4 and shard_size=8.
       physical_row = (i % 4) * 8 + i // 4
       expected_emb_activations[physical_row, :] -= 0.2
+      if min_value is not None or max_value is not None:
+        expected_emb_activations[physical_row, :] = np.clip(
+            expected_emb_activations[physical_row, :], min_value, max_value
+        )
 
     np.testing.assert_allclose(
         updated_emb_table, expected_emb_activations, rtol=1e-5, atol=1e-5
     )
-
-  @absltest.skip("b/496926428: Clipping with minibatching is not supported.")
-  def test_sc_emb_forward_pass_2_batches_per_core_with_bounds(self):
-    # Tests a single SC evaluating gradients from _BATCH_SIZE sequences.
-    # The SC separates this batch logically into _NUM_MINIBATCHES chunks.
-    batch_size = 16
-    num_sc = 1
-    num_minibatches_per_sc = 2
-    max_ids_per_partition = 16
-    assert batch_size % (num_sc * num_minibatches_per_sc) == 0
-
-    mb0_feat = [[5], [3], [9, 1], [6, 12, 0]]
-    mb1_feat = [[4], [15, 13, 11], [7, 8, 14, 2], [10]]
-    mb0_weight = [[1.0], [1.0], [1.0, 1.0], [1.0, 1.0, 1.0]]
-    mb1_weight = [[1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], [1.0]]
-
-    features = [mb0_feat, mb1_feat]
-    weights = [mb0_weight, mb1_weight]
-    mesh = jax.sharding.Mesh(self.global_devices, "x")
-
-    (
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
-        lhs_gains,
-    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        features,
-        weights,
-        mesh,
-        num_sc_per_device=num_sc,
-        max_ids_per_partition=max_ids_per_partition,
-        max_unique_ids_per_partition=max_ids_per_partition,
-        enable_minibatching=True,
-    )
-
-    emb_table_sharded = self._shard_table(
-        self.emb_table, num_devices=1, num_sc_per_device=1
-    )
-
-    # Provide gradients for the physical batch size.
-    z_grad = jnp.full(
-        (
-            self.max_device_batch_size,
-            self.emb_size,
-        ),
-        1.0,
-        np.float32,
-    )
-
-    # Do the embedding update.
-    updated_emb_table = (
-        self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
-            lhs_row_pointers,
-            lhs_local_embedding_ids,
-            lhs_local_sample_ids,
-            lhs_gains,
-            num_minibatches_per_sc,
-            emb_table_sharded[0],
-            z_grad,
-            0.1,  # learning_rate
-            max_ids_per_partition=16,
-            max_unique_ids_per_partition=16,
-            computation_name="sgd_minibatching_test_computation",
-            sharding_strategy=1,
-            enable_minibatching=True,
-            min_value=2.0,
-            max_value=12.0,
-        )
-    )
-
-    # Embedding IDs 0-15 are each present once, so they are updated by -0.1*1*1
-    # and clipped.
-    expected_emb_activations = emb_table_sharded[0].copy()
-    for i in range(16):
-      expected_emb_activations[i, :] = np.clip(i - 0.1, 2.0, 12.0)
-    updated_emb_table = utils.unshard_emb_table(
-        updated_emb_table[jnp.newaxis, :, :], num_sc_per_device=1
-    )
-
-    logging.debug("updated %s", updated_emb_table)
-    logging.debug("expected %s", expected_emb_activations)
-    np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
 
 
 if __name__ == "__main__":
