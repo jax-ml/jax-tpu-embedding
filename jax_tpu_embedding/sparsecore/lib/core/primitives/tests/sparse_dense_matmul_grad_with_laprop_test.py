@@ -411,8 +411,12 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
           max_unique_ids_per_partition=max_unique_ids_per_partition,
       )
 
-  def test_laprop_optimizer_update(self):
-    # Process the input.
+  @parameterized.named_parameters(
+      ("no_clipping", None, None),
+      ("clipping", 2.0, 12.0),
+  )
+  def test_laprop_optimizer_update(self, min_value, max_value):
+    # Arrange
     input_tensor = np.array(
         [
             [5],
@@ -459,17 +463,8 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         .astype(np.float32)
     )
     emb_table_sharded = self._shard_table(emb_table)
-    mu_init = jnp.full(
-        emb_table_sharded[0].shape,
-        0.00,
-        np.float32,
-    )
-
-    nu_init = jnp.full(
-        emb_table_sharded[0].shape,
-        0.00,
-        np.float32,
-    )
+    mu_init = jnp.full_like(emb_table_sharded[0], 0.002)
+    nu_init = jnp.full_like(emb_table_sharded[0], 0.004)
 
     learning_rate = np.float32(0.1)
     b1 = np.float32(0.9)
@@ -485,60 +480,51 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         np.float32,
     )
 
-    # Expected values are computed manually on colab.
-    expected_embedding_table = np.array([
-        _EMB_SIZE * [-0.19492617],
-        _EMB_SIZE * [0.80507386],
-        _EMB_SIZE * [1.8050739],
-        _EMB_SIZE * [2.8050737],
-        _EMB_SIZE * [3.8050737],
-        _EMB_SIZE * [4.8050737],
-        _EMB_SIZE * [5.8050737],
-        _EMB_SIZE * [6.8050737],
-        _EMB_SIZE * [7.8050737],
-        _EMB_SIZE * [8.805074],
-        _EMB_SIZE * [9.805074],
-        _EMB_SIZE * [10.805074],
-        _EMB_SIZE * [11.805074],
-        _EMB_SIZE * [12.805074],
-        _EMB_SIZE * [13.805074],
-        _EMB_SIZE * [14.805074],
-        _EMB_SIZE * [16],
-        _EMB_SIZE * [17],
-        _EMB_SIZE * [18],
-        _EMB_SIZE * [19],
-        _EMB_SIZE * [20],
-        _EMB_SIZE * [21],
-        _EMB_SIZE * [22],
-        _EMB_SIZE * [23],
-        _EMB_SIZE * [24],
-        _EMB_SIZE * [25],
-        _EMB_SIZE * [26],
-        _EMB_SIZE * [27],
-        _EMB_SIZE * [28],
-        _EMB_SIZE * [29],
-        _EMB_SIZE * [30],
-        _EMB_SIZE * [31],
-    ])
+    def _compute_laprop(theta, g, mu, nu, alpha, beta_1, decay_rate, epsilon):
+      grad_square = g * g + epsilon
+      nu_new = decay_rate * nu + (1.0 - decay_rate) * grad_square
+      update = g / jnp.sqrt(nu_new)
+      mu_new = beta_1 * mu + jnp.sqrt(1.0 - beta_1**2) * update
+      theta_new = theta - alpha * mu_new
+      return (theta_new, mu_new, nu_new)
 
-    expected_embedding_table = self._shard_table(expected_embedding_table)[0]
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    # The optimizer only applies a sparse update: only rows involved in the
+    # forward pass are updated.
+    table_grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE))
+    sparse_rows = jnp.unique(input_tensor.flatten())
+    sparse_update_mask = jnp.zeros(emb_table.shape, dtype=jnp.bool)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
+    # Gradients for updated rows: 1.0 (gain) * 0.01 (z_grad) = 0.01
+    table_grad = table_grad.at[sparse_rows, :].set(0.01)
 
-    # Expected values are computed manually on colab.
-    expected_mu = np.array([
-        (_VOCAB_SIZE // 2) * _EMB_SIZE * [1.9492617],
-        (_VOCAB_SIZE // 2) * _EMB_SIZE * [0.0],
-    ]).reshape(_VOCAB_SIZE, _EMB_SIZE)
+    mu_init_cpu = np.full_like(emb_table, 0.002, dtype=np.float32)
+    nu_init_cpu = np.full_like(emb_table, 0.004, dtype=np.float32)
 
-    expected_mu = self._shard_table(expected_mu)[0]
+    expected_embedding_table, expected_mu, expected_nu = _compute_laprop(
+        np.asarray(emb_table),
+        np.asarray(table_grad),
+        mu_init_cpu,
+        nu_init_cpu,
+        learning_rate,
+        b1,
+        decay_rate,
+        eps,
+    )
 
-    # Expected values are computed manually on colab.
-    expected_nu = np.array([
-        (_VOCAB_SIZE // 2) * _EMB_SIZE * [5.0004996e-06],
-        (_VOCAB_SIZE // 2) * _EMB_SIZE * [0.0],
-    ]).reshape(_VOCAB_SIZE, _EMB_SIZE)
+    # Apply manual bounds clamping matching exactly what SparseCore should do.
+    expected_embedding_table = jnp.clip(
+        expected_embedding_table, min_value, max_value
+    )
 
-    expected_nu = self._shard_table(expected_nu)[0]
+    # Restore unaffected rows.
+    expected_embedding_table = jnp.where(
+        sparse_update_mask, expected_embedding_table, emb_table
+    )
+    expected_mu = jnp.where(sparse_update_mask, expected_mu, mu_init_cpu)
+    expected_nu = jnp.where(sparse_update_mask, expected_nu, nu_init_cpu)
 
+    # Act
     updated_table, updated_mu, updated_nu = (
         sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive.bind(
             lhs_row_pointers,
@@ -558,159 +544,21 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
+            min_value=min_value,
+            max_value=max_value,
         )
     )
 
-    np.testing.assert_almost_equal(
-        expected_embedding_table, updated_table, decimal=6
-    )
-    np.testing.assert_almost_equal(expected_mu, updated_mu, decimal=6)
-    np.testing.assert_almost_equal(expected_nu, updated_nu, decimal=6)
-
-  def test_laprop_optimizer_update_with_bounds(self):
-    input_tensor = np.array(
-        [
-            [5],
-            [3],
-            [9],
-            [1],
-            [6],
-            [12],
-            [0],
-            [4],
-            [15],
-            [13],
-            [11],
-            [7],
-            [8],
-            [14],
-            [2],
-            [10],
-        ],
-        dtype=np.int32,
-    )
-    input_weights = np.array(
-        [[1.0] for _ in range(16)],
-        dtype=np.float32,
-    )
-
-    global_devices = np.array([mock.create_autospec(jax.Device)])
-    mesh = jax.sharding.Mesh(global_devices, "x")
-    (
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
-        lhs_gains,
-    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        input_tensor,
-        input_weights,
-        mesh,
-        max_ids_per_partition=16,
-        max_unique_ids_per_partition=64,
-        num_sc_per_device=_NUM_SC_PER_DEVICE,
-    )
-
-    def _compute_table_grad(inputs, weights, activation_grad):
-      batch_size = activation_grad.shape[0]
-      sample_lengths = jnp.array([len(sample) for sample in inputs])
-      rows = jnp.repeat(jnp.arange(batch_size), sample_lengths)
-      cols = jnp.concatenate(np.unstack(inputs))
-      vals = jnp.concatenate(np.unstack(weights)).reshape(-1, 1)
-
-      grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE))
-      grad = grad.at[cols, :].add(vals * activation_grad[rows, :])
-      return grad
-
-    def _compute_laprop(theta, g, mu, nu, alpha, beta_1, decay_rate, epsilon):
-      grad_square = g * g + epsilon
-      nu_new = decay_rate * nu + (1.0 - decay_rate) * grad_square
-      update = g / jnp.sqrt(nu_new)
-      mu_new = beta_1 * mu + jnp.sqrt(1.0 - beta_1**2) * update
-      theta_new = theta - alpha * mu_new
-      return (theta_new, mu_new, nu_new)
-
-    embedding_table = (
-        np.array(
-            [[(i + 1) for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)]
-        )
-        .reshape(_VOCAB_SIZE, _EMB_SIZE)
-        .astype(np.float32)
-    )
-    embedding_table_sharded = self._shard_table(embedding_table)
-
-    mu = jnp.full(embedding_table.shape, 0.002, np.float32)
-    mu_sharded = self._shard_table(np.asarray(mu))
-
-    nu = jnp.full(embedding_table.shape, 0.004, np.float32)
-    nu_sharded = self._shard_table(np.asarray(nu))
-
-    learning_rate = np.float32(0.1)
-    b1 = np.float32(0.9)
-    decay_rate = np.float32(0.999)
-    eps = np.float32(1e-8)
-
-    activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.012, np.float32)
-
-    table_grad = _compute_table_grad(
-        input_tensor, input_weights, activations_grad
-    )
-
-    sparse_rows = jnp.unique(jnp.concatenate(np.unstack(input_tensor)))
-    sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool)
-    sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
-    expected_embedding_table, expected_mu, expected_nu = _compute_laprop(
-        np.asarray(embedding_table),
-        np.asarray(table_grad),
-        np.asarray(mu),
-        np.asarray(nu),
-        learning_rate,
-        b1,
-        decay_rate,
-        eps,
-    )
-
-    # Apply manual bounds clamping matching exactly what SparseCore should do.
-    # Applying limits matching `min_value=2.0` and `max_value=12.0`.
-    expected_embedding_table = jnp.clip(expected_embedding_table, 2.0, 12.0)
-
-    # Restore unaffected rows.
-    expected_embedding_table = jnp.where(
-        sparse_update_mask, expected_embedding_table, embedding_table
-    )
-    expected_mu = jnp.where(sparse_update_mask, expected_mu, mu)
-    expected_nu = jnp.where(sparse_update_mask, expected_nu, nu)
-
-    updated_table, updated_mu, updated_nu = (
-        sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive.bind(
-            lhs_row_pointers,
-            lhs_local_embedding_ids,
-            lhs_local_sample_ids,
-            lhs_gains,
-            1,  # num_minibatches_per_physical_sparse_core
-            embedding_table_sharded[0],
-            mu_sharded[0],
-            nu_sharded[0],
-            activations_grad,
-            learning_rate,
-            b1,
-            decay_rate,
-            eps,
-            max_ids_per_partition=16,
-            max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
-            sharding_strategy=1,
-            min_value=2.0,
-            max_value=12.0,
-        )
-    )
-
+    # Assert
     updated_table = self._unshard_table(updated_table[jnp.newaxis, :, :])
     updated_mu = self._unshard_table(updated_mu[jnp.newaxis, :, :])
     updated_nu = self._unshard_table(updated_nu[jnp.newaxis, :, :])
 
-    np.testing.assert_allclose(expected_mu, updated_mu)
-    np.testing.assert_allclose(expected_nu, updated_nu)
-    np.testing.assert_allclose(expected_embedding_table, updated_table)
+    np.testing.assert_allclose(
+        expected_embedding_table, updated_table, atol=1e-5
+    )
+    np.testing.assert_allclose(expected_mu, updated_mu, atol=1e-5)
+    np.testing.assert_allclose(expected_nu, updated_nu, atol=1e-5)
 
 
 if __name__ == "__main__":

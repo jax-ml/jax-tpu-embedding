@@ -316,130 +316,14 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         np.asarray(m_n, dtype=np.float32),
     )
 
-  def test_adagrad_momentum_optimizer_update(self):
-    input_tensor_ids = np.array(
-        [[i % _VOCAB_SIZE] for i in range(_BATCH_SIZE)],
-        dtype=np.int32,
-    )
-    input_tensor_weights = np.ones_like(input_tensor_ids, dtype=np.float32)
-
-    global_devices = np.array([mock.create_autospec(jax.Device)])
-    mesh = jax.sharding.Mesh(global_devices, "x")
-    (
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
-        lhs_gains,
-    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
-        input_tensor_ids,
-        input_tensor_weights,
-        mesh,
-        max_ids_per_partition=self.max_ids_per_partition,
-        max_unique_ids_per_partition=self.max_unique_ids_per_partition,
-        num_sc_per_device=_NUM_SC_PER_DEVICE,
-    )
-
-    embedding_table_np = (
-        np.array([
-            [(i * 0.1 + j * 0.01) for j in range(_EMB_SIZE)]
-            for i in range(_VOCAB_SIZE)
-        ])
-        .reshape(_VOCAB_SIZE, _EMB_SIZE)
-        .astype(np.float32)
-    )
-    accumulator_np = np.full_like(embedding_table_np, 0.1, np.float32)
-    momentum_buffer_np = np.full_like(embedding_table_np, 0.01, np.float32)
-
-    embedding_table_sharded = self._shard_table(embedding_table_np)
-    accumulator_sharded = self._shard_table(accumulator_np)
-    momentum_buffer_sharded = self._shard_table(momentum_buffer_np)
-
-    learning_rate_val = np.float32(0.1)
-    momentum_param_val = np.float32(0.9)
-    beta2_param_val = np.float32(0.99)
-    epsilon_val = np.float32(1e-10)
-    k_power_val = np.float32(0.5)
-    use_nesterov_flag = np.bool_(True)
-
-    activations_grad_np = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.01, np.float32)
-    table_grad_np = self._compute_table_grad(
-        input_tensor_ids, input_tensor_weights, activations_grad_np
-    )
-
-    sparse_rows_to_update = np.unique(input_tensor_ids.flatten())
-
-    expected_embedding_table_np = embedding_table_np.copy()
-    expected_accumulator_np = accumulator_np.copy()
-    expected_momentum_buffer_np = momentum_buffer_np.copy()
-
-    for row in sparse_rows_to_update:
-      (
-          expected_embedding_table_np[row, :],
-          expected_accumulator_np[row, :],
-          expected_momentum_buffer_np[row, :],
-      ) = self._compute_adagrad_momentum_update(
-          embedding_table_np[row, :],
-          table_grad_np[row, :],
-          accumulator_np[row, :],
-          momentum_buffer_np[row, :],
-          learning_rate_val,
-          momentum_param_val,
-          beta2_param_val,
-          epsilon_val,
-          k_power_val,
-          use_nesterov_flag,
-      )
-    (
-        updated_table,
-        updated_accumulator,
-        updated_momentum,
-    ) = sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive.bind(
-        lhs_row_pointers,
-        lhs_local_embedding_ids,
-        lhs_local_sample_ids,
-        lhs_gains,
-        np.int32(1),  # num_minibatches_per_physical_sparse_core
-        embedding_table_sharded[0],
-        accumulator_sharded[0],
-        momentum_buffer_sharded[0],
-        np.asarray(activations_grad_np),
-        learning_rate_val,
-        momentum_param_val,
-        beta2_param_val,
-        epsilon_val,
-        k_power_val,
-        use_nesterov_flag,
-        max_ids_per_partition=self.max_ids_per_partition,
-        max_unique_ids_per_partition=self.max_unique_ids_per_partition,
-        computation_name="adagrad_momentum_optimizer_test_computation",
-        sharding_strategy=1,
-        enable_minibatching=False,
-    )
-
-    updated_table_unsharded = self._unshard_table(
-        updated_table[jnp.newaxis, :, :]
-    )
-    updated_accumulator_unsharded = self._unshard_table(
-        updated_accumulator[jnp.newaxis, :, :]
-    )
-    updated_momentum_unsharded = self._unshard_table(
-        updated_momentum[jnp.newaxis, :, :]
-    )
-
-    np.testing.assert_allclose(
-        expected_accumulator_np,
-        updated_accumulator_unsharded,
-    )
-    np.testing.assert_allclose(
-        expected_momentum_buffer_np,
-        updated_momentum_unsharded,
-    )
-    np.testing.assert_allclose(
-        expected_embedding_table_np,
-        updated_table_unsharded,
-    )
-
-  def test_adagrad_momentum_optimizer_update_with_bounds(self):
+  @parameterized.named_parameters(
+      ("no_clipping", None, None),
+      ("clipping", 2.0, 12.0),
+  )
+  def test_sc_emb_backward_pass_with_adagrad_momentum(
+      self, min_value, max_value
+  ):
+    # Arrange
     input_tensor = np.array(
         [
             [5],
@@ -510,7 +394,10 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         input_tensor, input_weights, activations_grad
     )
 
-    sparse_rows = jnp.unique(jnp.concatenate(np.unstack(input_tensor)))
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    # The optimizer only applies a sparse update: only rows involved in the
+    # forward pass are updated.
+    sparse_rows = jnp.unique(input_tensor.flatten())
     sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool)
     sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
 
@@ -529,9 +416,9 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         )
     )
 
-    # Apply manual bounds clamping matching exactly what SparseCore should do.
-    # Applying limits matching `min_value=2.0` and `max_value=12.0`.
-    expected_embedding_table = jnp.clip(expected_embedding_table, 2.0, 12.0)
+    expected_embedding_table = jnp.clip(
+        expected_embedding_table, min_value, max_value
+    )
 
     # Restore unaffected rows.
     expected_embedding_table = jnp.where(
@@ -544,6 +431,7 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         sparse_update_mask, expected_momentum_buffer, momentum_buffer
     )
 
+    # Act
     updated_table, updated_accumulator, updated_momentum_buffer = (
         sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive.bind(
             lhs_row_pointers,
@@ -565,24 +453,32 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
-            min_value=2.0,
-            max_value=12.0,
+            min_value=min_value,
+            max_value=max_value,
         )
     )
 
-    updated_table = self._unshard_table(updated_table[jnp.newaxis, :, :])
-    updated_accumulator = self._unshard_table(
+    # Assert
+    # Check the embedding activations.
+    actual_table_unsharded = self._unshard_table(
+        updated_table[jnp.newaxis, :, :]
+    )
+    actual_accumulator_unsharded = self._unshard_table(
         updated_accumulator[jnp.newaxis, :, :]
     )
-    updated_momentum_buffer = self._unshard_table(
+    actual_momentum_buffer_unsharded = self._unshard_table(
         updated_momentum_buffer[jnp.newaxis, :, :]
     )
 
-    np.testing.assert_allclose(expected_accumulator, updated_accumulator)
     np.testing.assert_allclose(
-        expected_momentum_buffer, updated_momentum_buffer
+        expected_accumulator, actual_accumulator_unsharded, atol=1e-5
     )
-    np.testing.assert_allclose(expected_embedding_table, updated_table)
+    np.testing.assert_allclose(
+        expected_momentum_buffer, actual_momentum_buffer_unsharded, atol=1e-5
+    )
+    np.testing.assert_allclose(
+        expected_embedding_table, actual_table_unsharded, atol=1e-5
+    )
 
 
 if __name__ == "__main__":

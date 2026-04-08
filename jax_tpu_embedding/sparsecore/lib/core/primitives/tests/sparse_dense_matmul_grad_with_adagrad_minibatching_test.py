@@ -278,7 +278,9 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingValidatorTest(
       )
 
 
-class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
+class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
+    parameterized.TestCase
+):
 
   def setUp(self):
     super().setUp()
@@ -356,7 +358,12 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
         enable_minibatching=True,
     )
 
-  def test_sc_emb_backward_pass_with_adagrad(self):
+  @parameterized.named_parameters(
+      ("no_clipping", None, None),
+      ("clipping", 2.0, 10.0),
+  )
+  def test_sc_emb_backward_pass_with_adagrad(self, min_value, max_value):
+    # Arrange
     # fmt: off
     mb0_feat = [
         [5], [3], [], [1], [6], [], [0], [4], [], [], [], [7], [], [], [2], [],
@@ -409,6 +416,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
     learning_rate = 0.01
     num_minibatches_per_physical_sparse_core = 1
 
+    # Act
     updated_table, updated_accumulator = (
         self.sparse_dense_matmul_grad_with_adagrad_with_mini_batching(
             lhs_row_pointers,
@@ -425,214 +433,42 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(absltest.TestCase):
             computation_name="optimizer_test_computation",
             sharding_strategy=1,
             enable_minibatching=True,
+            min_value=min_value,
+            max_value=max_value,
         )
     )
 
+    # Assert
     # Check the embedding activations.
-    # For embedding id 0-15,
-    # each has -0.01 (gradient) x 0.01 (learning rate) x 1 (sample) = -1e-4
-    # For embedding id 16-31, nothing is updated.
-    expected_table = np.array(
-        [
-            [-1.000e-02] * 8,
-            [3.990e00] * 8,
-            [7.990e00] * 8,
-            [1.199e01] * 8,
-            [1.600e01] * 8,
-            [2.000e01] * 8,
-            [2.400e01] * 8,
-            [2.800e01] * 8,
-            [9.900e-01] * 8,
-            [4.990e00] * 8,
-            [8.990e00] * 8,
-            [1.299e01] * 8,
-            [1.700e01] * 8,
-            [2.100e01] * 8,
-            [2.500e01] * 8,
-            [2.900e01] * 8,
-            [1.990e00] * 8,
-            [5.990e00] * 8,
-            [9.990e00] * 8,
-            [1.399e01] * 8,
-            [1.800e01] * 8,
-            [2.200e01] * 8,
-            [2.600e01] * 8,
-            [3.000e01] * 8,
-            [2.990e00] * 8,
-            [6.990e00] * 8,
-            [1.099e01] * 8,
-            [1.499e01] * 8,
-            [1.900e01] * 8,
-            [2.300e01] * 8,
-            [2.700e01] * 8,
-            [3.100e01] * 8,
-        ],
-        dtype=np.float32,
+    actual_table_unsharded = utils.unshard_emb_table(
+        updated_table[jnp.newaxis, :, :], num_sc_per_device=4
+    )
+    actual_accumulator_unsharded = utils.unshard_emb_table(
+        updated_accumulator[jnp.newaxis, :, :], num_sc_per_device=4
     )
 
-    expected_accumulator = np.array(
-        [
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-        ],
-        dtype=np.float32,
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    expected_table_unsharded = self.emb_table.copy()
+    updated_rows = np.unique(jax.tree_util.tree_flatten(features)[0])
+    # Adagrad update: weight = weight - lr * 1.0 = weight - 0.01
+    expected_table_unsharded[updated_rows, :] -= 0.01
+
+    expected_table_unsharded[updated_rows, :] = np.clip(
+        expected_table_unsharded[updated_rows, :], min_value, max_value
     )
+
+    expected_accumulator_unsharded = np.zeros_like(self.emb_table)
+    # Accumulator update: accum = 0 + (0.01)^2 = 1e-4
+    expected_accumulator_unsharded[updated_rows, :] = 1e-4
 
     # Verify the expected tables and accumulators. Note that the inputs
     # contained a sample of each column between 0 and 15.
-    np.testing.assert_equal(expected_accumulator, updated_accumulator)
-    np.testing.assert_equal(expected_table, updated_table)
-
-  def test_sc_emb_backward_pass_with_adagrad_with_bounds(self):
-    # Gradient is padded to max_device_batch_size, no matter how many rows are
-    # actually used.
-    # This is to make sure we don't have different gradient dimensions among
-    # test cases to avoid recompilation.
-    z_grad = jnp.full(
-        (
-            self.max_device_batch_size,
-            self.emb_size,
-        ),
-        0.01,
-        np.float32,
+    np.testing.assert_allclose(
+        actual_accumulator_unsharded, expected_accumulator_unsharded, atol=1e-5
     )
-    learning_rate = 0.01
-    num_minibatches_per_physical_sparse_core = 1
-
-    updated_table, updated_accumulator = (
-        self.sparse_dense_matmul_grad_with_adagrad_with_mini_batching(
-            self.lhs_row_pointers,
-            self.lhs_local_embedding_ids,
-            self.lhs_local_sample_ids,
-            self.lhs_gains,
-            num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
-            self.accumulator_init,
-            z_grad,
-            learning_rate,
-            max_ids_per_partition=16,
-            max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
-            sharding_strategy=1,
-            enable_minibatching=True,
-            min_value=2.0,
-            max_value=10.0,
-        )
+    np.testing.assert_allclose(
+        actual_table_unsharded, expected_table_unsharded, atol=1e-5
     )
-
-    # Check the embedding activations.
-    # For embedding id 0-15,
-    # each has -0.01 (gradient) x 0.01 (learning rate) x 1 (sample) = -1e-4
-    # For embedding id 16-31, nothing is updated.
-    expected_table = np.array(
-        [
-            [2.0] * 8,
-            [3.990000009536743] * 8,
-            [7.989999771118164] * 8,
-            [10.0] * 8,
-            [16.0] * 8,
-            [20.0] * 8,
-            [24.0] * 8,
-            [28.0] * 8,
-            [2.0] * 8,
-            [4.989999771118164] * 8,
-            [8.989999771118164] * 8,
-            [10.0] * 8,
-            [17.0] * 8,
-            [21.0] * 8,
-            [25.0] * 8,
-            [29.0] * 8,
-            [2.0] * 8,
-            [5.989999771118164] * 8,
-            [9.989999771118164] * 8,
-            [10.0] * 8,
-            [18.0] * 8,
-            [22.0] * 8,
-            [26.0] * 8,
-            [30.0] * 8,
-            [2.990000009536743] * 8,
-            [6.989999771118164] * 8,
-            [10.0] * 8,
-            [10.0] * 8,
-            [19.0] * 8,
-            [23.0] * 8,
-            [27.0] * 8,
-            [31.0] * 8,
-        ],
-        dtype=np.float32,
-    )
-    expected_accumulator = np.array(
-        [
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [1.0e-04] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-            [0.0e00] * 8,
-        ],
-        dtype=np.float32,
-    )
-
-    # Verify the expected tables and accumulators. Note that the inputs
-    # contained a sample of each column between 0 and 15.
-    np.testing.assert_equal(expected_accumulator, updated_accumulator)
-    np.testing.assert_equal(expected_table, updated_table)
 
 
 if __name__ == "__main__":

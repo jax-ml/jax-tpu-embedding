@@ -511,6 +511,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
       ),
   )
   def test_sc_emb_backward_pass_with_f2a(self, min_value, max_value):
+    # Arrange
     input_tensor = jnp.array([
         [0, 1, 2, 3],
         [4, 5, 6, 7],
@@ -621,6 +622,9 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         input_tensor, input_weights, activations_grad
     )
 
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    # The optimizer only applies a sparse update: only rows involved in the
+    # forward pass are updated.
     expected_embedding_table, expected_accumulator, expected_local_step = (
         _compute_f2a(
             np.asarray(embedding_table),
@@ -636,15 +640,28 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         )
     )
 
-    if min_value is not None and max_value is not None:
-      expected_embedding_table = jnp.clip(
-          expected_embedding_table, min_value, max_value
-      )
+    sparse_rows = jnp.unique(input_tensor.flatten())
+    sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
+
+    expected_embedding_table = jnp.where(
+        sparse_update_mask,
+        jnp.clip(expected_embedding_table, min_value, max_value),
+        embedding_table,
+    )
+
+    expected_accumulator = jnp.where(
+        sparse_update_mask, expected_accumulator, accumulator
+    )
+    expected_local_step = jnp.where(
+        sparse_update_mask, expected_local_step, local_step
+    )
 
     tpu_f2a = (
         sparse_dense_matmul_grad_with_f2a.tpu_sparse_dense_matmul_grad_with_f2a_primitive.bind
     )
 
+    # Act
     updated_vars = tpu_f2a(
         lhs_row_pointers,
         lhs_local_embedding_ids,
@@ -673,6 +690,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         updated_vars
     )
 
+    # Assert
     def _unshard_table(table):
       return utils.unshard_emb_table(
           jnp.expand_dims(table, axis=0), num_sc_per_device=4
@@ -682,25 +700,20 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     updated_accumulator_unsharded = _unshard_table(updated_accumulator)
     updated_local_step_unsharded = _unshard_table(updated_local_step)
 
-    sparse_rows = jnp.unique(jnp.concatenate(np.unstack(input_tensor)))
-
     np.testing.assert_allclose(
-        updated_embedding_table_unsharded[sparse_rows],
-        expected_embedding_table[sparse_rows],
-        rtol=1e-4,
-        atol=1e-4,
+        updated_embedding_table_unsharded,
+        expected_embedding_table,
+        atol=1e-5,
     )
     np.testing.assert_allclose(
-        updated_accumulator_unsharded[sparse_rows],
-        expected_accumulator[sparse_rows],
-        rtol=1e-4,
-        atol=1e-4,
+        updated_accumulator_unsharded,
+        expected_accumulator,
+        atol=1e-5,
     )
     np.testing.assert_allclose(
-        updated_local_step_unsharded[sparse_rows],
-        expected_local_step[sparse_rows],
-        rtol=1e-4,
-        atol=1e-4,
+        updated_local_step_unsharded,
+        expected_local_step,
+        atol=1e-5,
     )
 
 

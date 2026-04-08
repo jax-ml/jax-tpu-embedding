@@ -63,6 +63,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
     )
 
   def test_sc_emb_backward_pass(self):
+    # Arrange
     input_tensor = np.array(
         [
             [5],
@@ -117,6 +118,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     num_minibatches_per_physical_sparse_core = 1
 
+    # Act
     # Do the embedding update.
     updated_emb_table = (
         self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
@@ -138,19 +140,21 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     logging.debug("updated_emb_table: %s", updated_emb_table)
 
+    # Assert
     # Check the embedding activations.
-    # For embedding id 0-15,
-    # each has -1.0 (gradient) x 0.1 (learning rate) x 1 (sample) = -0.1
-    # For embedding id 16-31, nothing is updated.
-    expected_emb_activations = self.emb_table_sharded[0].copy()
-    for i in range(16):
-      # The table uses MOD sharding, so logical ID i is mapped to physical row:
-      # (i % num_shards) * shard_size + (i // num_shards),
-      # where num_shards=4 and shard_size=8.
-      physical_row = (i % 4) * 8 + i // 4
-      expected_emb_activations[physical_row, :] -= 0.1
+    actual_updated_unsharded = utils.unshard_emb_table(
+        updated_emb_table[np.newaxis, :, :], num_sc_per_device=4
+    )
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    # The optimizer only applies a sparse update: only rows involved in the
+    # forward pass are updated.
+    expected_unsharded = self.emb_table.copy()
+    updated_rows = np.unique(input_tensor.flatten())
+    expected_unsharded[updated_rows, :] -= 0.1
 
-    np.testing.assert_allclose(updated_emb_table, expected_emb_activations)
+    np.testing.assert_allclose(
+        actual_updated_unsharded, expected_unsharded, atol=1e-5
+    )
 
   @parameterized.named_parameters(
       dict(
@@ -164,7 +168,8 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
           max_value=12.0,
       ),
   )
-  def test_sc_emb_forward_pass_2_batches_per_core(self, min_value, max_value):
+  def test_sc_emb_backward_pass_2_batches_per_core(self, min_value, max_value):
+    # Arrange
     # fmt: off
     mb0_feat = [
         [5], [3], [], [1], [6], [], [0], [4], [], [], [], [7], [], [], [2], [],
@@ -217,6 +222,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     num_minibatches_per_physical_sparse_core = 2
 
+    # Act
     # Do the embedding update.
     updated_emb_table = (
         self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
@@ -240,26 +246,29 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     logging.debug("updated_emb_table: %s", updated_emb_table)
 
+    # Assert
     # Check the embedding activations.
+    actual_updated_unsharded = utils.unshard_emb_table(
+        updated_emb_table[np.newaxis, :, :], num_sc_per_device=4
+    )
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    # The optimizer only applies a sparse update: only rows involved in the
+    # forward pass are updated.
+    expected_unsharded = self.emb_table.copy()
     # Note that the expected updates are twice as large as the 1 batch case, for
     # we have 2 input samples for each embedding id.
     # For embedding id 0-15,
     # each has -1.0 (gradient) x 0.1 (learning rate) x 2 (samples) = -0.2
     # For embedding id 16-31, nothing is updated.
-    expected_emb_activations = self.emb_table_sharded[0].copy()
-    for i in range(16):
-      # The table uses MOD sharding, so logical ID i is mapped to physical row:
-      # (i % num_shards) * shard_size + (i // num_shards),
-      # where num_shards=4 and shard_size=8.
-      physical_row = (i % 4) * 8 + i // 4
-      expected_emb_activations[physical_row, :] -= 0.2
-      if min_value is not None or max_value is not None:
-        expected_emb_activations[physical_row, :] = np.clip(
-            expected_emb_activations[physical_row, :], min_value, max_value
-        )
+    updated_rows = np.unique(jax.tree_util.tree_flatten(features)[0])
+    expected_unsharded[updated_rows, :] -= 0.2
+    # Apply manual bounds clamping matching exactly what SparseCore should do.
+    expected_unsharded[updated_rows, :] = np.clip(
+        expected_unsharded[updated_rows, :], min_value, max_value
+    )
 
     np.testing.assert_allclose(
-        updated_emb_table, expected_emb_activations, rtol=1e-5, atol=1e-5
+        actual_updated_unsharded, expected_unsharded, atol=1e-5
     )
 
 
