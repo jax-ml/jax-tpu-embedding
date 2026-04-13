@@ -2,7 +2,7 @@
 # All default build options below. These apply to all build commands.
 ##############################################################################
 # TODO: Enable Bzlmod
-common --noenable_bzlmod
+common --noenable_bzlmod --enable_workspace
 
 # TODO: Migrate for https://github.com/bazelbuild/bazel/issues/7260
 common --incompatible_enable_cc_toolchain_resolution
