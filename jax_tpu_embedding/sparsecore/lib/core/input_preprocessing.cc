@@ -31,6 +31,7 @@
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
+#include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -514,11 +515,22 @@ void SyncMinibatchingRequired(
   }
   tsl::RunWhenReady(absl::MakeConstSpan(device_sorting_results_av), [=]() {
     bool local_minibatching_required = false;
+    std::vector<std::string> tables_requiring_minibatching;
     for (const auto& state : table_states) {
       for (const auto& sorting_result_av : state.device_sorting_results) {
-        local_minibatching_required |=
-            sorting_result_av.get().table_minibatching_required;
+        if (sorting_result_av.get().table_minibatching_required) {
+          local_minibatching_required = true;
+          tables_requiring_minibatching.push_back(
+              std::string(state.stacked_table_name));
+          break;
+        }
       }
+    }
+    if (!tables_requiring_minibatching.empty()) {
+      LOG_EVERY_N_SEC(INFO, 300)
+          << "Local minibatching required for tables: "
+          << absl::StrJoin(tables_requiring_minibatching, ", ")
+          << " at batch " << options.batch_number;
     }
     if (options.all_reduce_interface != nullptr) {
       tsl::AsyncValueRef<bool> reduced_value_av =
