@@ -1622,8 +1622,10 @@ def init_embedding_variables(
   sharding_axis = next((s for s in global_sharding.spec if s is not None), None)
 
   if sharding_axis is None or (
-      global_sharding.spec != (sharding_axis, None, None)
-      and global_sharding.spec != (sharding_axis, None)
+      global_sharding.spec
+      != jax.sharding.PartitionSpec(sharding_axis, None, None)
+      and global_sharding.spec
+      != jax.sharding.PartitionSpec(sharding_axis, None)
   ):
     raise ValueError(
         "PartitionSpec of the global sharding either needs to be in the format"
