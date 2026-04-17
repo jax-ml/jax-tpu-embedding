@@ -49,12 +49,36 @@ pytype_strict_contrib_test(
     ],
 )
 
+pytype_strict_library(
+    name = "csv_file_fdo_client",
+    srcs = ["csv_file_fdo_client.py"],
+    deps = [
+        ":fdo_client",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        pypi_requirement("absl/logging"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_contrib_test(
+    name = "csv_file_fdo_client_test",
+    srcs = ["csv_file_fdo_client_test.py"],
+    deps = [
+        ":csv_file_fdo_client",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("numpy"),
+    ],
+)
+
 # Library target.
 pytype_strict_library(
     name = "fdo",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
     deps = [
+        ":csv_file_fdo_client",  # buildcleaner: keep
         ":fdo_client",  # buildcleaner: keep
         ":file_fdo_client",  # buildcleaner: keep
     ],
