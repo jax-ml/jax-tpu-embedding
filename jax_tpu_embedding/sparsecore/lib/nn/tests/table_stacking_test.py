@@ -16,6 +16,7 @@
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
+import chex
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
@@ -23,6 +24,43 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
+
+
+class ComputePhysicalRowIdsTest(chex.TestCase):
+  def setUp(self):
+    super().setUp()
+
+    num_sparse_cores = 4
+    stack_vocab_size = 100
+    shard_rotation = 1
+    row_offset_in_shard = 10
+
+    def compute(row_id):
+      return table_stacking.compute_physical_row_ids(
+          num_sparse_cores,
+          stack_vocab_size,
+          shard_rotation,
+          row_offset_in_shard,
+          row_id,
+      )
+    self.fn_harness = compute
+
+  @chex.all_variants
+  def test_int_input(self):
+    # Test scalar
+    # stack_shard_size = 100 // 4 = 25
+    # shard_id = (5 % 4 + 1) % 4 = 2
+    # sharded_row_id = 5 // 4 + 10 = 11
+    # physical_row_id = 2 * 25 + 11 = 61
+
+    self.assertEqual(self.variant(self.fn_harness)(5), 61)
+
+  @chex.all_variants
+  def test_jax_array_input(self):
+    row_ids = jnp.array([0, 1, 2, 3, 4])
+    expected = jnp.array([35, 60, 85, 10, 36])
+    actual = self.variant(self.fn_harness)(row_ids)
+    self.assertTrue(jnp.array_equal(actual, expected))
 
 
 class TableStackingTest(parameterized.TestCase):

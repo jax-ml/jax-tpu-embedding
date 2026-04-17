@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Methods for table stacking."""
-
 import collections
 from collections.abc import Mapping
 import hashlib
@@ -1187,6 +1186,39 @@ def stack_and_shard_feature_tables(
   return ret
 
 
+Indexer = TypeVar("Indexer", int, jax.typing.ArrayLike)
+
+
+def compute_physical_row_ids(
+    num_sparse_cores: int,
+    stack_vocab_size: int,
+    shard_rotation: int,
+    row_offset_in_shard: int,
+    row_ids: Indexer,
+) -> Indexer:
+  """Computes the physical row IDs of a table in a stacked table buffer given its logical equivalents.
+
+  Args:
+    num_sparse_cores: The number of SparseCores the stacked table was
+      sharded for.
+    stack_vocab_size: The total vocabulary size of the stacked table.
+    shard_rotation: The shard rotation factor for the logical table in the
+      stacked table.
+    row_offset_in_shard: The row offset of the logical table in the stacked
+      table.
+    row_ids: The target row IDs in the logical table. If an array, computes the
+      physical row IDs for all elements in the array.
+  Returns:
+    The physical row IDs of the table in the stacked table buffer.
+  """
+  stack_shard_size = stack_vocab_size // num_sparse_cores
+  shard_id = (
+      row_ids % num_sparse_cores + shard_rotation
+  ) % num_sparse_cores
+  sharded_row_id = row_ids // num_sparse_cores + row_offset_in_shard
+  return shard_id * stack_shard_size + sharded_row_id
+
+
 def get_row_ids_in_stacked_table(
     stack_table_spec: embedding_spec_pb2.StackedTableSpecProto,
     table_spec: embedding_spec_pb2.TableSpecProto,
@@ -1202,10 +1234,10 @@ def get_row_ids_in_stacked_table(
   Returns:
     Row ids of the stacked table
   """
-  ret = []
+  physical_row_ids = []
 
   num_sparse_cores = stack_table_spec.num_sparsecores
-  stack_shard_size = stack_table_spec.stack_vocab_size // num_sparse_cores
+  stack_vocab_size = stack_table_spec.stack_vocab_size
 
   for row_id in row_ids:
     if row_id >= table_spec.vocab_size:
@@ -1214,13 +1246,16 @@ def get_row_ids_in_stacked_table(
           f" [{table_spec.vocab_size}]."
       )
 
-    shard_id = (
-        row_id % num_sparse_cores + table_spec.shard_rotation
-    ) % num_sparse_cores
-    sharded_row_id = row_id // num_sparse_cores + table_spec.row_offset_in_shard
-    ret.append(shard_id * stack_shard_size + sharded_row_id)
+    physical_row_id = compute_physical_row_ids(
+        num_sparse_cores,
+        stack_vocab_size,
+        table_spec.shard_rotation,
+        table_spec.row_offset_in_shard,
+        row_id,
+    )
+    physical_row_ids.append(physical_row_id)
 
-  return ret
+  return physical_row_ids
 
 
 def get_row_ids_in_stacked_tables(

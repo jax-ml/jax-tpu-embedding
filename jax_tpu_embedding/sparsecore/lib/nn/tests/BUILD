@@ -199,6 +199,7 @@ tpu_py_strict_test(
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("chex"),
         pypi_requirement("jax"),
     ],
 )
