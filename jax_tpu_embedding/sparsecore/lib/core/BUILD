@@ -188,7 +188,6 @@ pytype_strict_library(
     visibility = [
         "//jax_tpu_embedding/sparsecore/lib:__pkg__",
         "//jax_tpu_embedding/sparsecore/lib/core:__subpackages__",
-        "//jax_tpu_embedding/sparsecore/lib/nn/tests:__pkg__",
     ],
     deps = [
         ":constants",  # buildcleaner: keep
