@@ -13,9 +13,18 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
+#include "absl/strings/str_cat.h"  // from @com_google_absl
+#include "absl/strings/str_join.h"  // from @com_google_absl
+#include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
+#include "absl/time/time.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "include/grpcpp/server_context.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/support/server_callback.h"  // from @com_github_grpc_grpc
@@ -23,10 +32,13 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "xla/tsl/concurrency/chain.h"  // from @xla
+#include "tsl/platform/env.h"  // from @tsl
 #include "tsl/profiler/lib/traceme.h"
+
 namespace jax_sc_embedding {
 namespace rpc {
 namespace {
+
 void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
   DCHECK_EQ(accumulator.value_case(), value.value_case())
       << "Data type mismatch during reduction.";
@@ -39,7 +51,59 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
                << accumulator.value_case();
   }
 }
+
 }  // namespace
+
+// Schedules a watchdog for a synchronization operation. The watchdog will log a
+// WARNING if the synchronization is not complete after the specified interval.
+void AllReduceServiceImpl::ScheduleWatchdog(int sync_key, WaitType wait_type,
+                                            tsl::AsyncValueRef<tsl::Chain> av,
+                                            int elapsed_minutes) {
+  // NOTE: It is safe to capture `this` here, since `AllReduceServiceImpl` will
+  // outlive the watchdog.
+  env_->SchedClosureAfter(
+      absl::ToInt64Microseconds(absl::Minutes(5)),
+      [this, sync_key, wait_type, av = std::move(av),
+       elapsed_minutes]() mutable {
+        // If the synchronization is finished or failed, we stop the watchdog.
+        if (av.IsAvailable() || av.IsError()) return;
+
+        // Collect information about which hosts or threads are still missing.
+        auto get_missing_info = [&]() {
+          absl::MutexLock lock(mutex_);
+          auto it = all_reduce_state_map_.find(sync_key);
+          if (it == all_reduce_state_map_.end()) return std::string();
+
+          if (wait_type == WaitType::kLocalReduction) {
+            return absl::StrCat(
+                " (missing ",
+                threads_per_task_ - it->second.local_received_count,
+                " threads)");
+          }
+
+          std::vector<int> missing;
+          for (int i = 0; i < num_tasks_; ++i) {
+            if (!it->second.received_from_task[i]) missing.push_back(i);
+          }
+          return absl::StrCat(" (missing ranks: ", absl::StrJoin(missing, ", "),
+                              ")");
+        };
+
+        std::string missing_info = get_missing_info();
+        std::string wait_type_str = (wait_type == WaitType::kLocalReduction)
+                                        ? "local reduction"
+                                        : "global values";
+
+        LOG(WARNING) << "Host is waiting for more than " << elapsed_minutes
+                     << " minutes for " << wait_type_str
+                     << " for sync_key: " << sync_key
+                     << " at rank: " << task_id_ << missing_info;
+
+        // Schedule the next watchdog check.
+        ScheduleWatchdog(sync_key, wait_type, std::move(av),
+                         /*elapsed_minutes=*/elapsed_minutes + 5);
+      });
+}
 
 void AllReduceServiceImpl::InitializeState(AllReduceState& state,
                                            const AllReduceData& data) {
@@ -52,6 +116,22 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
       tsl::CountDownAsyncValueRef<tsl::Chain>(threads_per_task_);
   state.global_values_countdown =
       tsl::CountDownAsyncValueRef<tsl::Chain>(num_tasks_ - 1);
+  state.received_from_task.assign(num_tasks_, false);
+  state.received_from_task[task_id_] = true;
+  state.local_received_count = 0;
+
+  // NOTE: It is cheap to create new watchdogs since minibatching operation
+  // would be infrequent.
+
+  // Start watchdogs to monitor synchronization progress.
+  ScheduleWatchdog(data.sync_key(), WaitType::kLocalReduction,
+                   state.local_reduction_countdown.AsRef(),
+                   /*elapsed_minutes=*/5);
+  if (num_tasks_ > 1) {
+    ScheduleWatchdog(data.sync_key(), WaitType::kGlobalValues,
+                     state.global_values_countdown.AsRef(),
+                     /*elapsed_minutes=*/5);
+  }
 }
 
 ::grpc::ServerUnaryReactor* AllReduceServiceImpl::ContributeData(
@@ -78,6 +158,7 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
     VLOG(2) << "Finished processing data for sync_key: " << request->sync_key()
             << " from peer: " << context->peer();
     countdown = state.global_values_countdown;
+    state.received_from_task[request->src_rank()] = true;
   }
   countdown.CountDown();
   reactor->Finish(grpc::Status::OK);
@@ -101,6 +182,7 @@ bool AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
       // Update the state.
       ReduceData(data, state.local_data);
     }
+    state.local_received_count++;
     countdown = state.local_reduction_countdown;
   }
 

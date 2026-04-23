@@ -21,11 +21,14 @@
 #include "fuzztest/fuzztest.h"
 #include "fuzztest/googletest_fixture_adapter.h" // for OSS
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/scoped_mock_log.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
+#include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_test_utils.h"
 #include "tsl/platform/env.h"  // from @tsl
@@ -35,6 +38,38 @@
 namespace jax_sc_embedding {
 namespace rpc {
 namespace {
+
+class FakeEnv : public tsl::EnvWrapper {
+ public:
+  FakeEnv() : tsl::EnvWrapper(tsl::Env::Default()) {}
+
+  void SchedClosureAfter(int64_t micros,
+                         absl::AnyInvocable<void()> c) override {
+    absl::MutexLock lock(&mutex_);
+    scheduled_closures_.push_back(std::move(c));
+  }
+
+  void RunScheduledClosures() {
+    std::vector<absl::AnyInvocable<void()>> closures;
+    {
+      absl::MutexLock lock(&mutex_);
+      closures.swap(scheduled_closures_);
+    }
+    for (auto& c : closures) {
+      c();
+    }
+  }
+
+  int num_scheduled_closures() const {
+    absl::MutexLock lock(&mutex_);
+    return scheduled_closures_.size();
+  }
+
+ private:
+  mutable absl::Mutex mutex_;
+  std::vector<absl::AnyInvocable<void()>> scheduled_closures_
+      ABSL_GUARDED_BY(mutex_);
+};
 
 using ::absl_testing::IsOkAndHolds;
 using ::testing::Each;
@@ -241,6 +276,39 @@ TEST_F(MultipleLocalValuesAllReduceTest, BlockingAllReduceBool) {
 
   // Assert
   EXPECT_THAT(results, Each(IsOkAndHolds(expected_result)));
+}
+
+TEST(WatchdogTest, WatchdogLogsWarning) {
+  FakeEnv fake_env;
+  int task_id = 0;
+  int num_tasks = 1;
+  int threads_per_task = 2;
+
+  AllReduceServiceImpl service(task_id, num_tasks, threads_per_task, &fake_env);
+
+  AllReduceData data;
+  data.set_sync_key(123);
+  data.set_bool_val(true);
+
+  absl::ScopedMockLog mock_log;
+  EXPECT_CALL(mock_log,
+              Log(absl::LogSeverity::kWarning, testing::_,
+                  testing::HasSubstr("Host is waiting for more than")))
+      .Times(1);
+
+  // This should call InitializeState and ScheduleWatchdog
+  service.InitializeOrUpdateState(123, data);
+
+  // Verify that closures were scheduled
+  EXPECT_EQ(fake_env.num_scheduled_closures(), 1);
+
+  mock_log.StartCapturingLogs();
+  // Run them
+  fake_env.RunScheduledClosures();
+  mock_log.StopCapturingLogs();
+
+  // Verify that it scheduled the NEXT one (recurring)
+  EXPECT_EQ(fake_env.num_scheduled_closures(), 1);
 }
 
 }  // namespace

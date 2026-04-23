@@ -14,6 +14,9 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 
+#include <string>
+#include <vector>
+
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
@@ -23,6 +26,9 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "xla/tsl/concurrency/chain.h"  // from @xla
+
+#include "tsl/platform/env.h"  // from @tsl
+
 
 namespace jax_sc_embedding {
 namespace rpc {
@@ -41,14 +47,20 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
     int results_counter;
     tsl::CountDownAsyncValueRef<tsl::Chain> local_reduction_countdown;
     tsl::CountDownAsyncValueRef<tsl::Chain> global_values_countdown;
+
+    // Track which peers have contributed data for diagnostics.
+    std::vector<bool> received_from_task;
+    int local_received_count = 0;
   };
 
  public:
   explicit AllReduceServiceImpl(int task_id, int num_tasks,
-                                int threads_per_task = 1)
+                                int threads_per_task = 1,
+                                tsl::Env* env = tsl::Env::Default())
       : task_id_(task_id),
         num_tasks_(num_tasks),
-        threads_per_task_(threads_per_task) {}
+        threads_per_task_(threads_per_task),
+        env_(env) {}
 
   // Called by remote peers. Returns this server's local value for the sync_key.
   ::grpc::ServerUnaryReactor* ContributeData(
@@ -65,6 +77,8 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   // Gets locally and globally reduced result.
   tsl::AsyncValueRef<AllReduceData> GetResult(int sync_key);
 
+  enum class WaitType { kLocalReduction, kGlobalValues };
+
  private:
   // Helper to initialize AllReduceState.
   void InitializeState(AllReduceState& state, const AllReduceData& data);
@@ -74,6 +88,12 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   // Number of threads (within the same process) that will participate in the
   // all-reduce operation.
   int threads_per_task_;
+  tsl::Env* env_;
+
+  // Schedules a recurring watchdog warning every 5 minutes until the
+  // AsyncValue becomes available.
+  void ScheduleWatchdog(int sync_key, WaitType wait_type,
+                        tsl::AsyncValueRef<tsl::Chain> av, int elapsed_minutes);
 
   absl::Mutex mutex_;
   absl::flat_hash_map<int, AllReduceState> all_reduce_state_map_
