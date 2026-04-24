@@ -14,6 +14,7 @@
 """Tests for embedding spec."""
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
@@ -596,6 +597,28 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(ts1, ts2)
     self.assertNotEqual(ts1, ts3)
+
+
+class ResolveHyperparameterTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      ("static_float", 0.5, None, 0.5),
+      ("static_int", 42, None, 42.0),
+      ("callable_no_args", lambda: 3.14, None, 3.14),
+      ("callable_with_step", lambda step: step * 2.0, 5, 10.0),
+  )
+  def test_resolve_hyperparameter(self, hyperparameter, step, expected_value):
+    result = embedding_spec._resolve_hyperparameter(hyperparameter, step=step)
+    self.assertEqual(result.dtype, jnp.float32)
+    self.assertAlmostEqual(result.item(), expected_value, places=5)
+
+  def test_callable_with_step_requires_step(self):
+    with self.assertRaisesRegex(ValueError, "requires a 'step' argument"):
+      embedding_spec._resolve_hyperparameter(lambda step: step * 2.0, step=None)
+
+  def test_callable_too_many_args_raises(self):
+    with self.assertRaisesRegex(ValueError, "no parameters, or a single"):
+      embedding_spec._resolve_hyperparameter(lambda a, b: a + b, step=0)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,14 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
+# A single hyperparameter value for a custom optimizer. Can be one of:
+#   - A static float (e.g., 0.01).
+#   - A no-arg callable returning a float (e.g., ``lambda: some_value``).
+#   - A single-arg callable taking the current training step and returning a
+#     float (e.g., ``lambda step: step - initial_step``), enabling
+#     step-dependent hyperparameters for continuous training resets.
+HyperparameterValue: TypeAlias = float | Callable[..., float | jax.Array]
+
 # Standard initializers are defined in jax.nn.initializers. See
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
 CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
@@ -159,6 +167,45 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
     return self.__hash__() == other.__hash__()
 
 
+def _resolve_hyperparameter(
+    hp: HyperparameterValue,
+    step: jax.Array | int | None = None,
+) -> jax.Array:
+  """Resolves a single hyperparameter to a jax.Array scalar.
+
+  Supports:
+    - Static float values.
+    - Callables taking no arguments (e.g., `lambda: some_value`).
+    - Callables taking a single `step` argument (e.g.,
+      `lambda step: step - initial_step`).
+
+  Args:
+    hp: The hyperparameter value or callable.
+    step: The current training step, passed to callables that require it.
+
+  Returns:
+    A jnp.float32 scalar array.
+  """
+  if not callable(hp):
+    return jnp.array(hp, dtype=jnp.float32)
+
+  sig = inspect.signature(hp)
+  num_args = len(sig.parameters)
+  if num_args == 0:
+    return jnp.array(hp(), dtype=jnp.float32)
+  elif num_args == 1:
+    if step is None:
+      raise ValueError(
+          "Callable hyperparameter requires a 'step' argument."
+      )
+    return jnp.array(hp(step), dtype=jnp.float32)
+  else:
+    raise ValueError(
+        "Hyperparameter callbacks should either take no parameters, or a"
+        " single step count argument."
+    )
+
+
 class CustomOptimizerSpec(OptimizerSpec):
   """Spec for the Custom Optimizer.
 
@@ -168,6 +215,8 @@ class CustomOptimizerSpec(OptimizerSpec):
     slot_variable_initializers_tuple: Tuple of initializers for the slot
       variables.
     short_name_str: Short name for the optimizer.
+    hyperparameters: Extra hyperparameters for the custom optimizer. See
+      `HyperparameterValue` for the supported value types.
   """
 
   def __init__(
@@ -180,11 +229,35 @@ class CustomOptimizerSpec(OptimizerSpec):
           CallableTableInitializer, ...
       ] = (),
       short_name_str: str = "custom",
+      hyperparameters: Sequence[HyperparameterValue] = (),
   ):
+    """Initializes the CustomOptimizerSpec.
+
+    Args:
+      learning_rate: The learning rate for the training variables or embeddings.
+      custom_computation_fn: The python function for the custom optimizer.
+      slot_variable_initializers_tuple: Tuple of initializers for the slot
+        variables.
+      short_name_str: Short name for the optimizer.
+      hyperparameters: Extra hyperparameters for the custom optimizer. Each
+        entry is a `HyperparameterValue`: a static float, a no-arg callable
+        returning a float, or a single-arg callable taking the current training
+        step (see the type alias definition for details).
+    """
     super().__init__(learning_rate=learning_rate)
     self.custom_computation_fn = custom_computation_fn
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
+    self._hyperparameters = tuple(hyperparameters)
+
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns hyperparameters: (learning_rate, hp_0, hp_1, ..., hp_n)."""
+    return (self.get_learning_rate(step),) + tuple(
+        _resolve_hyperparameter(hp, step)
+        for hp in self._hyperparameters
+    )
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return self.slot_variable_initializers_tuple
@@ -195,6 +268,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         self.custom_computation_fn,
         self.slot_variable_initializers_tuple,
         self.short_name_str,
+        self._hyperparameters,
     ))
 
   def short_name(self) -> str:
