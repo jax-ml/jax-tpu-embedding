@@ -406,8 +406,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             internal::StatsPerDevice stats =
                 local_stats_host.GetStatsPerDevice(0);
 
-            std::vector<uint64_t> keys;
-            keys.reserve(extracted_coo_tensors.size());
+            std::vector<uint64_t> keys(extracted_coo_tensors.size());
             internal::ValidateKeyCapacity(local_sc_id,
                                           extracted_coo_tensors.size());
 
@@ -425,10 +424,10 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
               uint32_t data = kHasVariableWeights
                                   ? coo_index
                                   : extracted_coo_tensors.ids[coo_index].row_id;
-              keys.push_back(CooFormat::GetGroupingKey(
+              keys[coo_index] = CooFormat::GetGroupingKey(
                   extracted_coo_tensors.ids[coo_index].col_id, data,
                   num_sc_bits, kCreateBuckets,
-                  options.minibatching_bucketing_hash_fn));
+                  options.minibatching_bucketing_hash_fn);
             }
             generate_keys_traceme.Stop();
 
