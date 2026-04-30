@@ -185,7 +185,12 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   for _ in range(num_hyperparameters):
     wrapper_input_types.append(row_tensor_type)
 
-  const_types = [mlir.aval_to_ir_type(v.aval) for v in jaxpr.constvars]
+  const_types = [
+      mlir.aval_to_ir_type(ctx.module_context, v.aval)
+      if jax.__version_info__ >= (0, 10, 1)
+      else mlir.aval_to_ir_type(v.aval)  # pytype: disable=missing-parameter
+      for v in jaxpr.constvars
+  ]
   wrapper_input_types.extend(const_types)
 
   output_types = [row_tensor_type for _ in range(num_slot_variables + 1)]
@@ -233,7 +238,11 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     func_dialect.ReturnOp([result_tuple])
 
   hyperparams = []
-  f32type = mlir.aval_to_ir_type(core.ShapedArray((), np.float32))
+  f32type = (
+      mlir.aval_to_ir_type(ctx.module_context, core.ShapedArray((), np.float32))
+      if jax.__version_info__ >= (0, 10, 1)
+      else mlir.aval_to_ir_type(core.ShapedArray((), np.float32))  # pytype: disable=missing-parameter
+  )
   for param in hyperparameters:
     if ir.RankedTensorType(param.type).rank == 0:
       hyperparams.append(param)

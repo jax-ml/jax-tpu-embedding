@@ -136,7 +136,11 @@ def _tpu_local_sparse_dense_matmul_lowering(
 
   return jax.ffi.ffi_lowering(
       "SparseDenseMatmulLocalOp",
-      result_types=[mlir.aval_to_ir_type(out_aval)],
+      result_types=[
+          mlir.aval_to_ir_type(ctx.module_context, out_aval)
+          if jax.__version_info__ >= (0, 10, 1)
+          else mlir.aval_to_ir_type(out_aval)  # pytype: disable=missing-parameter
+      ],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,
