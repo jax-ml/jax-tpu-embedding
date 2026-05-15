@@ -193,7 +193,7 @@ struct LocalSparseCoreTensorGroupingContext {
   MatrixXi& kept_unique_ids_per_partition_per_bucket;
 };
 
-template <bool kHasVariableWeights, bool kCreateBuckets>
+template <bool kHasVariableWeights, bool kCreateBuckets, RowCombiner Combiner>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContext context) {
   tsl::profiler::TraceMe group_traceme([&] {
@@ -241,8 +241,8 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     const uint32_t global_sc_id = col_id & (global_sc_count - 1);
 
     const CooFormat coo_tensor =
-        context.extracted_coo_tensors.GetCooFormatWithGain<kHasVariableWeights>(
-            key, col_id);
+        context.extracted_coo_tensors
+            .GetCooFormatWithGain<kHasVariableWeights, Combiner>(key, col_id);
     const uint32_t row_id = coo_tensor.row_id;
 
     // Step 2: Handle duplicates.
@@ -474,8 +474,23 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
 
             // Group tensors by destination SC and minibatching bucket,
             // apply deduplication, collect statistics, and handle ID dropping.
-            internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                kHasVariableWeights, kCreateBuckets>(context);
+            switch (context.feature_metadata.row_combiner) {
+              case RowCombiner::kSum:
+                internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum>(
+                    context);
+                break;
+              case RowCombiner::kMean:
+                internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean>(
+                    context);
+                break;
+              case RowCombiner::kSqrtn:
+                internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn>(
+                    context);
+                break;
+            }
 
             grouped_coo_tensors.FillRemainingScBuckets();
 

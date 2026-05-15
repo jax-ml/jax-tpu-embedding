@@ -188,7 +188,7 @@ struct ExtractedCooTensorsPerSparseCore {
     return CooFormat(ids[i].row_id, ids[i].col_id, gain);
   }
 
-  template <bool kHasVariableWeights>
+  template <bool kHasVariableWeights, RowCombiner Combiner = RowCombiner::kSum>
   CooFormat GetCooFormatWithGain(uint64_t key, uint32_t col_id) const {
     float gain = 1.0f;
     uint32_t row_id;
@@ -198,17 +198,13 @@ struct ExtractedCooTensorsPerSparseCore {
       gain = gains[index];
     } else {
       row_id = CooFormat::GetDataFromKey(key);
-      switch (combiner_) {
-        case RowCombiner::kMean:
-          gain = 1.0f / static_cast<float>(
-                            row_token_counts[row_id % batch_size_per_sc_]);
-          break;
-        case RowCombiner::kSum:
-          gain = 1.0f;
-          break;
-        case RowCombiner::kSqrtn:
-          gain = row_gains[row_id % batch_size_per_sc_];
-          break;
+      if constexpr (Combiner == RowCombiner::kMean) {
+        gain = 1.0f / static_cast<float>(
+                          row_token_counts[row_id % batch_size_per_sc_]);
+      } else if constexpr (Combiner == RowCombiner::kSqrtn) {
+        gain = row_gains[row_id % batch_size_per_sc_];
+      } else {
+        gain = 1.0f;
       }
     }
     return CooFormat(row_id, col_id, gain);
