@@ -65,6 +65,7 @@ python_init_repositories(
         "3.11": "//third_party/py:requirements_lock_3_11.txt",
         "3.12": "//third_party/py:requirements_lock_3_12.txt",
         "3.13": "//third_party/py:requirements_lock_3_13.txt",
+        "3.14": "//third_party/py:requirements_lock_3_14.txt",
     },
 )
 
