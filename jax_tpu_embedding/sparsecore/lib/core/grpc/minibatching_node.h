@@ -39,9 +39,10 @@ class MinibatchingNode {
  public:
   MinibatchingNode(int task_id, int num_tasks,
                    std::vector<std::string> peer_addresses,
-                   int minibatching_port, int threads_per_task = 1)
+                   int minibatching_port, int threads_per_task = 1,
+                   tsl::Env* env = tsl::Env::Default())
       : all_reduce_service_(std::make_unique<AllReduceServiceImpl>(
-            task_id, num_tasks, threads_per_task)),
+            task_id, num_tasks, threads_per_task, env)),
         all_reduce_interface_(std::make_unique<GrpcAllReduceInterface>(
             peer_addresses, task_id, num_tasks, all_reduce_service_.get(),
             threads_per_task)),
@@ -54,6 +55,11 @@ class MinibatchingNode {
 
   AllReduceInterface* GetAllReduceInterface() ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return all_reduce_interface_.get();
+  }
+
+  // Only for testing.
+  int GetActiveStatesCount() const {
+    return all_reduce_service_->GetActiveStatesCount();
   }
 
  private:

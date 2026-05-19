@@ -19,7 +19,6 @@
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
-#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -38,6 +37,8 @@
 namespace jax_sc_embedding {
 namespace rpc {
 namespace {
+
+constexpr absl::Duration kWatchdogTimeout = absl::Minutes(5);
 
 void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
   DCHECK_EQ(accumulator.value_case(), value.value_case())
@@ -62,7 +63,7 @@ void AllReduceServiceImpl::ScheduleWatchdog(int sync_key, WaitType wait_type,
   // NOTE: It is safe to capture `this` here, since `AllReduceServiceImpl` will
   // outlive the watchdog.
   env_->SchedClosureAfter(
-      absl::ToInt64Microseconds(absl::Minutes(5)),
+      absl::ToInt64Microseconds(kWatchdogTimeout),
       [this, sync_key, wait_type, av = std::move(av),
        elapsed_minutes]() mutable {
         // If the synchronization is finished or failed, we stop the watchdog.
@@ -137,12 +138,32 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
 ::grpc::ServerUnaryReactor* AllReduceServiceImpl::ContributeData(
     ::grpc::CallbackServerContext* context, const AllReduceData* request,
     AllReduceResponse* response) {
-  VLOG(2) << "Received data for sync_key: " << request->sync_key()
-          << " from peer: " << context->peer();
+  VLOG(2) << "Task " << task_id_
+          << " received data for sync_key: " << request->sync_key()
+          << " from peer: " << context->peer()
+          << " claiming src_rank: " << request->src_rank();
   auto* reactor = context->DefaultReactor();
+  if (request->src_rank() < 0 || request->src_rank() >= num_tasks_ ||
+      request->src_rank() == task_id_) {
+    LOG(WARNING) << "Task " << task_id_
+                 << " ignoring RPC with invalid/self src_rank: "
+                 << request->src_rank()
+                 << " for sync_key: " << request->sync_key();
+    reactor->Finish(
+        grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Invalid src_rank"));
+    return reactor;
+  }
   tsl::CountDownAsyncValueRef<tsl::Chain> countdown;
   {
     absl::MutexLock lock(mutex_);
+    if (max_completed_sync_key_.has_value() &&
+        request->sync_key() <= *max_completed_sync_key_) {
+      VLOG(1) << "Task " << task_id_
+              << " ignoring late RPC for sync_key: " << request->sync_key()
+              << " because max completed is " << *max_completed_sync_key_;
+      reactor->Finish(grpc::Status::OK);
+      return reactor;
+    }
     auto [it, inserted] =
         all_reduce_state_map_.try_emplace(request->sync_key());
     AllReduceState& state = it->second;
@@ -151,11 +172,19 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
       // the state is initialized with the remote request data.
       InitializeState(state, *request);
     } else {
+      if (state.received_from_task[request->src_rank()]) {
+        VLOG(1) << "Task " << task_id_
+                << " ignoring duplicate RPC for sync_key: "
+                << request->sync_key() << " from task: " << request->src_rank();
+        reactor->Finish(grpc::Status::OK);
+        return reactor;
+      }
       // State already exists.
       ReduceData(*request, state.local_data);
     }
 
-    VLOG(2) << "Finished processing data for sync_key: " << request->sync_key()
+    VLOG(2) << "Task " << task_id_
+            << " finished processing data for sync_key: " << request->sync_key()
             << " from peer: " << context->peer();
     countdown = state.global_values_countdown;
     state.received_from_task[request->src_rank()] = true;
@@ -205,9 +234,13 @@ tsl::AsyncValueRef<AllReduceData> AllReduceServiceImpl::GetLocalReducedValue(
   local_reduction_done_av.AndThen([this, sync_key, result]() mutable {
     absl::MutexLock lock(mutex_);
     AllReduceState& state = all_reduce_state_map_.at(sync_key);
-    result.emplace(state.local_data);
+    AllReduceData local_data = state.local_data;
+    local_data.set_src_rank(task_id_);
+    result.emplace(local_data);
     if (--state.results_counter == 0) {
       all_reduce_state_map_.erase(sync_key);
+      max_completed_sync_key_ =
+          std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
     }
   });
   return result;
@@ -241,9 +274,16 @@ tsl::AsyncValueRef<AllReduceData> AllReduceServiceImpl::GetResult(
 
         if (--state.results_counter == 0) {
           all_reduce_state_map_.erase(sync_key);
+          max_completed_sync_key_ =
+              std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
         }
       });
   return result;
+}
+
+int AllReduceServiceImpl::GetActiveStatesCount() const {
+  absl::MutexLock lock(mutex_);
+  return all_reduce_state_map_.size();
 }
 
 }  // namespace rpc

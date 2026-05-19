@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "fuzztest/fuzztest.h"
+#include "absl/base/log_severity.h"  // from @com_google_absl
+#include "absl/base/thread_annotations.h"  // from @com_google_absl
+#include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "fuzztest/googletest_fixture_adapter.h" // for OSS
 #include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
@@ -26,11 +31,19 @@
 #include "absl/log/scoped_mock_log.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
+#include "include/grpcpp/client_context.h"  // from @com_github_grpc_grpc
+#include "include/grpcpp/create_channel.h"  // from @com_github_grpc_grpc
+#include "include/grpcpp/support/status.h"  // from @com_github_grpc_grpc
+#include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/grpc/grpc_credentials.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/minibatching_test_utils.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/test.h"  // from @tsl
 #include "tsl/platform/threadpool.h"  // from @tsl
@@ -78,12 +91,15 @@ class AllReduceTest : public ::testing::Test {
  protected:
   void SetUp() override {
     num_tasks_ = 4;
+    fake_env_ = std::make_unique<FakeEnv>();
     thread_pool_ = std::make_unique<tsl::thread::ThreadPool>(
         tsl::Env::Default(), "AllReduceTest", 4);
-    nodes_ = testing_utils::SetUpMinibatchingNodes(num_tasks_);
+    nodes_ =
+        testing_utils::SetUpMinibatchingNodes(num_tasks_, 1, fake_env_.get());
   }
 
   int num_tasks_;
+  std::unique_ptr<FakeEnv> fake_env_;
   std::vector<std::unique_ptr<MinibatchingNode>> nodes_;
   std::unique_ptr<tsl::thread::ThreadPool> thread_pool_;
 
@@ -171,8 +187,17 @@ TEST_F(AllReduceDeathTest, BlockingAllReduceDataTypeMismatch) {
 class AllReduceFuzzTest
     : public fuzztest::PerFuzzTestFixtureAdapter<AllReduceTest> {
  public:
-  void BlockingAllReduceBoolFuzz(int sync_key,
+  void SetUp() override {
+    num_tasks_ = 4;
+    nodes_ = testing_utils::SetUpMinibatchingNodes(num_tasks_, 1,
+                                                   tsl::Env::Default());
+    thread_pool_ = std::make_unique<tsl::thread::ThreadPool>(
+        tsl::Env::Default(), "AllReduceFuzzTest", 4);
+  }
+
+  void BlockingAllReduceBoolFuzz(int sync_key_delta,
                                  const std::vector<bool>& inputs) {
+    int sync_key = GetNextSyncKey(sync_key_delta);
     // Arrange
     const bool expected_result =
         absl::c_accumulate(inputs, false, std::logical_or<>());
@@ -185,8 +210,9 @@ class AllReduceFuzzTest
     EXPECT_THAT(results, Each(IsOkAndHolds(expected_result)));
   }
 
-  void BlockingAllReduceUint64Fuzz(int sync_key,
+  void BlockingAllReduceUint64Fuzz(int sync_key_delta,
                                    const std::vector<uint64_t>& inputs) {
+    int sync_key = GetNextSyncKey(sync_key_delta);
     // Arrange
     const uint64_t expected_result =
         absl::c_accumulate(inputs, uint64_t{0}, std::bit_or<>());
@@ -198,6 +224,15 @@ class AllReduceFuzzTest
     // Assert
     EXPECT_THAT(results, Each(IsOkAndHolds(expected_result)));
   }
+
+ private:
+  int GetNextSyncKey(int delta) {
+    int64_t delta_64 = delta;
+    int next = last_sync_key_ + (std::abs(delta_64) % 1000) + 1;
+    last_sync_key_ = next;
+    return next;
+  }
+  int last_sync_key_ = 0;
 };
 
 FUZZ_TEST_F(AllReduceFuzzTest, BlockingAllReduceBoolFuzz)
@@ -215,12 +250,13 @@ class MultipleLocalValuesAllReduceTest : public ::testing::Test {
     num_tasks_ = 2;
     threads_per_task_ = 2;
     total_threads_ = num_tasks_ * threads_per_task_;
+    fake_env_ = std::make_unique<FakeEnv>();
     thread_pool_ = std::make_unique<tsl::thread::ThreadPool>(
         tsl::Env::Default(), "MultipleLocalValuesAllReduceTest",
         total_threads_ * 2);
 
-    nodes_ =
-        testing_utils::SetUpMinibatchingNodes(num_tasks_, threads_per_task_);
+    nodes_ = testing_utils::SetUpMinibatchingNodes(
+        num_tasks_, threads_per_task_, fake_env_.get());
   }
 
   template <typename T>
@@ -244,6 +280,7 @@ class MultipleLocalValuesAllReduceTest : public ::testing::Test {
   int num_tasks_;
   int threads_per_task_;
   int total_threads_;
+  std::unique_ptr<FakeEnv> fake_env_;
   std::vector<std::unique_ptr<MinibatchingNode>> nodes_;
   std::unique_ptr<tsl::thread::ThreadPool> thread_pool_;
 };
@@ -309,6 +346,148 @@ TEST(WatchdogTest, WatchdogLogsWarning) {
 
   // Verify that it scheduled the NEXT one (recurring)
   EXPECT_EQ(fake_env.num_scheduled_closures(), 1);
+}
+
+class AllReduceRaceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    num_tasks_ = 3;
+    fake_env_ = std::make_unique<FakeEnv>();
+    ports_.reserve(num_tasks_);
+    for (int i = 0; i < num_tasks_; ++i) {
+      ports_.push_back(tsl::testing::PickUnusedPortOrDie());
+    }
+
+    std::vector<std::string> peer_addresses;
+    peer_addresses.reserve(num_tasks_);
+    for (int i = 0; i < num_tasks_; ++i) {
+      peer_addresses.push_back(absl::StrCat("localhost:", ports_[i]));
+    }
+
+    nodes_.reserve(num_tasks_);
+    for (int i = 0; i < num_tasks_; ++i) {
+      std::vector<std::string> other_peer_addresses;
+      for (int j = 0; j < num_tasks_; ++j) {
+        if (i == j) continue;
+        other_peer_addresses.push_back(peer_addresses[j]);
+      }
+      nodes_.push_back(std::make_unique<MinibatchingNode>(
+          /*task_id=*/i, /*num_tasks=*/num_tasks_, other_peer_addresses,
+          ports_[i],
+          /*threads_per_task=*/1, fake_env_.get()));
+    }
+
+    thread_pool_ = std::make_unique<tsl::thread::ThreadPool>(
+        tsl::Env::Default(), "AllReduceRaceTest", 10);
+  }
+
+  int num_tasks_;
+  std::unique_ptr<FakeEnv> fake_env_;
+  std::vector<int> ports_;
+  std::vector<std::unique_ptr<MinibatchingNode>> nodes_;
+  std::unique_ptr<tsl::thread::ThreadPool> thread_pool_;
+};
+
+TEST_F(AllReduceRaceTest, DuplicateRpcDoesNotCausePrematureConsensus) {
+  int sync_key = 999;
+  AllReduceInterface* interface = nodes_[0]->GetAllReduceInterface();
+
+  tsl::AsyncValueRef<bool> result_av =
+      interface->AsyncAllReduce(sync_key, /*value=*/false);
+  EXPECT_FALSE(result_av.IsAvailable());
+
+  std::string target = absl::StrCat("localhost:", ports_[0]);
+  std::shared_ptr<::grpc::Channel> channel =
+      ::grpc::CreateChannel(target, GetDefaultChannelCredentials());
+  std::unique_ptr<AllReduceGrpcService::Stub> stub =
+      AllReduceGrpcService::NewStub(channel);
+
+  // Send contribution from Task 1 (false).
+  {
+    ::grpc::ClientContext context;
+    AllReduceData request;
+    request.set_sync_key(sync_key);
+    request.set_src_rank(1);
+    request.set_bool_val(false);
+    AllReduceResponse response;
+    ::grpc::Status status = stub->ContributeData(&context, request, &response);
+    ASSERT_TRUE(status.ok());
+  }
+
+  EXPECT_FALSE(result_av.IsAvailable());
+
+  // Send DUPLICATE contribution from Task 1 (false).
+  {
+    ::grpc::ClientContext context;
+    AllReduceData request;
+    request.set_sync_key(sync_key);
+    request.set_src_rank(1);
+    request.set_bool_val(false);
+    AllReduceResponse response;
+    ::grpc::Status status = stub->ContributeData(&context, request, &response);
+    ASSERT_TRUE(status.ok());
+  }
+
+  // If the bug is present, result_av will now be ready (premature consensus).
+  // We assert it is NOT ready.
+  EXPECT_FALSE(result_av.IsAvailable());
+
+  // Send contribution from Task 2 (true).
+  {
+    ::grpc::ClientContext context;
+    AllReduceData request;
+    request.set_sync_key(sync_key);
+    request.set_src_rank(2);
+    request.set_bool_val(true);
+    AllReduceResponse response;
+    ::grpc::Status status = stub->ContributeData(&context, request, &response);
+    ASSERT_TRUE(status.ok());
+  }
+
+  tsl::BlockUntilReady(result_av);
+  ASSERT_TRUE(result_av.IsAvailable());
+  EXPECT_TRUE(result_av.get());
+}
+
+TEST_F(AllReduceRaceTest, LateRpcIsIgnored) {
+  int sync_key = 1000;
+  std::vector<absl::StatusOr<bool>> results(num_tasks_);
+  absl::BlockingCounter barrier(num_tasks_);
+
+  for (int i = 0; i < num_tasks_; ++i) {
+    thread_pool_->Schedule([&, i]() {
+      results[i] = nodes_[i]->GetAllReduceInterface()->BlockingAllReduce(
+          sync_key, /*value=*/false);
+      barrier.DecrementCount();
+    });
+  }
+  barrier.Wait();
+
+  for (int i = 0; i < num_tasks_; ++i) {
+    ASSERT_TRUE(results[i].ok());
+    EXPECT_FALSE(*results[i]);
+  }
+
+  EXPECT_EQ(nodes_[0]->GetActiveStatesCount(), 0);
+
+  std::string target = absl::StrCat("localhost:", ports_[0]);
+  std::shared_ptr<::grpc::Channel> channel =
+      ::grpc::CreateChannel(target, GetDefaultChannelCredentials());
+  std::unique_ptr<AllReduceGrpcService::Stub> stub =
+      AllReduceGrpcService::NewStub(channel);
+
+  {
+    ::grpc::ClientContext context;
+    AllReduceData request;
+    request.set_sync_key(sync_key);
+    request.set_src_rank(1);
+    request.set_bool_val(false);
+    AllReduceResponse response;
+    ::grpc::Status status = stub->ContributeData(&context, request, &response);
+    ASSERT_TRUE(status.ok());
+  }
+
+  EXPECT_EQ(nodes_[0]->GetActiveStatesCount(), 0);
 }
 
 }  // namespace

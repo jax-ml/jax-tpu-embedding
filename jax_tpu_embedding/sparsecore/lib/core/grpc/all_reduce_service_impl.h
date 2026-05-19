@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,9 +27,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.pb.h" // from internal
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "xla/tsl/concurrency/chain.h"  // from @xla
-
 #include "tsl/platform/env.h"  // from @tsl
-
 
 namespace jax_sc_embedding {
 namespace rpc {
@@ -77,6 +76,9 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   // Gets locally and globally reduced result.
   tsl::AsyncValueRef<AllReduceData> GetResult(int sync_key);
 
+  // Only for testing.
+  int GetActiveStatesCount() const;
+
   enum class WaitType { kLocalReduction, kGlobalValues };
 
  private:
@@ -95,9 +97,10 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   void ScheduleWatchdog(int sync_key, WaitType wait_type,
                         tsl::AsyncValueRef<tsl::Chain> av, int elapsed_minutes);
 
-  absl::Mutex mutex_;
+  mutable absl::Mutex mutex_;
   absl::flat_hash_map<int, AllReduceState> all_reduce_state_map_
       ABSL_GUARDED_BY(mutex_);
+  std::optional<int> max_completed_sync_key_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace rpc
