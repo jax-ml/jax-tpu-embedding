@@ -71,6 +71,10 @@ struct CooFormat {
   // bucket id as `hash(col_id) % bucket_count`.
   using HashFn = absl::FunctionRef<uint32_t(int col_id)>;
 
+  // Default constructor. Note that using `= default` leaves members
+  // uninitialized, which is more performant when creating arrays with `new[]`.
+  CooFormat() = default;
+
   CooFormat(int row_id, int embedding_id, float gain, int col_shift,
             int col_offset, int num_scs_mod)
       : CooFormat(row_id,

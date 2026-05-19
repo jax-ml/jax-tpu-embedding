@@ -19,6 +19,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
@@ -34,7 +36,9 @@ class PartitionedCooTensors {
  public:
   PartitionedCooTensors() : PartitionedCooTensors(0, 1) {}
   PartitionedCooTensors(uint32_t global_sc_count, int bucket_count_per_sc = 1)
-      : coo_tensors_(),
+      : coo_tensors_(nullptr),
+        capacity_(0),
+        size_(0),
         bucket_count_per_sc_(bucket_count_per_sc),
         global_sc_count_(global_sc_count),
         bucket_offsets_(),
@@ -46,11 +50,50 @@ class PartitionedCooTensors {
     bucket_offsets_.push_back(0);
   }
 
-  void Reserve(int reserve_count) { coo_tensors_.reserve(reserve_count); }
+  PartitionedCooTensors(PartitionedCooTensors&& other) noexcept
+      : coo_tensors_(std::move(other.coo_tensors_)),
+        capacity_(std::exchange(other.capacity_, 0)),
+        size_(std::exchange(other.size_, 0)),
+        bucket_count_per_sc_(other.bucket_count_per_sc_),
+        global_sc_count_(other.global_sc_count_),
+        bucket_offsets_(std::move(other.bucket_offsets_)),
+        curr_bucket_id_(other.curr_bucket_id_),
+        merged_(other.merged_),
+        dedup_col_id_(other.dedup_col_id_),
+        dedup_row_id_(other.dedup_row_id_) {}
+
+  PartitionedCooTensors& operator=(PartitionedCooTensors&& other) noexcept {
+    if (this != &other) {
+      coo_tensors_ = std::move(other.coo_tensors_);
+      capacity_ = std::exchange(other.capacity_, 0);
+      size_ = std::exchange(other.size_, 0);
+      bucket_count_per_sc_ = other.bucket_count_per_sc_;
+      global_sc_count_ = other.global_sc_count_;
+      bucket_offsets_ = std::move(other.bucket_offsets_);
+      curr_bucket_id_ = other.curr_bucket_id_;
+      merged_ = other.merged_;
+      dedup_col_id_ = other.dedup_col_id_;
+      dedup_row_id_ = other.dedup_row_id_;
+    }
+    return *this;
+  }
+  PartitionedCooTensors(const PartitionedCooTensors&) = delete;
+  PartitionedCooTensors& operator=(const PartitionedCooTensors&) = delete;
+
+  // Reserves space for `reserve_count` CooFormat tensors.
+  // This method *must* be called exactly once before any calls to `Add`.
+  void Reserve(int reserve_count) {
+    CHECK_EQ(capacity_, 0);
+    if (reserve_count == 0) {
+      return;
+    }
+    coo_tensors_ = std::unique_ptr<CooFormat[]>(new CooFormat[reserve_count]);
+    capacity_ = reserve_count;
+  }
 
   inline void MergeWithLastCoo(const CooFormat& coo_tensor) {
-    DCHECK_GT(coo_tensors_.size(), 0);
-    CooFormat& last = coo_tensors_.back();
+    DCHECK_GT(size_, 0);
+    CooFormat& last = coo_tensors_[size_ - 1];
     DCHECK_EQ(last.row_id, coo_tensor.row_id);
     DCHECK_EQ(last.col_id, coo_tensor.col_id);
     last.gain += coo_tensor.gain;
@@ -70,10 +113,13 @@ class PartitionedCooTensors {
   }
 
   // Add Coo tensor for given SC and bucket. Similar to std::vector::push_back.
+  // Force inlining to avoid function call overhead in hot loop.
+  __attribute__((always_inline))
   void Add(int target_bucket_id, const CooFormat& coo_tensor) {
     AdvanceBucketOffsets(target_bucket_id);
 
-    coo_tensors_.push_back(coo_tensor);
+    DCHECK_LT(size_, capacity_);
+    coo_tensors_[size_++] = coo_tensor;
     dedup_col_id_ = coo_tensor.col_id;
     dedup_row_id_ = coo_tensor.row_id;
   }
@@ -94,9 +140,8 @@ class PartitionedCooTensors {
     const int start_offset = bucket_offsets_[start_index];
     DCHECK_LT(start_index + 1, bucket_offsets_.size());
     const int end_offset = bucket_offsets_[start_index + 1];
-    return absl::MakeSpan(coo_tensors_)
-        .subspan(/*pos=*/start_offset,
-                 /*len=*/end_offset - start_offset);
+    return absl::MakeConstSpan(coo_tensors_.get() + start_offset,
+                               end_offset - start_offset);
   }
 
   // Fill remaining buckets for current SC.
@@ -127,8 +172,8 @@ class PartitionedCooTensors {
     // COOs already have same local SC and bucket, only need to compare global
     // SC.
     std::inplace_merge(
-        coo_tensors_.begin() + ptr_left, coo_tensors_.begin() + ptr_right,
-        coo_tensors_.begin() + ptr_right_end,
+        coo_tensors_.get() + ptr_left, coo_tensors_.get() + ptr_right,
+        coo_tensors_.get() + ptr_right_end,
         [&global_sc_count](const CooFormat& a, const CooFormat& b) {
           return (a.col_id & (global_sc_count - 1)) <
                   (b.col_id & (global_sc_count - 1));
@@ -194,13 +239,15 @@ class PartitionedCooTensors {
     DCHECK_LE(target_bucket_id, bucket_count_per_sc_);
 
     while (curr_bucket_id_ < target_bucket_id) {
-      bucket_offsets_.push_back(coo_tensors_.size());
+      bucket_offsets_.push_back(size_);
       curr_bucket_id_++;
     }
   }
 
   // Flattened list of COO Tensors for all SCs.
-  std::vector<CooFormat> coo_tensors_;
+  std::unique_ptr<CooFormat[]> coo_tensors_;
+  int capacity_;
+  int size_;
   // Minibatching buckets per SC.
   int bucket_count_per_sc_;
   // Number of global SCs.

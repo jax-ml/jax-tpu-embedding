@@ -38,6 +38,7 @@ TEST(PartitionedCooTensorsTest, SingleScSingleBucket) {
   PartitionedCooTensors tensors(
       /*global_sc_count=*/1,
       /*bucket_count_per_sc=*/1);
+  tensors.Reserve(2);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
   tensors.Add(0, coo1);
@@ -55,6 +56,8 @@ TEST(DevicePartitionedCooTensorsTest, MultiScSingleBucket) {
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/1);
   tensors.grouped_coo_tensors.emplace_back(
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/1);
+  tensors.grouped_coo_tensors[0].Reserve(1);
+  tensors.grouped_coo_tensors[1].Reserve(2);
   CooFormat coo1(1, 2, 3.0);
   CooFormat coo2(4, 5, 6.0);
   CooFormat coo3(7, 8, 9.0);
@@ -78,6 +81,8 @@ TEST(DevicePartitionedCooTensorsTest, MultiScMultiBucket) {
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   tensors.grouped_coo_tensors.emplace_back(
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
+  tensors.grouped_coo_tensors[0].Reserve(2);
+  tensors.grouped_coo_tensors[1].Reserve(3);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
   CooFormat coo3(3, 3, 3.0);
@@ -107,6 +112,8 @@ TEST(DevicePartitionedCooTensorsTest, MergeBuckets) {
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
   tensors.grouped_coo_tensors.emplace_back(
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/2);
+  tensors.grouped_coo_tensors[0].Reserve(2);
+  tensors.grouped_coo_tensors[1].Reserve(3);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
   CooFormat coo3(3, 3, 3.0);
@@ -138,6 +145,8 @@ TEST(DevicePartitionedCooTensorsTest, PartialMerge) {
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   tensors.grouped_coo_tensors.emplace_back(
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
+  tensors.grouped_coo_tensors[0].Reserve(4);
+  tensors.grouped_coo_tensors[1].Reserve(4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
   CooFormat coo3(3, 3, 3.0);
@@ -176,6 +185,8 @@ TEST(DevicePartitionedCooTensorsTest, NoMerge) {
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
   tensors.grouped_coo_tensors.emplace_back(
       /*global_sc_count=*/2, /*bucket_count_per_sc=*/4);
+  tensors.grouped_coo_tensors[0].Reserve(4);
+  tensors.grouped_coo_tensors[1].Reserve(4);
   CooFormat coo1(1, 1, 1.0);
   CooFormat coo2(2, 2, 2.0);
   CooFormat coo3(3, 3, 3.0);
