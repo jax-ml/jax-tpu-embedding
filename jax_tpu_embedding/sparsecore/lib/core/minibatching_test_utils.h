@@ -18,11 +18,47 @@
 #include <string>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
+#include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
+#include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/test.h"  // from @tsl
 
 namespace jax_sc_embedding {
+
+class FakeEnv : public tsl::EnvWrapper {
+ public:
+  FakeEnv() : tsl::EnvWrapper(tsl::Env::Default()) {}
+
+  void SchedClosureAfter(int64_t micros,
+                         absl::AnyInvocable<void()> c) override {
+    absl::MutexLock lock(&mutex_);
+    scheduled_closures_.push_back(std::move(c));
+  }
+
+  void RunScheduledClosures() {
+    std::vector<absl::AnyInvocable<void()>> closures;
+    {
+      absl::MutexLock lock(&mutex_);
+      closures.swap(scheduled_closures_);
+    }
+    for (auto& c : closures) {
+      c();
+    }
+  }
+
+  int num_scheduled_closures() const {
+    absl::MutexLock lock(&mutex_);
+    return scheduled_closures_.size();
+  }
+
+ private:
+  mutable absl::Mutex mutex_;
+  std::vector<absl::AnyInvocable<void()>> scheduled_closures_
+      ABSL_GUARDED_BY(mutex_);
+};
+
 namespace testing_utils {
 
 // Helper function to set up MinibatchingNode instances for each host.

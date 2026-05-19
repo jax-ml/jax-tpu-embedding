@@ -318,7 +318,10 @@ cc_library(
     hdrs = ["minibatching_test_utils.h"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:test",
     ],
 )
