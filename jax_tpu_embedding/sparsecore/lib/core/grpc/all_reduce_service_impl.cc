@@ -135,6 +135,46 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
   }
 }
 
+absl::Status AllReduceServiceImpl::ContributeDataInternal(
+    const AllReduceData& request) {
+  if (request.src_rank() < 0 || request.src_rank() >= num_tasks_ ||
+      request.src_rank() == task_id_) {
+    return absl::InvalidArgumentError("Invalid src_rank");
+  }
+  tsl::CountDownAsyncValueRef<tsl::Chain> countdown;
+  {
+    absl::MutexLock lock(mutex_);
+    if (max_completed_sync_key_.has_value() &&
+        request.sync_key() <= *max_completed_sync_key_) {
+      VLOG(1) << "Task " << task_id_
+              << " ignoring late RPC for sync_key: " << request.sync_key()
+              << " because max completed is " << *max_completed_sync_key_;
+      return absl::OkStatus();
+    }
+    auto [it, inserted] = all_reduce_state_map_.try_emplace(request.sync_key());
+    AllReduceState& state = it->second;
+    if (inserted) {
+      // If a remote RPC arrives before any local InitializeOrUpdateState call,
+      // the state is initialized with the remote request data.
+      InitializeState(state, request);
+    } else {
+      if (state.received_from_task[request.src_rank()]) {
+        VLOG(1) << "Task " << task_id_
+                << " ignoring duplicate RPC for sync_key: "
+                << request.sync_key() << " from task: " << request.src_rank();
+        return absl::OkStatus();
+      }
+      // State already exists.
+      ReduceData(request, state.local_data);
+    }
+
+    countdown = state.global_values_countdown;
+    state.received_from_task[request.src_rank()] = true;
+  }
+  countdown.CountDown();
+  return absl::OkStatus();
+}
+
 ::grpc::ServerUnaryReactor* AllReduceServiceImpl::ContributeData(
     ::grpc::CallbackServerContext* context, const AllReduceData* request,
     AllReduceResponse* response) {
@@ -143,54 +183,21 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
           << " from peer: " << context->peer()
           << " claiming src_rank: " << request->src_rank();
   auto* reactor = context->DefaultReactor();
-  if (request->src_rank() < 0 || request->src_rank() >= num_tasks_ ||
-      request->src_rank() == task_id_) {
+  absl::Status s = ContributeDataInternal(*request);
+  if (!s.ok()) {
     LOG(WARNING) << "Task " << task_id_
                  << " ignoring RPC with invalid/self src_rank: "
                  << request->src_rank()
-                 << " for sync_key: " << request->sync_key();
-    reactor->Finish(
-        grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Invalid src_rank"));
-    return reactor;
-  }
-  tsl::CountDownAsyncValueRef<tsl::Chain> countdown;
-  {
-    absl::MutexLock lock(mutex_);
-    if (max_completed_sync_key_.has_value() &&
-        request->sync_key() <= *max_completed_sync_key_) {
-      VLOG(1) << "Task " << task_id_
-              << " ignoring late RPC for sync_key: " << request->sync_key()
-              << " because max completed is " << *max_completed_sync_key_;
-      reactor->Finish(grpc::Status::OK);
-      return reactor;
+                 << " for sync_key: " << request->sync_key()
+                 << " error: " << s.message();
+    grpc::StatusCode code = grpc::StatusCode::UNKNOWN;
+    if (s.code() == absl::StatusCode::kInvalidArgument) {
+      code = grpc::StatusCode::INVALID_ARGUMENT;
     }
-    auto [it, inserted] =
-        all_reduce_state_map_.try_emplace(request->sync_key());
-    AllReduceState& state = it->second;
-    if (inserted) {
-      // If a remote RPC arrives before any local InitializeOrUpdateState call,
-      // the state is initialized with the remote request data.
-      InitializeState(state, *request);
-    } else {
-      if (state.received_from_task[request->src_rank()]) {
-        VLOG(1) << "Task " << task_id_
-                << " ignoring duplicate RPC for sync_key: "
-                << request->sync_key() << " from task: " << request->src_rank();
-        reactor->Finish(grpc::Status::OK);
-        return reactor;
-      }
-      // State already exists.
-      ReduceData(*request, state.local_data);
-    }
-
-    VLOG(2) << "Task " << task_id_
-            << " finished processing data for sync_key: " << request->sync_key()
-            << " from peer: " << context->peer();
-    countdown = state.global_values_countdown;
-    state.received_from_task[request->src_rank()] = true;
+    reactor->Finish(grpc::Status(code, std::string(s.message())));
+  } else {
+    reactor->Finish(grpc::Status::OK);
   }
-  countdown.CountDown();
-  reactor->Finish(grpc::Status::OK);
   return reactor;
 }
 
@@ -237,11 +244,7 @@ tsl::AsyncValueRef<AllReduceData> AllReduceServiceImpl::GetLocalReducedValue(
     AllReduceData local_data = state.local_data;
     local_data.set_src_rank(task_id_);
     result.emplace(local_data);
-    if (--state.results_counter == 0) {
-      all_reduce_state_map_.erase(sync_key);
-      max_completed_sync_key_ =
-          std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
-    }
+    EraseStateIfCompleted(sync_key, state);
   });
   return result;
 }
@@ -272,13 +275,18 @@ tsl::AsyncValueRef<AllReduceData> AllReduceServiceImpl::GetResult(
           result.emplace(state.local_data);
         }
 
-        if (--state.results_counter == 0) {
-          all_reduce_state_map_.erase(sync_key);
-          max_completed_sync_key_ =
-              std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
-        }
+        EraseStateIfCompleted(sync_key, state);
       });
   return result;
+}
+
+void AllReduceServiceImpl::EraseStateIfCompleted(int sync_key,
+                                                 AllReduceState& state) {
+  if (--state.results_counter == 0) {
+    all_reduce_state_map_.erase(sync_key);
+    max_completed_sync_key_ =
+        std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
+  }
 }
 
 int AllReduceServiceImpl::GetActiveStatesCount() const {

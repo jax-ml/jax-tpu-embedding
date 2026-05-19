@@ -20,6 +20,7 @@
 
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "include/grpcpp/server_context.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/support/server_callback.h"  // from @com_github_grpc_grpc
@@ -66,6 +67,9 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
       ::grpc::CallbackServerContext* context, const AllReduceData* request,
       AllReduceResponse* response) override;
 
+  // Only for testing / simulation. Core logic of ContributeData.
+  absl::Status ContributeDataInternal(const AllReduceData& request);
+
   // Method to register the local data for a given sync_key. Called by the local
   // client. Returns true if this is the last local thread to contribute.
   bool InitializeOrUpdateState(int sync_key, const AllReduceData& data);
@@ -84,6 +88,10 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
  private:
   // Helper to initialize AllReduceState.
   void InitializeState(AllReduceState& state, const AllReduceData& data);
+
+  // Helper to erase AllReduceState if all consumers have retrieved the result.
+  void EraseStateIfCompleted(int sync_key, AllReduceState& state)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   int task_id_;
   int num_tasks_;

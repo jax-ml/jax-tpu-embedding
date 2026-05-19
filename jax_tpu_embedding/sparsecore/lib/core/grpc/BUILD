@@ -75,6 +75,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
@@ -133,6 +134,22 @@ cc_test(
         "@com_google_absl//absl/synchronization",
         "@com_google_fuzztest//fuzztest",
         "@com_google_fuzztest//fuzztest:googletest_fixture_adapter",
+        "@com_google_googletest//:gtest_main",
+        "@tsl//tsl/platform:env",
+        "@tsl//tsl/platform:test",
+        "@xla//xla/tsl/concurrency:async_value",
+    ],
+)
+
+cc_test(
+    name = "all_reduce_simulation_test",
+    srcs = ["all_reduce_simulation_test.cc"],
+    deps = [
+        ":all_reduce_cc_proto",
+        ":all_reduce_service_impl",
+        "//jax_tpu_embedding/sparsecore/lib/core:minibatching_test_utils",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
         "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:test",
