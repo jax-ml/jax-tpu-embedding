@@ -59,7 +59,7 @@ void SendLocalData(
   {
     tsl::profiler::TraceMe traceme_send(
         "GrpcAllReduceInterface::SendLocalData::SendToPeers");
-    auto deadline = absl::ToChronoTime(absl::Now() + absl::Seconds(7200));
+    auto deadline = absl::ToChronoTime(absl::Now() + absl::Seconds(120));
     for (const auto& [peer_address, stub] : stubs) {
       auto args = std::make_shared<ContributeDataArgs>();
       args->context.set_deadline(deadline);
