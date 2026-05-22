@@ -39,6 +39,8 @@ namespace jax_sc_embedding {
 namespace rpc {
 namespace {
 
+static constexpr absl::Duration kRpcDeadline = absl::Minutes(2);
+
 // Helper function to send ContributeData RPCs to all peers.
 void SendLocalData(
     const absl::flat_hash_map<
@@ -59,7 +61,7 @@ void SendLocalData(
   {
     tsl::profiler::TraceMe traceme_send(
         "GrpcAllReduceInterface::SendLocalData::SendToPeers");
-    auto deadline = absl::ToChronoTime(absl::Now() + absl::Seconds(7200));
+    auto deadline = absl::ToChronoTime(absl::Now() + kRpcDeadline);
     for (const auto& [peer_address, stub] : stubs) {
       auto args = std::make_shared<ContributeDataArgs>();
       args->context.set_deadline(deadline);
