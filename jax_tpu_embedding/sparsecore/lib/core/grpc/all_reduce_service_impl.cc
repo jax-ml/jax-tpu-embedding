@@ -156,11 +156,10 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
   tsl::CountDownAsyncValueRef<tsl::Chain> countdown;
   {
     absl::MutexLock lock(mutex_);
-    if (max_completed_sync_key_.has_value() &&
-        request->sync_key() <= *max_completed_sync_key_) {
+    if (IsSyncKeyCompleted(request->sync_key())) {
       VLOG(1) << "Task " << task_id_
-              << " ignoring late RPC for sync_key: " << request->sync_key()
-              << " because max completed is " << *max_completed_sync_key_;
+              << " ignoring duplicate RPC for sync_key: " << request->sync_key()
+              << " because it has already been completed.";
       reactor->Finish(grpc::Status::OK);
       return reactor;
     }
@@ -237,11 +236,7 @@ tsl::AsyncValueRef<AllReduceData> AllReduceServiceImpl::GetLocalReducedValue(
     AllReduceData local_data = state.local_data;
     local_data.set_src_rank(task_id_);
     result.emplace(local_data);
-    if (--state.results_counter == 0) {
-      all_reduce_state_map_.erase(sync_key);
-      max_completed_sync_key_ =
-          std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
-    }
+    CleanupStateIfDone(sync_key, state);
   });
   return result;
 }
@@ -272,11 +267,7 @@ tsl::AsyncValueRef<AllReduceData> AllReduceServiceImpl::GetResult(
           result.emplace(state.local_data);
         }
 
-        if (--state.results_counter == 0) {
-          all_reduce_state_map_.erase(sync_key);
-          max_completed_sync_key_ =
-              std::max(max_completed_sync_key_.value_or(sync_key), sync_key);
-        }
+        CleanupStateIfDone(sync_key, state);
       });
   return result;
 }

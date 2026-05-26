@@ -149,6 +149,30 @@ TEST_F(AllReduceTest, BlockingAllReduceUint64) {
   EXPECT_THAT(results, Each(IsOkAndHolds(expected_result)));
 }
 
+TEST_F(AllReduceTest, OutOfOrderSyncKeysCompleteSuccessfully) {
+  // Arrange
+  const std::vector<uint64_t> inputs_10 = {10, 20, 30, 40};
+  const std::vector<uint64_t> inputs_9 = {1, 2, 3, 4};
+
+  const uint64_t expected_result_10 =
+      absl::c_accumulate(inputs_10, uint64_t{0}, std::bit_or<>());
+  const uint64_t expected_result_9 =
+      absl::c_accumulate(inputs_9, uint64_t{0}, std::bit_or<>());
+
+  // Act
+  // 1. Run Batch 10 (sync_key 20) first.
+  std::vector<absl::StatusOr<uint64_t>> results_10 =
+      RunAllReduceTest(/*sync_key=*/20, inputs_10);
+
+  // 2. Run Batch 9 (sync_key 18) second (out-of-order).
+  std::vector<absl::StatusOr<uint64_t>> results_9 =
+      RunAllReduceTest(/*sync_key=*/18, inputs_9);
+
+  // Assert
+  EXPECT_THAT(results_10, Each(IsOkAndHolds(expected_result_10)));
+  EXPECT_THAT(results_9, Each(IsOkAndHolds(expected_result_9)));
+}
+
 using AllReduceDeathTest = AllReduceTest;
 
 TEST_F(AllReduceDeathTest, BlockingAllReduceDataTypeMismatch) {

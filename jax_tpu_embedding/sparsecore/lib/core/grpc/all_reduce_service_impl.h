@@ -14,13 +14,16 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
 #include "include/grpcpp/server_context.h"  // from @com_github_grpc_grpc
 #include "include/grpcpp/support/server_callback.h"  // from @com_github_grpc_grpc
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce.grpc.pb.h"
@@ -85,6 +88,38 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   // Helper to initialize AllReduceState.
   void InitializeState(AllReduceState& state, const AllReduceData& data);
 
+  // Records a completed sync key to the history. If history capacity is
+  // exceeded, it wraps around and overwrites the oldest entries.
+  void RecordCompletedSyncKey(int sync_key)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    completed_sync_keys_[completed_sync_keys_head_] = sync_key;
+    completed_sync_keys_head_ =
+        (completed_sync_keys_head_ + 1) % kCompletedSyncKeysHistorySize;
+    completed_sync_keys_size_ =
+        std::min(completed_sync_keys_size_ + 1, kCompletedSyncKeysHistorySize);
+  }
+
+  // Returns true if the sync key is present in the completed history.
+  // Performs a linear search limited to the populated portion of the buffer.
+  // Linear search on 4KB contiguous array is faster than hash set lookup
+  // due to L1 cache locality and compiler SIMD vectorization.
+  bool IsSyncKeyCompleted(int sync_key) const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    absl::Span<const int> populated_keys(completed_sync_keys_.data(),
+                                         completed_sync_keys_size_);
+    return absl::c_find(populated_keys, sync_key) != populated_keys.end();
+  }
+
+  // Decrements the results counter for the state. If it reaches 0, records
+  // the sync key as completed and erases the state from the map.
+  void CleanupStateIfDone(int sync_key, AllReduceState& state)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    if (--state.results_counter == 0) {
+      RecordCompletedSyncKey(sync_key);
+      all_reduce_state_map_.erase(sync_key);
+    }
+  }
+
   int task_id_;
   int num_tasks_;
   // Number of threads (within the same process) that will participate in the
@@ -100,7 +135,18 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   mutable absl::Mutex mutex_;
   absl::flat_hash_map<int, AllReduceState> all_reduce_state_map_
       ABSL_GUARDED_BY(mutex_);
-  std::optional<int> max_completed_sync_key_ ABSL_GUARDED_BY(mutex_);
+
+  // History size of 1024 is chosen to be 2x larger than the maximum possible
+  // pipeline depth (prefetch queue size of 256 steps / 512 sync keys), ensuring
+  // that lagging threads retrying old steps will always hit the history.
+  static constexpr int kCompletedSyncKeysHistorySize = 1024;
+  // Circular buffer for tracking completed sync keys. A flat array is used
+  // instead of a hash set to avoid heap allocations in the critical path and
+  // to leverage cache locality and SIMD vectorization for the linear search.
+  std::array<int, kCompletedSyncKeysHistorySize> completed_sync_keys_
+      ABSL_GUARDED_BY(mutex_) = {};
+  int completed_sync_keys_head_ ABSL_GUARDED_BY(mutex_) = 0;
+  int completed_sync_keys_size_ ABSL_GUARDED_BY(mutex_) = 0;
 };
 
 }  // namespace rpc

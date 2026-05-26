@@ -71,6 +71,7 @@ cc_library(
         ":all_reduce_cc_grpc_proto",
         ":all_reduce_cc_proto",
         "@com_github_grpc_grpc//:grpc++",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
