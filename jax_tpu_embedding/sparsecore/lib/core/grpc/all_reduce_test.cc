@@ -173,7 +173,13 @@ TEST_F(AllReduceTest, OutOfOrderSyncKeysCompleteSuccessfully) {
   EXPECT_THAT(results_9, Each(IsOkAndHolds(expected_result_9)));
 }
 
-using AllReduceDeathTest = AllReduceTest;
+class AllReduceDeathTest : public AllReduceTest {
+ protected:
+  void SetUp() override {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    AllReduceTest::SetUp();
+  }
+};
 
 TEST_F(AllReduceDeathTest, BlockingAllReduceDataTypeMismatch) {
   // Arrange
@@ -512,6 +518,92 @@ TEST_F(AllReduceRaceTest, LateRpcIsIgnored) {
   }
 
   EXPECT_EQ(nodes_[0]->GetActiveStatesCount(), 0);
+}
+
+TEST_F(AllReduceDeathTest,
+       MismatchBetweenThreadsAndConfigTriggersCheckFailure) {
+  // Arrange
+  const int num_tasks = 2;
+  const int expected_threads = 1;
+
+  // Act & Assert
+  EXPECT_DEATH(
+      {
+        // Re-create the environment inside the child process to ensure
+        // thread-safety after fork.
+        auto fake_env = std::make_unique<FakeEnv>();
+        auto thread_pool = std::make_unique<tsl::thread::ThreadPool>(
+            tsl::Env::Default(), "TestPool", 2);
+        std::vector<std::unique_ptr<MinibatchingNode>> nodes =
+            testing_utils::SetUpMinibatchingNodes(num_tasks, expected_threads,
+                                                  fake_env.get());
+
+        // Schedule the second thread in the background.
+        // One thread will check in (either main or this background thread),
+        // and the other will check in second and trigger the mismatch crash.
+        thread_pool->Schedule([&]() {
+          // This is a concurrent check-in on Node 0. One of these two calls
+          // will execute second, violating the configured threads_per_task = 1
+          // and triggering the mismatch check.
+          static_cast<void>(
+              nodes[0]->GetAllReduceInterface()->BlockingAllReduce(
+                  /*sync_key=*/100, /*minibatching_required=*/false));
+        });
+
+        // Main thread calls all-reduce (blocks until remote RPCs, which never
+        // arrive, or until the process aborts due to the background thread's
+        // crash).
+        static_cast<void>(nodes[0]->GetAllReduceInterface()->BlockingAllReduce(
+            /*sync_key=*/100, /*minibatching_required=*/false));
+      },
+      "pipeline configuration mismatch");
+}
+
+TEST_F(AllReduceDeathTest,
+       DuplicateCheckInForCompletedSyncKeyTriggersCheckFailure) {
+  // Arrange
+  const int num_tasks = 2;
+  const int expected_threads = 1;
+
+  // Act & Assert
+  EXPECT_DEATH(
+      {
+        // Re-create the environment inside the child process to ensure
+        // thread-safety after fork.
+        std::unique_ptr<FakeEnv> fake_env = std::make_unique<FakeEnv>();
+        std::unique_ptr<tsl::thread::ThreadPool> thread_pool =
+            std::make_unique<tsl::thread::ThreadPool>(tsl::Env::Default(),
+                                                      "TestPool", 4);
+        std::vector<std::unique_ptr<MinibatchingNode>> nodes =
+            testing_utils::SetUpMinibatchingNodes(num_tasks, expected_threads,
+                                                  fake_env.get());
+
+        absl::BlockingCounter barrier(2);
+        absl::StatusOr<bool> r0;
+        absl::StatusOr<bool> r1;
+
+        // 1. Run a successful all-reduce for sync_key = 100
+        thread_pool->Schedule([&]() {
+          r0 = nodes[0]->GetAllReduceInterface()->BlockingAllReduce(
+              /*sync_key=*/100, /*minibatching_required=*/true);
+          barrier.DecrementCount();
+        });
+
+        thread_pool->Schedule([&]() {
+          r1 = nodes[1]->GetAllReduceInterface()->BlockingAllReduce(
+              /*sync_key=*/100, /*minibatching_required=*/true);
+          barrier.DecrementCount();
+        });
+
+        barrier.Wait();
+        ASSERT_THAT(r0, IsOkAndHolds(true));
+        ASSERT_THAT(r1, IsOkAndHolds(true));
+
+        // 2. Call BlockingAllReduce for sync_key = 100 (duplicate check-in)
+        static_cast<void>(nodes[0]->GetAllReduceInterface()->BlockingAllReduce(
+            /*sync_key=*/100, /*minibatching_required=*/false));
+      },
+      "received duplicate check-in for already completed sync_key: 100");
 }
 
 }  // namespace

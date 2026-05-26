@@ -201,6 +201,12 @@ bool AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
 
   {
     absl::MutexLock lock(mutex_);
+    CHECK(!IsSyncKeyCompleted(sync_key))
+        << "Task " << task_id_
+        << " received duplicate check-in for already completed sync_key: "
+        << sync_key
+        << ". This indicates a desynchronization or overlapping batch_ids.";
+
     auto result = all_reduce_state_map_.try_emplace(sync_key);
     AllReduceState& state = result.first->second;
     if (result.second) {
@@ -210,7 +216,12 @@ bool AllReduceServiceImpl::InitializeOrUpdateState(int sync_key,
       // Update the state.
       ReduceData(data, state.local_data);
     }
-    state.local_received_count++;
+    ++state.local_received_count;
+    CHECK_LE(state.local_received_count, threads_per_task_)
+        << "Task " << task_id_
+        << " received more local check-ins than configured threads_per_task ("
+        << threads_per_task_ << ") for sync_key: " << sync_key
+        << ". This indicates a pipeline configuration mismatch.";
     countdown = state.local_reduction_countdown;
   }
 
