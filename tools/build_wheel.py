@@ -113,8 +113,18 @@ def run_build(output_dir: str) -> str:
     RuntimeError: if we fail to parse the output of the build command.
   """
   logging.info('Building wheels in %s', output_dir)
+  runfiles_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+  logging.info('Runfiles root: %s', runfiles_root)
   process = run_process(
-      [sys.executable, '-m', 'build', '--outdir', output_dir],
+      [
+          sys.executable,
+          '-m',
+          'build',
+          '--no-isolation',
+          '--outdir',
+          output_dir,
+          runfiles_root,
+      ],
   )
   stdout = process.stdout
   logging.debug('Build output:\n%s', stdout)
@@ -263,6 +273,13 @@ def run_wheel_tags(bdist_path: str, python_tag: str, abi_tag: str) -> str:
 
 def main(argv: Sequence[str]) -> None:
   del argv
+
+  if 'BUILD_WORKSPACE_DIRECTORY' in os.environ:
+    logging.info(
+        'Changing directory to %s', os.environ['BUILD_WORKSPACE_DIRECTORY']
+    )
+    os.chdir(os.environ['BUILD_WORKSPACE_DIRECTORY'])
+  logging.info('Current directory: %s', os.getcwd())
 
   output_dir = _OUTPUT_DIR.value
   if not output_dir:
