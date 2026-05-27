@@ -299,20 +299,22 @@ int ComputeCooBufferSizePerDevice(
   VLOG_EVERY_N(2, 10007) << "Computed Coo Buffer Size for table "
                          << stacked_table_name << ": "
                          << computed_coo_buffer_size_per_device;
-  // The result could be very large and cause overflow. We need to make
-  // sure the result is within the range of int before using it.
+  // The result could be very large and cause overflow or OOM. We need to make
+  // sure the result is within a safe range before using it.
   CHECK(computed_coo_buffer_size_per_device > 0 &&
-        computed_coo_buffer_size_per_device < INT_MAX)
+        computed_coo_buffer_size_per_device <= kMaxCooBufferSizePerDevice)
       << "Computed Coo Buffer Size (" << computed_coo_buffer_size_per_device
       << ") for table " << stacked_table_name
-      << " is out of the valid range (0, INT_MAX).";
+      << " is out of the valid range (0, " << kMaxCooBufferSizePerDevice
+      << "].";
   return static_cast<int>(computed_coo_buffer_size_per_device);
 }
 
 int MaxIdsPerPartitionForStackedTables(
     const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   int max_ids_per_partition = stacked_table_metadata[0].max_ids_per_partition;
-  DCHECK_GT(max_ids_per_partition, 0);
+  CHECK_GT(max_ids_per_partition, 0)
+      << "max_ids_per_partition must be strictly positive.";
   return max_ids_per_partition;
 }
 

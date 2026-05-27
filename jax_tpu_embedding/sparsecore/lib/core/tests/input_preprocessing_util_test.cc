@@ -130,6 +130,17 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
   // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
   EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
                ".*Check failed: suggested_value <= theoretical_max.*");
+
+  // Test too large buffer size.
+  stacked_table_metadata[0].suggested_coo_buffer_size_per_device = std::nullopt;
+  stacked_table_metadata[0].max_ids_per_partition = 2000000000;
+  EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
+               ".*is out of the valid range.*");
+
+  // Test invalid max_ids_per_partition.
+  stacked_table_metadata[0].max_ids_per_partition = 0;
+  EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
+               ".*max_ids_per_partition must be strictly positive.*");
 }
 
 TEST(SortAndGroupTest, Base) {

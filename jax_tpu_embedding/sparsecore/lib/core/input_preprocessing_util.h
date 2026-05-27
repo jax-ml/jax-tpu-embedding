@@ -51,6 +51,10 @@ namespace jax_sc_embedding {
 // generations of TPUs (v2, v3, v4, v5, v6).
 inline constexpr int TPU_VECTOR_REGISTER_ALIGNMENT_SIZE = 8;
 
+// The maximum safe COO buffer size per device to avoid Out of Memory (OOM)
+// crashes.
+inline constexpr int kMaxCooBufferSizePerDevice = 100000000;
+
 // numpy uses row major order, while eigen defaults to column major.
 template <typename T>
 using MatrixX =
