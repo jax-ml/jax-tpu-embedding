@@ -1866,6 +1866,54 @@ class InputPreprocessingTest(parameterized.TestCase):
     assert_equal_coo_buffer(sample_ids_w[stack_name], sample_ids_n[stack_name])
     assert_equal_coo_buffer(gains_w[stack_name], gains_n[stack_name])
 
+  def test_invalid_device_parameters(self):
+    batch_number = 42
+
+    # Test local_device_count <= 0
+    with self.assertRaisesRegex(
+        RuntimeError,
+        "local_device_count must be greater than 0",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          0,
+          1,
+          num_sc_per_device=4,
+          batch_number=batch_number,
+      )
+
+    # Test global_device_count <= 0
+    with self.assertRaisesRegex(
+        RuntimeError,
+        "global_device_count must be greater than 0",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          1,
+          0,
+          num_sc_per_device=4,
+          batch_number=batch_number,
+      )
+
+    # Test num_sc_per_device <= 0
+    with self.assertRaisesRegex(
+        RuntimeError,
+        "num_sc_per_device must be greater than 0",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          1,
+          1,
+          num_sc_per_device=0,
+          batch_number=batch_number,
+      )
+
 
 class PybindBufferSizeTest(absltest.TestCase):
 

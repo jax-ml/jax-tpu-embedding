@@ -31,6 +31,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
@@ -1312,6 +1313,61 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
                                          options_allow_dropping);
     ASSERT_TRUE(result.ok());
     EXPECT_GT(result->stats.dropped_id_count.at("stacked_table"), 0);
+  }
+}
+
+TEST_F(TableStackingTest, InvalidDeviceAndSCParameters) {
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+
+  // Test local_device_count <= 0
+  {
+    PreprocessSparseDenseMatmulInputOptions options{
+        .local_device_count = 0,
+        .global_device_count = 1,
+        .num_sc_per_device = 4,
+    };
+    auto result = PreprocessSparseDenseMatmulInput(
+        absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+    EXPECT_THAT(
+        result.status().message(),
+        ::testing::HasSubstr("local_device_count must be greater than 0"));
+  }
+
+  // Test global_device_count <= 0
+  {
+    PreprocessSparseDenseMatmulInputOptions options{
+        .local_device_count = 1,
+        .global_device_count = 0,
+        .num_sc_per_device = 4,
+    };
+    auto result = PreprocessSparseDenseMatmulInput(
+        absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+    EXPECT_THAT(
+        result.status().message(),
+        ::testing::HasSubstr("global_device_count must be greater than 0"));
+  }
+
+  // Test num_sc_per_device <= 0
+  {
+    PreprocessSparseDenseMatmulInputOptions options{
+        .local_device_count = 1,
+        .global_device_count = 1,
+        .num_sc_per_device = 0,
+    };
+    auto result = PreprocessSparseDenseMatmulInput(
+        absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.status().code(), absl::StatusCode::kInvalidArgument);
+    EXPECT_THAT(
+        result.status().message(),
+        ::testing::HasSubstr("num_sc_per_device must be greater than 0"));
   }
 }
 

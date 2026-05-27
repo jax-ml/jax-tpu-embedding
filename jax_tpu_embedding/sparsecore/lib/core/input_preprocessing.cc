@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <bitset>
-#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -29,6 +28,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
@@ -777,7 +777,24 @@ PreprocessSparseDenseMatmulInput(
   if (options.sharding_strategy != ShardingStrategy::kMod) {
     LOG(FATAL) << "Only mod sharding is supported for now.";
   }
-  CHECK_GT(options.local_device_count, 0);
+  if (options.local_device_count <= 0) {
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    return absl::InvalidArgumentError(
+        absl::StrCat("local_device_count must be greater than 0, but got ",
+                     options.local_device_count));
+  }
+  if (options.global_device_count <= 0) {
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    return absl::InvalidArgumentError(
+        absl::StrCat("global_device_count must be greater than 0, but got ",
+                     options.global_device_count));
+  }
+  if (options.num_sc_per_device <= 0) {
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    return absl::InvalidArgumentError(
+        absl::StrCat("num_sc_per_device must be greater than 0, but got ",
+                     options.num_sc_per_device));
+  }
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
 
   PreprocessSparseDenseMatmulOutput out;
