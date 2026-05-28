@@ -58,14 +58,14 @@ class FakeEnv : public tsl::EnvWrapper {
 
   void SchedClosureAfter(int64_t micros,
                          absl::AnyInvocable<void()> c) override {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     scheduled_closures_.push_back(std::move(c));
   }
 
   void RunScheduledClosures() {
     std::vector<absl::AnyInvocable<void()>> closures;
     {
-      absl::MutexLock lock(&mutex_);
+      absl::MutexLock lock(mutex_);
       closures.swap(scheduled_closures_);
     }
     for (auto& c : closures) {
@@ -74,7 +74,7 @@ class FakeEnv : public tsl::EnvWrapper {
   }
 
   int num_scheduled_closures() const {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return scheduled_closures_.size();
   }
 
