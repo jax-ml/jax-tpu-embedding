@@ -210,5 +210,15 @@ INSTANTIATE_TEST_SUITE_P(FixedValencyRowOffsetsTests,
                                   .expected_offsets = {0, 5},
                               }}));
 
+TEST(RaggedTensorInputBatchTest, EmptyRowOffsetsTriggersCheckFailure) {
+  std::vector<int64_t> embedding_ids = {};
+  std::vector<int32_t> row_splits = {};
+  auto construct_empty_batch = [&]() {
+    RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
+        ragged_tensor_feature_input(embedding_ids, row_splits);
+  };
+  EXPECT_DEATH(construct_empty_batch(), "row_offsets cannot be empty");
+}
+
 }  // namespace
 }  // namespace jax_sc_embedding

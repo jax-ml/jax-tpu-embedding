@@ -87,7 +87,9 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
       : embedding_ids_(embedding_ids),
         row_offsets_(row_offsets),
         table_name_(table_name),
-        max_vocab_id_(max_vocab_id) {}
+        max_vocab_id_(max_vocab_id) {
+    CHECK_GT(row_offsets_.size(), 0) << "row_offsets cannot be empty.";
+  }
 
   // Returns the number of samples in this input batch.
   int64_t size() const override { return row_offsets_.size() - 1; }
