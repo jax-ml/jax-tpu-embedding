@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -66,6 +67,9 @@ class FixedValencyRowOffsets {
 // as vectors, arrays, or other data structures.
 template <typename EmbeddingIdsView, typename RowOffsetsView>
 class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
+  using EmbeddingIdT =
+      typename std::decay_t<decltype(std::declval<EmbeddingIdsView>()[0])>;
+
   // Ensures that EmbeddingIdsView and RowOffsetsView are view-like types that
   // are cheap to copy. This prevents expensive copies of underlying data
   // containers (e.g. std::vector) and encourages passing views (e.g.
@@ -107,7 +111,7 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
   void ExtractCooTensors(
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensorsPerSparseCore& coo_tensors) override {
-    SparseCsrInputBatchStream<int64_t, EmbeddingIdsView, RowOffsetsView>
+    SparseCsrInputBatchStream<EmbeddingIdT, EmbeddingIdsView, RowOffsetsView>
         values_stream(embedding_ids_, row_offsets_, options.slice_start,
                       options.slice_end, table_name_, max_vocab_id_);
     UnityWeightsStream weights_stream(values_stream);
