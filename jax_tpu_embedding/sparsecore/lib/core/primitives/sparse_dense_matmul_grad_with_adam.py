@@ -133,7 +133,7 @@ def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
         f" {embedding_table.shape} and {momentum.shape}"
     )
 
-  return embedding_table, velocity, momentum
+  return embedding_table, momentum, velocity
 
 
 tpu_sparse_dense_matmul_grad_with_adam_primitive.def_abstract_eval(
