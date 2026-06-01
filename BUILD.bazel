@@ -29,4 +29,5 @@ exports_files([
     "LICENSE",
     "pyproject.toml",
     "README.md",
+    "SECURITY.md",
 ])
