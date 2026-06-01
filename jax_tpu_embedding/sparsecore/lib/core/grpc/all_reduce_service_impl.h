@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_GRPC_ALL_REDUCE_SERVICE_IMPL_H_
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -37,7 +38,9 @@ namespace rpc {
 
 // Implementation of the gRPC AllReduce service. This class manages the state
 // for multiple concurrent all-reduce operations, identified by a `sync_key`.
-class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
+class AllReduceServiceImpl
+    : public AllReduceGrpcService::CallbackService,
+      public std::enable_shared_from_this<AllReduceServiceImpl> {
   struct AllReduceState {
     AllReduceState() = default;
     AllReduceState(AllReduceState&&) = default;
@@ -130,6 +133,10 @@ class AllReduceServiceImpl : public AllReduceGrpcService::CallbackService {
   // Schedules a recurring watchdog warning every 5 minutes until the
   // AsyncValue becomes available.
   void ScheduleWatchdog(int sync_key, WaitType wait_type,
+                        tsl::AsyncValueRef<tsl::Chain> av, int elapsed_minutes);
+
+  // Callback executed by the scheduled watchdog closure.
+  void WatchdogCallback(int sync_key, WaitType wait_type,
                         tsl::AsyncValueRef<tsl::Chain> av, int elapsed_minutes);
 
   mutable absl::Mutex mutex_;

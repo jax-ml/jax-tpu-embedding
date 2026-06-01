@@ -41,7 +41,7 @@ class MinibatchingNode {
                    std::vector<std::string> peer_addresses,
                    int minibatching_port, int threads_per_task = 1,
                    tsl::Env* env = tsl::Env::Default())
-      : all_reduce_service_(std::make_unique<AllReduceServiceImpl>(
+      : all_reduce_service_(std::make_shared<AllReduceServiceImpl>(
             task_id, num_tasks, threads_per_task, env)),
         all_reduce_interface_(std::make_unique<GrpcAllReduceInterface>(
             peer_addresses, task_id, num_tasks, all_reduce_service_.get(),
@@ -63,7 +63,7 @@ class MinibatchingNode {
   }
 
  private:
-  std::unique_ptr<AllReduceServiceImpl> all_reduce_service_;
+  std::shared_ptr<AllReduceServiceImpl> all_reduce_service_;
   std::unique_ptr<rpc::GrpcAllReduceInterface> all_reduce_interface_;
   std::unique_ptr<::grpc::Server> all_reduce_server_;
 };

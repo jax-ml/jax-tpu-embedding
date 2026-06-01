@@ -13,6 +13,7 @@
 // limitations under the License.
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -60,50 +61,59 @@ void ReduceData(const AllReduceData& value, AllReduceData& accumulator) {
 void AllReduceServiceImpl::ScheduleWatchdog(int sync_key, WaitType wait_type,
                                             tsl::AsyncValueRef<tsl::Chain> av,
                                             int elapsed_minutes) {
-  // NOTE: It is safe to capture `this` here, since `AllReduceServiceImpl` will
-  // outlive the watchdog.
+  std::weak_ptr<AllReduceServiceImpl> self_weak = weak_from_this();
   env_->SchedClosureAfter(
       absl::ToInt64Microseconds(kWatchdogTimeout),
-      [this, sync_key, wait_type, av = std::move(av),
+      [self_weak, sync_key, wait_type, av = std::move(av),
        elapsed_minutes]() mutable {
-        // If the synchronization is finished or failed, we stop the watchdog.
-        if (av.IsAvailable() || av.IsError()) return;
-
-        // Collect information about which hosts or threads are still missing.
-        auto get_missing_info = [&]() {
-          absl::MutexLock lock(mutex_);
-          auto it = all_reduce_state_map_.find(sync_key);
-          if (it == all_reduce_state_map_.end()) return std::string();
-
-          if (wait_type == WaitType::kLocalReduction) {
-            return absl::StrCat(
-                " (missing ",
-                threads_per_task_ - it->second.local_received_count,
-                " threads)");
-          }
-
-          std::vector<int> missing;
-          for (int i = 0; i < num_tasks_; ++i) {
-            if (!it->second.received_from_task[i]) missing.push_back(i);
-          }
-          return absl::StrCat(" (missing ranks: ", absl::StrJoin(missing, ", "),
-                              ")");
-        };
-
-        std::string missing_info = get_missing_info();
-        std::string wait_type_str = (wait_type == WaitType::kLocalReduction)
-                                        ? "local reduction"
-                                        : "global values";
-
-        LOG(WARNING) << "Host is waiting for more than " << elapsed_minutes
-                     << " minutes for " << wait_type_str
-                     << " for sync_key: " << sync_key
-                     << " at rank: " << task_id_ << missing_info;
-
-        // Schedule the next watchdog check.
-        ScheduleWatchdog(sync_key, wait_type, std::move(av),
-                         /*elapsed_minutes=*/elapsed_minutes + 5);
+        if (auto self = self_weak.lock()) {
+          self->WatchdogCallback(sync_key, wait_type, std::move(av),
+                                 elapsed_minutes);
+        }
       });
+}
+
+void AllReduceServiceImpl::WatchdogCallback(int sync_key, WaitType wait_type,
+                                            tsl::AsyncValueRef<tsl::Chain> av,
+                                            int elapsed_minutes) {
+  // If the synchronization is finished or failed, we stop the watchdog.
+  if (av.IsAvailable() || av.IsError()) return;
+
+  // Collect information about which hosts or threads are still missing.
+  auto get_missing_info = [&]() {
+    absl::MutexLock lock(mutex_);
+    auto it = all_reduce_state_map_.find(sync_key);
+    if (it == all_reduce_state_map_.end()) return std::string();
+
+    if (wait_type == WaitType::kLocalReduction) {
+      return absl::StrCat(
+          " (missing ",
+          threads_per_task_ - it->second.local_received_count,
+          " threads)");
+    }
+
+    std::vector<int> missing;
+    missing.reserve(num_tasks_);
+    for (int i = 0; i < num_tasks_; ++i) {
+      if (!it->second.received_from_task[i]) missing.push_back(i);
+    }
+    return absl::StrCat(" (missing ranks: ", absl::StrJoin(missing, ", "),
+                        ")");
+  };
+
+  std::string missing_info = get_missing_info();
+  std::string wait_type_str = (wait_type == WaitType::kLocalReduction)
+                                  ? "local reduction"
+                                  : "global values";
+
+  LOG(WARNING) << "Host is waiting for more than " << elapsed_minutes
+               << " minutes for " << wait_type_str
+               << " for sync_key: " << sync_key
+               << " at rank: " << task_id_ << missing_info;
+
+  // Schedule the next watchdog check.
+  ScheduleWatchdog(sync_key, wait_type, std::move(av),
+                   /*elapsed_minutes=*/elapsed_minutes + 5);
 }
 
 void AllReduceServiceImpl::InitializeState(AllReduceState& state,

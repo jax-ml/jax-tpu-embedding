@@ -351,7 +351,8 @@ TEST(WatchdogTest, WatchdogLogsWarning) {
   int num_tasks = 1;
   int threads_per_task = 2;
 
-  AllReduceServiceImpl service(task_id, num_tasks, threads_per_task, &fake_env);
+  auto service = std::make_shared<AllReduceServiceImpl>(
+      task_id, num_tasks, threads_per_task, &fake_env);
 
   AllReduceData data;
   data.set_sync_key(123);
@@ -364,7 +365,7 @@ TEST(WatchdogTest, WatchdogLogsWarning) {
       .Times(1);
 
   // This should call InitializeState and ScheduleWatchdog
-  service.InitializeOrUpdateState(123, data);
+  service->InitializeOrUpdateState(123, data);
 
   // Verify that closures were scheduled
   EXPECT_EQ(fake_env.num_scheduled_closures(), 1);
