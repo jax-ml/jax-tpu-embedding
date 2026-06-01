@@ -163,6 +163,15 @@ void AllReduceServiceImpl::InitializeState(AllReduceState& state,
         grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Invalid src_rank"));
     return reactor;
   }
+  if (request->value_case() == AllReduceData::VALUE_NOT_SET) {
+    LOG(WARNING) << "Task " << task_id_
+                 << " ignoring RPC with unset value case"
+                 << " for sync_key: " << request->sync_key()
+                 << " from task: " << request->src_rank();
+    reactor->Finish(
+        grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "Value not set"));
+    return reactor;
+  }
   tsl::CountDownAsyncValueRef<tsl::Chain> countdown;
   {
     absl::MutexLock lock(mutex_);

@@ -86,6 +86,7 @@ class FakeEnv : public tsl::EnvWrapper {
 
 using ::absl_testing::IsOkAndHolds;
 using ::testing::Each;
+using ::testing::HasSubstr;
 
 class AllReduceTest : public ::testing::Test {
  protected:
@@ -478,6 +479,45 @@ TEST_F(AllReduceRaceTest, DuplicateRpcDoesNotCausePrematureConsensus) {
   tsl::BlockUntilReady(result_av);
   ASSERT_TRUE(result_av.IsAvailable());
   EXPECT_TRUE(result_av.get());
+}
+
+
+TEST_F(AllReduceRaceTest, ContributeDataRejectsInvalidSrcRank) {
+  int sync_key = 1001;
+  std::string target = absl::StrCat("localhost:", ports_[0]);
+  std::shared_ptr<::grpc::Channel> channel =
+      ::grpc::CreateChannel(target, GetDefaultChannelCredentials());
+  std::unique_ptr<AllReduceGrpcService::Stub> stub =
+      AllReduceGrpcService::NewStub(channel);
+
+  ::grpc::ClientContext context;
+  AllReduceData request;
+  request.set_sync_key(sync_key);
+  request.set_src_rank(99);  // Invalid
+  request.set_bool_val(true);
+  AllReduceResponse response;
+  ::grpc::Status status = stub->ContributeData(&context, request, &response);
+  EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+  EXPECT_THAT(status.error_message(), HasSubstr("Invalid src_rank"));
+}
+
+TEST_F(AllReduceRaceTest, ContributeDataRejectsUnsetValue) {
+  int sync_key = 1001;
+  std::string target = absl::StrCat("localhost:", ports_[0]);
+  std::shared_ptr<::grpc::Channel> channel =
+      ::grpc::CreateChannel(target, GetDefaultChannelCredentials());
+  std::unique_ptr<AllReduceGrpcService::Stub> stub =
+      AllReduceGrpcService::NewStub(channel);
+
+  ::grpc::ClientContext context;
+  AllReduceData request;
+  request.set_sync_key(sync_key);
+  request.set_src_rank(1);  // Valid rank
+  // Do not set bool_val or uint64_val (value case is VALUE_NOT_SET)
+  AllReduceResponse response;
+  ::grpc::Status status = stub->ContributeData(&context, request, &response);
+  EXPECT_EQ(status.error_code(), ::grpc::StatusCode::INVALID_ARGUMENT);
+  EXPECT_THAT(status.error_message(), HasSubstr("Value not set"));
 }
 
 TEST_F(AllReduceRaceTest, LateRpcIsIgnored) {
