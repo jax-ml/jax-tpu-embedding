@@ -225,6 +225,7 @@ TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
       .local_device_count = 1,
       .global_device_count = 2,
       .num_sc_per_device = 4,
+      .tpu_vector_alignment = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -291,6 +292,7 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .tpu_vector_alignment = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -318,6 +320,7 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
       .local_device_count = 2,
       .global_device_count = 2,
       .num_sc_per_device = 4,
+      .tpu_vector_alignment = 8,
   };
 
   std::vector<int> expected_ids_per_sc[] = {{1 + 9, 2 + 10, 3 + 11, 4 + 12},
@@ -354,6 +357,7 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
       .local_device_count = local_device_count,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
+      .tpu_vector_alignment = 8,
   };
 
   const int row_pointers_size_per_device =
@@ -481,6 +485,7 @@ TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .tpu_vector_alignment = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -666,7 +671,8 @@ TEST_F(MinibatchingCountTest,
   PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
                                                   .global_device_count = 1,
                                                   .num_sc_per_device = 4,
-                                                  .enable_minibatching = true};
+                                                  .enable_minibatching = true,
+                                                  .tpu_vector_alignment = 8};
 
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
@@ -692,7 +698,8 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
   PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
                                                   .global_device_count = 1,
                                                   .num_sc_per_device = 4,
-                                                  .enable_minibatching = true};
+                                                  .enable_minibatching = true,
+                                                  .tpu_vector_alignment = 8};
 
   // Reduce max ids and max unique ids to trigger minibatching.
   // Also increase buffer size.
@@ -756,6 +763,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
           .global_device_count = 2,
           .num_sc_per_device = 4,
           .enable_minibatching = true,
+          .tpu_vector_alignment = 8,
           .batch_number = 100,
           .all_reduce_interface = &all_reducers[host_id]};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
@@ -806,6 +814,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
           .global_device_count = 2,
           .num_sc_per_device = 4,
           .enable_minibatching = true,
+          .tpu_vector_alignment = 8,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
                               PreprocessSparseDenseMatmulInput(
@@ -857,6 +866,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
           .global_device_count = 2,
           .num_sc_per_device = 4,
           .enable_minibatching = true,
+          .tpu_vector_alignment = 8,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
                               PreprocessSparseDenseMatmulInput(
@@ -895,6 +905,7 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
         .global_device_count = 1,
         .num_sc_per_device = 4,
         .enable_minibatching = true,
+        .tpu_vector_alignment = 8,
         .batch_number = batch_num,
         .all_reduce_interface = all_reduce.get()};
     auto input_batches =
@@ -935,7 +946,7 @@ void ValidateMinibatchOrSparseCoreSlice(
     const Eigen::Ref<const RowVectorXf>& gains_slice,
     int64_t total_padded_vocab, int batch_size_per_sc,
     int max_ids_per_partition, int max_unique_ids_per_partition,
-    int64_t& total_ids_in_slice) {
+    int64_t& total_ids_in_slice, int tpu_vector_alignment) {
   int32_t start_index = 0;
   for (int i = 0; i < row_pointers_slice.size(); ++i) {
     int end_index = row_pointers_slice(i);
@@ -962,7 +973,7 @@ void ValidateMinibatchOrSparseCoreSlice(
       ASSERT_LE(ids_count, max_ids_per_partition);
       ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
     }
-    start_index = xla::RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+    start_index = xla::RoundUpTo(end_index, tpu_vector_alignment);
   }
 }
 
@@ -970,7 +981,8 @@ void RunPreprocessingOutputIsValidTest(
     absl::Span<const std::vector<std::vector<int64_t>>> samples_per_table,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition, bool enable_minibatching) {
+    int max_unique_ids_per_partition, bool enable_minibatching,
+    int tpu_vector_alignment = 8) {
   // Max unique ids should be less than or equal to max ids.
   max_unique_ids_per_partition =
       std::min(max_unique_ids_per_partition, max_ids_per_partition);
@@ -1003,7 +1015,8 @@ void RunPreprocessingOutputIsValidTest(
         /*col_shift=*/i % 4, kBatchSize,
         /*suggested_coo_buffer_size_per_device=*/std::nullopt,
         RowCombiner::kSum, table_vocabs[i] - 1));
-    current_col_offset += xla::RoundUpTo(table_vocabs[i], 8 * kNumScs);
+    current_col_offset +=
+        xla::RoundUpTo(table_vocabs[i], tpu_vector_alignment * kNumScs);
   }
 
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
@@ -1015,6 +1028,7 @@ void RunPreprocessingOutputIsValidTest(
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
       .enable_minibatching = enable_minibatching,
+      .tpu_vector_alignment = tpu_vector_alignment,
       .batch_number = 42};
 
   TF_ASSERT_OK_AND_ASSIGN(
@@ -1037,14 +1051,14 @@ void RunPreprocessingOutputIsValidTest(
 
   int64_t total_present_ids = 0;
   if (options.enable_minibatching) {
-    const int32_t row_pointers_size =
-        num_minibatches *
-        std::max(kNumScs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE) *
-        num_sc_per_device;
+    const int32_t row_pointers_size = num_minibatches *
+                                      std::max(kNumScs, tpu_vector_alignment) *
+                                      num_sc_per_device;
     ValidateMinibatchOrSparseCoreSlice(
         row_pointers.row(0).head(row_pointers_size), embedding_ids.row(0),
         sample_ids.row(0), gains.row(0), table_shard_size, batch_size_per_sc,
-        max_ids_per_partition, max_unique_ids_per_partition, total_present_ids);
+        max_ids_per_partition, max_unique_ids_per_partition, total_present_ids,
+        tpu_vector_alignment);
   } else {
     const int coo_buffer_size_per_sc = embedding_ids.cols() / num_sc_per_device;
     const int row_pointers_size_per_bucket =
@@ -1060,7 +1074,8 @@ void RunPreprocessingOutputIsValidTest(
           sample_ids.row(0).segment(coo_buffer_offset, coo_buffer_size_per_sc),
           gains.row(0).segment(coo_buffer_offset, coo_buffer_size_per_sc),
           table_shard_size, batch_size_per_sc, max_ids_per_partition,
-          max_unique_ids_per_partition, total_present_ids);
+          max_unique_ids_per_partition, total_present_ids,
+          tpu_vector_alignment);
     }
   }
   EXPECT_EQ(total_present_ids + output.stats.TotalDroppedIdCount(),
@@ -1182,6 +1197,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
       .enable_minibatching = false,
+      .tpu_vector_alignment = 8,
       .batch_number = 1};
   PreprocessSparseDenseMatmulInputOptions options_no_dropping{
       .local_device_count = 1,
@@ -1189,6 +1205,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = false,
       .enable_minibatching = false,
+      .tpu_vector_alignment = 8,
       .batch_number = 1};
 
   // Run with large max_ids to get stats.
@@ -1296,7 +1313,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   // size. Expect id dropping if buffer size is reduced enough to be less than
   // required amount due to alignment.
   const int kDeviceCooBufferAlignment =
-      TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_sc_per_device;
+      options_allow_dropping.tpu_vector_alignment * num_sc_per_device;
   if (required_buffer_size_per_device > kDeviceCooBufferAlignment) {
     FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
@@ -1326,6 +1343,17 @@ FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)
         fuzztest::ElementOf<int>({1, 2, 4}),
         // Domain for global_device_count
         fuzztest::ElementOf<int>({1, 2, 4}));
+
+TEST(InputPreprocessingTest, OutputIsValidWithSixteenByteAlignment) {
+  std::vector<std::vector<int64_t>> samples = {{1, 2, 3}, {4, 5}, {6}, {7}};
+  std::vector<int> table_vocabs = {10};
+
+  RunPreprocessingOutputIsValidTest(
+      {samples}, table_vocabs, /*num_sc_per_device=*/2,
+      /*global_device_count=*/1,
+      /*max_ids_per_partition=*/10, /*max_unique_ids_per_partition=*/10,
+      /*enable_minibatching=*/false, /*tpu_vector_alignment=*/16);
+}
 
 }  // namespace
 }  // namespace jax_sc_embedding

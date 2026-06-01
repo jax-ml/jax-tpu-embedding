@@ -118,6 +118,7 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .tpu_vector_alignment = 8,
   };
   EXPECT_EQ(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
             16 * 4 * 4);
@@ -130,6 +131,44 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
   // The theoretical max is 16 * 4 * 4 = 256. This is less than the suggestion.
   EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
                ".*Check failed: suggested_value <= theoretical_max.*");
+}
+
+TEST(ComputeCooBufferSizePerDeviceTest, UsesAlignmentSizeOfEight) {
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
+      /*name=*/"table_1",
+      /*feature_index=*/1, /*max_ids_per_partition=*/20,
+      /*max_unique_ids_per_partition=*/20, /*row_offset=*/0,
+      /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16));
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .tpu_vector_alignment = 8,
+  };
+
+  int size = ComputeCooBufferSizePerDevice(options, stacked_table_metadata);
+
+  EXPECT_EQ(size, 384);
+}
+
+TEST(ComputeCooBufferSizePerDeviceTest, UsesCustomAlignmentSizeFromOptions) {
+  std::vector<FeatureMetadataInStack> stacked_table_metadata;
+  stacked_table_metadata.push_back(FeatureMetadataInStack(
+      /*name=*/"table_1",
+      /*feature_index=*/1, /*max_ids_per_partition=*/20,
+      /*max_unique_ids_per_partition=*/20, /*row_offset=*/0,
+      /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/16));
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .tpu_vector_alignment = 16,
+  };
+
+  int size = ComputeCooBufferSizePerDevice(options, stacked_table_metadata);
+
+  EXPECT_EQ(size, 512);
 }
 
 TEST(SortAndGroupTest, Base) {
@@ -151,6 +190,7 @@ TEST(SortAndGroupTest, Base) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -238,6 +278,7 @@ TEST(SortAndGroupTest, TwoScs) {
       .global_device_count = 1,
       .num_sc_per_device = 2,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/2,
@@ -306,6 +347,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -356,6 +398,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations2) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -411,6 +454,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations3) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -467,6 +511,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations4) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -518,6 +563,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations5) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -569,6 +615,7 @@ TEST(SortAndGroupTest, VerifyIdLimitations6) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -621,6 +668,7 @@ TEST(SortAndGroupTest, IdDropping) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = true,
+      .tpu_vector_alignment = 8,
   };
   bool minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -711,6 +759,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -842,6 +891,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
       .enable_minibatching = true,
+      .tpu_vector_alignment = 8,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -971,6 +1021,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
       .enable_minibatching = true,
+      .tpu_vector_alignment = 8,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -1151,6 +1202,7 @@ TEST(InputPreprocessingUtilTest,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
+      .tpu_vector_alignment = 8,
   };
 
   bool minibatching_required = false;
@@ -1217,6 +1269,7 @@ TEST(InputPreprocessingUtilTest,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
       .enable_minibatching = true,
+      .tpu_vector_alignment = 8,
       .minibatching_bucketing_hash_fn = hash_fn,
   };
 
