@@ -16,7 +16,10 @@ load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pyt
 
 package(
     default_applicable_licenses = ["//:license"],
-    default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
+    default_visibility = [
+        "//jax_tpu_embedding/sparsecore:internal",
+        pypi_requirement("jaxloop:__subpackages__"),
+    ],
 )
 
 pytype_strict_library(
