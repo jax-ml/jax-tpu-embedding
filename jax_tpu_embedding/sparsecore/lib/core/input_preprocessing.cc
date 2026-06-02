@@ -29,6 +29,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
@@ -778,6 +779,11 @@ PreprocessSparseDenseMatmulInput(
     LOG(FATAL) << "Only mod sharding is supported for now.";
   }
   CHECK_GT(options.local_device_count, 0);
+  CHECK_GT(options.global_device_count, 0);
+  CHECK_GT(options.num_sc_per_device, 0);
+  CHECK(absl::has_single_bit(static_cast<uint32_t>(options.GetNumScs())))
+      << "Total number of SparseCores (" << options.GetNumScs()
+      << ") must be a power of 2.";
   CHECK_GT(input_batches.size(), 0) << "input_batches cannot be empty.";
 
   PreprocessSparseDenseMatmulOutput out;
