@@ -84,7 +84,7 @@ void ProcessCooTensors(
   CHECK(options.num_scs > 0 && (options.num_scs & (options.num_scs - 1)) == 0);
 
   const int num_scs_bit = std::log2(options.num_scs);
-  const int num_scs_mod = (1 << num_scs_bit) - 1;
+  extracted_coo_tensors.num_sc_bits_ = num_scs_bit;
   const int batch_size_per_sc = extracted_coo_tensors.batch_size_per_sc_;
   CHECK_GT(batch_size_per_sc, 0);
 
@@ -120,7 +120,7 @@ void ProcessCooTensors(
 
         extracted_coo_tensors.emplace_back_with_gain(
             sample_id, embedding_id, gain, options.col_shift,
-            options.col_offset, num_scs_mod);
+            options.col_offset, num_scs_bit);
       }
     } else {
       for (int i = 0; i < num_cols; ++i) {
@@ -129,7 +129,7 @@ void ProcessCooTensors(
 
         extracted_coo_tensors.emplace_back(sample_id, embedding_id,
                                            options.col_shift,
-                                           options.col_offset, num_scs_mod);
+                                           options.col_offset, num_scs_bit);
       }
     }
   }

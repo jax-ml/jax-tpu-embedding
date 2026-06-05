@@ -417,7 +417,8 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
       });
       ExtractedCooTensorsPerSparseCore coo_tensors_per_sc(
           batch_size_per_slice, has_variable_weights,
-          stacked_table_metadata[0].row_combiner);
+          stacked_table_metadata[0].row_combiner,
+          absl::countr_zero(static_cast<uint32_t>(options.GetNumScs())));
       coo_tensors_per_sc.reserve(ids_per_sc[sc_id]);
       for (int feature_idx = 0; feature_idx < stacked_table_metadata.size();
            ++feature_idx) {

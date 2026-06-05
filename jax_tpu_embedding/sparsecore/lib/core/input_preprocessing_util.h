@@ -91,6 +91,7 @@ struct IdPair {
 
 struct ExtractedCooTensorsPerSparseCore {
   std::vector<IdPair> ids;
+  std::vector<uint64_t> keys;
   // For storing gains, we use different strategies to optimize for memory and
   // performance:
   // 1. If weights are non-uniform (`has_variable_weights_ == true`), we store
@@ -114,17 +115,20 @@ struct ExtractedCooTensorsPerSparseCore {
   bool has_variable_weights_;
   int batch_size_per_sc_;
   RowCombiner combiner_;
+  int num_sc_bits_;
 
   ExtractedCooTensorsPerSparseCore()
       : has_variable_weights_(false),
         batch_size_per_sc_(0),
-        combiner_(RowCombiner::kSum) {}
+        combiner_(RowCombiner::kSum),
+        num_sc_bits_(0) {}
   ExtractedCooTensorsPerSparseCore(int batch_size_per_sc,
                                    bool has_variable_weights,
-                                   RowCombiner combiner)
+                                   RowCombiner combiner, int num_sc_bits = 0)
       : has_variable_weights_(has_variable_weights),
         batch_size_per_sc_(batch_size_per_sc),
-        combiner_(combiner) {
+        combiner_(combiner),
+        num_sc_bits_(num_sc_bits) {
     if (!has_variable_weights_) {
       switch (combiner) {
         case RowCombiner::kMean:
@@ -141,29 +145,36 @@ struct ExtractedCooTensorsPerSparseCore {
 
   bool has_variable_weights() const { return has_variable_weights_; }
 
-  void emplace_back(int row_id, int embedding_id, int col_shift,
-                    int col_offset, int num_scs_mod) {
+  void emplace_back(int row_id, int embedding_id, int col_shift, int col_offset,
+                    int num_scs_bit) {
     DCHECK(!has_variable_weights_);
-    this->ids.push_back({.col_id = CooFormat::GetColId(embedding_id, col_shift,
-                                                       col_offset, num_scs_mod),
-                         .row_id = row_id});
+    const int num_scs_mod = (1 << num_scs_bit) - 1;
+    const int col_id =
+        CooFormat::GetColId(embedding_id, col_shift, col_offset, num_scs_mod);
+    this->keys.push_back(CooFormat::GetGroupingKey(col_id, row_id, num_scs_bit,
+                                                   /*create_buckets=*/false));
   }
 
   void emplace_back_with_gain(int row_id, int embedding_id, float gain,
-                              int col_shift, int col_offset, int num_scs_mod) {
+                              int col_shift, int col_offset, int num_scs_bit) {
     DCHECK(has_variable_weights_);
+    const int num_scs_mod = (1 << num_scs_bit) - 1;
     this->ids.push_back({.col_id = CooFormat::GetColId(embedding_id, col_shift,
                                                        col_offset, num_scs_mod),
                          .row_id = row_id});
     this->gains.push_back(gain);
   }
 
-  size_t size() const { return ids.size(); }
+  size_t size() const {
+    return has_variable_weights_ ? ids.size() : keys.size();
+  }
 
   void reserve(size_t n) {
-    ids.reserve(n);
     if (has_variable_weights_) {
+      ids.reserve(n);
       gains.reserve(n);
+    } else {
+      keys.reserve(n);
     }
   }
 
@@ -172,12 +183,18 @@ struct ExtractedCooTensorsPerSparseCore {
     float gain = 1.0f;
     if (has_variable_weights_) {
       gain = gains[i];
-    } else if (!row_token_counts.empty()) {
-      gain = 1.0f / row_token_counts[ids[i].row_id % batch_size_per_sc_];
-    } else if (!row_gains.empty()) {
-      gain = row_gains[ids[i].row_id % batch_size_per_sc_];
+      return CooFormat(ids[i].row_id, ids[i].col_id, gain);
+    } else {
+      const uint64_t key = keys[i];
+      const uint32_t row_id = CooFormat::GetDataFromKey(key);
+      const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits_);
+      if (!row_token_counts.empty()) {
+        gain = 1.0f / row_token_counts[row_id % batch_size_per_sc_];
+      } else if (!row_gains.empty()) {
+        gain = row_gains[row_id % batch_size_per_sc_];
+      }
+      return CooFormat(row_id, col_id, gain);
     }
-    return CooFormat(ids[i].row_id, ids[i].col_id, gain);
   }
 
   template <bool kHasVariableWeights, RowCombiner Combiner = RowCombiner::kSum>
@@ -254,11 +271,13 @@ struct ExtractedCooTensors {
     per_sc_tensors_av.reserve(num_sc_per_device);
     int batch_size_per_sc =
         num_sc_per_device > 0 ? batch_size_for_device / num_sc_per_device : 0;
+    const int num_sc_bits =
+        num_sc_per_device > 0 ? std::log2(num_sc_per_device) : 0;
     for (int i = 0; i < num_sc_per_device; ++i) {
       per_sc_tensors_av.push_back(tsl::MakeUnconstructedAsyncValueRef<
                                   ExtractedCooTensorsPerSparseCore>());
       per_sc_tensors_av.back().emplace(batch_size_per_sc, has_variable_weights_,
-                                       combiner_);
+                                       combiner_, num_sc_bits);
     }
 
     // If we have variable weights, we need to store the gains.
@@ -269,10 +288,14 @@ struct ExtractedCooTensors {
     // Add all the coos to the extracted coo tensors.
     for (const auto& coo : coos) {
       int sc_id = coo.row_id / batch_size_per_sc;
-      per_sc_tensors_av[sc_id].get().ids.push_back(
-          {.col_id = coo.col_id, .row_id = coo.row_id});
       if (has_variable_weights_) {
+        per_sc_tensors_av[sc_id].get().ids.push_back(
+            {.col_id = coo.col_id, .row_id = coo.row_id});
         per_sc_tensors_av[sc_id].get().gains.push_back(coo.gain);
+      } else {
+        per_sc_tensors_av[sc_id].get().keys.push_back(
+            CooFormat::GetGroupingKey(coo.col_id, coo.row_id, num_sc_bits,
+                                      /*create_buckets=*/false));
       }
     }
   }

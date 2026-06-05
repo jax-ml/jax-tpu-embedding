@@ -236,8 +236,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     // Step 1: Unpack key to get tensor coordinates.
     const uint32_t bucket_id =
         kCreateBuckets ? CooFormat::GetBucketIdFromKey(key) : 0;
-    const uint32_t col_id =
-        absl::rotl(CooFormat::GetRotatedColIdFromKey(key), num_sc_bits);
+    const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits);
     const uint32_t global_sc_id = col_id & (global_sc_count - 1);
 
     const CooFormat coo_tensor =
@@ -308,6 +307,30 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     prev_col_id = col_id;
     prev_row_id = row_id;
     prev_bucket_id = bucket_id;
+  }
+}
+
+inline void GenerateKeysFromIds(
+    const ExtractedCooTensorsPerSparseCore& extracted_coo_tensors,
+    int num_sc_bits, bool kCreateBuckets, CooFormat::HashFn hash_fn,
+    std::vector<uint64_t>& keys) {
+  // Direct indexing with resize is faster than reserve + push_back
+  // because it is more easily vectorized by the compiler.
+  keys.resize(extracted_coo_tensors.size());
+  for (uint32_t coo_index = 0; coo_index < extracted_coo_tensors.size();
+       ++coo_index) {
+    keys[coo_index] = CooFormat::GetGroupingKey(
+        extracted_coo_tensors.ids[coo_index].col_id, coo_index, num_sc_bits,
+        kCreateBuckets, hash_fn);
+  }
+}
+
+inline void UpdateKeysWithBucketId(
+    int num_sc_bits, CooFormat::HashFn hash_fn, std::vector<uint64_t>& keys) {
+  for (uint64_t& key : keys) {
+    const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits);
+    const uint32_t bucket_id = CooFormat::GetBucketId(col_id, hash_fn);
+    key = CooFormat::SetBucketIdInKey(key, bucket_id);
   }
 }
 
@@ -406,30 +429,35 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             internal::StatsPerDevice stats =
                 local_stats_host.GetStatsPerDevice(0);
 
-            std::vector<uint64_t> keys(extracted_coo_tensors.size());
             internal::ValidateKeyCapacity(local_sc_id,
                                           extracted_coo_tensors.size());
 
-            tsl::profiler::TraceMe generate_keys_traceme([&] {
-              return tsl::profiler::TraceMeEncode(
-                  absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
-                               local_sc_id),
-                  {{"batch_number", options.batch_number}});
-            });
-            for (uint32_t coo_index = 0;
-                 coo_index < extracted_coo_tensors.size(); ++coo_index) {
-              // The key here is [bucket_id(6 bits), global_sc_id(num_scs bits),
-              // local_embedding_id(32-num_scs bits), index(26 bits)].
-              //  Note that this assumes `num_scs` is a power of 2.
-              uint32_t data = kHasVariableWeights
-                                  ? coo_index
-                                  : extracted_coo_tensors.ids[coo_index].row_id;
-              keys[coo_index] = CooFormat::GetGroupingKey(
-                  extracted_coo_tensors.ids[coo_index].col_id, data,
-                  num_sc_bits, kCreateBuckets,
-                  options.minibatching_bucketing_hash_fn);
+            std::vector<uint64_t> keys;
+            if constexpr (kHasVariableWeights) {
+              tsl::profiler::TraceMe generate_keys_traceme([&] {
+                return tsl::profiler::TraceMeEncode(
+                    absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
+                                 local_sc_id),
+                    {{"batch_number", options.batch_number}});
+              });
+              internal::GenerateKeysFromIds(
+                  extracted_coo_tensors, num_sc_bits, kCreateBuckets,
+                  options.minibatching_bucketing_hash_fn, keys);
+              generate_keys_traceme.Stop();
+            } else {
+              keys = extracted_coo_tensors.keys;
+              if constexpr (kCreateBuckets) {
+                tsl::profiler::TraceMe generate_keys_traceme([&] {
+                  return tsl::profiler::TraceMeEncode(
+                      absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
+                                   local_sc_id),
+                      {{"batch_number", options.batch_number}});
+                });
+                internal::UpdateKeysWithBucketId(
+                    num_sc_bits, options.minibatching_bucketing_hash_fn, keys);
+                generate_keys_traceme.Stop();
+              }
             }
-            generate_keys_traceme.Stop();
 
             // Sort keys to group by bucket_id, global_sc_id, and column_id.
             tsl::profiler::TraceMe vqsort_traceme([&] {

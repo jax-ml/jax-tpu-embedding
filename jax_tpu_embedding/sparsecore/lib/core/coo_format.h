@@ -190,8 +190,18 @@ struct CooFormat {
     return (key >> kRotatedColIdOffset) & 0xFFFFFFFF;
   }
 
+  static uint32_t GetColIdFromKey(uint64_t key, uint32_t num_scs_bit) {
+    return absl::rotl(GetRotatedColIdFromKey(key), num_scs_bit);
+  }
+
   static uint32_t GetBucketIdFromKey(uint64_t key) {
     return key >> kBucketIdOffset;
+  }
+
+  static uint64_t SetBucketIdInKey(uint64_t key, uint32_t bucket_id) {
+    DCHECK_EQ(GetBucketIdFromKey(key), 0);
+    DCHECK_LE(bucket_id, kMaxMinibatchingBuckets - 1);
+    return key | (uint64_t{bucket_id} << kBucketIdOffset);
   }
 };
 
