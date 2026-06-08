@@ -452,13 +452,17 @@ def compute_row_pointers_size_per_device(
     global_device_count: int,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
+    sparsecore_sublane_count: int | None = None,
 ) -> int:
   """Computes the required row pointers buffer size per device."""
   resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  if sparsecore_sublane_count is None:
+    sparsecore_sublane_count = utils.sparsecore_sublane_count()
   return pybind_input_preprocessing.compute_row_pointers_size_per_device(
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
       enable_minibatching=enable_minibatching,
+      sparsecore_sublane_count=sparsecore_sublane_count,
   )
 
 
@@ -467,14 +471,18 @@ def compute_theoretical_max_coo_buffer_size(
     global_device_count: int,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
+    sparsecore_sublane_count: int | None = None,
 ) -> int:
   """Computes the theoretical max COO buffer size per device."""
   resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  if sparsecore_sublane_count is None:
+    sparsecore_sublane_count = utils.sparsecore_sublane_count()
   return pybind_input_preprocessing.compute_theoretical_max_coo_buffer_size(
       max_ids_per_partition=max_ids_per_partition,
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
       enable_minibatching=enable_minibatching,
+      sparsecore_sublane_count=sparsecore_sublane_count,
   )
 
 
@@ -483,6 +491,7 @@ def compute_coo_buffer_size_per_device(
     global_device_count: int,
     num_sc_per_device: int | None = None,
     enable_minibatching: bool = False,
+    sparsecore_sublane_count: int | None = None,
 ) -> dict[str, int]:
   """Computes the required COO buffer size per device.
 
@@ -493,12 +502,16 @@ def compute_coo_buffer_size_per_device(
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
     enable_minibatching: Whether to enable minibatching.
+    sparsecore_sublane_count: The SparseCore sublane count (e.g. 8 for v5/v6e,
+      16 for v7x).
 
   Returns:
     A dictionary mapping stacked table names to their required COO buffer size
     per device.
   """
   resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  if sparsecore_sublane_count is None:
+    sparsecore_sublane_count = utils.sparsecore_sublane_count()
   # TODO: b/491557196 - Evaluate if passing deconstructed feature specs (e.g.,
   # max_ids_per_partition, suggested_buffer_size) to the pybind boundary is
   # better than passing the full FeatureSpec objects, similar to what we do for
@@ -508,6 +521,7 @@ def compute_coo_buffer_size_per_device(
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
       enable_minibatching=enable_minibatching,
+      sparsecore_sublane_count=sparsecore_sublane_count,
   )
 
 
@@ -571,6 +585,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    sparsecore_sublane_count: int | None = None,
     all_reduce_interface: (
         pybind_input_preprocessing.AllReduceInterface | None
     ) = None,
@@ -605,6 +620,8 @@ def preprocess_sparse_dense_matmul_input(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
+    sparsecore_sublane_count: The SparseCore sublane count (e.g. 8 for v5/v6e,
+      16 for v7x).
     all_reduce_interface: Interface to communicate between multiple hosts. This
       can be generated using the `get_all_reduce_interface` function. Not
       required for single-host minibatching.
@@ -613,6 +630,8 @@ def preprocess_sparse_dense_matmul_input(
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  if sparsecore_sublane_count is None:
+    sparsecore_sublane_count = utils.sparsecore_sublane_count()
   _assert_same_structure(features, feature_specs, "features", "feature_specs")
   if features_weights is not None:
     _assert_same_structure(
@@ -642,6 +661,7 @@ def preprocess_sparse_dense_matmul_input(
           allow_id_dropping=allow_id_dropping,
           batch_number=batch_number,
           enable_minibatching=enable_minibatching,
+          sparsecore_sublane_count=sparsecore_sublane_count,
           all_reduce_interface=all_reduce_interface,
       )
   )
@@ -670,6 +690,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    sparsecore_sublane_count: int | None = None,
     all_reduce_interface: (
         pybind_input_preprocessing.AllReduceInterface | None
     ) = None,
@@ -717,6 +738,8 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
+    sparsecore_sublane_count: The SparseCore sublane count (e.g. 8 for v5/v6e,
+      16 for v7x).
     all_reduce_interface: Interface to communicate between multiple hosts. This
       can be generated using the `get_all_reduce_interface` function. Not
       required for single-host minibatching.
@@ -726,6 +749,8 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   """
 
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  if sparsecore_sublane_count is None:
+    sparsecore_sublane_count = utils.sparsecore_sublane_count()
   _assert_same_structure(indices, feature_specs, "indices", "feature_specs")
   _assert_same_structure(values, feature_specs, "values", "feature_specs")
   _assert_same_structure(
@@ -756,6 +781,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           allow_id_dropping=allow_id_dropping,
           batch_number=batch_number,
           enable_minibatching=enable_minibatching,
+          sparsecore_sublane_count=sparsecore_sublane_count,
           all_reduce_interface=all_reduce_interface,
       )
   )

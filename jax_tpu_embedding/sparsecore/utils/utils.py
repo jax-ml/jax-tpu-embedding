@@ -15,6 +15,7 @@
 
 from absl import flags
 import einops
+import immutabledict
 import jax
 from jax.experimental import layout
 
@@ -28,12 +29,23 @@ _DUMP_DIR = flags.DEFINE_string(
     'dump_dir', None, 'Directory to write debug dumps to.'
 )
 
-NUM_SC_PER_DEVICE_MAP = {
-    'TPU v5': 4,
+NUM_SC_PER_DEVICE_MAP = immutabledict.immutabledict({
+    'TPU v5': 4,  # Alias for TPU v5p.
     'TPU v5p': 4,  # In pathways setup, TPU v5 shows up as TPU v5p.
-    'TPU v6 lite': 2,
-    'TPU7x': 2,  # Megacore is disabled.
-}
+    'TPU v6 lite': 2,  # Trillium, alias for TPU v6e.
+    'TPU v6e': 2,  # Trillium.
+    'TPU7': 2,  # TPU7 (Inference).
+    'TPU7x': 2,  # Ironwood: Megacore is disabled.
+})
+
+SPARSECORE_SUBLANE_COUNT_MAP = immutabledict.immutabledict({
+    'TPU v5': 8,  # Alias for TPU v5p.
+    'TPU v5p': 8,
+    'TPU v6 lite': 8,  # Trillium, alias for TPU v6e.
+    'TPU v6e': 8,  # Trillium.
+    'TPU7': 16,  # TPU7 (Inference).
+    'TPU7x': 16,  # Ironwood: 16 physical sublanes.
+})
 
 
 def num_sparsecores_per_device(device: jax.Device | None = None) -> int:
@@ -130,3 +142,24 @@ def embedding_table_format_with_sharding(
       ),
       sharding,
   )
+
+
+def sparsecore_sublane_count(device: jax.Device | None = None) -> int:
+  """Determine the SparseCore sublane count for a device.
+
+  Args:
+    device: JAX device to check.  If None, queries the first device in
+      jax.devices().
+
+  Returns:
+    SparseCore sublane count (e.g. 8 for v5/v6, 16 for v7).
+  """
+  devices = jax.devices()
+  if not devices:
+    return 8
+  resolved_device = device or devices[0]
+
+  if not hasattr(resolved_device, 'device_kind'):
+    return 8
+
+  return SPARSECORE_SUBLANE_COUNT_MAP.get(resolved_device.device_kind, 8)

@@ -43,14 +43,6 @@
 
 namespace jax_sc_embedding {
 
-// TPU_VECTOR_REGISTER_ALIGNMENT_SIZE represents the required alignment for data
-// loaded into TPU vector registers, which are typically 8 sublanes x 128 lanes.
-// Data dimensions, specially the second most minor, must be padded to be
-// multiples of this value to ensure efficient TPU processing and avoid memory
-// inefficiency. This alignment is enforced by XLA. This applies to most current
-// generations of TPUs (v2, v3, v4, v5, v6).
-inline constexpr int TPU_VECTOR_REGISTER_ALIGNMENT_SIZE = 8;
-
 // numpy uses row major order, while eigen defaults to column major.
 template <typename T>
 using MatrixX =
@@ -469,6 +461,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const bool allow_id_dropping = true;
   // Whether mini-batching is enabled.
   const bool enable_minibatching = false;
+  // SparseCore sublane count (e.g. 8 for v5/v6e, 16 for v7x).
+  const int sparsecore_sublane_count ABSL_REQUIRE_EXPLICIT_INIT;
 
   // The batch number should be a sequential counter that is unique for each
   // batch. It is safe to reset this counter to 0 on restart. The number should
@@ -500,8 +494,7 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
   // Returns the size of row pointers per bucket.
   int GetRowPointersSizePerBucket() const {
-    return std::max(static_cast<int>(GetNumScs()),
-                    TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+    return std::max(static_cast<int>(GetNumScs()), sparsecore_sublane_count);
   }
 
   // Returns the size of row pointers per device.
@@ -579,7 +572,8 @@ inline int GetActualRowPointersSizePerDevice(
 int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
                                            int global_device_count,
                                            int num_sc_per_device,
-                                           bool enable_minibatching);
+                                           bool enable_minibatching,
+                                           int sparsecore_sublane_count);
 
 int ComputeCooBufferSizePerDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,

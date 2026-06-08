@@ -66,6 +66,8 @@ struct BufferFillingOptions {
   int coo_buffer_size ABSL_REQUIRE_EXPLICIT_INIT;
   // Whether minibatching is enabled.
   bool enable_minibatching ABSL_REQUIRE_EXPLICIT_INIT;
+  // SparseCore sublane count.
+  int sparsecore_sublane_count ABSL_REQUIRE_EXPLICIT_INIT;
 };
 
 // Check if the current indexes are valid within the buffer sizes.
@@ -102,7 +104,7 @@ void PadRowPointersBuffer(int& lhs_row_offset, int padding, int row_end,
 
 // Enum to specify the padding behavior for `PadCooBuffer`.
 enum class PadType {
-  // Pads to the next HBM alignment boundary.
+  // Pads to the next vector alignment boundary.
   kAlignOnly,
   // Pads to the end of the provided buffer segment (`coo_end`).
   kPadToEnd
@@ -114,15 +116,16 @@ enum class PadType {
 //   `coo_index`: Current index into the COO buffer.
 //   `coo_end`: End index of the COO buffer segment to consider for padding.
 //   `pad_type`: Specifies the padding behavior.
+//   `alignment_size`: The alignment size to pad to.
 //   `csr`: CSR arrays to be padded.
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
-                  internal::CsrArraysRefPerDevice& csr) {
+                  int alignment_size, internal::CsrArraysRefPerDevice& csr) {
+  DCHECK_GT(alignment_size, 0);
   if (pad_type == PadType::kPadToEnd) {
     coo_index = coo_end;
     return;
   }
-  while (coo_index % TPU_VECTOR_REGISTER_ALIGNMENT_SIZE != 0 &&
-         coo_index < coo_end) {
+  while (coo_index % alignment_size != 0 && coo_index < coo_end) {
     csr.embedding_ids[coo_index] = INT_MAX;
     csr.sample_ids[coo_index] = INT_MAX;
     csr.gains[coo_index] = std::nanf("");
@@ -154,7 +157,8 @@ void AdvanceAndPadPartitions(int& current_partition_id,
     csr_arrays.row_pointers[lhs_row_index++] =
         GetRowPointer(coo_index, options);
     // Align partition.
-    PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly, csr_arrays);
+    PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly,
+                 options.sparsecore_sublane_count, csr_arrays);
     ++current_partition_id;
   }
 }
@@ -221,13 +225,14 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
 int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
                               int64_t suggested_coo_buffer_size_per_device,
                               int num_scs_per_device,
+                              int sparsecore_sublane_count,
                               absl::string_view stacked_table_name) {
   // Since the suggested size corresponds to only current device (local SCs),
   // Buffer for each SC should be properly aligned, hence ALIGNMENT *
   // num_scs_per_device
-  int64_t suggested_value = xla::RoundUpTo<int64_t>(
-      suggested_coo_buffer_size_per_device,
-      TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_scs_per_device);
+  int64_t suggested_value =
+      xla::RoundUpTo<int64_t>(suggested_coo_buffer_size_per_device,
+                              sparsecore_sublane_count * num_scs_per_device);
   CHECK(suggested_value <= theoretical_max)
       << "Suggested Coo Buffer Size is larger than the theoretical "
          "max for table "
@@ -238,12 +243,13 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 }
 
 int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
-                                       int global_device_count,
-                                       int num_sc_per_device,
-                                       bool enable_minibatching) {
+                                           int global_device_count,
+                                           int num_sc_per_device,
+                                           bool enable_minibatching,
+                                           int sparsecore_sublane_count) {
   const int num_scs = global_device_count * num_sc_per_device;
-  const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
-      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  const int64_t max_ids_rounded_up =
+      xla::RoundUpTo<int64_t>(max_ids_per_partition, sparsecore_sublane_count);
   // If minibatching is enabled, `theoretical_max` is multiplied by
   // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
   // core are packed into a single buffer.
@@ -263,10 +269,11 @@ int ComputeCooBufferSizePerDevice(
   const int batch_number = options.batch_number;
 
   const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
-      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+      max_ids_per_partition, options.sparsecore_sublane_count);
   const int64_t theoretical_max = ComputeTheoreticalMaxCooBufferSize(
       max_ids_per_partition, options.global_device_count,
-      options.num_sc_per_device, options.enable_minibatching);
+      options.num_sc_per_device, options.enable_minibatching,
+      options.sparsecore_sublane_count);
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                          << ": " << theoretical_max
@@ -286,7 +293,8 @@ int ComputeCooBufferSizePerDevice(
                            << suggested_coo_buffer_size_per_device.value();
     computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
         theoretical_max, suggested_coo_buffer_size_per_device.value(),
-        num_scs_per_device, stacked_table_name);
+        num_scs_per_device, options.sparsecore_sublane_count,
+        stacked_table_name);
   } else {
     LOG_IF(WARNING, batch_number % 10000 == 0)
         << "No Coo Buffer Size provided for table " << stacked_table_name
@@ -422,6 +430,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                   .num_scs = num_scs,
                   .coo_buffer_size = coo_buffer_size,
                   .enable_minibatching = options.enable_minibatching,
+                  .sparsecore_sublane_count = options.sparsecore_sublane_count,
               },
               csr_arrays, dropped_ids_in_segment);
           shared_segment_data->dropped_id_counts[segment_idx].emplace(
@@ -429,11 +438,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
           if (options.enable_minibatching) {
             // Align minibatch buffer
             PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
-                         csr_arrays);
-          } else {
-            // Align SparseCore buffer (since each SC has only 1 minibatch).
-            const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
-            PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd, csr_arrays);
+                         options.sparsecore_sublane_count, csr_arrays);
           }
           // We could compute per minibatch buffer size, but we serialize the
           // filling for multiple (>1) minibatches instead. Also because it lies
@@ -457,7 +462,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
         int coo_begin =
             shared_segment_data->coo_begins[total_segments - 1].get();
         PadCooBuffer(coo_begin, coo_buffer_size, PadType::kPadToEnd,
-                     csr_arrays);
+                     options.sparsecore_sublane_count, csr_arrays);
         // Compute total dropped ID count.
         int total_dropped_id_count = 0;
         for (int i = 0; i < total_segments; ++i) {

@@ -11,8 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
+import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
@@ -62,6 +64,46 @@ class UtilsTest(parameterized.TestCase):
     )
     unsharded = utils.unshard_emb_table(sharded, num_sc_per_device)
     np.testing.assert_array_equal(unsharded, table)
+
+  @parameterized.named_parameters(
+      ("tpu_v5", "TPU v5", 8),
+      ("tpu_v5p", "TPU v5p", 8),
+      ("tpu_v6_lite", "TPU v6 lite", 8),
+      ("tpu_v6e", "TPU v6e", 8),
+      ("tpu7", "TPU7", 16),
+      ("tpu7x", "TPU7x", 16),
+      ("unknown", "unknown_device", 8),
+  )
+  def test_sparsecore_sublane_count(self, device_kind, expected_alignment):
+    mock_device = mock.MagicMock()
+    mock_device.device_kind = device_kind
+
+    with mock.patch.object(jax, "devices", return_value=[mock_device]):
+      self.assertEqual(utils.sparsecore_sublane_count(), expected_alignment)
+
+  def test_sparsecore_sublane_count_no_devices(self):
+    with mock.patch.object(jax, "devices", return_value=[]):
+      self.assertEqual(utils.sparsecore_sublane_count(), 8)
+
+  def test_sparsecore_sublane_count_device_has_no_device_kind(self):
+    mock_device = mock.MagicMock(spec=[])
+    with mock.patch.object(jax, "devices", return_value=[mock_device]):
+      self.assertEqual(utils.sparsecore_sublane_count(), 8)
+
+  @parameterized.named_parameters(
+      ("tpu_v5", "TPU v5", 4),
+      ("tpu_v5p", "TPU v5p", 4),
+      ("tpu_v6_lite", "TPU v6 lite", 2),
+      ("tpu_v6e", "TPU v6e", 2),
+      ("tpu7", "TPU7", 2),
+      ("tpu7x", "TPU7x", 2),
+  )
+  def test_num_sparsecores_per_device(self, device_kind, expected_cores):
+    mock_device = mock.MagicMock()
+    mock_device.device_kind = device_kind
+
+    with mock.patch.object(jax, "devices", return_value=[mock_device]):
+      self.assertEqual(utils.num_sparsecores_per_device(), expected_cores)
 
 
 if __name__ == "__main__":
