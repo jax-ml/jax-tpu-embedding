@@ -158,7 +158,6 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
       .enable_minibatching = true,
-      .tpu_vector_alignment = 8,
   };
 
   for (auto s : state) {
@@ -207,7 +206,6 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
       .enable_minibatching = true,
-      .tpu_vector_alignment = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -272,7 +270,6 @@ void BM_FillBuffer(benchmark::State& state) {
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
       .enable_minibatching = true,
-      .tpu_vector_alignment = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =

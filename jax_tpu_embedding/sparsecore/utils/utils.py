@@ -15,7 +15,6 @@
 
 from absl import flags
 import einops
-import immutabledict
 import jax
 from jax.experimental import layout
 
@@ -29,20 +28,12 @@ _DUMP_DIR = flags.DEFINE_string(
     'dump_dir', None, 'Directory to write debug dumps to.'
 )
 
-NUM_SC_PER_DEVICE_MAP = immutabledict.immutabledict({
+NUM_SC_PER_DEVICE_MAP = {
     'TPU v5': 4,
     'TPU v5p': 4,  # In pathways setup, TPU v5 shows up as TPU v5p.
-    'TPU v6 lite': 2,  #  Trilium
-    'TPU7x': 2,  # Ironwood: Megacore is disabled.
-})
-
-TPU_VECTOR_ALIGNMENT_MAP = immutabledict.immutabledict({
-    'TPU v5': 8,
-    'TPU v5p': 8,
-    'TPU v6 lite': 8,  # Trilium: TPU v5e has 8 sublanes.
-    'TPU v6e': 16,  # Trilium: TPU v6e has 16 sublanes (for BF16).
-    'TPU7x': 16,  # Ironwood
-})
+    'TPU v6 lite': 2,
+    'TPU7x': 2,  # Megacore is disabled.
+}
 
 
 def num_sparsecores_per_device(device: jax.Device | None = None) -> int:
@@ -139,24 +130,3 @@ def embedding_table_format_with_sharding(
       ),
       sharding,
   )
-
-
-def tpu_vector_alignment(device: jax.Device | None = None) -> int:
-  """Determine the TPU vector register alignment size for a device.
-
-  Args:
-    device: JAX device to check.  If None, queries the first device in
-      jax.devices().
-
-  Returns:
-    TPU vector register alignment size (e.g. 8 for v5, 16 for v6).
-  """
-  devices = jax.devices()
-  if not devices:
-    return 8
-  device = device or devices[0]
-
-  if not hasattr(device, 'device_kind'):
-    return 8
-
-  return TPU_VECTOR_ALIGNMENT_MAP.get(device.device_kind, 8)

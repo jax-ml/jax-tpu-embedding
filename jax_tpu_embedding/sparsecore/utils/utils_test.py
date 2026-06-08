@@ -11,10 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
-import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
@@ -64,30 +62,6 @@ class UtilsTest(parameterized.TestCase):
     )
     unsharded = utils.unshard_emb_table(sharded, num_sc_per_device)
     np.testing.assert_array_equal(unsharded, table)
-
-  @parameterized.named_parameters(
-      ("tpu_v5", "TPU v5", 8),
-      ("tpu_v5p", "TPU v5p", 8),
-      ("tpu_v6_lite", "TPU v6 lite", 8),
-      ("tpu_v6e", "TPU v6e", 16),
-      ("tpu7x", "TPU7x", 16),
-      ("unknown", "unknown_device", 8),
-  )
-  def test_tpu_vector_alignment(self, device_kind, expected_alignment):
-    mock_device = mock.MagicMock()
-    mock_device.device_kind = device_kind
-
-    with mock.patch.object(jax, "devices", return_value=[mock_device]):
-      self.assertEqual(utils.tpu_vector_alignment(), expected_alignment)
-
-  def test_tpu_vector_alignment_no_devices(self):
-    with mock.patch.object(jax, "devices", return_value=[]):
-      self.assertEqual(utils.tpu_vector_alignment(), 8)
-
-  def test_tpu_vector_alignment_device_has_no_device_kind(self):
-    mock_device = mock.MagicMock(spec=[])
-    with mock.patch.object(jax, "devices", return_value=[mock_device]):
-      self.assertEqual(utils.tpu_vector_alignment(), 8)
 
 
 if __name__ == "__main__":

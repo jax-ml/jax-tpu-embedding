@@ -1,6 +1,5 @@
 # Library.
 absl-py
-immutabledict
 flax @ https://github.com/google/flax/archive/e2134af.zip
 numpy
 # Pre-release of JAX required for SparseCore TPUs.

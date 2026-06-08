@@ -961,39 +961,42 @@ class EmbeddingTest(parameterized.TestCase):
     )
     self.assertEqual(table_spec.stacked_table_spec.stack_embedding_dim % 8, 0)
 
-  @parameterized.named_parameters(
-      ("minibatching_disabled", False, 256),
-      ("minibatching_enabled", True, 16384),
-  )
-  def test_compute_theoretical_max_coo_buffer_size(
-      self, enable_minibatching, expected_size
-  ):
+  def test_compute_theoretical_max_coo_buffer_size(self):
     self.assertEqual(
         embedding.compute_theoretical_max_coo_buffer_size(
             max_ids_per_partition=12,
             global_device_count=1,
             num_sc_per_device=4,
-            enable_minibatching=enable_minibatching,
-            tpu_vector_alignment=8,
+            enable_minibatching=False,
         ),
-        expected_size,
+        256,
+    )
+    self.assertEqual(
+        embedding.compute_theoretical_max_coo_buffer_size(
+            max_ids_per_partition=12,
+            global_device_count=1,
+            num_sc_per_device=4,
+            enable_minibatching=True,
+        ),
+        16384,
     )
 
-  @parameterized.named_parameters(
-      ("minibatching_disabled", False, 32),
-      ("minibatching_enabled", True, 2048),
-  )
-  def test_compute_row_pointers_size_per_device(
-      self, enable_minibatching, expected_size
-  ):
+  def test_compute_row_pointers_size_per_device(self):
     self.assertEqual(
         embedding.compute_row_pointers_size_per_device(
             global_device_count=1,
             num_sc_per_device=4,
-            enable_minibatching=enable_minibatching,
-            tpu_vector_alignment=8,
+            enable_minibatching=False,
         ),
-        expected_size,
+        32,
+    )
+    self.assertEqual(
+        embedding.compute_row_pointers_size_per_device(
+            global_device_count=1,
+            num_sc_per_device=4,
+            enable_minibatching=True,
+        ),
+        2048,
     )
 
   def test_compute_coo_buffer_size_per_device(self):
@@ -1028,7 +1031,6 @@ class EmbeddingTest(parameterized.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         enable_minibatching=False,
-        tpu_vector_alignment=8,
     )
     self.assertEqual(res["test_table"], 64)
 

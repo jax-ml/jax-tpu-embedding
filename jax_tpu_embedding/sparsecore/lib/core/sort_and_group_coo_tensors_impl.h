@@ -535,10 +535,10 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                 ids_per_sc_partition_per_bucket.rowwise().sum().array();
             stats.required_buffer_size[local_sc_id] +=
                 partition_sizes
-                    .unaryExpr(
-                        [alignment = options.tpu_vector_alignment](int val) {
-                          return xla::RoundUpTo(val, alignment);
-                        })
+                    .unaryExpr([](int val) {
+                      return xla::RoundUpTo(val,
+                                            TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+                    })
                     .sum();
 
             internal::LogSparseCoreStats(local_sc_id, stacked_table_name,
