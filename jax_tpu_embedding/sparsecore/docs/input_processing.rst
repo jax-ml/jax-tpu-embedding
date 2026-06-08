@@ -57,27 +57,40 @@ To optimize for memory, it is thus important to utilize the
 Algorithm
 ^^^^^^^^^
 
-The algorithm works as follows for each stacked table:
+The preprocessing algorithm groups the input embedding IDs by the target
+SparseCore (based on table sharding) and prepares them for hardware access.
+Here is a simplified pseudocode illustrating the core steps:
 
-* COO Extraction:
+.. code-block:: python
 
-  * From different input source formats such as :func:`numpy.ndarray`,
-    ``tf.SparseTensor`` or ``RaggedTensor`` we create an instance of
-    ``AbstractInputBatch`` that combines the samples and their weights.
+    def preprocess_for_sparse_core(features, weights, num_sparse_cores, num_sc_per_device):
+      # partitions: (local_sc, global_sc) -> dict of {(local_embedding_id, local_row_id): accumulated_weight}
+      partitions = collections.defaultdict(lambda: collections.defaultdict(float))
 
-* Sorting and Grouping:
+      samples_per_sc = len(features) // num_sc_per_device
 
-  * The stacked rows are partitioned into ``num_sc_per_device`` chunks and a
-    monotonically increasing key (``uint64_t``) corresponding to each COO
-    tensor is used to sort and group them into partitions. The key
-    prioritizes ``global_sc_id`` then ``local_embedding_id``, while also packing
-    the index into the original list.
-  * Duplicate ``global_sc_id`` and ``local_embedding_id`` values are de-duped by
-    combining gains.
-  * FDO stats: ``max_ids_per_partition``, ``max_unique_ids_per_partition`` and
-    ``required_coo_buffer_size`` are calculated.
+      # 1. Partition & De-duplicate
+      for sample_id, (sample_features, sample_weights) in enumerate(
+          zip(features, weights)
+      ):
+        # Data parallelism: assign samples to local SparseCores
+        local_sc_id = sample_id // samples_per_sc
+        local_row_id = sample_id % samples_per_sc
 
-* Filling Buffer:
+        for embedding_id, weight in zip(sample_features, sample_weights):
+          # Model parallelism (sharding): find which SC holds this embedding ID
+          global_sc_id = embedding_id % num_sparse_cores
+          local_embedding_id = embedding_id // num_sparse_cores
 
-  * For each SparseCore, the partitions are packed in the above format using
-    padding as needed to achieve the correct buffer alignment.
+          key = (local_sc_id, global_sc_id)
+
+          # Accumulate weights (gains) for duplicate lookups in the same sample
+          partitions[key][(local_embedding_id, local_row_id)] += weight
+
+      # 2. Sort: Each partition must be sorted by embedding ID and sample ID
+      sorted_partitions = {
+          key: sorted(data.items()) for key, data in partitions.items()
+      }
+
+      # 3. Pack: Flatten and align partitions into CSR-wrapped COO buffers
+      return pack_to_csr_buffers(sorted_partitions)

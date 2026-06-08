@@ -126,64 +126,70 @@ minibatching is the recommended solution.
 How it works
 ------------
 
-When minibatching is enabled, the input preprocessing pipeline performs the
-following steps:
+When minibatching is enabled, the preprocessing and execution pipeline coordinates
+across all hosts to split the batch if the statically allocated buffer limits are
+exceeded.
 
-1.  **Check for minibatching requirement**: For each table in the input batch,
-    the preprocessing step checks if the number of embedding IDs or unique
-    embedding IDs destined for any SparseCore partition exceeds the limits
-    (``max_ids_per_partition`` and ``max_unique_ids_per_partition``). If these
-    limits are exceeded for any table, that table is marked as requiring
-    minibatching on the current host.
+Here is the high-level algorithm for minibatching and synchronization:
 
-2.  **Cross-host synchronization**: In a multi-host environment, if at least one
-    host requires minibatching for any table, all hosts must agree to use
-    minibatching for the current step. This is achieved via a cross-host
-    ``AllReduce`` operation implemented using gRPC, which aggregates the
-    minibatching requirement status from all hosts. If any host requires
-    minibatching, all hosts will proceed with it.
+.. code-block:: python
 
-3.  **Bucketization**: If minibatching is required, all embedding IDs in tables
-    that require minibatching are assigned to one of 64 buckets based on a hash
-    of the embedding ID.
+    # --- Host Side (Preprocessing) ---
+    def preprocess_minibatched_inputs(features, weights, max_sc_limits):
+      # 1. Determine if Minibatching is needed (Sync across hosts)
+      local_needs_mb = check_if_limits_exceeded(features, max_sc_limits)
+      global_needs_mb = cross_host_all_reduce_or(local_needs_mb)
 
-4.  **Minibatch creation**: The 64 buckets are grouped into minibatches. The
-    goal is to create minibatches such that each minibatch fits within the
-    memory constraints of the SparseCore. The division of buckets into
-    minibatches is determined by another ``AllReduce`` operation across hosts,
-    ensuring all hosts use the same minibatching strategy for the current step.
-    This division is represented by a bitmask called ``MinibatchingSplit``.
+      if not global_needs_mb:
+        return preprocess_normal(features, weights)
 
-5.  **Sequential processing**: During the embedding lookup (forward pass) and
-    gradient update (backward pass), if minibatching is active
-    (``num_minibatches > 1``), the SparseCore operation
-    (``sparse_dense_matmul``) is executed in a loop, once for each minibatch. In
-    the forward pass, embedding lookups are accumulated into the activation
-    tensors based on the feature's combiner (e.g., 'sum'). In the backward pass,
-    gradients are computed for each minibatch and applied sequentially to update
-    the embedding tables in-place using the configured optimizer.
+      # 2. Bucketize and Estimate Load
+      buckets = bucketize_by_hash(features, weights, num_buckets=64)
+      local_bucket_loads = estimate_memory_per_bucket(buckets)
+
+      # 3. Sync load and Decide splits (Sync across hosts)
+      global_bucket_loads = cross_host_all_reduce_sum(local_bucket_loads)
+      minibatch_splits = partition_buckets(global_bucket_loads, max_sc_memory_limit)
+
+      # 4. Pack into minibatched buffers
+      return pack_minibatches(buckets, minibatch_splits)
+
+
+    # --- Device Side (TPU Lookup) ---
+    # This runs inside JAX JIT/shard_map
+    def execute_lookup(preprocessed_inputs, embedding_tables):
+      activations = zeros(batch_size, embedding_dim)
+
+      # The compiler/hardware loops over minibatches sequentially
+      for mb_idx in range(preprocessed_inputs.num_minibatches):
+        # 1. Slice CSR pointers for the current minibatch
+        sliced_row_pointers = slice_csr(preprocessed_inputs.row_pointers, mb_idx)
+
+        # 2. Perform local lookup and accumulate
+        activations += local_sparse_dense_matmul(
+            sliced_row_pointers,
+            preprocessed_inputs.embedding_ids,
+            preprocessed_inputs.sample_ids,
+            preprocessed_inputs.gains,
+            embedding_tables
+        )
+
+      return activations
 
 Cross-Host Synchronization Flow
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-As mentioned in steps 2 and 4 above, cross-host synchronization is performed
-using a gRPC-based ``AllReduce`` operation. This is used first to
-synchronize a boolean ``minibatching_required`` flag, and then to synchronize the
-``MinibatchingSplit`` bitmask across all hosts. Both reductions use a logical OR
-operation. The synchronization within ``AllReduce`` involves two main
-phases:
+The cross-host synchronization (used for ``cross_host_all_reduce_or`` and
+``cross_host_all_reduce_sum`` in the pseudocode above) is implemented using a
+gRPC-based ``AllReduce`` operation. This ensures all hosts remain synchronized
+and use identical minibatching splits.
 
-1.  **Local Reduction**: Within each host, all participating threads (K) call
-    ``InitializeOrUpdateState``, and their values are combined (OR-ed) into a
-    single host-level value. The last thread to contribute its value is
-    responsible for initiating the global reduction, as at this point, all local
-    contributions are guaranteed to be aggregated into the host-level value.
-2.  **Global Reduction**: The locally-reduced values from all hosts (N) are
-    combined via an all-to-all gRPC exchange into a single globally-reduced
-    value, which is then made available to all threads on all hosts.
+The synchronization involves two main phases:
 
-The diagram below illustrates this flow, showing how ``SendLocalData`` executes in
-parallel with the ``ContributeData`` RPC handler.
+1.  **Local Reduction**: Within each host, all local threads combine their
+    data into a single host-level value.
+2.  **Global Reduction**: The host-level values are exchanged and combined
+    across all hosts via gRPC.
 
 .. graphviz::
 
@@ -244,41 +250,35 @@ parallel with the ``ContributeData`` RPC handler.
       {rank=same; i_GetRes; j_GetRes;}
   }
 
-Explanation of Global Reduction Parallelism
-"""""""""""""""""""""""""""""""""""""""""""
+Here is the simplified pseudocode for this coordination:
 
-Stage 1 ``InitializeOrUpdateState`` performs local reduction among K threads, with
-the last contributing thread (the "last contributing thread"), identified by
-causing a ``local_contributions_counter`` to reach zero, emerging with the host's
-locally-reduced value (e.g., L\ :sub:`i` for Host i).
+.. code-block:: python
 
-Stage 2 is the global reduction, which involves parallel send and receive
-operations:
+    # Shared state on each host, initialized for the step
+    global_value = initial_value
 
-* **2a. SendLocalData**: The last contributing thread on Host ``i`` calls
-  ``SendLocalData``, which sends L\ :sub:`i` to Host ``j`` (and all other peers) via
-  *asynchronous* gRPC calls. This function initiates the sends but does not
-  wait for responses.
-* **2b. ContributeData**: This is an RPC handler running on Host ``i``'s gRPC
-  server. When Host ``j`` calls ``SendLocalData``, its RPC arrives at Host ``i`` and
-  invokes ``ContributeData(L_j)``. This handler incorporates L\ :sub:`j` into Host
-  ``i``'s state via an OR-reduction and decrements a counter tracking
-  pending contributions from peers.
-* **Parallelism**: Because ``SendLocalData`` sends RPCs asynchronously, and
-  ``ContributeData`` is an RPC handler that reacts to incoming RPCs, these two
-  operations occur concurrently. Host ``i`` can be sending L\ :sub:`i` to Host ``j`` at
-  the same time as its ``ContributeData`` handler is processing L\ :sub:`k` received
-  from Host ``k``.
+    def all_reduce(my_thread_data, reduction_op):
+      # 1. Local Reduction: Combine data from all local threads on this host
+      host_value = contribute_local(my_thread_data, reduction_op)
 
-**Synchronization and Result Retrieval**:
+      # The last local thread to contribute triggers the global exchange
+      if is_last_local_thread():
+        for peer in peer_hosts:
+          # Send this host's data to peers asynchronously
+          send_data_async(peer, host_value)
 
-**Stage 3: Synchronization and Result Retrieval**:
-Synchronization occurs when threads call ``GetResult``, which blocks until
-both of the following conditions are met:
+      # 2. Synchronization: All threads block until local reduction is done
+      # and the RPC handler (below) has received and combined all peer data.
+      wait_for_all_local_and_peer_contributions()
 
-1. All K local threads have completed Stage 1 (``local_reduction_countdown``).
-2. All N-1 peers have sent their data, which is processed by ``ContributeData``
-   on the local gRPC server (``global_values_countdown``).
+      return global_value
 
-Once both local and global reduction are complete, ``GetResult`` unblocks and
-provides the final result to all waiting threads.
+    # RPC Handler: Executed on the local server when peer data arrives
+    def on_peer_data_received(peer_data, reduction_op):
+      global global_value
+      # Combine peer data into the global result
+      global_value = reduction_op(global_value, peer_data)
+
+The synchronization blocks execution until all local threads have completed local
+reduction and all peer hosts have contributed their data, ensuring a consistent
+global state before proceeding.
