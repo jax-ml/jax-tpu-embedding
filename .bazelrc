@@ -3,6 +3,7 @@
 ##############################################################################
 # TODO: Enable Bzlmod
 common --noenable_bzlmod
+common --repo_env USE_HERMETIC_CC_TOOLCHAIN=1
 
 # TODO: Migrate for https://github.com/bazelbuild/bazel/issues/7260
 common --incompatible_enable_cc_toolchain_resolution
