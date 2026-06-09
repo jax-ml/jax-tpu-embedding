@@ -36,7 +36,14 @@ echo "JTE_VERSION_SUFFIX: ${JTE_VERSION_SUFFIX}"
 echo "JTE_GIT_SHA: ${JTE_GIT_SHA}"
 echo "JTE_WHEEL_OUTDIR: ${JTE_WHEEL_OUTDIR}"
 
+# Add JTE_BAZEL_OPTS to bazel run command if set.
+BAZEL_OPTS=""
+if [ -n "$JTE_BAZEL_OPTS" ]; then
+  BAZEL_OPTS="$JTE_BAZEL_OPTS"
+fi
+
 bazel run //tools:build_wheel --verbose_failures \
+  $BAZEL_OPTS \
   --repo_env=HERMETIC_PYTHON_VERSION="${JTE_HERMETIC_PYTHON_VERSION}" \
   --//jax_tpu_embedding/sparsecore:version_suffix="${JTE_VERSION_SUFFIX}" \
   --//jax_tpu_embedding/sparsecore:git_commit="${JTE_GIT_SHA}" \
