@@ -37,6 +37,24 @@ pytype_strict_library(
 
 # Library target.
 pytype_strict_library(
+    name = "checkpoint_utils",
+    srcs = ["checkpoint_utils.py"],
+    deps = [
+        ":embed",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/lib/nn:table_stacking",
+        "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
+        "//jax_tpu_embedding/sparsecore/utils",
+        pypi_requirement("absl/logging"),
+        pypi_requirement("flax/nnx"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+        pypi_requirement("orbax/checkpoint"),
+    ],
+)
+
+pytype_strict_library(
     name = "nnx",
     srcs = ["__init__.py"],
     visibility = [
@@ -44,6 +62,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/flax:__pkg__",
     ],
     deps = [
+        ":checkpoint_utils",  # buildcleaner: keep
         ":embed",  # buildcleaner: keep
     ],
 )
