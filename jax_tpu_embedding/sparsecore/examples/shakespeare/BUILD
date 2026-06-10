@@ -24,6 +24,7 @@ tpu_py_strict_test(
     name = "jax_sc_shakespeare_jit_test",
     srcs = ["jax_sc_shakespeare_jit.py"],
     args = [
+        "--dump_dir=$$TEST_UNDECLARED_OUTPUTS_DIR",
         # "--vmodule=jax_sc_shakespeare_jit=1",
     ],
     main = "jax_sc_shakespeare_jit.py",

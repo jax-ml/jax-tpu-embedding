@@ -15,11 +15,7 @@ r"""Simple benchmarks for preprocessing input for sparse-dense matmul.
 
 Example usage:
 
-On perflab comparing against HEAD:
-benchy --perflab --runs=10 --reference=srcfs --benchmark_filter=all \
- //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks.par
-
-Or locally:
+Locally:
 bazel run -c opt --dynamic_mode=off --copt=-gmlt \
  //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks \
  -- --benchmark_filter=all --cpu_profile=/tmp/preprocess.prof

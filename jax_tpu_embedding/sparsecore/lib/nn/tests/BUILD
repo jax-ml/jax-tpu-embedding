@@ -55,8 +55,6 @@ pytype_strict_binary(
 
 # Verify that the benchmarks run for small values of (#features, #samples).
 #
-# This can also be used with benchy:
-# benchy //jax_tpu_embedding/sparsecore/lib/nn/tests:preprocess_input_benchmarks_test
 # (Uses default value for num_features and num_samples ignoring the args below.)
 pytype_strict_contrib_test(
     name = "preprocess_input_benchmarks_test",
