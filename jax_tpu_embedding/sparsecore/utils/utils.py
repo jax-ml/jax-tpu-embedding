@@ -28,11 +28,16 @@ _DUMP_DIR = flags.DEFINE_string(
     'dump_dir', None, 'Directory to write debug dumps to.'
 )
 
+# The device kind names (keys) must align with the external names mapped in
+# https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#versions.
+# The SparseCore counts (values) should match the JAX TPU info in
+# https://github.com/jax-ml/jax/blob/main/jax/_src/pallas/mosaic/tpu_info.py.
 NUM_SC_PER_DEVICE_MAP = {
     'TPU v5': 4,
-    'TPU v5p': 4,  # In pathways setup, TPU v5 shows up as TPU v5p.
-    'TPU v6 lite': 2,
-    'TPU7x': 2,  # Megacore is disabled.
+    'TPU v5p': 4,  # Alias for 'TPU v5'.
+    'TPU v6e': 2,  # Trillium.
+    'TPU v6 lite': 2,  # Alias for 'TPU v6e'.
+    'TPU7x': 2,  # Ironwood. Megacore is disabled.
 }
 
 
