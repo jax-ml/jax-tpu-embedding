@@ -550,25 +550,36 @@ def _verify_stack_tables(
     )
 
 
-def _compute_table_to_setting_in_stack(
+def compute_table_to_setting_in_stack(
     stack_name: str,
     table_names: Sequence[str],
     padded_embedding_dim: int,
     table_to_padded_vocab_size: Mapping[str, int],
-    global_device_count: int,
-    num_sc_per_device: int,
+    num_shards: int,
     rotation: int,
 ) -> Mapping[str, embedding_spec.TableSettingInStack]:
-  """Returns the table to setting in stack mapping."""
+  """Returns the table to setting in stack mapping.
+
+  Args:
+    stack_name: The name of the stack.
+    table_names: The names of the tables in the stack.
+    padded_embedding_dim: The padded embedding dimension of the stack.
+    table_to_padded_vocab_size: The mapping from table name to padded vocab
+      size.
+    num_shards: The number of shards.
+    rotation: The rotation of the shards.
+
+  Returns:
+    The mapping from table name to setting in stack.
+  """
   table_name_to_setting_in_stack = {}
   row_offset_in_shard = 0
   shard_rotation = 0
-  num_sc = num_sc_per_device * global_device_count
   for tname in table_names:
     if tname not in table_to_padded_vocab_size:
       raise ValueError(f"Padded vocab size for Table {tname} is missing.")
 
-    num_rows_in_shard = table_to_padded_vocab_size[tname] // num_sc
+    num_rows_in_shard = table_to_padded_vocab_size[tname] // num_shards
     setting_in_stack = embedding_spec.TableSettingInStack(
         stack_name=stack_name,
         padded_vocab_size=table_to_padded_vocab_size[tname],
@@ -577,9 +588,9 @@ def _compute_table_to_setting_in_stack(
         shard_rotation=shard_rotation,
     )
     row_offset_in_shard += num_rows_in_shard
-    # Rotate the shard by num_sc_per_device and then bound by the
-    # total number of sparsecores.
-    shard_rotation = (shard_rotation + rotation) % (num_sc)
+    # Rotate the shard by rotation and then bound by the
+    # total number of sparsecores (num_shards).
+    shard_rotation = (shard_rotation + rotation) % num_shards
     table_name_to_setting_in_stack[tname] = setting_in_stack
     logging.info("Table %s has setting in stack: %s", tname, setting_in_stack)
   return table_name_to_setting_in_stack
@@ -635,13 +646,12 @@ def _stack_feature_specs(
       f.table_spec.name: f for f in jax.tree.leaves(features)
   }
   logging.info("Creating stack: %s with tables: %s", stack_name, table_names)
-  table_name_to_setting_in_stack = _compute_table_to_setting_in_stack(
+  table_name_to_setting_in_stack = compute_table_to_setting_in_stack(
       stack_name=stack_name,
       table_names=table_names,
       padded_embedding_dim=padded_embedding_dim,
       table_to_padded_vocab_size=table_to_padded_vocab_size,
-      global_device_count=global_device_count,
-      num_sc_per_device=num_sc_per_device,
+      num_shards=global_device_count * num_sc_per_device,
       rotation=rotation,
   )
   # Get the features for which the table is stacked in this group.

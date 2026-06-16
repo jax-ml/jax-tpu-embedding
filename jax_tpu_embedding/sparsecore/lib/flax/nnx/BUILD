@@ -13,7 +13,12 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load(
+    "//third_party/bazel/python:pytype.bzl",
+    "pytype_strict_binary",
+    "pytype_strict_library",
+    pytype_strict_test = "pytype_strict_contrib_test",
+)
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -64,5 +69,55 @@ pytype_strict_library(
     deps = [
         ":checkpoint_utils",  # buildcleaner: keep
         ":embed",  # buildcleaner: keep
+        ":offline_converter_lib",  # buildcleaner: keep
+    ],
+)
+
+pytype_strict_library(
+    name = "offline_converter_lib",
+    srcs = ["offline_converter.py"],
+    deps = [
+        ":checkpoint_utils",
+        "//jax_tpu_embedding/sparsecore/utils",
+        pypi_requirement("absl:app"),
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
+    ],
+)
+
+pytype_strict_binary(
+    name = "offline_converter",
+    srcs = ["offline_converter.py"],
+    main = "offline_converter.py",
+    deps = [
+        ":checkpoint_utils",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl:app"),
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
+    ],
+)
+
+# Note that tests in //jax_tpu_embedding/sparsecore/examples/shakespeare exercise
+# checkpoints converted using this binary.
+pytype_strict_test(
+    name = "offline_converter_test",
+    srcs = ["offline_converter.py"],
+    args = [
+        "--input_checkpoint=jax_tpu_embedding/sparsecore/examples/shakespeare/testdata/checkpoint-2x2x2.tgz",
+        "--output_checkpoint=TEST_UNDECLARED_OUTPUTS_DIR/converted_checkpoints",
+        "--target_num_devices=4",
+        "--target_device_kind=TPU_v5",
+    ],
+    data = ["//jax_tpu_embedding/sparsecore/examples/shakespeare:checkpoint_2x2x2"],
+    main = "offline_converter.py",
+    deps = [
+        ":checkpoint_utils",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl:app"),
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
     ],
 )

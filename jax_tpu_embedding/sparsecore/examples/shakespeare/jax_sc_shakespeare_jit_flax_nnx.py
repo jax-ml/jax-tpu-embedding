@@ -44,14 +44,13 @@ _CHECKPOINT_DIR = flags.DEFINE_string(
     None,
     'If set, checkpoints will be written to this directory.',
 )
+_INPUT_CHECKPOINT_DIR = flags.DEFINE_string(
+    'input_checkpoint_dir',
+    None,
+    'If set, a checkpoint will be restored from this directory.',
+)
 _CHECKPOINT_INTERVAL = flags.DEFINE_integer(
     'checkpoint_interval', 100, 'Number of steps per checkpoint'
-)
-_CHECKPOINT_RESUME = flags.DEFINE_bool(
-    'checkpoint_resume',
-    True,
-    'If set True and checkpoint_dir is specified, try to resume the training'
-    ' from the latest checkpoint available in the checkpoint_dir.',
 )
 _CHECKPOINT_MAX_TO_KEEP = flags.DEFINE_integer(
     'checkpoint_max_to_keep',
@@ -71,7 +70,7 @@ _FDO_DIR = flags.DEFINE_string(
 )
 
 
-def expand_directory_path(input_dir: str):
+def expand_directory_path(input_dir: str) -> str | None:
   """Expands the input directory if it refers to a test output directory.
 
 
@@ -103,9 +102,7 @@ def expand_directory_path(input_dir: str):
   # Special handling for test output subdirectories.
   if input_dir.startswith(testdir_key + '/'):
     if not testdir_env_var:
-      raise ValueError(
-          f'{testdir_env_var} environment variable is not set.'
-      )
+      raise ValueError(f'{testdir_key} environment variable is not set.')
     expanded_dir = os.path.join(
         testdir_env_var, input_dir[len(testdir_key + '/') :]
     )
@@ -115,9 +112,7 @@ def expand_directory_path(input_dir: str):
   # Special handling for writing to the test output directory.
   if input_dir == testdir_key:
     if not testdir_env_var:
-      raise ValueError(
-          f'{testdir_env_var} environment variable is not set.'
-      )
+      raise ValueError(f'{testdir_key} environment variable is not set.')
     return testdir_env_var
 
   return os.path.abspath(input_dir)
@@ -145,11 +140,24 @@ def create_checkpoint_manager() -> ocp.CheckpointManager | None:
   )
   cp_path = expand_directory_path(_CHECKPOINT_DIR.value)
   logging.info('Checkpoint path: %s', cp_path)
-  return ocp.CheckpointManager(cp_path, options=cp_options)
+  return checkpoint_utils.create_checkpoint_manager(
+      cp_path=cp_path,
+      cp_options=cp_options,
+  )
 
 
-def run_model():
+def run_model() -> None:
   """Runs the model including input processing and training."""
+
+  if (
+      _INPUT_CHECKPOINT_DIR.value is not None
+      and _CROSS_TOPOLOGY_CHECKPOINT_RESTORE.value is not None
+  ):
+    raise ValueError(
+        'Only one of --input_checkpoint or --cross_topology_checkpoint_restore'
+        ' can be set.'
+    )
+
   config = shakespeare_config.get_config()
 
   mesh = Mesh(
@@ -178,16 +186,30 @@ def run_model():
   dense_tx = optax.adam(learning_rate=config.learning_rate)
   optimizer = embed.PartitionedOptimizer(model, dense_tx)
 
-  checkpoint_utils.restore_cross_topology_checkpoint(
-      cross_topology_checkpoint_restore_path=expand_directory_path(
-          _CROSS_TOPOLOGY_CHECKPOINT_RESTORE.value
-      ),
-      model=model,
-      optimizer=optimizer,
-      target_feature_specs=feature_specs,
-      num_global_devices=config.num_global_devices,
-      num_sc_per_device=config.num_sc_per_device,
-  )
+  if _CROSS_TOPOLOGY_CHECKPOINT_RESTORE.value is not None:
+    restore_path = expand_directory_path(
+        _CROSS_TOPOLOGY_CHECKPOINT_RESTORE.value
+    )
+    if restore_path is not None and restore_path.endswith('.tgz'):
+      restore_path = checkpoint_utils.decompress_checkpoint(restore_path)
+    checkpoint_utils.restore_cross_topology_checkpoint(
+        cross_topology_checkpoint_restore_path=restore_path,
+        model=model,
+        optimizer=optimizer,
+        target_feature_specs=feature_specs,
+        num_global_devices=config.num_global_devices,
+        num_sc_per_device=config.num_sc_per_device,
+    )
+  elif _INPUT_CHECKPOINT_DIR.value is not None:
+    input_path = expand_directory_path(_INPUT_CHECKPOINT_DIR.value)
+    if input_path is not None and input_path.endswith('.tgz'):
+      input_path = checkpoint_utils.decompress_checkpoint(input_path)
+    checkpoint_utils.restore_checkpoint(
+        input_checkpoint_path=input_path,
+        step=None,  # Restore from the latest step.
+        model=model,
+        optimizer=optimizer,
+    )
 
   model_sharding = embed.get_named_sharding(model, mesh)
   optimizer_sharding = embed.get_named_sharding(optimizer, mesh)

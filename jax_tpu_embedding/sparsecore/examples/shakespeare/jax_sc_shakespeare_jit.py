@@ -44,7 +44,6 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-
 np.set_printoptions(threshold=np.inf)
 Nested = embedding.Nested
 
@@ -474,8 +473,6 @@ def run_model():
 def main(argv: collections.abc.Sequence[str]) -> None:
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
-  if flags.FLAGS.dump_dir:
-    flags.FLAGS.dump_dir = os.path.expandvars(flags.FLAGS.dump_dir)
   run_model()
 
 

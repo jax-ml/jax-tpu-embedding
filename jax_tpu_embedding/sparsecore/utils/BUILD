@@ -27,7 +27,6 @@ pytype_strict_library(
         "utils.py",
     ],
     deps = [
-        pypi_requirement("absl/flags"),
         pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("jax/experimental:layout"),

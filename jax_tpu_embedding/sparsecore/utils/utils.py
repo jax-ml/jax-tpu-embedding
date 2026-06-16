@@ -13,7 +13,8 @@
 # limitations under the License.
 """Utilities for examples."""
 
-from absl import flags
+import typing
+
 import einops
 import jax
 from jax.experimental import layout
@@ -23,10 +24,6 @@ if jax.__version_info__ >= (0, 6, 3):
 else:
   Layout = layout.DeviceLocalLayout  # type: ignore
 
-
-_DUMP_DIR = flags.DEFINE_string(
-    'dump_dir', None, 'Directory to write debug dumps to.'
-)
 
 # The device kind names (keys) must align with the external names mapped in
 # https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#versions.
@@ -41,7 +38,13 @@ NUM_SC_PER_DEVICE_MAP = {
 }
 
 
-def num_sparsecores_per_device(device: jax.Device | None = None) -> int:
+class DeviceLike(typing.Protocol):
+  device_kind: str
+
+
+def num_sparsecores_per_device(
+    device: DeviceLike | None = None,
+) -> int:
   """Determine the number of sparsecores available on a device.
 
   Args:
@@ -61,7 +64,10 @@ def num_sparsecores_per_device(device: jax.Device | None = None) -> int:
 
   device_kind = device.device_kind
   if device_kind not in NUM_SC_PER_DEVICE_MAP:
-    raise ValueError(f'Unknown sparsecore count for device kind: {device_kind}')
+    raise ValueError(
+        f'Unknown sparsecore count for device kind: {device_kind}. Known'
+        f' device kinds: {NUM_SC_PER_DEVICE_MAP.keys()}'
+    )
 
   return NUM_SC_PER_DEVICE_MAP[device_kind]
 
@@ -128,6 +134,16 @@ def embedding_table_format_with_sharding(
     sharding: jax.sharding.Sharding,
 ) -> jax.sharding.Sharding:
   """Returns the layout format of the embedding table."""
+  if hasattr(sharding, 'mesh') and isinstance(
+      sharding.mesh, jax.sharding.AbstractMesh
+  ):
+    device_kind = getattr(sharding.mesh.abstract_device, 'device_kind', '')
+  else:
+    devices = list(sharding.device_set)
+    device_kind = getattr(devices[0], 'device_kind', '') if devices else ''
+
+  if device_kind == 'cpu':
+    return sharding
   return layout.Format(  # pytype: disable=bad-return-type
       Layout(
           major_to_minor=(0, 1),
