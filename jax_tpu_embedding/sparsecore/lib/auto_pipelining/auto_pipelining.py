@@ -132,9 +132,9 @@ def dump_jaxpr(jaxpr: jex.core.ClosedJaxpr | jex.core.Jaxpr, name: str) -> None:
 
 
 class EmbeddingPipeliningState(NamedTuple):
-  activations_1: list[jax.Array] | None = None
+  activations_1: Any = None
   args_1: Any = None
-  updates_0: list[jax.Array] | None = None
+  updates_0: Any = None
 
 
 @dataclasses.dataclass
@@ -180,7 +180,7 @@ def _run(
     )
   else:
     # No dense computation needed, create empty results.
-    updates_1 = None
+    updates_1 = runner.dummy_updates()
     _, *func_results = runner.none_result()
 
   # Prepare data for the next step.

@@ -19,6 +19,7 @@ from typing import Any
 import jax
 import jax.extend as jex
 from jax.interpreters import partial_eval as pe
+import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import preprocess
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import utils
 
@@ -43,6 +44,12 @@ class FunctionRunner:
 
   update_params_len: int
   activations_len: int
+  update_params_avals: list[Any] = dataclasses.field(default_factory=list)
+
+  def dummy_updates(self):
+    return [
+        jnp.zeros(aval.shape, aval.dtype) for aval in self.update_params_avals
+    ]
 
   def _run_jaxpr(self, jaxpr, *args):
     flatten_args = jax.tree.leaves(args)
@@ -171,12 +178,17 @@ def decompose(
       lookups[embedding_tables[0]] = eqn
     elif utils.is_embedding_update(eqn):
       # The last argument is excluded because it's the embedding table.
-      update_params, embedding_tables = utils.update_params(eqn)
+      update_params, embedding_tables, unmapped_args = utils.update_params(eqn)
       emb_slot_vars.extend(embedding_tables)
       update_param_outputs.extend(update_params)
+      update_param_outputs.extend(unmapped_args)
       cloned_params = utils.clone_vars(update_params)
-      eqn = eqn.replace(invars=cloned_params + embedding_tables)
+      cloned_unmapped = utils.clone_vars(unmapped_args)
+      eqn = eqn.replace(
+          invars=cloned_params + embedding_tables + cloned_unmapped
+      )
       update_param_inputs.extend(cloned_params)
+      update_param_inputs.extend(cloned_unmapped)
       assert (
           embedding_tables[0] not in updates
       ), 'Duplicate embedding updates for the same table.'
@@ -320,4 +332,5 @@ def decompose(
       dense_jaxpr=dense_jaxpr,
       update_params_len=update_len,
       activations_len=act_len,
+      update_params_avals=[var.aval for var in update_param_outputs],
   )

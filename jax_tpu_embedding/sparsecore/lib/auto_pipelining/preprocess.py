@@ -105,15 +105,34 @@ def _validate_embedding_update(eqn: jex.core.JaxprEqn) -> None:
       f'Got {update_eqn.primitive.name}'
   )
 
-  # The embedding table should be the last input of the update shard_map.
-  # Used when passing updates from dense to SC backward.
-  embed_tables = jaxpr.invars[utils.EMBEDDING_UPDATE_DATA_LEN :]
-  assert (
-      update_eqn.invars[utils.EMBEDDING_UPDATE_DATA_LEN - 1 :][
-          : len(embed_tables)
-      ]
-      == embed_tables
-  ), 'Embedding table should be the last input of the update shard_map'
+  # Table count mapping by optimizer name substring.
+  optimizer_tables_count = {
+      'adam': 3,
+      'adagrad_momentum': 3,
+      'adagrad': 2,
+      'ftrl': 3,
+      'sgd': 1,
+      'laprop': 3,
+      'f2a': 1,
+  }
+
+  prim_name = update_eqn.primitive.name
+  num_tables = 1
+  for opt, count in optimizer_tables_count.items():
+    if opt in prim_name:
+      num_tables = count
+      break
+
+  # For all these primitives, data inputs are first 5.
+  prim_tables = update_eqn.invars[5 : 5 + num_tables]
+
+  # Verify that all identified tables and slots are inputs to the shard_map.
+  for var in prim_tables:
+    if isinstance(var, jex.core.Var):
+      assert var in jaxpr.invars, (
+          f'Table variable {var} from primitive {prim_name} not found in'
+          ' shard_map lambda invars'
+      )
 
   # Embedding table should be the only output of the update shard_map.
   # This is used when we combine the lookup and update shard_maps.
