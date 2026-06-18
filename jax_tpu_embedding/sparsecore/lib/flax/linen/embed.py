@@ -24,7 +24,6 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
-
 LogicalNames = typing.LogicalNames
 Nested = embedding.Nested
 EmbeddingLookupInput = embedding.PreprocessedInput
@@ -48,6 +47,7 @@ def with_sparsecore_layout(
     mesh: jax.sharding.Mesh,
 ) -> Callable[..., Any]:
   """Wraps a function to add a SparseCore layout."""
+
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
     return WithSparseCoreLayout(fn(*args, **kwargs), names, mesh=mesh)
@@ -167,7 +167,28 @@ class SparseCoreEmbed(nn.Module):
     return _emb_lookup(
         self,
         embedding_lookup_inputs,
-        self.embedding_table,
+        self._ensure_float32(self.embedding_table),
+    )
+
+  def _ensure_float32(
+      self, table: embedding.Nested[jax.Array]
+  ) -> embedding.Nested[jax.Array]:
+    """Casts embedding table leaves to float32 if needed.
+
+    SparseCore's tpu_sparse_dense_matmul (and its gradient) primitives strictly
+    require float32 inputs. Mixed-precision training frameworks may initialize
+    or cast model parameters to bfloat16. Casting here ensures correctness
+    regardless of the caller's dtype policy.
+
+    Args:
+      table: The embedding table to cast.
+
+    Returns:
+      The embedding table with leaves cast to float32.
+    """
+    return jax.tree.map(
+        lambda x: x.astype(np.float32) if x.dtype != np.float32 else x,
+        table,
     )
 
   def apply_gradient(
@@ -186,8 +207,8 @@ class SparseCoreEmbed(nn.Module):
     """
     _, embed_table = _emb_lookup_bwd(
         self,
-        (embedding_lookup_inputs, self.embedding_table),
-        gradients,
+        (embedding_lookup_inputs, self._ensure_float32(self.embedding_table)),
+        self._ensure_float32(gradients),
     )
     path = '/'.join(self.path + (EMBEDDING_PARAM_NAME,))
     return {path: embed_table}
@@ -207,7 +228,18 @@ def _emb_lookup(
   return jax.shard_map(
       functools.partial(
           embedding.tpu_sparse_dense_matmul,
-          global_device_count=embedding_layer.mesh.size,
+          # Use num_shards (= mesh.shape[sharding_axis]) rather than
+          # mesh.size.  The shard_map below partitions data along
+          # `sharding_axis` only (via in_specs=P(sharding_axis)), so each
+          # shard receives batch/num_shards items.  tpu_sparse_dense_matmul
+          # uses global_device_count to determine per-shard output shapes
+          # and MOD table lookups, so the value must equal the actual shard
+          # count.  With a 1D mesh (the default) mesh.size == num_shards
+          # and both are correct.  With a multi-axis mesh, however,
+          # mesh.size is the total device count across ALL axes while only
+          # one axis is used for sharding, causing a mismatch that produces
+          # incorrectly-shaped embedding outputs.
+          global_device_count=embedding_layer.num_shards,
           feature_specs=embedding_layer.feature_specs,
           sharding_strategy=embedding_layer.table_sharding_strategy,
           enable_minibatching=embedding_layer.enable_minibatching,
@@ -239,7 +271,7 @@ def _emb_lookup_fwd(
 
 def _emb_lookup_bwd(embedding_layer, res, gradients):
   """Backward pass for embedding lookup."""
-  (embedding_lookups, emb_table) = res
+  embedding_lookups, emb_table = res
 
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition

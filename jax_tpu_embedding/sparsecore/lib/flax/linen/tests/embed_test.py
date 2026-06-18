@@ -582,6 +582,154 @@ class EmbeddingLayerTest(parameterized.TestCase):
         expected_grad_table_ac,
     )
 
+  def test_forward_and_backward_with_bfloat16_params(self):
+    """Tests that bfloat16 embedding tables are cast to float32 correctly.
+
+    Mixed-precision training frameworks may initialize or cast model parameters
+    to bfloat16. This test verifies that the forward pass (__call__) and
+    backward pass (apply_gradient) handle bfloat16 embedding tables by casting
+    them to float32 before calling the SparseCore primitives.
+    """
+    devices = jax.devices()
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+
+    feature_specs = (self.feature_spec_a,)
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        global_device_count=jax.device_count(),
+        num_sc_per_device=num_sc_per_device,
+    )
+
+    sc_module = embed.SparseCoreEmbed(
+        feature_specs=feature_specs,
+    )
+    step = 42
+    embedding_lookup_input = sc_module.preprocess_inputs(
+        step,
+        (self.input_tensor,),
+        None,  # uniform weights
+    )
+
+    padded_vocab_a = (
+        self.feature_spec_a.table_spec.setting_in_stack.padded_vocab_size
+    )
+    padded_dim_a = (
+        self.feature_spec_a.table_spec.setting_in_stack.padded_embedding_dim
+    )
+
+    device_count = len(devices)
+    emb_table_a = test_utils.row_initialize_with_padding(
+        self.feature_spec_a.table_spec, pad_value=_PAD_VALUE
+    )
+
+    emb_table_a_sharded = utils.shard_emb_table(
+        emb_table_a,
+        num_devices=device_count,
+        num_sc_per_device=num_sc_per_device,
+    )
+    embedding_variables = {}
+    embedding_variables['table_a'] = [
+        jax.device_put(
+            emb_table_a_sharded[i],
+            device=local_device,
+        )
+        for i, local_device in enumerate(devices)
+    ]
+    sharding = NamedSharding(sc_module.mesh, P(sc_module.sharding_axis, None))
+    embedding_variables['table_a'] = embedding.EmbeddingVariables(
+        table=jax.make_array_from_single_device_arrays(
+            shape=(padded_vocab_a, padded_dim_a),
+            sharding=sharding,
+            arrays=embedding_variables['table_a'],
+        ),
+        slot=embedding_spec.SGDSlotVariables(),
+    )
+
+    var_spec = jax.eval_shape(
+        sc_module.init,
+        jax.random.PRNGKey(0),
+        embedding_lookup_input,
+    )
+    out_sharding = nn.get_sharding(var_spec, sc_module.mesh)
+
+    params = jax.jit(
+        sc_module.init,
+        in_shardings=(
+            NamedSharding(sc_module.mesh, P()),
+            NamedSharding(sc_module.mesh, P(sc_module.sharding_axis)),
+        ),
+        out_shardings=out_sharding,
+    )(
+        jax.random.PRNGKey(0),
+        embedding_lookup_input,
+    )
+
+    # Replace the embedding variables with our custom ones.
+    params['params'][_EMBED_PARAM] = params['params'][
+        _EMBED_PARAM
+    ].replace_boxed(embedding_variables)
+
+    # Cast embedding tables to bfloat16 to simulate mixed-precision training.
+    params['params'][_EMBED_PARAM] = jax.tree.map(
+        lambda x: x.astype(jnp.bfloat16) if hasattr(x, 'astype') else x,
+        params['params'][_EMBED_PARAM],
+    )
+
+    # --- Forward pass: __call__ should cast bf16 tables to f32 internally ---
+    activations = jax.jit(sc_module.apply)(
+        params,
+        embedding_lookup_input,
+    )
+
+    expected_emb_activations = np.broadcast_to(
+        np.array(
+            [
+                [11.0],
+                [3.0],
+                [9.0],
+                [26.0],
+                [29.0],
+                [31.0],
+                [67.0],
+                [57.0],
+                [15.0],
+                [13.0],
+                [11.0],
+                [8.0],
+                [17.0],
+                [42.0],
+                [30.0],
+                [26.0],
+            ],
+            dtype=np.float32,
+        ),
+        (_BATCH_SIZE, _DIM_A),
+    )
+    np.testing.assert_allclose(
+        activations[0], expected_emb_activations, rtol=1e-2
+    )
+
+    # --- Backward pass: apply_gradient with bf16 params ---
+    activations_grad = (
+        jnp.ones(
+            (_BATCH_SIZE, _DIM_A),
+            dtype=jnp.bfloat16,
+        ),
+    )
+
+    params_updates = jax.jit(
+        functools.partial(sc_module.apply, method=sc_module.apply_gradient),
+    )(
+        params,
+        activations_grad,
+        embedding_lookup_input,
+    )
+
+    assert len(params_updates) == 1
+    embedding._assert_same_structure(
+        params_updates[_EMBED_PARAM], params['params'][_EMBED_PARAM].value
+    )
+
 
 if __name__ == '__main__':
   absltest.main()
