@@ -66,7 +66,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
-        pypi_requirement("flax/nnx"),
+        pypi_requirement("flax/nnx:v1"),
         pypi_requirement("jax"),
     ],
 )
