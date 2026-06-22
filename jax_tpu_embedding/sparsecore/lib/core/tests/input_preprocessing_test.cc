@@ -31,6 +31,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/synchronization/blocking_counter.h"  // from @com_google_absl
@@ -54,11 +55,13 @@ namespace jax_sc_embedding {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::absl_testing::StatusIs;
 using ::jax_sc_embedding::testing_utils::SetUpMinibatchingNodes;
 using ::testing::Each;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Gt;
+using ::testing::HasSubstr;
 using ::testing::SizeIs;
 
 using InputBatch =
@@ -1313,6 +1316,166 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
     ASSERT_TRUE(result.ok());
     EXPECT_GT(result->stats.dropped_id_count.at("stacked_table"), 0);
   }
+}
+
+TEST_F(TableStackingTest,
+       LocalDeviceCountLessThanOrEqualToZeroReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 0,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+  };
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(result,
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("local_device_count must be greater than 0")));
+}
+
+TEST_F(TableStackingTest,
+       GlobalDeviceCountLessThanOrEqualToZeroReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 0,
+      .num_sc_per_device = 4,
+  };
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(
+      result,
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("global_device_count must be greater than 0")));
+}
+
+TEST_F(TableStackingTest,
+       GlobalDeviceCountLessThanLocalDeviceCountReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 2,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+  };
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(
+      result,
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("global_device_count must be greater than or equal to "
+                         "local_device_count")));
+}
+
+TEST_F(TableStackingTest, InvalidShardingStrategyReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sharding_strategy = static_cast<ShardingStrategy>(0),
+  };
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(result, StatusIs(absl::StatusCode::kInvalidArgument,
+                               HasSubstr("Only mod sharding is supported")));
+}
+
+TEST_F(TableStackingTest, EmptyInputBatchesReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+  };
+  std::vector<std::unique_ptr<AbstractInputBatch>> empty_input_batches;
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(empty_input_batches), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(result, StatusIs(absl::StatusCode::kInvalidArgument,
+                               HasSubstr("input_batches cannot be empty")));
+}
+
+TEST_F(TableStackingTest,
+       NumScPerDeviceLessThanOrEqualToZeroReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 0,
+  };
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(result,
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("num_sc_per_device must be greater than 0")));
+}
+
+TEST_F(TableStackingTest, TotalNumScsIsNotPowerOfTwoReturnsInvalidArgument) {
+  // Arrange
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables;
+  stacked_tables[stacked_table_metadata_multi_[0].name] =
+      stacked_table_metadata_multi_;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 3,
+  };
+
+  // Act
+  auto result = PreprocessSparseDenseMatmulInput(
+      absl::MakeSpan(input_batches_multi_), stacked_tables, options);
+
+  // Assert
+  EXPECT_THAT(result, StatusIs(absl::StatusCode::kInvalidArgument,
+                               HasSubstr("must be a power of 2")));
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)

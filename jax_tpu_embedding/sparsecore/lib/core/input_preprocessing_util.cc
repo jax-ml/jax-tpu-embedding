@@ -24,6 +24,8 @@
 #include "absl/base/attributes.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/numeric/bits.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -483,6 +485,40 @@ void FillLocalDeviceBuffer(
       stacked_table_name, csr_arrays);
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
+}
+
+absl::Status PreprocessSparseDenseMatmulInputOptions::Validate() const {
+  if (sharding_strategy != ShardingStrategy::kMod) {
+    return absl::InvalidArgumentError(
+        "Only mod sharding is supported for now.");
+  }
+  if (local_device_count <= 0) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("local_device_count must be greater than 0, but got ",
+                     local_device_count));
+  }
+  if (global_device_count <= 0) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("global_device_count must be greater than 0, but got ",
+                     global_device_count));
+  }
+  if (global_device_count < local_device_count) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("global_device_count must be greater than or equal to "
+                     "local_device_count, but got ",
+                     global_device_count, " vs ", local_device_count));
+  }
+  if (num_sc_per_device <= 0) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("num_sc_per_device must be greater than 0, but got ",
+                     num_sc_per_device));
+  }
+  if (!absl::has_single_bit(static_cast<uint32_t>(GetNumScs()))) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Total number of SparseCores (", GetNumScs(),
+                     ") must be a power of 2."));
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace jax_sc_embedding

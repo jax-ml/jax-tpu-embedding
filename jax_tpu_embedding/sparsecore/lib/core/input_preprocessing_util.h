@@ -31,6 +31,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/functional/function_ref.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
@@ -508,6 +509,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   int GetRowPointersSizePerDevice() const {
     return GetRowPointersSizePerBucket() * GetNumBuckets() * num_sc_per_device;
   }
+
+  absl::Status Validate() const;
 };
 
 static_assert(

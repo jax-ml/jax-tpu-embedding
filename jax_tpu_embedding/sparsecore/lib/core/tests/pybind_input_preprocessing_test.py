@@ -1866,6 +1866,124 @@ class InputPreprocessingTest(parameterized.TestCase):
     assert_equal_coo_buffer(sample_ids_w[stack_name], sample_ids_n[stack_name])
     assert_equal_coo_buffer(gains_w[stack_name], gains_n[stack_name])
 
+  def test_local_device_count_less_than_or_equal_to_zero_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "local_device_count must be greater than 0",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          0,
+          1,
+          num_sc_per_device=4,
+          batch_number=batch_number,
+      )
+
+  def test_global_device_count_less_than_or_equal_to_zero_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "global_device_count must be greater than 0",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          1,
+          0,
+          num_sc_per_device=4,
+          batch_number=batch_number,
+      )
+
+  def test_global_device_count_less_than_local_device_count_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "global_device_count must be greater than or equal to"
+        " local_device_count",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          2,
+          1,
+          num_sc_per_device=4,
+          batch_number=batch_number,
+      )
+
+  def test_invalid_sharding_strategy_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaises((ValueError, TypeError)):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          1,
+          1,
+          num_sc_per_device=4,
+          sharding_strategy=0,
+          batch_number=batch_number,
+      )
+
+  def test_empty_input_batches_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "input_batches cannot be empty",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [],
+          [],
+          [],
+          1,
+          1,
+          num_sc_per_device=4,
+          batch_number=batch_number,
+      )
+
+  def test_num_sc_per_device_less_than_or_equal_to_zero_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "num_sc_per_device must be greater than 0",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          1,
+          1,
+          num_sc_per_device=0,
+          batch_number=batch_number,
+      )
+
+  def test_total_num_scs_not_power_of_two_raises_error(self):
+    batch_number = 42
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "must be a power of 2",
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [self.singleton_input_features],
+          [self.singleton_input_weights],
+          [self.singleton_input_feature_spec],
+          1,
+          1,
+          num_sc_per_device=3,
+          batch_number=batch_number,
+      )
+
 
 class PybindBufferSizeTest(absltest.TestCase):
 
