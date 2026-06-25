@@ -38,6 +38,7 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
@@ -751,6 +752,38 @@ void FillDeviceBuffersAllTables(
   });
   counter.Wait();
 }
+// Validates that the local batch size for each device does not exceed
+// internal CooFormat bitmask constraints.
+absl::Status ValidateLocalBatchSizeLimits(
+    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>&
+        stacked_tables,
+    int local_device_count) {
+  for (const auto& [stacked_table_name, stacked_table_metadata] :
+       stacked_tables) {
+    int64_t batch_size_for_device = 0;
+    for (const auto& feature_metadata : stacked_table_metadata) {
+      batch_size_for_device +=
+          input_batches[feature_metadata.feature_index]->size() /
+          local_device_count;
+    }
+    // The CooFormat 64-bit sorting key limits the local batch size per device
+    // to 2^26 (67M). Widening the key to 128-bit (hwy::uint128_t) to remove
+    // this limit is deferred because benchmarks show that sorting 128-bit keys
+    // with hwy::VQSort introduces a significant performance penalty (+60%
+    // instruction overhead, +34% wall time latency regression) due to the lack
+    // of native SIMD 128-bit comparison instructions. Instead, we validate the
+    // limit proactively.
+    if (batch_size_for_device > CooFormat::kDataMask) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "The total local batch size for device (including stacked tables) "
+          "exceeds the maximum limit supported by the SparseCore CooFormat "
+          "sorting key (%d).",
+          CooFormat::kDataMask));
+    }
+  }
+  return absl::OkStatus();
+}
 
 }  // namespace
 
@@ -781,6 +814,11 @@ PreprocessSparseDenseMatmulInput(
   }
   if (input_batches.empty()) {
     return absl::InvalidArgumentError("input_batches cannot be empty.");
+  }
+  if (absl::Status status = ValidateLocalBatchSizeLimits(
+          input_batches, stacked_tables, options.local_device_count);
+      !status.ok()) {
+    return status;
   }
 
   PreprocessSparseDenseMatmulOutput out;

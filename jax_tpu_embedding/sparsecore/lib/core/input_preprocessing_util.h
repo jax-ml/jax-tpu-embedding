@@ -526,7 +526,7 @@ struct FeatureMetadataInStack {
   FeatureMetadataInStack(
       absl::string_view name, int feature_index, int max_ids_per_partition,
       int max_unique_ids_per_partition, int row_offset, int col_offset,
-      int col_shift, int batch_size,
+      int col_shift, int64_t batch_size,
       std::optional<int> suggested_coo_buffer_size_per_device = std::nullopt,
       RowCombiner row_combiner = RowCombiner::kSum,
       int max_col_id = std::numeric_limits<int>::max())
@@ -559,7 +559,7 @@ struct FeatureMetadataInStack {
   int col_shift;
 
   // Process local batch size of the feature.
-  int batch_size;
+  int64_t batch_size;
 
   RowCombiner row_combiner;
 

@@ -69,7 +69,12 @@ GetStackedTableMetadata(py::list& feature_specs) {
         feature_spec.attr("input_shape").cast<py::list>();
     const std::string feature_name =
         py::cast<std::string>(feature_spec.attr("name"));
-    const int batch_size = py::cast<int>(input_shape[0]);
+    const int64_t batch_size = py::cast<int64_t>(input_shape[0]);
+    // The C++ preprocessing core relies on 32-bit indexing and the 26-bit
+    // row_id limit (67M) of the SparseCore COO key format. We allow the global
+    // batch_size here to exceed 32 bits (e.g., 3B), as long as the sharded
+    // local batch size per device remains within these limits. Validation of
+    // the local limits happens explicitly during preprocessing.
     const py::object& stacked_table_spec =
         table_spec.attr("stacked_table_spec");
     if (stacked_table_spec.is_none()) {

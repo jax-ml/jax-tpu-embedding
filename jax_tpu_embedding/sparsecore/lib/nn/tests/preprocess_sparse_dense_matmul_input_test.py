@@ -173,6 +173,72 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     self.mesh.devices = self.global_devices
     self.mesh.local_mesh = self.local_mesh
 
+  def test_preprocess_large_batch_size(self):
+    # Arrange
+    global_device_count = 128
+    global_batch_size = 3_000_000_000
+    local_batch_size = global_batch_size // global_device_count
+
+    feature_spec_large = dataclasses.replace(
+        self.feature_spec_b,
+        input_shape=[global_batch_size, 4],
+        output_shape=[global_batch_size, self.table_spec_b.embedding_dim],
+    )
+
+    features = {
+        "feature_b": np.zeros((local_batch_size, 4), dtype=np.int32),
+    }
+
+    # Act
+    output, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features=features,
+        features_weights=None,
+        feature_specs={
+            "feature_b": feature_spec_large,
+        },
+        local_device_count=1,
+        global_device_count=global_device_count,
+        num_sc_per_device=4,
+        allow_id_dropping=True,
+    )
+
+    # Assert
+    self.assertIn("table_b", output.lhs_row_pointers)
+
+  def test_preprocess_local_batch_size_exceeds_limit(self):
+    # Arrange
+    global_device_count = 1
+    # CooFormat::kDataMask is (1 << 26) - 1 = 67108863.
+    global_batch_size = 67108864
+    local_batch_size = global_batch_size // global_device_count
+
+    feature_spec_large = dataclasses.replace(
+        self.feature_spec_b,
+        input_shape=[global_batch_size, 1],
+        output_shape=[global_batch_size, self.table_spec_b.embedding_dim],
+    )
+
+    features = {
+        "feature_b": np.zeros((local_batch_size, 1), dtype=np.int32),
+    }
+
+    # Act & Assert
+    with self.assertRaisesRegex(
+        ValueError,
+        "exceeds the maximum limit supported by the SparseCore CooFormat",
+    ):
+      embedding.preprocess_sparse_dense_matmul_input(
+          features=features,
+          features_weights=None,
+          feature_specs={
+              "feature_b": feature_spec_large,
+          },
+          local_device_count=1,
+          global_device_count=global_device_count,
+          num_sc_per_device=4,
+          allow_id_dropping=True,
+      )
+
   def test_preprocess_suggested_buffer_size(self):
     # theoretical max = max ids * num_sc_per_device * num_scs = 16 * 4 * 4 = 256
     # This deeply nested setting in unwieldly, but we plan to move these
