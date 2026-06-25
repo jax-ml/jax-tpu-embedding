@@ -122,7 +122,7 @@ GetStackedTableMetadata(py::list& feature_specs) {
 }
 
 py::tuple PyPreprocessSparseDenseMatmulInput(
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,

@@ -78,7 +78,7 @@ void AllocateOutputCsrBuffersIfNeeded(
 // Extract the COO tensors for a single feature slice.
 void ExtractCooTensorsForSingleFeatureSlice(
     const FeatureMetadataInStack& metadata,
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const FeatureSliceInfo& slice_info,
     const PreprocessSparseDenseMatmulInputOptions& options,
     ExtractedCooTensorsPerSparseCore& extracted_coo_tensors) {
@@ -133,7 +133,7 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
 // We consider a stack to have variable weights if any feature in the stack
 // has explicitly variable weights.
 bool StackHasVariableWeights(
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
   for (const auto& metadata : stacked_table_metadata) {
     if (input_batches[metadata.feature_index]->HasVariableWeights()) {
@@ -205,7 +205,7 @@ SortAndGroupCooTensorsForTableStateAsync(
 // `state.partitioned_coo_tensors_per_device`.
 void ExtractSortAndGroupCooTensorsForTable(
     TableState& state,
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const PreprocessSparseDenseMatmulInputOptions& options) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
@@ -311,7 +311,7 @@ inline bool Deserialize(bool value) { return value; }
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     const absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options,
     bool has_variable_weights) {
@@ -755,7 +755,7 @@ void FillDeviceBuffersAllTables(
 // Validates that the local batch size for each device does not exceed
 // internal CooFormat bitmask constraints.
 absl::Status ValidateLocalBatchSizeLimits(
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>&
         stacked_tables,
     int local_device_count) {
@@ -799,7 +799,7 @@ void SparseDenseMatmulInputStats::merge(
 
 absl::StatusOr<PreprocessSparseDenseMatmulOutput>
 PreprocessSparseDenseMatmulInput(
-    absl::Span<std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>&
         stacked_tables,
     const PreprocessSparseDenseMatmulInputOptions& options,
