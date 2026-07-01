@@ -32,7 +32,7 @@ import numpy as np
 
 
 # Helpful for detailed debug prints.
-np.set_printoptions(threshold=np.inf, suppress=True)
+np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
 
 _PARTITION_ERR_STR = (
     "PartitionSpec of the global sharding either needs to be in the format"
@@ -159,7 +159,7 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
+        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),  # pyrefly: ignore[bad-argument-type]
     )
     with self.assertRaises(ValueError):
       embedding.get_stacked_table_specs(feature_specs)
@@ -358,7 +358,7 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
+        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),  # pyrefly: ignore[bad-argument-type]
     )
     self.assertEqual(
         embedding.get_stacked_table_specs(feature_specs),
@@ -416,7 +416,7 @@ class EmbeddingTest(parameterized.TestCase):
         jax.random.PRNGKey(0),
         [table_a_spec, table_b_spec],
         global_sharding=global_sharding,
-        num_sparsecore_per_device=utils.num_sparsecores_per_device(devices[0]),
+        num_sparsecore_per_device=utils.num_sparsecores_per_device(devices[0]),  # pyrefly: ignore[bad-argument-type]
     )
 
     self.assertLen(
@@ -1151,11 +1151,11 @@ class EmbeddingTest(parameterized.TestCase):
   def test_preprocess_sparse_dense_matmul_input_from_sparse_tensor(self):
     # Arrange
     devices = jax.devices()[:1]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,
-        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_a",

@@ -80,7 +80,7 @@ def _generate_expected_emb_table(
   for i in range(vocab_size):
     val = i  # row initializer.
     if i in ids_count:
-      val -= feature.table_spec.optimizer.learning_rate * ids_count[i]
+      val -= feature.table_spec.optimizer.learning_rate * ids_count[i]  # pyrefly: ignore[unsupported-operation]
     shard_id = i % num_shards
     idx_in_shard = i // num_shards
     physical_row = shard_id * shard_size + idx_in_shard
@@ -206,7 +206,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
   def test_single_host_minibatching_required(self):
     self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(
+        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
             max_ids_per_partition=1, max_unique_ids_per_partition=1
         )
     )
@@ -230,7 +230,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
   def test_single_host_minibatching_id_dropping(self):
     # Set max_ids_per_partition to a small value to trigger id dropping.
     self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(
+        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
             max_ids_per_partition=1, max_unique_ids_per_partition=1
         )
     )
@@ -263,7 +263,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     # Set max_unique_ids_per_partition to a small value to trigger unique id
     # dropping.
     self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(
+        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
             max_ids_per_partition=10, max_unique_ids_per_partition=1
         )
     )
@@ -313,7 +313,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
   def test_single_host_minibatching_forward_pass(self):
     # Test forward pass with minibatching
     self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(
+        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
             max_ids_per_partition=2, max_unique_ids_per_partition=2
         )
     )
@@ -348,7 +348,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
   def test_single_host_minibatching_backward_pass(self):
     # Test backward pass with minibatching
     self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(
+        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
             max_ids_per_partition=2, max_unique_ids_per_partition=2
         )
     )
@@ -459,7 +459,7 @@ class MultiHostMinibatchingTest(absltest.TestCase):
 
   def test_multi_host_minibatching_required(self):
     self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(
+        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
             max_ids_per_partition=1, max_unique_ids_per_partition=1
         )
     )

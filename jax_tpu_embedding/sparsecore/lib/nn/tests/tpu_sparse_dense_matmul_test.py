@@ -107,7 +107,7 @@ class ErrorHandlingTest(absltest.TestCase):
     long_spec = embedding_spec.TableSpec(
         vocabulary_size=1000,
         embedding_dim=8,
-        initializer=lambda: np.zeros((1000, 8), dtype=np.float32),
+        initializer=lambda: np.zeros((1000, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
@@ -126,7 +126,7 @@ class ErrorHandlingTest(absltest.TestCase):
     )
     global_devices = jax.devices()
     first_device = global_devices[0]
-    num_sc_per_device = utils.num_sparsecores_per_device(first_device)
+    num_sc_per_device = utils.num_sparsecores_per_device(first_device)  # pyrefly: ignore[bad-argument-type]
     mesh = jax.sharding.Mesh([first_device], "x")
     feature_specs = {
         "feature": lf_spec,
@@ -171,7 +171,7 @@ class ErrorHandlingTest(absltest.TestCase):
     embedding_variables = {}
     embedding_variables["table"] = [
         jax.device_put(
-            emb_table_a_sharded[0],
+            emb_table_a_sharded[0],  # pyrefly: ignore[bad-index]
             device=first_device,
         ),
     ]
@@ -213,7 +213,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,
-        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_a",
@@ -223,7 +223,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.table_spec_aa = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,
-        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_aa",
@@ -233,7 +233,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=16,
-        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_b",
@@ -318,7 +318,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       self, using_pmap, use_activation_unstack_primitive
   ):
     devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
         "feature_spec_a": self.feature_spec_a,
@@ -441,7 +441,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
       self, using_pmap, use_activation_unstack_primitive
   ):
     devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
         "feature_spec_a": self.feature_spec_a,
@@ -588,7 +588,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
   ):
     global_devices = jax.devices()
     devices = [global_devices[0]]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
         "feature_spec_a": self.feature_spec_a,
@@ -692,7 +692,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
   )
   def test_sparse_dense_matmul_two_tables(self, using_pmap):
     devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
         "feature_spec_a": self.feature_spec_a,
@@ -1113,12 +1113,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
   )
   def test_sparse_dense_matmul_four_chips_complex_stacked(self, using_pmap):
     devices = jax.devices()
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     mesh = jax.sharding.Mesh(devices, "x")
     country_table = embedding_spec.TableSpec(
         vocabulary_size=247,
         embedding_dim=16,
-        initializer=lambda: jnp.zeros((256, 16), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((256, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="country_table",
@@ -1128,7 +1128,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     language_table = embedding_spec.TableSpec(
         vocabulary_size=316,
         embedding_dim=16,
-        initializer=lambda: jnp.zeros((384, 16), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((384, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="language_table",
@@ -1138,7 +1138,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     related_item_table = embedding_spec.TableSpec(
         vocabulary_size=151,
         embedding_dim=16,
-        initializer=lambda: jnp.zeros((256, 16), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((256, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="related_item_table",
@@ -1318,12 +1318,12 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
   def test_sparse_dense_matmul_quantized(self):
     devices = jax.devices()[:1]
     mesh = jax.sharding.Mesh(devices, "x")
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
 
     quantized_table_spec = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=32,
-        initializer=lambda: jnp.zeros((32, 32), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 32), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="quantized_table",
@@ -1381,7 +1381,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         tuple(jax.tree.leaves(feature_specs)),
     ).compile()
     hlo = compiled.as_text()
-    self.assertIn("u8", hlo)
+    self.assertIn("u8", hlo)  # pyrefly: ignore[bad-argument-type]
 
     activations = sparse_matmul(
         preprocessed_inputs,

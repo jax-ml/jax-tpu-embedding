@@ -300,8 +300,8 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (2, 3)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),
-            jnp.full(dummy_shape, op.initial_accumulator_value),
+            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            jnp.full(dummy_shape, op.initial_accumulator_value),  # pyrefly: ignore[bad-argument-type]
         )
     )
 
@@ -328,13 +328,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (2, 3)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),
+            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.momentum(dummy_key, dummy_shape),
+            slot_inits.momentum(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_momentum_value),
         )
     )
@@ -357,13 +357,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (3, 2)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.mu(dummy_key, dummy_shape),
+            slot_inits.mu(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_slot_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.nu(dummy_key, dummy_shape),
+            slot_inits.nu(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_slot_value),
         )
     )
@@ -388,13 +388,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (1, 5)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),
+            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.linear(dummy_key, dummy_shape),
+            slot_inits.linear(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_linear_value),
         )
     )
@@ -420,13 +420,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (1, 5)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),
+            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.local_step(dummy_key, dummy_shape),
+            slot_inits.local_step(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
             jnp.full(dummy_shape, op.initial_local_step_value),
         )
     )
@@ -464,10 +464,10 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     optimizer_specs = [
         embedding_spec.SGDOptimizerSpec(learning_rate=lr_schedule),
-        embedding_spec.AdagradOptimizerSpec(learning_rate=lr_schedule),
+        embedding_spec.AdagradOptimizerSpec(learning_rate=lr_schedule),  # pyrefly: ignore[bad-argument-type]
         embedding_spec.LaPropOptimizerSpec(learning_rate=lr_schedule),
-        embedding_spec.FTRLOptimizerSpec(learning_rate=lr_schedule),
-        embedding_spec.AdagradMomentumOptimizerSpec(learning_rate=lr_schedule),
+        embedding_spec.FTRLOptimizerSpec(learning_rate=lr_schedule),  # pyrefly: ignore[bad-argument-type]
+        embedding_spec.AdagradMomentumOptimizerSpec(learning_rate=lr_schedule),  # pyrefly: ignore[bad-argument-type]
     ]
 
     for op_spec in optimizer_specs:
@@ -477,14 +477,14 @@ class OptimizerSpecTest(absltest.TestCase):
 
   def test_hyperparameters(self):
     op = embedding_spec.AdagradOptimizerSpec(
-        learning_rate=schedules.linear_schedule(
+        learning_rate=schedules.linear_schedule(  # pyrefly: ignore[bad-argument-type]
             init_value=1.0, end_value=0.1, transition_steps=100
         )
     )
     self.assertEqual(op.get_hyperparameters(0), (1.0,))
 
     op = embedding_spec.AdagradMomentumOptimizerSpec(
-        learning_rate=schedules.linear_schedule(
+        learning_rate=schedules.linear_schedule(  # pyrefly: ignore[bad-argument-type]
             init_value=1.0, end_value=0.1, transition_steps=100
         ),
         momentum=0.9,
@@ -506,7 +506,7 @@ class OptimizerSpecTest(absltest.TestCase):
     )
 
     op = embedding_spec.AdamOptimizerSpec(
-        learning_rate=schedules.linear_schedule(
+        learning_rate=schedules.linear_schedule(  # pyrefly: ignore[bad-argument-type]
             init_value=1.0, end_value=0.1, transition_steps=100
         ),
         beta_1=0.9,
@@ -514,7 +514,7 @@ class OptimizerSpecTest(absltest.TestCase):
         epsilon=1e-8,
     )
     c2 = jnp.sqrt(1 - jnp.float32(op.beta_2))
-    alpha_t = op.learning_rate(0) * c2 / (1 - jnp.float32(op.beta_1))
+    alpha_t = op.learning_rate(0) * c2 / (1 - jnp.float32(op.beta_1))  # pyrefly: ignore[not-callable]
     epsilon_hat = op.epsilon * c2
     expected_hyperparameters = (
         jnp.array(alpha_t, dtype=jnp.float32),  # alpha_t
@@ -525,7 +525,7 @@ class OptimizerSpecTest(absltest.TestCase):
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
 
     op = embedding_spec.FTRLOptimizerSpec(
-        learning_rate=schedules.linear_schedule(
+        learning_rate=schedules.linear_schedule(  # pyrefly: ignore[bad-argument-type]
             init_value=1.0, end_value=0.1, transition_steps=100
         ),
         learning_rate_power=-0.5,
@@ -543,7 +543,7 @@ class OptimizerSpecTest(absltest.TestCase):
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_ftrl)
 
     op = embedding_spec.F2AOptimizerSpec(
-        learning_rate=schedules.linear_schedule(
+        learning_rate=schedules.linear_schedule(  # pyrefly: ignore[bad-argument-type]
             init_value=1.0, end_value=0.1, transition_steps=100
         ),
         rho=0.5,

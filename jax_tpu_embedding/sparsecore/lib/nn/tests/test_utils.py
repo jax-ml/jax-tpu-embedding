@@ -52,7 +52,7 @@ def row_id_initializer(
 
 def formatted_array2string(arr: jax.Array) -> str:
   """Force float-like values to be formatted with 6 decimal places."""
-  return np.array2string(arr, formatter={"float_kind": lambda x: "%.6f" % x})
+  return np.array2string(arr, formatter={"float_kind": lambda x: "%.6f" % x})  # pyrefly: ignore[bad-argument-type]
 
 
 def row_col_id_initializer(
@@ -79,7 +79,7 @@ def row_col_id_initializer(
     assert shape[1] <= 999  # 3 digits for cols
     return create_array(leading_value, shape)
 
-  return init
+  return init  # pyrefly: ignore[bad-return]
 
 
 def row_id_with_offset_initializer_value(
@@ -107,7 +107,7 @@ def row_id_with_offset_initializer(
     del key
     return create_array(offset_value, shape)
 
-  return init
+  return init  # pyrefly: ignore[bad-return]
 
 
 def rotate_sharded_table(
@@ -205,4 +205,4 @@ def row_initialize_with_padding(
   )
   array = row_id_initializer(shape=shape, offset=offset)
   paddings = tuple((0, y - x) for x, y in zip(shape, padded_shape))
-  return np.pad(array, paddings, mode="constant", constant_values=pad_value)
+  return np.pad(array, paddings, mode="constant", constant_values=pad_value)  # pyrefly: ignore[bad-return]
