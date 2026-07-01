@@ -240,7 +240,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
       api_version=1,
   )(ctx, *operands)
 
-  tuple_op = hlo.GetTupleElementOp(op, 0)
+  tuple_op = hlo.GetTupleElementOp(op, 0)  # pyrefly: ignore[bad-argument-type]
   tuple_op = _annotate_sparse_compute_type(tuple_op)
   return tuple_op.results
 

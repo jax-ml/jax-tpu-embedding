@@ -23,7 +23,7 @@ import jax
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 import numpy as np
 
-np.set_printoptions(threshold=np.inf, suppress=True)
+np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
 
 
 class TestUtilsTest(parameterized.TestCase):

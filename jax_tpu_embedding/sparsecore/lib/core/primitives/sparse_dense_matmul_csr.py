@@ -71,7 +71,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       lhs_gains,
       num_minibatches_per_physical_sparse_core,
       embedding_table,
-      activations_grad=np.zeros(
+      activations_grad=np.zeros(  # pyrefly: ignore[bad-argument-type]
           (device_batch_size, embedding_table.shape[1]), np.float32
       ),  # Not used in the forward pass.
       max_ids_per_partition=max_ids_per_partition,
@@ -145,7 +145,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   # Add quantization params only when enabled
   if quantization_config is not None:
     q_min, q_max, q_buckets = quantization_config
-    sdmm_csr_config["quantization_config"] = {
+    sdmm_csr_config["quantization_config"] = {  # pyrefly: ignore[bad-assignment]
         "min_value": q_min,
         "max_value": q_max,
         "num_buckets": q_buckets,
@@ -178,7 +178,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     # We still have tests that use this format.
     call_target = "SparseDenseMatmulOp"
 
-  return jax.ffi.ffi_lowering(
+  return jax.ffi.ffi_lowering(  # pyrefly: ignore[bad-return]
       call_target,
       result_types=[
           mlir.aval_to_ir_type(ctx.module_context, out_aval)

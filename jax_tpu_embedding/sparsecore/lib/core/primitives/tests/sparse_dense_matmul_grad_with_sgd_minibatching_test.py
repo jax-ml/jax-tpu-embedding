@@ -127,7 +127,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
             lhs_local_sample_ids,
             lhs_gains,
             num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
+            self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
             z_grad,
             0.1,  # learning_rate
             max_ids_per_partition=16,
@@ -231,7 +231,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
             lhs_local_sample_ids,
             lhs_gains,
             num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
+            self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
             z_grad,
             0.1,  # learning_rate
             max_ids_per_partition=16,

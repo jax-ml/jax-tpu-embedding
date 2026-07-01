@@ -75,7 +75,7 @@ def generate_feature_specs(num_features: int, num_samples: int):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=1024,
         embedding_dim=16,
-        initializer=lambda: np.zeros((1024, 16), dtype=np.float32),
+        initializer=lambda: np.zeros((1024, 16), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
@@ -340,7 +340,7 @@ def preprocess_minibatching(
         if force_minibatching:
           # Make sure we are benchmarking multiple minibatches (guaranteed by
           # initial seed).
-          assert num_minibatches >= 5, num_minibatches
+          assert num_minibatches >= 5, num_minibatches  # pyrefly: ignore[unsupported-operation]
         else:
           # Make sure we are benchmarking only one minibatch.
           assert num_minibatches == 1, num_minibatches

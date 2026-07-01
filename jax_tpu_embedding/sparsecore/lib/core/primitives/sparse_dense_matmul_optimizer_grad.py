@@ -191,7 +191,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       else mlir.aval_to_ir_type(v.aval)  # pytype: disable=missing-parameter
       for v in jaxpr.constvars
   ]
-  wrapper_input_types.extend(const_types)
+  wrapper_input_types.extend(const_types)  # pyrefly: ignore[bad-argument-type]
 
   output_types = [row_tensor_type for _ in range(num_slot_variables + 1)]
 
@@ -274,7 +274,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
 
   result = []
   for i in range(len(tables)):
-    tuple_op = hlo.GetTupleElementOp(op, i)
+    tuple_op = hlo.GetTupleElementOp(op, i)  # pyrefly: ignore[bad-argument-type]
     tuple_op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
         {"_xla_compute_type": ir.StringAttr.get("sparse")}
     )
