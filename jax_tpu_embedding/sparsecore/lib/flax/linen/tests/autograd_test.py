@@ -30,7 +30,7 @@ import optax
 
 Nested = embedding.Nested
 FLAGS = flags.FLAGS
-np.set_printoptions(threshold=np.inf)
+np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
 
 
 ################################################################################
@@ -96,7 +96,7 @@ class ShakespeareTest(absltest.TestCase):
       def forward_pass(params, embedding_lookups, labels):
         logits = model.apply(params, embedding_lookups)
         xentropy = optax.softmax_cross_entropy_with_integer_labels(
-            logits=logits, labels=labels
+            logits=logits, labels=labels  # pyrefly: ignore[bad-argument-type]
         )
         return jnp.mean(xentropy), logits
 

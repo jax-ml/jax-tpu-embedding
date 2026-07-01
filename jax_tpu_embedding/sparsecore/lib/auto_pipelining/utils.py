@@ -125,7 +125,7 @@ def inline_jaxpr(
 
   return [
       eqn.replace(
-          invars=[_translate_invar(var) for var in eqn.invars],
+          invars=[_translate_invar(var) for var in eqn.invars],  # pyrefly: ignore[bad-argument-type]
           outvars=[_translate_outvar(var) for var in eqn.outvars],
       )
       for eqn in jaxpr.eqns

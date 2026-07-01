@@ -30,7 +30,7 @@ import optax
 import orbax.checkpoint as ocp
 
 
-np.set_printoptions(threshold=np.inf)
+np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
 FLAGS = flags.FLAGS
 
 
@@ -85,7 +85,7 @@ class ShakespeareTest(absltest.TestCase):
     embedding_variables = {}
     embedding_variables[config.table_name] = [
         jax.device_put(
-            emb_table_sharded[i],
+            emb_table_sharded[i],  # pyrefly: ignore[bad-index]
             device=device,
         )
         for i, device in enumerate(config.global_devices)

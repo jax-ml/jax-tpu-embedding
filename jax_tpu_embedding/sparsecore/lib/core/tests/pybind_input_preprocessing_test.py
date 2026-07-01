@@ -37,7 +37,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   table_spec = embedding_spec.TableSpec(
       vocabulary_size=16,
       embedding_dim=8,
-      initializer=lambda: np.zeros((16, 8), dtype=np.float32),
+      initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -187,7 +187,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   table_spec_a = embedding_spec.TableSpec(
       vocabulary_size=32,
       embedding_dim=8,
-      initializer=lambda: np.zeros((32, 8), dtype=np.float32),
+      initializer=lambda: np.zeros((32, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -218,7 +218,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   table_spec_b = embedding_spec.TableSpec(
       vocabulary_size=16,
       embedding_dim=8,
-      initializer=lambda: np.zeros((16, 8), dtype=np.float32),
+      initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -390,7 +390,7 @@ class InputPreprocessingTest(parameterized.TestCase):
   table_spec = embedding_spec.TableSpec(
       vocabulary_size=32,
       embedding_dim=8,
-      initializer=lambda: np.zeros((32, 8), dtype=np.float32),
+      initializer=lambda: np.zeros((32, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -402,7 +402,7 @@ class InputPreprocessingTest(parameterized.TestCase):
   ragged_input_table_spec = embedding_spec.TableSpec(
       vocabulary_size=16,
       embedding_dim=8,
-      initializer=lambda: np.zeros((16, 8), dtype=np.float32),
+      initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -414,7 +414,7 @@ class InputPreprocessingTest(parameterized.TestCase):
   singleton_input_table_spec = embedding_spec.TableSpec(
       vocabulary_size=16,
       embedding_dim=8,
-      initializer=lambda: np.zeros((16, 8), dtype=np.float32),
+      initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -960,7 +960,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=16,
         embedding_dim=8,
-        initializer=lambda: np.zeros((16, 8), dtype=np.float32),
+        initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
@@ -1698,7 +1698,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=8,
-        initializer=lambda: np.zeros((32, 8), dtype=np.float32),
+        initializer=lambda: np.zeros((32, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
@@ -1709,7 +1709,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
-        input_shape=[4, None],  # Ragged or dense input.
+        input_shape=[4, None],  # Ragged or dense input.  # pyrefly: ignore[bad-argument-type]
         output_shape=[
             4,
             table_spec.embedding_dim,
@@ -2008,7 +2008,7 @@ class PybindBufferSizeTest(absltest.TestCase):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=8,
-        initializer=lambda: np.zeros((32, 8), dtype=np.float32),
+        initializer=lambda: np.zeros((32, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
         combiner="sum",
         name="test_table",

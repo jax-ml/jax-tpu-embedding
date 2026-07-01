@@ -68,7 +68,7 @@ class Model(nn.Module):
     )(embedding_lookup_inputs)
 
     # Unpack the activations.
-    x = x[self.feature_name]
+    x = x[self.feature_name]  # pyrefly: ignore[bad-index]
     x = jnp.reshape(x, (self.global_batch_size, -1))
     x = self.add_sharding_constraint(x)
 

@@ -58,7 +58,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     # format between SparseDenseMatmulInputStats and separate files.
     # param_name -> table_name -> stats
     self._params: dict[str, dict[str, np.ndarray]] = {
-        field.name: collections.defaultdict(np.ndarray)
+        field.name: collections.defaultdict(np.ndarray)  # pyrefly: ignore[no-matching-overload]
         for field in _PARAM_FIELDS
     }
 
@@ -86,7 +86,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
             stats,
         )
         if table_name not in self._params[param_name]:
-          self._params[param_name][table_name] = stats
+          self._params[param_name][table_name] = stats  # pyrefly: ignore[unsupported-operation]
         else:
           self._params[param_name][table_name] = np.vstack(
               (self._params[param_name][table_name], stats)
@@ -134,7 +134,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     """Writes stats to a npz file."""
     file_name = self._generate_file_name()
     logging.info('Write stats to %s', file_name)
-    jax.numpy.savez(file_name, **stats)
+    jax.numpy.savez(file_name, **stats)  # pyrefly: ignore[bad-argument-type]
 
   def publish(self) -> None:
     """Publishes locally accmulatedstats to a file in the base_dir.
@@ -153,7 +153,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     files = self._get_latest_files_by_process(glob.glob(files_glob))
     if not files:
       raise FileNotFoundError('No stats files found in %s' % files_glob)
-    stats = collections.defaultdict(np.ndarray)
+    stats = collections.defaultdict(np.ndarray)  # pyrefly: ignore[no-matching-overload]
     for file_name in files:
       logging.info('Reading stats from %s', file_name)
       loaded = np.load(file_name)
