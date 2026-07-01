@@ -109,12 +109,12 @@ class ShakespeareTest(absltest.TestCase):
     super().setUp()
     self.devices = jax.devices()
     self.mesh = Mesh(np.array(self.devices), axis_names=['device'])
-    self.num_sc_per_device = utils.num_sparsecores_per_device(self.devices[0])
+    self.num_sc_per_device = utils.num_sparsecores_per_device(self.devices[0])  # pyrefly: ignore[bad-argument-type]
 
     self.shakespeare_table_spec = embedding_spec.TableSpec(
         vocabulary_size=_VOCAB_SIZE.value,
         embedding_dim=_EMBEDDING_SIZE.value,
-        initializer=lambda: jnp.zeros(
+        initializer=lambda: jnp.zeros(  # pyrefly: ignore[bad-argument-type]
             (_VOCAB_SIZE.value, _EMBEDDING_SIZE.value),
             dtype=jnp.float32,
         ),
@@ -154,7 +154,7 @@ class ShakespeareTest(absltest.TestCase):
     self.embedding_variables = {}
     self.embedding_variables[self.shakespeare_table_spec.name] = [
         jax.device_put(
-            emb_table_sharded[i],
+            emb_table_sharded[i],  # pyrefly: ignore[bad-index]
             device=device,
         )
         for i, device in enumerate(self.devices)
@@ -198,7 +198,7 @@ class ShakespeareTest(absltest.TestCase):
 
     def loss_fn(params, emb_acts, labels):
       logits = self.model.apply(params, emb_acts)
-      xentropy = optax.softmax_cross_entropy_with_integer_labels(logits, labels)
+      xentropy = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # pyrefly: ignore[bad-argument-type]
       return jnp.mean(xentropy)
 
     self.loss_grad_fn = jax.value_and_grad(loss_fn, argnums=(0, 1))

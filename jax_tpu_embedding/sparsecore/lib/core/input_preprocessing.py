@@ -295,7 +295,7 @@ def preprocess_sparse_dense_matmul_input(
         f"max_ids_per_partition must be positive, got {max_ids_per_partition}."
     )
   try:
-    features_ndim = np.ndim(features)
+    features_ndim = np.ndim(features)  # pyrefly: ignore[bad-argument-type]
   except ValueError:
     features_ndim = 1
   if not enable_minibatching and features_ndim not in (1, 2):
@@ -316,15 +316,15 @@ def preprocess_sparse_dense_matmul_input(
   )
   num_scs = num_sc_per_device * global_device_count
   if not enable_minibatching:
-    features = [features]
-    features_weights = [features_weights]
+    features = [features]  # pyrefly: ignore[bad-assignment]
+    features_weights = [features_weights]  # pyrefly: ignore[bad-assignment]
 
   ##############################################################################
   # Step 1: Preprocess Minibatch to Partition Map
   ##############################################################################
   all_partitions: list[PartitionMap] = [
       _preprocess_batch_to_partitions(
-          mb_feat, mb_weight, num_scs, num_sc_per_device
+          mb_feat, mb_weight, num_scs, num_sc_per_device  # pyrefly: ignore[bad-argument-type]
       )
       for mb_feat, mb_weight in zip(features, features_weights, strict=True)
   ]

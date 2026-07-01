@@ -57,7 +57,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=_VOC_A,
         embedding_dim=_DIM_A,
-        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
+        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner='sum',
         name='table_a',
@@ -67,7 +67,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=_VOC_B,
         embedding_dim=_DIM_B,
-        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
+        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner='sum',
         name='table_b',
@@ -77,7 +77,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     self.table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=_VOC_C,
         embedding_dim=_DIM_C,
-        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),
+        initializer=lambda _, shape: jnp.zeros(shape, dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner='sum',
         name='table_c',
@@ -160,7 +160,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
   )
   def test_forward_and_backward_with_one_table(self, enable_minibatching: bool):
     devices = jax.devices()
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
 
     feature_specs = (self.feature_spec_a, self.feature_spec_b)
     embedding.prepare_feature_specs_for_training(
@@ -216,14 +216,14 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     embedding_variables['table_a'] = [
         jax.device_put(
-            emb_table_a_sharded[i],
+            emb_table_a_sharded[i],  # pyrefly: ignore[bad-index]
             device=local_device,
         )
         for i, local_device in enumerate(devices)
     ]
     embedding_variables['table_b'] = [
         jax.device_put(
-            emb_table_b_sharded[i],
+            emb_table_b_sharded[i],  # pyrefly: ignore[bad-index]
             device=local_device,
         )
         for i, local_device in enumerate(devices)
@@ -591,7 +591,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     them to float32 before calling the SparseCore primitives.
     """
     devices = jax.devices()
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
 
     feature_specs = (self.feature_spec_a,)
     embedding.prepare_feature_specs_for_training(
@@ -630,7 +630,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     embedding_variables = {}
     embedding_variables['table_a'] = [
         jax.device_put(
-            emb_table_a_sharded[i],
+            emb_table_a_sharded[i],  # pyrefly: ignore[bad-index]
             device=local_device,
         )
         for i, local_device in enumerate(devices)

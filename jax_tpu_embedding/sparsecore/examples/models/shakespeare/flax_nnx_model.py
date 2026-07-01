@@ -42,8 +42,8 @@ class Model(nnx.Module):
       feature_name: str,
       sharding_axis: str,
   ):
-    assert len(feature_specs) == 1, 'Shakespeare model expects one feature.'
-    assert feature_name in feature_specs, (
+    assert len(feature_specs) == 1, 'Shakespeare model expects one feature.'  # pyrefly: ignore[bad-argument-type]
+    assert feature_name in feature_specs, (  # pyrefly: ignore[not-iterable]
         'Shakespeare model expects feature named "%s".' % feature_name
     )
 
@@ -107,7 +107,7 @@ class Model(nnx.Module):
     x = self.embedding_layer(embedding_lookup_inputs, step=step)
 
     # Unpack the activations.
-    x = x[self.feature_name]
+    x = x[self.feature_name]  # pyrefly: ignore[bad-index]
     x = jnp.reshape(x, (self.global_batch_size, -1))
     x = self.add_sharding_constraint(x, (self.sharding_axis,))
 

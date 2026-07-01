@@ -99,7 +99,7 @@ def get_config() -> Config:
   global_devices = jax.devices()
   num_global_devices = len(global_devices)
   num_local_devices = len(local_devices)
-  num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])
+  num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])  # pyrefly: ignore[bad-argument-type]
 
   num_processes = jax.process_count()
   process_id = jax.process_index()
@@ -145,8 +145,8 @@ def get_config() -> Config:
 
 def local_slice(config: Config, x: embedding.ArrayLike) -> embedding.ArrayLike:
   """Batch data is read for the global model. This creates a local slice."""
-  return x[
-      config.process_id
+  return x[  # pyrefly: ignore[bad-index]
+      config.process_id  # pyrefly: ignore[bad-index]
       * config.local_batch_size : (config.process_id + 1)
       * config.local_batch_size
   ]

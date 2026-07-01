@@ -82,7 +82,7 @@ def _get_optimizer_for_optax() -> optax.GradientTransformation:
   # and this function would need to create the real optimizer for SC.
   return optax.GradientTransformation(
       init=lambda params: optax.EmptyState(),
-      update=lambda grads, state, params: (grads, state),
+      update=lambda grads, state, params: (grads, state),  # pyrefly: ignore[bad-argument-type]
   )
 
 
