@@ -57,11 +57,13 @@ def _create_embedding_variable_for_pmap(
       for i, local_device in enumerate(devices)
   ]
   sharding = NamedSharding(mesh, P("x", None, None))
-  return jax.make_array_from_single_device_arrays(
+  array = jax.make_array_from_single_device_arrays(
       shape=(len(devices), total_vocab // len(devices), dim),
       sharding=sharding,
       arrays=embedding_variable_shards,
   )
+  layout_sharding = utils.embedding_table_format(mesh, P("x", None, None))
+  return jax.device_put(array, layout_sharding)
 
 
 def _create_embedding_variable_for_jit(
@@ -91,11 +93,13 @@ def _create_embedding_variable_for_jit(
       for i, local_device in enumerate(devices)
   ]
   sharding = NamedSharding(mesh, P("x", None))
-  return jax.make_array_from_single_device_arrays(
+  array = jax.make_array_from_single_device_arrays(
       shape=(total_vocab, dim),
       sharding=sharding,
       arrays=embedding_variable_shards,
   )
+  layout_sharding = utils.embedding_table_format(mesh, P("x", None))
+  return jax.device_put(array, layout_sharding)
 
 
 class ErrorHandlingTest(absltest.TestCase):
@@ -685,6 +689,92 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     )
     if using_pmap:
       expected_emb_activations = expected_emb_activations.reshape(1, 16, 6)
+    np.testing.assert_equal(activations[0], expected_emb_activations)
+
+  def test_sparse_dense_matmul_dim_1(self):
+    global_devices = jax.devices()
+    devices = [global_devices[0]]
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    mesh = jax.sharding.Mesh(devices, "x")
+
+    table_spec_dim_1 = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=1,
+        initializer=lambda: jnp.zeros((32, 1), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_dim_1",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_specs = {
+        "feature_spec_dim_1": embedding_spec.FeatureSpec(
+            table_spec=table_spec_dim_1,
+            input_shape=(16, 1),
+            output_shape=(16, 1),
+            name="feature_spec_dim_1",
+        )
+    }
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        global_device_count=1,
+        num_sc_per_device=num_sc_per_device,
+    )
+    batch_number = 42
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_dim_1": self.input_tensor,
+        },
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        batch_number=batch_number,
+    )
+    embedding_variables = {}
+    embedding_variables["table_dim_1"] = embedding.EmbeddingVariables(
+        table=_create_embedding_variable_for_jit(
+            [VariableInfo((32, 1), 0)], devices, mesh
+        ),
+        slot=(),
+    )
+
+    tpu_sparse_dense_matmul_fn = functools.partial(
+        embedding.tpu_sparse_dense_matmul,
+        sharding_strategy="MOD",
+        global_device_count=mesh.size,
+    )
+    sparse_matmul = jax.jit(tpu_sparse_dense_matmul_fn, static_argnums=[2])
+    activations = sparse_matmul(
+        preprocessed_inputs,
+        embedding_variables,
+        tuple(jax.tree.leaves(feature_specs)),
+    )
+
+    expected_emb_activations = np.array(
+        [
+            [11.0],
+            [3.0],
+            [9.0],
+            [26.0],
+            [29.0],
+            [31.0],
+            [67.0],
+            [57.0],
+            [15.0],
+            [13.0],
+            [11.0],
+            [8.0],
+            [17.0],
+            [42.0],
+            [30.0],
+            [26.0],
+        ],
+        dtype=np.float32,
+    )
+    self.assertEqual(activations[0].shape, (16, 1))
     np.testing.assert_equal(activations[0], expected_emb_activations)
 
   @parameterized.product(
