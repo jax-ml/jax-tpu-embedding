@@ -270,4 +270,4 @@ def auto_pipelining(
       finalize_pipeline, out_shardings=out_shardings, donate_argnames=('carry',)
   )
 
-  return PipeliningFunction(train_pipeline, finalize_pipeline)
+  return PipeliningFunction(train_pipeline, finalize_pipeline)  # pyrefly: ignore[bad-return]

@@ -842,12 +842,12 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
   # leaf nodes.
   return PreprocessedInput(
       sparse_dense_matmul_input=SparseDenseMatmulInput(
-          lhs_row_pointers=lhs_row_pointers,
-          lhs_embedding_ids=lhs_embedding_ids,
-          lhs_sample_ids=lhs_sample_ids,
-          lhs_gains=lhs_gains,
+          lhs_row_pointers=lhs_row_pointers,  # pyrefly: ignore[bad-argument-type]
+          lhs_embedding_ids=lhs_embedding_ids,  # pyrefly: ignore[bad-argument-type]
+          lhs_sample_ids=lhs_sample_ids,  # pyrefly: ignore[bad-argument-type]
+          lhs_gains=lhs_gains,  # pyrefly: ignore[bad-argument-type]
       ),
-      num_minibatches=num_minibatches,
+      num_minibatches=num_minibatches,  # pyrefly: ignore[bad-argument-type]
   )
 
 
@@ -1079,7 +1079,7 @@ def tpu_sparse_dense_matmul(
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
   # Casting to int since primitives requires JSON serializable value.
-  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))
+  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))  # pyrefly: ignore[bad-assignment]
 
   num_minibatches = preprocessed_inputs.num_minibatches
   if num_minibatches.ndim == 1:
@@ -1356,7 +1356,7 @@ def tpu_sparse_dense_matmul_grad(
   assert lhs_row_pointers.keys() == gradients.keys()
 
   # Casting to int since primitives requires JSON serializable value.
-  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))
+  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))  # pyrefly: ignore[bad-assignment]
 
   num_minibatches = preprocessed_inputs.num_minibatches
   if num_minibatches.ndim == 1:
@@ -1557,7 +1557,7 @@ def _init_stacked_embedding_table(
             out_specs=global_sharding.spec,
         ),
         out_shardings=utils.embedding_table_format(
-            global_sharding.mesh, global_sharding.spec
+            global_sharding.mesh, global_sharding.spec  # pyrefly: ignore[bad-argument-type]
         ),
     )(
         rng,
@@ -1636,7 +1636,7 @@ def init_embedding_variables(
   if not bypass_mesh_check and (
       global_sharding.mesh.devices is None
       or not np.array_equal(
-          global_sharding.mesh.devices.flatten(), jax.devices()
+          global_sharding.mesh.devices.flatten(), jax.devices()  # pyrefly: ignore[bad-argument-type]
       )
   ):
     raise ValueError(
@@ -1720,7 +1720,7 @@ def create_proto_from_feature_specs(
               stack_embedding_dim=feature.table_spec.stacked_table_spec.stack_embedding_dim,
               total_sample_count=feature.table_spec.stacked_table_spec.total_sample_count,
               max_ids_per_partition=feature.table_spec.stacked_table_spec.max_ids_per_partition,
-              num_sparsecores=(num_sparsecore_per_device * global_device_count),
+              num_sparsecores=(num_sparsecore_per_device * global_device_count),  # pyrefly: ignore[unsupported-operation]
               max_unique_ids_per_partition=feature.table_spec.stacked_table_spec.max_unique_ids_per_partition,
           )
       )

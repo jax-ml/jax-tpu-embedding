@@ -101,7 +101,7 @@ class SparseCoreEmbed(nn.Module):
     )
     self.embedding_table = self.param(
         EMBEDDING_PARAM_NAME,
-        self._wrap_initializer(initializer),
+        self._wrap_initializer(initializer),  # pyrefly: ignore[bad-argument-type]
     )
 
   def _wrap_initializer(

@@ -107,7 +107,7 @@ class PartitionedOptimizer(nnx.Optimizer):
   ):
     super().__init__(model, dense_optimizer, wrt=is_non_embedding_variables)
 
-  def update(self, model: nnx.Module, grads: Any):
+  def update(self, model: nnx.Module, grads: Any):  # pyrefly: ignore[bad-override]
     """Compute and apply optimzier updates for the model."""
 
     # JAX SparseCore returns the updated embedding variables as the gradients so

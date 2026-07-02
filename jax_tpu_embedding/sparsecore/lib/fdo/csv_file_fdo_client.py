@@ -59,7 +59,7 @@ class CSVFileFDOClient(fdo_client.FDOClient):
     # format between SparseDenseMatmulInputStats and separate files.
     # param_name -> table_name -> stats
     self._params: dict[str, dict[str, np.ndarray]] = {
-        field.name: collections.defaultdict(np.ndarray)
+        field.name: collections.defaultdict(np.ndarray)  # pyrefly: ignore[no-matching-overload]
         for field in _PARAM_FIELDS
     }
 
@@ -164,7 +164,7 @@ class CSVFileFDOClient(fdo_client.FDOClient):
     if not files:
       raise FileNotFoundError('No stats files found in %s' % files_glob)
 
-    stats = collections.defaultdict(np.ndarray)
+    stats = collections.defaultdict(np.ndarray)  # pyrefly: ignore[no-matching-overload]
     for file_name in files:
       logging.info('Reading stats from %s', file_name)
       file_data = collections.defaultdict(list)

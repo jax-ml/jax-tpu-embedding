@@ -46,7 +46,7 @@ import numpy as np
 import optax
 
 
-jnp.set_printoptions(threshold=np.inf, linewidth=np.inf)
+jnp.set_printoptions(threshold=np.inf, linewidth=np.inf)  # pyrefly: ignore[bad-argument-type]
 NestedFeatureSpecs = embedding.Nested[embedding_spec.FeatureSpec]
 NestedEmbeddingVariables = embedding.Nested[embedding.EmbeddingVariables]
 NestedArray = embedding.Nested[jax.Array]
@@ -75,8 +75,8 @@ class TrainMetrics(metrics.Collection):
 
   # train_accuracy: metrics.Accuracy
   # learning_rate: metrics.LastValue.from_output("learning_rate")
-  train_loss: metrics.Average.from_output('loss')
-  train_loss_std: metrics.Std.from_output('loss')
+  train_loss: metrics.Average.from_output('loss')  # pyrefly: ignore[invalid-annotation]
+  train_loss_std: metrics.Std.from_output('loss')  # pyrefly: ignore[invalid-annotation]
 
 
 @flax.struct.dataclass
@@ -210,7 +210,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
     self.global_sharding = NamedSharding(self.global_mesh, self.pd)
     self.global_emb_sharding = NamedSharding(self.global_mesh, self.pe)
     self.global_emb_layout = utils.embedding_table_format(
-        self.global_emb_sharding.mesh, self.global_emb_sharding.spec
+        self.global_emb_sharding.mesh, self.global_emb_sharding.spec  # pyrefly: ignore[bad-argument-type]
     )
     self.replicated_sharding = NamedSharding(self.global_mesh, P())
 
@@ -362,7 +362,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
         lambda x: jnp.reshape(x, (-1, self.model.embedding_size)), emb_grad
     )
 
-    train_state = train_state.replace(
+    train_state = train_state.replace(  # pyrefly: ignore[missing-attribute]
         params=new_params,
         opt_state=new_opt_state,
         step=train_state.step + 1,
@@ -402,7 +402,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
         self.global_sharding,
     )
     return ShakesperaeModelPipelineCurrentStepInput(
-        dense_inputs=ShakespeareModelDenseInput(labels=labels),
+        dense_inputs=ShakespeareModelDenseInput(labels=labels),  # pyrefly: ignore[bad-argument-type]
         sparse_inputs=preprocessed_inputs,
     )
 
@@ -428,7 +428,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
         embedding_variables=embedding_variables,
         pipeline_state=pipeline_state,
         sc_fwd_function=self.sc_fwd_function,
-        tc_function=self._tc_forward_backward_pass,
+        tc_function=self._tc_forward_backward_pass,  # pyrefly: ignore[bad-argument-type]
         sc_bwd_function=self.sc_bwd_function,
         fake_tc_step=fake_tc_step,
     )
@@ -437,7 +437,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
     """Performs any special handling or consumption of the train step outputs."""
 
     if ep_utils.is_output_valid(step, self.config.num_steps):
-      self.train_metrics = self.train_metrics.merge(model_output.metrics_update)
+      self.train_metrics = self.train_metrics.merge(model_output.metrics_update)  # pyrefly: ignore[bad-argument-type]
 
     if (step + 1) % self.config.log_frequency == 0:
       m = self.train_metrics.compute()
@@ -453,8 +453,8 @@ class EmbeddingPipelineTest(absltest.TestCase):
     This test trains the model for a number of steps and then checks that the
     final loss is less than a certain threshold.
     """
-    pipeline_state: ShakespeareModelPipelineState = None
-    pipeline_input: ShakesperaeModelPipelineCurrentStepInput = None
+    pipeline_state: ShakespeareModelPipelineState = None  # pyrefly: ignore[bad-assignment]
+    pipeline_input: ShakesperaeModelPipelineCurrentStepInput = None  # pyrefly: ignore[bad-assignment]
     train_step = None
     fake_tc_train_step = None
 
@@ -484,7 +484,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
               tc_train_state=self.train_state,
               embedding_variables=self.emb_variables,
               sc_fwd_function=self.sc_fwd_function,
-              tc_function=self._tc_forward_backward_pass,
+              tc_function=self._tc_forward_backward_pass,  # pyrefly: ignore[bad-argument-type]
           )
           pipeline_state = jax.device_put(
               pipeline_state, self.pipeline_state_sharding

@@ -61,7 +61,7 @@ def _inline_custom_vjp(jaxpr: jex.core.Jaxpr) -> jex.core.Jaxpr:
     ):
       eqns.extend(
           utils.inline_jaxpr(
-              eqn.params['call_jaxpr'].jaxpr, eqn.invars, eqn.outvars
+              eqn.params['call_jaxpr'].jaxpr, eqn.invars, eqn.outvars  # pyrefly: ignore[bad-argument-type]
           )
       )
     else:

@@ -414,7 +414,7 @@ def get_default_sc_bwd_function(
 
     return updated_embedding_variables, None
 
-  return sc_bwd_default_function
+  return sc_bwd_default_function  # pyrefly: ignore[bad-return]
 
 
 def get_pipeline_state_sharding(
@@ -461,19 +461,19 @@ def get_pipeline_state_sharding(
   )
   return pipeline_state_cls(
       pipeline_step=None,  # pytype: disable=wrong-arg-types
-      last_step_inputs=LastStepInput(
+      last_step_inputs=LastStepInput(  # pyrefly: ignore[bad-argument-type]
           sparse_inputs=sparse_input_sharding,
           embedding_activations=sc_layout,
           dense_inputs=dense_input_sharding,
           sc_fwd_aux=dense_input_sharding,
       ),
-      step_before_last_step_inputs=StepBeforeLastStepInput(
+      step_before_last_step_inputs=StepBeforeLastStepInput(  # pyrefly: ignore[bad-argument-type]
           sparse_inputs=sparse_input_sharding,
           embedding_gradients=sc_layout,
           tc_aux=tc_aux_sharding,
       ),
-      placeholder_output=pipeline_output_sharding,
-      placeholder_tc_aux=tc_aux_sharding,
+      placeholder_output=pipeline_output_sharding,  # pyrefly: ignore[bad-argument-type]
+      placeholder_tc_aux=tc_aux_sharding,  # pyrefly: ignore[bad-argument-type]
   )
 
 

@@ -41,7 +41,7 @@ HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
 CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
 
-_OptimizerDefinition: TypeAlias = collections.namedtuple(
+_OptimizerDefinition: TypeAlias = collections.namedtuple(  # pyrefly: ignore[invalid-annotation]
     "_OptimizerDefinition",
     ["primitive", "slot_variable_type", "default_initializers"],
 )
@@ -155,7 +155,7 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
   def __hash__(self) -> int:
     raise NotImplementedError
 
-  def __eq__(self, other: OptimizerSpec) -> bool:
+  def __eq__(self, other: OptimizerSpec) -> bool:  # pyrefly: ignore[bad-override]
     return self.__hash__() == other.__hash__()
 
 
@@ -181,7 +181,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       ] = (),
       short_name_str: str = "custom",
   ):
-    super().__init__(learning_rate=learning_rate)
+    super().__init__(learning_rate=learning_rate)  # pyrefly: ignore[bad-argument-type]
     self.custom_computation_fn = custom_computation_fn
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
@@ -266,13 +266,13 @@ class AdagradOptimizerSpec(OptimizerSpec):
       initial_accumulator_value: HyperParameterType = 0.1,
   ):
     super().__init__(
-        learning_rate=learning_rate,
+        learning_rate=learning_rate,  # pyrefly: ignore[bad-argument-type]
     )
     self.initial_accumulator_value = initial_accumulator_value
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return AdagradSlotVariables(
-        accumulator=jax.nn.initializers.constant(self.initial_accumulator_value)
+        accumulator=jax.nn.initializers.constant(self.initial_accumulator_value)  # pyrefly: ignore[bad-argument-type]
     )
 
   def __hash__(self) -> int:
@@ -322,7 +322,7 @@ class AdamOptimizerSpec(OptimizerSpec):
       epsilon: float | jax.Array = 1e-8,
   ):
     super().__init__(
-        learning_rate=learning_rate,
+        learning_rate=learning_rate,  # pyrefly: ignore[bad-argument-type]
     )
     self.beta_1 = beta_1
     self.beta_2 = beta_2
@@ -420,7 +420,7 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
       initial_momentum_value: float = 0.0,
   ):
     super().__init__(
-        learning_rate=learning_rate,
+        learning_rate=learning_rate,  # pyrefly: ignore[bad-argument-type]
     )
     self.momentum = momentum
     self.beta2 = beta2
@@ -502,7 +502,7 @@ class FTRLOptimizerSpec(OptimizerSpec):
       initial_linear_value: float = 0.0,
       multiply_linear_by_learning_rate: bool = False,
   ):
-    super().__init__(learning_rate=learning_rate)
+    super().__init__(learning_rate=learning_rate)  # pyrefly: ignore[bad-argument-type]
     self.learning_rate_power = learning_rate_power
     self.l1_regularization_strength = l1_regularization_strength
     self.l2_regularization_strength = l2_regularization_strength
@@ -664,7 +664,7 @@ class F2AOptimizerSpec(OptimizerSpec):
       l2_regularization_strength: float = 0.0,
       max_lr_multiplier: float = 1e6,
   ):
-    super().__init__(learning_rate=learning_rate)
+    super().__init__(learning_rate=learning_rate)  # pyrefly: ignore[bad-argument-type]
     self.rho = rho
     self.initial_accumulator_value = initial_accumulator_value
     self.initial_local_step_value = initial_local_step_value

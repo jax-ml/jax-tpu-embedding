@@ -126,7 +126,7 @@ def create_fdo_client() -> csv_file_fdo_client.CSVFileFDOClient | None:
 
   fdo_path = expand_directory_path(_FDO_DIR.value)
   logging.info('FDO storage path: %s', fdo_path)
-  return csv_file_fdo_client.CSVFileFDOClient(fdo_path, retain_history=False)
+  return csv_file_fdo_client.CSVFileFDOClient(fdo_path, retain_history=False)  # pyrefly: ignore[bad-argument-type]
 
 
 def create_checkpoint_manager() -> ocp.CheckpointManager | None:
@@ -141,7 +141,7 @@ def create_checkpoint_manager() -> ocp.CheckpointManager | None:
   cp_path = expand_directory_path(_CHECKPOINT_DIR.value)
   logging.info('Checkpoint path: %s', cp_path)
   return checkpoint_utils.create_checkpoint_manager(
-      cp_path=cp_path,
+      cp_path=cp_path,  # pyrefly: ignore[bad-argument-type]
       cp_options=cp_options,
   )
 

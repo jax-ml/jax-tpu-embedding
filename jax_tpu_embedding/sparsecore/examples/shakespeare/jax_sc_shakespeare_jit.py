@@ -44,7 +44,7 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-np.set_printoptions(threshold=np.inf)
+np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
 Nested = embedding.Nested
 
 
@@ -63,8 +63,8 @@ class TrainState:
 class TrainMetrics(metrics.Collection):
   # train_accuracy: metrics.Accuracy
   # learning_rate: metrics.LastValue.from_output("learning_rate")
-  train_loss: metrics.Average.from_output('loss')
-  train_loss_std: metrics.Std.from_output('loss')
+  train_loss: metrics.Average.from_output('loss')  # pyrefly: ignore[invalid-annotation]
+  train_loss_std: metrics.Std.from_output('loss')  # pyrefly: ignore[invalid-annotation]
 
 
 _CHECKPOINT_DIR = flags.DEFINE_string(
@@ -241,9 +241,9 @@ def run_model():
       )
       if latest_step is not None:
         # restore successfully, use the restored train_state and embedding
-        train_state = restored['train_state']
+        train_state = restored['train_state']  # pyrefly: ignore[unsupported-operation]
         emb_variables = {}
-        for k, v in restored['emb_variables'].items():
+        for k, v in restored['emb_variables'].items():  # pyrefly: ignore[unsupported-operation]
           emb_variables[k] = embedding.EmbeddingVariables(
               table=v['table'],
               slot=v['slot'],
@@ -260,7 +260,7 @@ def run_model():
         config.num_sc_per_device,
     )
   emb_var_outsharding = utils.embedding_table_format(
-      embedding_sharding.mesh, embedding_sharding.spec
+      embedding_sharding.mesh, embedding_sharding.spec  # pyrefly: ignore[bad-argument-type]
   )
 
   @partial(
@@ -348,7 +348,7 @@ def run_model():
           emb_variables,
       )
 
-    train_state = train_state.replace(
+    train_state = train_state.replace(  # pyrefly: ignore[missing-attribute]
         params=new_params, opt_state=new_opt_state
     )
 

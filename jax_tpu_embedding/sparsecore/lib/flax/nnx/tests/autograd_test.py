@@ -30,7 +30,7 @@ import optax
 
 Nested = embedding.Nested
 FLAGS = flags.FLAGS
-np.set_printoptions(threshold=np.inf)
+np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
 
 
 ################################################################################
