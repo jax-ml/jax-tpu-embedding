@@ -134,7 +134,7 @@ def _tpu_local_sparse_dense_matmul_lowering(
       activation_init,
   ]
 
-  return jax.ffi.ffi_lowering(
+  return jax.ffi.ffi_lowering(  # pyrefly: ignore[bad-return]
       "SparseDenseMatmulLocalOp",
       result_types=[
           mlir.aval_to_ir_type(ctx.module_context, out_aval)

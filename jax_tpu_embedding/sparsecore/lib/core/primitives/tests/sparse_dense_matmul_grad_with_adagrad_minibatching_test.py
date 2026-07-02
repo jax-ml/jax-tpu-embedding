@@ -314,7 +314,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
 
     self.accumulator_init = jnp.full(
-        self.emb_table_sharded[0].shape,
+        self.emb_table_sharded[0].shape,  # pyrefly: ignore[bad-index]
         0.00,
         np.float32,
     )
@@ -424,7 +424,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
             lhs_local_sample_ids,
             lhs_gains,
             num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
+            self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
             self.accumulator_init,
             z_grad,
             learning_rate,

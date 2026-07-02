@@ -129,7 +129,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           lhs_local_sample_ids,
           lhs_gains,
           num_minibatches_per_physical_sparse_core,
-          self.emb_table_sharded[0],
+          self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
           device_batch_size=batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
@@ -149,7 +149,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           lhs_local_sample_ids,
           lhs_gains,
           num_minibatches_per_physical_sparse_core,
-          self.emb_table_sharded[0],
+          self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
           device_batch_size=batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
@@ -167,7 +167,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           bad_local_sample_ids,
           lhs_gains,
           num_minibatches_per_physical_sparse_core,
-          self.emb_table_sharded[0],
+          self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
           device_batch_size=batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
@@ -185,7 +185,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           lhs_local_sample_ids,
           bad_gains,
           num_minibatches_per_physical_sparse_core,
-          self.emb_table_sharded[0],
+          self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
           device_batch_size=batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
@@ -241,7 +241,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
           bad_sample_id,
           lhs_gains,
           num_minibatches_per_physical_sparse_core,
-          self.emb_table_sharded[0],
+          self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
           device_batch_size=batch_size // self.num_chips,
           max_ids_per_partition=256,
           max_unique_ids_per_partition=256,
@@ -275,7 +275,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=0,
         max_unique_ids_per_partition=256,
@@ -290,7 +290,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=256,
         max_unique_ids_per_partition=0,
@@ -324,7 +324,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=256,
         max_unique_ids_per_partition=256,
@@ -364,7 +364,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         sample_ids,
         gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
@@ -484,7 +484,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
@@ -582,7 +582,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         lhs_local_sample_ids,
         lhs_gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        self.emb_table_sharded[0],  # pyrefly: ignore[bad-index]
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,

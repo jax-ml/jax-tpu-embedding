@@ -28,7 +28,7 @@ from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
-np.set_printoptions(threshold=np.inf, suppress=True)
+np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
 
 _VOC_A = 32
 _DIM_A = 4
@@ -68,7 +68,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=_VOC_A,
         embedding_dim=_DIM_A,
-        initializer=lambda: jnp.zeros((_VOC_A, _DIM_A), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((_VOC_A, _DIM_A), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_a",
@@ -76,7 +76,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=_VOC_B,
         embedding_dim=_DIM_B,
-        initializer=lambda: jnp.zeros((_VOC_B, _DIM_B), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((_VOC_B, _DIM_B), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_b",
@@ -84,7 +84,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=_VOC_C,
         embedding_dim=_DIM_C,
-        initializer=lambda: jnp.zeros((_VOC_C, _DIM_C), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((_VOC_C, _DIM_C), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.AdagradOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_c",
@@ -92,7 +92,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_d = embedding_spec.TableSpec(
         vocabulary_size=_VOC_D,
         embedding_dim=_DIM_D,
-        initializer=lambda: jnp.zeros((_VOC_D, _DIM_D), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((_VOC_D, _DIM_D), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.F2AOptimizerSpec(
             learning_rate=0.01,
             rho=0.5,
@@ -276,7 +276,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     embedding_variables = {}
     embedding_variables["table_a"] = [
         jax.device_put(
-            emb_table_a_sharded[0],
+            emb_table_a_sharded[0],  # pyrefly: ignore[bad-index]
             device=devices[0],
         ),
     ]
@@ -303,7 +303,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )
     embedding_variables["table_b"] = [
         jax.device_put(
-            emb_table_b_sharded[0],
+            emb_table_b_sharded[0],  # pyrefly: ignore[bad-index]
             device=devices[0],
         ),
     ]
@@ -325,11 +325,11 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=1,
         num_sc_per_device=4,
     )
-    accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)
+    accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)  # pyrefly: ignore[bad-index]
     embedding_variables["table_c"] = (
         [
             jax.device_put(
-                emb_table_c_sharded[0],
+                emb_table_c_sharded[0],  # pyrefly: ignore[bad-index]
                 device=devices[0],
             )
         ],
@@ -365,12 +365,12 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=1,
         num_sc_per_device=4,
     )
-    accumulator_d_init = jnp.full(emb_table_d_sharded[0].shape, 0.1, np.float32)
-    local_step_d_init = jnp.zeros(emb_table_d_sharded[0].shape, np.float32)
+    accumulator_d_init = jnp.full(emb_table_d_sharded[0].shape, 0.1, np.float32)  # pyrefly: ignore[bad-index]
+    local_step_d_init = jnp.zeros(emb_table_d_sharded[0].shape, np.float32)  # pyrefly: ignore[bad-index]
     embedding_variables["table_d"] = (
         [
             jax.device_put(
-                emb_table_d_sharded[0],
+                emb_table_d_sharded[0],  # pyrefly: ignore[bad-index]
                 device=devices[0],
             )
         ],
@@ -447,7 +447,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     # times the ID appears in the input.
     for i, array in enumerate(embedding_variables["table_a"][0]):
       col_id = array[0]
-      new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
+      new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)  # pyrefly: ignore[bad-argument-type]
       expected_grad_table_a[i] = np.full(
           (1, _DIM_A), new_col_id, dtype=np.float32
       )
@@ -455,7 +455,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     for i, array in enumerate(embedding_variables["table_b"][0]):
       col_id = array[0]
       new_col_id = col_id - (
-          count_num(self.input_tensor_table_b, col_id) * 0.01
+          count_num(self.input_tensor_table_b, col_id) * 0.01  # pyrefly: ignore[bad-argument-type]
       )
       expected_grad_table_b[i] = np.full(
           (1, _DIM_B), new_col_id, dtype=np.float32
@@ -630,13 +630,13 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
     )
 
-    expected_table_d = utils.shard_emb_table(
+    expected_table_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
         expected_table_d, num_devices=1, num_sc_per_device=4
     )[0]
-    expected_accumulator_d = utils.shard_emb_table(
+    expected_accumulator_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
         expected_accumulator_d, num_devices=1, num_sc_per_device=4
     )[0]
-    expected_local_step_d = utils.shard_emb_table(
+    expected_local_step_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
         expected_local_step_d, num_devices=1, num_sc_per_device=4
     )[0]
 
@@ -661,7 +661,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(self):
     devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -704,7 +704,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     embedding_variables = {}
     embedding_variables["table_a"] = [
         jax.device_put(
-            emb_table_a_sharded[i],
+            emb_table_a_sharded[i],  # pyrefly: ignore[bad-index]
             device=local_device,
         )
         for i, local_device in enumerate(devices)
@@ -731,7 +731,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )
     embedding_variables["table_b"] = [
         jax.device_put(
-            emb_table_b_sharded[i],
+            emb_table_b_sharded[i],  # pyrefly: ignore[bad-index]
             device=local_device,
         )
         for i, local_device in enumerate(devices)
@@ -757,7 +757,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     embedding_variables["table_c"] = (
         [
             jax.device_put(
-                emb_table_c_sharded[i],
+                emb_table_c_sharded[i],  # pyrefly: ignore[bad-index]
                 device=local_device,
             )
             for i, local_device in enumerate(devices)
@@ -825,7 +825,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     # times the ID appears in the input.
     for i, array in enumerate(embedding_variables["table_a"][0]):
       col_id = array[0]
-      new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
+      new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)  # pyrefly: ignore[bad-argument-type]
       expected_grad_table_a[i] = np.full(
           (1, _DIM_A), new_col_id, dtype=np.float32
       )
@@ -833,7 +833,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     for i, array in enumerate(embedding_variables["table_b"][0]):
       col_id = array[0]
       new_col_id = col_id - (
-          count_num(self.input_tensor_table_b, col_id) * 0.01
+          count_num(self.input_tensor_table_b, col_id) * 0.01  # pyrefly: ignore[bad-argument-type]
       )
       expected_grad_table_b[i] = np.full(
           (1, _DIM_B), new_col_id, dtype=np.float32
@@ -928,7 +928,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables_stacked(self):
     devices = jax.devices()[:2]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -1075,14 +1075,14 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       col_id = array[0]
       if col_id < 100:
         # Rows for table A
-        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
+        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)  # pyrefly: ignore[bad-argument-type]
         expected_grad_table_ab[i, :_DIM_A] = np.full(
             (1, _DIM_A), new_col_id, dtype=np.float32
         )
       else:
         # Rows for table B
         new_col_id = col_id - (
-            count_num(self.input_tensor_table_b, col_id - 100) * 0.01
+            count_num(self.input_tensor_table_b, col_id - 100) * 0.01  # pyrefly: ignore[bad-argument-type]
         )
         expected_grad_table_ab[i, :_DIM_B] = np.full(
             (1, _DIM_B), new_col_id, dtype=np.float32
@@ -1091,7 +1091,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     for i, array in enumerate(embedding_variables["table_c"][0]):
       col_id = array[0]
       new_col_id = col_id - (
-          count_num(self.input_tensor_table_c, col_id) * 0.01
+          count_num(self.input_tensor_table_c, col_id) * 0.01  # pyrefly: ignore[bad-argument-type]
       )
       expected_grad_table_c[i, :_DIM_C] = np.full(
           (1, _DIM_C), new_col_id, dtype=np.float32
@@ -1189,7 +1189,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       learning_rate: float | Callable[..., float | jax.Array],
   ):
     devices = jax.devices()
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -1238,7 +1238,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     embedding_variables = {}
     embedding_variables["table_a"] = [
         jax.device_put(
-            emb_table_a_sharded[i],
+            emb_table_a_sharded[i],  # pyrefly: ignore[bad-index]
             device=local_device,
         )
         for i, local_device in enumerate(devices)
@@ -1305,7 +1305,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       for i, array in enumerate(embedding_variables["table_a"][0]):
         col_id = array[0]
         new_col_id = col_id - (
-            count_num(self.input_tensor, col_id)
+            count_num(self.input_tensor, col_id)  # pyrefly: ignore[bad-argument-type]
         ) * table_a_optimizer.get_learning_rate(step)
         expected_grad_table_a[i] = np.full(
             (1, _DIM_A), new_col_id, dtype=np.float32
@@ -1364,7 +1364,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_c_sharded = utils.shard_emb_table(
         emb_table_c, num_devices=1, num_sc_per_device=4
     )
-    accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)
+    accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)  # pyrefly: ignore[bad-index]
 
     sharding = NamedSharding(mesh, P("x", None))
     embedding_variables = {
@@ -1373,7 +1373,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
                 shape=(_VOC_C, table_dim_c),
                 sharding=sharding,
                 arrays=[
-                    jax.device_put(emb_table_c_sharded[0], device=devices[0])
+                    jax.device_put(emb_table_c_sharded[0], device=devices[0])  # pyrefly: ignore[bad-index]
                 ],
             ),
             jax.make_array_from_single_device_arrays(
@@ -1665,14 +1665,14 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       col_id = array[0]
       if col_id < 100:
         # Rows for table A
-        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
+        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)  # pyrefly: ignore[bad-argument-type]
         expected_grad_table_ab[i, :_DIM_A] = np.full(
             (1, _DIM_A), new_col_id, dtype=np.float32
         )
       else:
         # Rows for table B
         new_col_id = col_id - (
-            count_num(self.input_tensor_table_b, col_id - 100) * 0.01
+            count_num(self.input_tensor_table_b, col_id - 100) * 0.01  # pyrefly: ignore[bad-argument-type]
         )
         expected_grad_table_ab[i, :_DIM_B] = np.full(
             (1, _DIM_B), new_col_id, dtype=np.float32
@@ -1680,7 +1680,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
     for i, array in enumerate(embedding_variables["table_c"][0]):
       col_id = array[0]
-      count = count_num(self.input_tensor_table_c, col_id)
+      count = count_num(self.input_tensor_table_c, col_id)  # pyrefly: ignore[bad-argument-type]
       if count > 0:
         new_col_id = col_id - 0.01 * count / (count + 1e-7)
       else:

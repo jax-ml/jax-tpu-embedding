@@ -69,7 +69,7 @@ def _hlo_const(x: core.ShapedArray) -> ir.Value:
 
 def _hlo_f32(x: float, emb_dim: int):
   return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
+      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))  # pyrefly: ignore[bad-argument-type]
   )
 
 
@@ -400,11 +400,11 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
       api_version=1,
   )(ctx, *operands)
 
-  table_tuple_op = hlo.GetTupleElementOp(op, 0)
+  table_tuple_op = hlo.GetTupleElementOp(op, 0)  # pyrefly: ignore[bad-argument-type]
   table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  momentum_tuple_op = hlo.GetTupleElementOp(op, 1)
+  momentum_tuple_op = hlo.GetTupleElementOp(op, 1)  # pyrefly: ignore[bad-argument-type]
   momentum_tuple_op = _annotate_sparse_compute_type(momentum_tuple_op)
-  velocity_tuple_op = hlo.GetTupleElementOp(op, 2)
+  velocity_tuple_op = hlo.GetTupleElementOp(op, 2)  # pyrefly: ignore[bad-argument-type]
   velocity_tuple_op = _annotate_sparse_compute_type(velocity_tuple_op)
 
   return (

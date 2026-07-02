@@ -408,8 +408,8 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
             lhs_local_sample_ids,
             lhs_gains,
             1,  # num_minibatches_per_physical_sparse_core
-            embedding_table_sharded[0],
-            accumulator_sharded[0],
+            embedding_table_sharded[0],  # pyrefly: ignore[bad-index]
+            accumulator_sharded[0],  # pyrefly: ignore[bad-index]
             activations_grad,
             learning_rate,
             max_ids_per_partition=16,
