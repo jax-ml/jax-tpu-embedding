@@ -46,6 +46,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: "/__w/.cache/bazel"
+          # Cache key uses dependency file hashes to avoid re-compiling external C++ dependencies when source or workflow files change.
           key: bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-${{ github.event.pull_request.base.sha }}
           restore-keys: |
             bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-
@@ -59,6 +60,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: "/__w/.cache/bazel"
+          # Cache key uses dependency file hashes to avoid re-compiling external C++ dependencies when source or workflow files change.
           key: bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-${{ github.event.before }}
           restore-keys: |
             bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-
