@@ -30,8 +30,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel pyrefly
           bash tools/install_bazelisk.sh
+
+      - name: Pyrefly static type check (non-blocking)
+        continue-on-error: true
+        run: |
+          pyrefly check jax_tpu_embedding
 
       # --- FOR PULL REQUESTS ---
       # Restore the cache from the main branch's base commit.
