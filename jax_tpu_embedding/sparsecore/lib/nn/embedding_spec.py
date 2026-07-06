@@ -19,7 +19,7 @@ import abc
 import collections
 import dataclasses
 import inspect
-from typing import Any, Callable, Sequence, TypeAlias
+from typing import Any, Callable, NamedTuple, Sequence, TypeAlias
 
 from flax import struct
 import jax
@@ -41,10 +41,11 @@ HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
 CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
 
-_OptimizerDefinition: TypeAlias = collections.namedtuple(  # pyrefly: ignore[invalid-annotation]
-    "_OptimizerDefinition",
-    ["primitive", "slot_variable_type", "default_initializers"],
-)
+
+class _OptimizerDefinition(NamedTuple):
+  primitive: jex.core.Primitive | Any
+  slot_variable_type: type[Any]
+  default_initializers: dict[str, CallableTableInitializer]
 
 
 SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
