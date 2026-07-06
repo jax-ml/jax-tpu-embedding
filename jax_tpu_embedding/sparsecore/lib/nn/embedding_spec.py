@@ -41,6 +41,7 @@ HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
 CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
 
+
 class _OptimizerDefinition(NamedTuple):
   primitive: jax.core.Primitive | Any
   slot_variable_type: type[Any]
