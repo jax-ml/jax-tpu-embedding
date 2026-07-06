@@ -36,6 +36,7 @@ jobs:
       - name: Pyrefly static type check (non-blocking)
         continue-on-error: true
         run: |
+          python -m pip install --root-user-action=ignore numpy jax
           pyrefly check jax_tpu_embedding
 
       # --- FOR PULL REQUESTS ---
@@ -45,10 +46,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: "/__w/.cache/bazel"
-          key: bazel-py3.10-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
+          key: bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-${{ github.event.pull_request.base.sha }}
           restore-keys: |
-            bazel-py3.10-${{ github.base_ref }}
-            bazel-py3.10-
+            bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-
+            bazel-py3.10-${{ runner.os }}-
             bazel-
 
       # --- FOR MAIN PUSHES AND MERGES ---
@@ -58,12 +59,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: "/__w/.cache/bazel"
-          # Try to find the cache from the exact commit *before* this push
-          key: bazel-py3.10-${{ github.ref_name }}-${{ github.event.before }}
-          # Fall back to the most recent cache for the main branch
+          key: bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-${{ github.event.before }}
           restore-keys: |
-            bazel-py3.10-${{ github.ref_name }}
-            bazel-py3.10-
+            bazel-py3.10-${{ runner.os }}-${{ hashFiles('WORKSPACE', 'third_party/**') }}-
+            bazel-py3.10-${{ runner.os }}-
             bazel-
 
       - name: Build all targets
