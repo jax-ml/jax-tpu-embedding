@@ -1,5 +1,6 @@
 [project]
 name = "jax_tpu_embedding"
+version = "0.1.0"
 description = "JAX SparseCore API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -29,22 +30,14 @@ dev = [
     'pyrefly',
 ]
 
-# `version` is set by setuptools to use `jax_tpu_embedding.sparsecore.__version__`.
-dynamic = ["version"]
-
-
 [project.urls]
 homepage = "https://github.com/jax-ml/jax-tpu-embedding"
 repository = "https://github.com/jax-ml/jax-tpu-embedding"
 issue_tracker = "https://github.com/jax-ml/jax-tpu-embedding/issues"
 
 [build-system]
-# Setuptools >= 61.0 is required for PEP 621 dynamic metadata support (e.g. dynamic = ["version"]).
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools.dynamic]
-version = {file = "jax_tpu_embedding/sparsecore/VERSION"}
 
 [tool.setuptools.packages.find]
 include = ["jax_tpu_embedding*"]
