@@ -44,7 +44,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
-version = {attr = "jax_tpu_embedding.sparsecore.__version__"}
+version = {file = "jax_tpu_embedding/sparsecore/VERSION"}
 
 [tool.setuptools.packages.find]
 include = ["jax_tpu_embedding*"]
