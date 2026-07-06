@@ -39,6 +39,7 @@ repository = "https://github.com/jax-ml/jax-tpu-embedding"
 issue_tracker = "https://github.com/jax-ml/jax-tpu-embedding/issues"
 
 [build-system]
+# Setuptools >= 61.0 is required for PEP 621 dynamic metadata support (e.g. dynamic = ["version"]).
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 

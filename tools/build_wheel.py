@@ -120,6 +120,8 @@ def run_build(output_dir: str) -> str:
   logging.info('Building wheels in %s', output_dir)
   runfiles_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
   logging.info('Runfiles root: %s', runfiles_root)
+  # Ensure the workspace root is in PYTHONPATH so setuptools can dynamically import
+  # jax_tpu_embedding.sparsecore.__version__ without throwing ModuleNotFoundError in Bazel.
   env = os.environ.copy()
   env['PYTHONPATH'] = (
       f"{runfiles_root}:{env.get('PYTHONPATH', '')}"
