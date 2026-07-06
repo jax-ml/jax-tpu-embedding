@@ -30,6 +30,7 @@ from collections.abc import Sequence
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from absl import app
@@ -287,11 +288,25 @@ def run_wheel_tags(bdist_path: str, python_tag: str, abi_tag: str) -> str:
 def main(argv: Sequence[str]) -> None:
   del argv
 
+  runfiles_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+  workspace_version_path = None
+
   if 'BUILD_WORKSPACE_DIRECTORY' in os.environ:
-    logging.info(
-        'Changing directory to %s', os.environ['BUILD_WORKSPACE_DIRECTORY']
+    workspace_dir = os.environ['BUILD_WORKSPACE_DIRECTORY']
+    logging.info('Changing directory to %s', workspace_dir)
+    os.chdir(workspace_dir)
+    
+    # Copy generated version.py to workspace so setuptools can import it.
+    runfiles_version = os.path.join(
+        runfiles_root, 'jax_tpu_embedding', 'sparsecore', 'version.py'
     )
-    os.chdir(os.environ['BUILD_WORKSPACE_DIRECTORY'])
+    workspace_version_path = os.path.join(
+        workspace_dir, 'jax_tpu_embedding', 'sparsecore', 'version.py'
+    )
+    if os.path.exists(runfiles_version):
+      logging.info('Copying %s to %s', runfiles_version, workspace_version_path)
+      shutil.copyfile(runfiles_version, workspace_version_path)
+
   logging.info('Current directory: %s', os.getcwd())
 
   output_dir = _OUTPUT_DIR.value
@@ -302,30 +317,35 @@ def main(argv: Sequence[str]) -> None:
 
   logging.info('Platform: %s, %s', platform.system(), platform.machine())
 
-  # Build wheel.
-  bdist, _ = run_build(output_dir)
-  wheel_info = _extract_wheel_info(bdist)
+  try:
+    # Build wheel.
+    bdist, _ = run_build(output_dir)
+    wheel_info = _extract_wheel_info(bdist)
 
-  # Run auditwheel to check and repair compatibility.
-  bdist_path = os.path.join(output_dir, bdist)
-  auditwheel_plat = run_auditwheel_show(bdist_path)
+    # Run auditwheel to check and repair compatibility.
+    bdist_path = os.path.join(output_dir, bdist)
+    auditwheel_plat = run_auditwheel_show(bdist_path)
 
-  if auditwheel_plat != wheel_info['platform_tag']:
-    repaired_path = run_auditwheel_repair(
-        bdist_path, auditwheel_plat, output_dir
-    )
-    # Remove unrepaired wheel.
-    if repaired_path != bdist_path:
-      logging.debug('Removing unrepaired wheel: %s', bdist_path)
-      os.remove(bdist_path)
-      bdist_path = repaired_path
+    if auditwheel_plat != wheel_info['platform_tag']:
+      repaired_path = run_auditwheel_repair(
+          bdist_path, auditwheel_plat, output_dir
+      )
+      # Remove unrepaired wheel.
+      if repaired_path != bdist_path:
+        logging.debug('Removing unrepaired wheel: %s', bdist_path)
+        os.remove(bdist_path)
+        bdist_path = repaired_path
 
-  # Run `wheel` to set the python and abi tags.
-  tags = next(packaging.tags.sys_tags())
-  bdist = run_wheel_tags(bdist_path, tags.interpreter, tags.abi)
-  bdist_path = os.path.join(output_dir, bdist)
+    # Run `wheel` to set the python and abi tags.
+    tags = next(packaging.tags.sys_tags())
+    bdist = run_wheel_tags(bdist_path, tags.interpreter, tags.abi)
+    bdist_path = os.path.join(output_dir, bdist)
 
-  logging.info('Final wheel: %s', bdist_path)
+    logging.info('Final wheel: %s', bdist_path)
+  finally:
+    if workspace_version_path and os.path.exists(workspace_version_path):
+      logging.info('Cleaning up copied version file: %s', workspace_version_path)
+      os.remove(workspace_version_path)
 
 
 if __name__ == '__main__':
