@@ -43,7 +43,7 @@ CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
 
 
 class _OptimizerDefinition(NamedTuple):
-  primitive: jax.core.Primitive | Any
+  primitive: jex.core.Primitive | Any
   slot_variable_type: type[Any]
   default_initializers: dict[str, CallableTableInitializer]
 
