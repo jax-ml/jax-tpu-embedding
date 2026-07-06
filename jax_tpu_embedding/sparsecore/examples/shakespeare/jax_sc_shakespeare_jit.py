@@ -63,8 +63,8 @@ class TrainState:
 class TrainMetrics(metrics.Collection):
   # train_accuracy: metrics.Accuracy
   # learning_rate: metrics.LastValue.from_output("learning_rate")
-  train_loss: metrics.Average = metrics.Average.from_output('loss')
-  train_loss_std: metrics.Std = metrics.Std.from_output('loss')
+  train_loss: metrics.Average.from_output('loss')  # pyrefly: ignore[invalid-annotation]
+  train_loss_std: metrics.Std.from_output('loss')  # pyrefly: ignore[invalid-annotation]
 
 
 _CHECKPOINT_DIR = flags.DEFINE_string(
