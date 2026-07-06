@@ -1,6 +1,5 @@
 [project]
 name = "jax_tpu_embedding"
-version = "0.0.1"
 description = "JAX SparseCore API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -29,6 +28,9 @@ dependencies = [
 dev = [
     'pyrefly',
 ]
+
+# `version` is set by setuptools to use `jax_tpu_embedding.sparsecore.__version__`.
+dynamic = ["version"]
 
 
 [project.urls]

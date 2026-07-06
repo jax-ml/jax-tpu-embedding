@@ -76,11 +76,14 @@ def _extract_wheel_info(filename: str) -> dict[str, str]:
   return wheel_info
 
 
-def run_process(cmd: Sequence[str]):
-  """Run a command as a subprocess, checking the return code.
+def run_process(
+    cmd: Sequence[str], env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+  """Runs a command and raises a RuntimeError on failure.
 
   Args:
-    cmd: process string tokens.
+    cmd: command and arguments list.
+    env: environment variables dictionary.
 
   Returns:
     The subprocess.run result.
@@ -88,7 +91,9 @@ def run_process(cmd: Sequence[str]):
   Raises:
     RuntimeError: on failure.
   """
-  process = subprocess.run(cmd, check=False, capture_output=True, text=True)
+  process = subprocess.run(
+      cmd, check=False, capture_output=True, text=True, env=env
+  )
   if process.returncode != 0:
     logging.error('Process failed with exit code %s', process.returncode)
     logging.error('Command: %s', ' '.join(cmd))
@@ -115,6 +120,10 @@ def run_build(output_dir: str) -> str:
   logging.info('Building wheels in %s', output_dir)
   runfiles_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
   logging.info('Runfiles root: %s', runfiles_root)
+  env = os.environ.copy()
+  env['PYTHONPATH'] = (
+      f"{runfiles_root}:{env.get('PYTHONPATH', '')}"
+  )
   process = run_process(
       [
           sys.executable,
@@ -125,6 +134,7 @@ def run_build(output_dir: str) -> str:
           output_dir,
           runfiles_root,
       ],
+      env=env,
   )
   stdout = process.stdout
   logging.debug('Build output:\n%s', stdout)
