@@ -24,13 +24,7 @@ dependencies = [
     'portpicker'
 ]
 
-[project.optional-dependencies]
-dev = [
-    'pyrefly',
-]
-
 # `version` is set by setuptools to use `jax_tpu_embedding.sparsecore.__version__`.
-# Setuptools >= 61.0 is required for PEP 621 dynamic metadata support.
 dynamic = ["version"]
 
 [project.urls]
@@ -39,12 +33,11 @@ repository = "https://github.com/jax-ml/jax-tpu-embedding"
 issue_tracker = "https://github.com/jax-ml/jax-tpu-embedding/issues"
 
 [build-system]
-# Setuptools >= 61.0 is required for PEP 621 dynamic metadata support (e.g. dynamic = ["version"]).
-requires = ["setuptools>=61.0"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
-version = {attr = "jax_tpu_embedding.sparsecore.version.__version__"}
+version = {attr = "jax_tpu_embedding.sparsecore.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["jax_tpu_embedding*"]
