@@ -828,7 +828,11 @@ def _recompute_target_specs(
 
   for stacked_spec_proto in target_proto.stacked_table_specs:
     stack_embedding_dim = max([
-        _next_largest_multiple(t.embedding_dim, 8)
+        (
+            1
+            if t.embedding_dim == 1
+            else _next_largest_multiple(t.embedding_dim, 8)
+        )
         for t in stacked_spec_proto.table_specs
     ])
     stacked_spec_proto.stack_embedding_dim = stack_embedding_dim

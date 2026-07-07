@@ -127,14 +127,40 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
 
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  embedding_dim = embedding_table_type.shape[1]
+
   constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
-  activation_init = hlo.broadcast(
-      constant_op,
-      mlir.dense_int_array([
-          device_batch_size,
-          ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-      ]),
-  )
+  use_broadcast_padding = embedding_dim == 1
+
+  if use_broadcast_padding:
+    vocab_size = embedding_table_type.shape[0]
+    table_padded_type = ir.RankedTensorType.get(
+        [vocab_size, 8], embedding_table_type.element_type
+    )
+    embedding_table_operand = hlo.broadcast_in_dim(
+        table_padded_type,
+        embedding_table,
+        broadcast_dimensions=mlir.dense_int_array([0, 1]),
+    )
+    activation_init = hlo.broadcast(
+        constant_op,
+        mlir.dense_int_array([device_batch_size, 8]),
+    )
+    result_type_for_custom_call = ir.RankedTensorType.get(
+        [device_batch_size, 8], embedding_table_type.element_type
+    )
+  else:
+    embedding_table_operand = embedding_table
+    activation_init = hlo.broadcast(
+        constant_op,
+        mlir.dense_int_array([device_batch_size, embedding_dim]),
+    )
+    result_type_for_custom_call = (
+        mlir.aval_to_ir_type(ctx.module_context, out_aval)
+        if jax.__version_info__ >= (0, 10, 1)
+        else mlir.aval_to_ir_type(out_aval)  # pytype: disable=missing-parameter
+    )
 
   sdmm_csr_config = {
       "max_ids_per_partition": max_ids_per_partition,
@@ -167,7 +193,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
           else []
       )
       + [
-          embedding_table,
+          embedding_table_operand,
           activation_init,
       ]
   )
@@ -178,19 +204,26 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     # We still have tests that use this format.
     call_target = "SparseDenseMatmulOp"
 
-  return jax.ffi.ffi_lowering(  # pyrefly: ignore[bad-return]
+  custom_call_output = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[
-          mlir.aval_to_ir_type(ctx.module_context, out_aval)
-          if jax.__version_info__ >= (0, 10, 1)
-          else mlir.aval_to_ir_type(out_aval)  # pytype: disable=missing-parameter
-      ],
+      result_types=[result_type_for_custom_call],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,
   )(
       ctx, *operands
   )  # type: ignore
+
+  if use_broadcast_padding:
+    final_output = hlo.slice(
+        custom_call_output[0],
+        mlir.dense_int_array([0, 0]),
+        mlir.dense_int_array([device_batch_size, 1]),
+        mlir.dense_int_array([1, 1]),
+    )
+    return [final_output]
+  else:
+    return custom_call_output  # type: ignore
 
 
 mlir.register_lowering(

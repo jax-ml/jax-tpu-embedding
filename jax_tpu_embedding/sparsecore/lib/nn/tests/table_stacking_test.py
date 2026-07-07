@@ -211,6 +211,33 @@ class TableStackingTest(parameterized.TestCase):
         * device_count,
     )
 
+  def test_auto_stack_dim_1(self):
+    device_count = 1
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=64,
+        embedding_dim=1,
+        initializer=lambda: jnp.zeros((64, 1), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_dim_1',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec,
+            input_shape=(16, 1),
+            output_shape=(16, 1),
+            name='feature_dim_1',
+        )
+    ]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=device_count,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    self.assertEqual(table_spec.setting_in_stack.padded_embedding_dim, 1)
+
   @parameterized.parameters(
       dict(use_short_stack_names=True),
       dict(use_short_stack_names=False),

@@ -144,10 +144,17 @@ def embedding_table_format_with_sharding(
 
   if device_kind == 'cpu':
     return sharding
+  rank = 2
+  if hasattr(sharding, 'spec') and sharding.spec is not None:
+    rank = max(2, len(sharding.spec))
+
+  major_to_minor = tuple(range(rank))
+  tiling = ((8,),)
+
   return layout.Format(  # pytype: disable=bad-return-type
       Layout(
-          major_to_minor=(0, 1),
-          tiling=((8,),),
+          major_to_minor=major_to_minor,
+          tiling=tiling,
       ),
       sharding,
   )

@@ -48,7 +48,11 @@ def _default_stacked_table_spec(
       stack_vocab_size=_next_largest_multiple(
           table_spec.vocabulary_size, 8 * num_shards
       ),
-      stack_embedding_dim=_next_largest_multiple(table_spec.embedding_dim, 8),
+      stack_embedding_dim=(
+          1
+          if table_spec.embedding_dim == 1
+          else _next_largest_multiple(table_spec.embedding_dim, 8)
+      ),
       optimizer=table_spec.optimizer,
       combiner=table_spec.combiner,
       total_sample_count=batch_size,
@@ -362,7 +366,11 @@ def round_up_dim_and_vocab_size(
     vocab size.
   """
   table_to_padded_dim = {
-      n: _next_largest_multiple(spec.embedding_dim, 8)
+      n: (
+          1
+          if spec.embedding_dim == 1
+          else _next_largest_multiple(spec.embedding_dim, 8)
+      )
       for (n, spec) in tables.items()
   }
   table_to_padded_vocab_size = {
