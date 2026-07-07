@@ -20,10 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Display Python version
         run: python -c "import sys; print(sys.version)"
@@ -40,10 +40,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: "/__w/.cache/bazel"
-          key: bazel-py3.10-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
+          key: bazel-py3.12-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
           restore-keys: |
-            bazel-py3.10-${{ github.base_ref }}
-            bazel-py3.10-
+            bazel-py3.12-${{ github.base_ref }}
+            bazel-py3.12-
             bazel-
 
       # --- FOR MAIN PUSHES AND MERGES ---
@@ -54,26 +54,26 @@ jobs:
         with:
           path: "/__w/.cache/bazel"
           # Try to find the cache from the exact commit *before* this push
-          key: bazel-py3.10-${{ github.ref_name }}-${{ github.event.before }}
+          key: bazel-py3.12-${{ github.ref_name }}-${{ github.event.before }}
           # Fall back to the most recent cache for the main branch
           restore-keys: |
-            bazel-py3.10-${{ github.ref_name }}
-            bazel-py3.10-
+            bazel-py3.12-${{ github.ref_name }}
+            bazel-py3.12-
             bazel-
 
       - name: Build all targets
         run: |
-          export HERMETIC_PYTHON_VERSION=3.10
+          export HERMETIC_PYTHON_VERSION=3.12
           bazel build --config=public_cache //... --build_tag_filters=-oss_exclude
 
       - name: Build wheel
         run: |
-          export HERMETIC_PYTHON_VERSION=3.10
+          export HERMETIC_PYTHON_VERSION=3.12
           bazel run --config=public_cache //tools:build_wheel
 
       - name: Run CPU tests
         run: |
-          export HERMETIC_PYTHON_VERSION=3.10
+          export HERMETIC_PYTHON_VERSION=3.12
           bazel test --config=public_cache --build_tests_only --test_tag_filters=-requires-tpu --test_output=errors --keep_going //...
 
       - name: Check disk space
@@ -87,4 +87,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: "/__w/.cache/bazel"
-          key: bazel-py3.10-${{ github.ref_name }}-${{ github.sha }}
+          key: bazel-py3.12-${{ github.ref_name }}-${{ github.sha }}
