@@ -23,6 +23,7 @@ follow the most performant patterns used in production.
 
 import collections
 from collections.abc import Sequence
+from typing import TypeVar
 
 import jax
 from jax import numpy as jnp
@@ -54,10 +55,45 @@ WeightBatch = Weight2D | Sequence[SampleWeight]
 MinibatchedFeatures = Sequence[FeatureBatch]
 MinibatchedWeights = Sequence[WeightBatch]
 
+FeatureInput = FeatureBatch | MinibatchedFeatures
+WeightInput = WeightBatch | MinibatchedWeights
+PartitionFeatureInput = FeatureInput | Sample
+PartitionWeightInput = WeightInput | SampleWeight
+
 
 ################################################################################
 # Helper Functions
 ################################################################################
+
+
+def _resolve_feature_input_ndim(features: FeatureInput) -> int:
+  """Resolves the number of dimensions for the FeatureInput sum type."""
+  if isinstance(features, (np.ndarray, jnp.ndarray)):
+    return features.ndim
+  try:
+    return np.asarray(features, dtype=object).ndim
+  except ValueError:
+    return 1
+
+
+_T = TypeVar("_T")
+
+
+def _to_sequence_of_batches(
+    inputs: _T,
+    enable_minibatching: bool,
+    input_name: str,
+) -> Sequence[_T]:
+  """Resolves an input into a uniform sequence of batches based on enable_minibatching."""
+  if not enable_minibatching:
+    return [inputs]
+  assert isinstance(inputs, Sequence) and not isinstance(
+      inputs, (np.ndarray, jnp.ndarray)
+  ), (
+      f"When enable_minibatching is True, {input_name} must be a sequence of"
+      " batches."
+  )
+  return inputs
 
 
 def _round_up(value: int, round_to: int) -> int:
@@ -88,8 +124,8 @@ def _validate_partition_map(
 
 
 def _preprocess_batch_to_partitions(
-    features: FeatureBatch,
-    features_weights: WeightBatch,
+    features: PartitionFeatureInput,
+    features_weights: PartitionWeightInput,
     num_scs: int,
     num_sc_per_device: int,
 ) -> PartitionMap:
@@ -256,8 +292,8 @@ def _pack_partitions_to_csr(
 
 
 def preprocess_sparse_dense_matmul_input(
-    features: FeatureBatch | MinibatchedFeatures,
-    features_weights: WeightBatch | MinibatchedWeights,
+    features: FeatureInput,
+    features_weights: WeightInput,
     mesh: jax.sharding.Mesh,
     *,
     max_ids_per_partition: int,
@@ -294,10 +330,7 @@ def preprocess_sparse_dense_matmul_input(
     raise ValueError(
         f"max_ids_per_partition must be positive, got {max_ids_per_partition}."
     )
-  try:
-    features_ndim = np.ndim(features)  # pyrefly: ignore[bad-argument-type]
-  except ValueError:
-    features_ndim = 1
+  features_ndim = _resolve_feature_input_ndim(features)
   if not enable_minibatching and features_ndim not in (1, 2):
     raise ValueError(f"features must be 1D or 2D, got {features_ndim}D.")
   if len(features) != len(features_weights):
@@ -315,18 +348,23 @@ def preprocess_sparse_dense_matmul_input(
       else utils.num_sparsecores_per_device(mesh.devices.item(0))
   )
   num_scs = num_sc_per_device * global_device_count
-  if not enable_minibatching:
-    features = [features]  # pyrefly: ignore[bad-assignment]
-    features_weights = [features_weights]  # pyrefly: ignore[bad-assignment]
+  feature_batches: Sequence[PartitionFeatureInput] = _to_sequence_of_batches(
+      features, enable_minibatching, "features"
+  )
+  weight_batches: Sequence[PartitionWeightInput] = _to_sequence_of_batches(
+      features_weights, enable_minibatching, "features_weights"
+  )
 
   ##############################################################################
-  # Step 1: Preprocess Minibatch to Partition Map
+  # Step 1: Preprocess Batches to Partition Map
   ##############################################################################
   all_partitions: list[PartitionMap] = [
       _preprocess_batch_to_partitions(
-          mb_feat, mb_weight, num_scs, num_sc_per_device  # pyrefly: ignore[bad-argument-type]
+          feat_batch, weight_batch, num_scs, num_sc_per_device
       )
-      for mb_feat, mb_weight in zip(features, features_weights, strict=True)
+      for feat_batch, weight_batch in zip(
+          feature_batches, weight_batches, strict=True
+      )
   ]
   for partitions in all_partitions:
     _validate_partition_map(

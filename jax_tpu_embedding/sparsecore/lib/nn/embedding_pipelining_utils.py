@@ -19,7 +19,7 @@ internal link:jax-sc-embedding-pipelining
 from collections.abc import Callable
 import functools
 import types
-from typing import Generic, ParamSpec, Protocol, TypeVar
+from typing import Generic, ParamSpec, Protocol, TypeAlias, TypeVar
 
 from flax import struct
 import jax
@@ -49,6 +49,7 @@ _TcTrainState = TypeVar('_TcTrainState')
 _EmbeddingVariables = TypeVar('_EmbeddingVariables')
 
 _T = TypeVar('_T')
+_PipelineStateT = TypeVar('_PipelineStateT', bound=struct.PyTreeNode)
 _P = ParamSpec('_P')
 
 
@@ -160,7 +161,7 @@ class TcStageFun(
       embedding_activations: _EmbeddingActivations,
       dense_inputs: _DenseInput,
       train_state: _TcTrainState,
-      sc_fwd_aux: _ScFwdAux = None,
+      sc_fwd_aux: _ScFwdAux | None = None,
   ) -> tuple[_EmbeddingGradients, _PipelineOutput, _TcTrainState, _TcAux]:
     """TensorCore forward/backward pass function.
 
@@ -193,7 +194,7 @@ class ScBwdStageFun(
       sparse_inputs: _SparseInput,
       embedding_gradients: _EmbeddingGradients,
       embedding_variables: _EmbeddingVariables,
-      tc_aux: _TcAux = None,
+      tc_aux: _TcAux | None = None,
   ) -> tuple[_EmbeddingVariables, _ScBwdAux]:
     """SparseCore backward pass function.
 
@@ -274,6 +275,15 @@ class PipelineState(
 
   placeholder_output: _PipelineOutput
   placeholder_tc_aux: _TcAux
+
+
+Sharding: TypeAlias = jax.sharding.Sharding
+ShardedLastStepInput: TypeAlias = LastStepInput[
+    Sharding, Sharding, Sharding, Sharding
+]
+ShardedStepBeforeLastStepInput: TypeAlias = StepBeforeLastStepInput[
+    Sharding, Sharding, Sharding
+]
 
 
 def get_pipeline_train_steps(num_steps: int) -> int:
@@ -387,9 +397,9 @@ def get_default_sc_bwd_function(
 
   def sc_bwd_default_function(
       sparse_inputs: DefaultSparseInputs,
-      emb_grad: DefaultEmbeddingGradients,
+      embedding_gradients: DefaultEmbeddingGradients,
       embedding_variables: NestedEmbeddingVariables,
-      tc_aux: DefaultTcAux,
+      tc_aux: DefaultTcAux | None = None,
   ) -> tuple[NestedEmbeddingVariables, DefaultScBwdAux]:
     """SparseCore backward pass - embedding update."""
     del tc_aux
@@ -409,39 +419,21 @@ def get_default_sc_bwd_function(
         check_vma=False,
     )
     updated_embedding_variables = tpu_sparse_dense_matmul_grad(
-        emb_grad, sparse_inputs, embedding_variables
+        embedding_gradients, sparse_inputs, embedding_variables
     )
 
     return updated_embedding_variables, None
 
-  return sc_bwd_default_function  # pyrefly: ignore[bad-return]
+  return sc_bwd_default_function
 
 
 def get_pipeline_state_sharding(
-    pipeline_state_cls: type[
-        PipelineState[
-            _SparseInput,
-            _DenseInput,
-            _EmbeddingActivations,
-            _EmbeddingGradients,
-            _TcAux,
-            _ScFwdAux,
-            _PipelineOutput,
-        ]
-    ],
+    pipeline_state_cls: Callable[..., _PipelineStateT],
     dense_input_sharding: jax.sharding.Sharding,
     sparse_input_sharding: jax.sharding.Sharding,
     pipeline_output_sharding: jax.sharding.Sharding,
     tc_aux_sharding: jax.sharding.Sharding,
-) -> PipelineState[
-    _SparseInput,
-    _DenseInput,
-    _EmbeddingActivations,
-    _EmbeddingGradients,
-    _TcAux,
-    _ScFwdAux,
-    _PipelineOutput,
-]:
+) -> _PipelineStateT:
   """Get the sharding for the pipeline state.
 
   Args:
@@ -460,20 +452,20 @@ def get_pipeline_state_sharding(
       sharding=sparse_input_sharding,
   )
   return pipeline_state_cls(
-      pipeline_step=None,  # pytype: disable=wrong-arg-types
-      last_step_inputs=LastStepInput(  # pyrefly: ignore[bad-argument-type]
+      pipeline_step=None,
+      last_step_inputs=ShardedLastStepInput(
           sparse_inputs=sparse_input_sharding,
           embedding_activations=sc_layout,
           dense_inputs=dense_input_sharding,
           sc_fwd_aux=dense_input_sharding,
       ),
-      step_before_last_step_inputs=StepBeforeLastStepInput(  # pyrefly: ignore[bad-argument-type]
+      step_before_last_step_inputs=ShardedStepBeforeLastStepInput(
           sparse_inputs=sparse_input_sharding,
           embedding_gradients=sc_layout,
           tc_aux=tc_aux_sharding,
       ),
-      placeholder_output=pipeline_output_sharding,  # pyrefly: ignore[bad-argument-type]
-      placeholder_tc_aux=tc_aux_sharding,  # pyrefly: ignore[bad-argument-type]
+      placeholder_output=pipeline_output_sharding,
+      placeholder_tc_aux=tc_aux_sharding,
   )
 
 

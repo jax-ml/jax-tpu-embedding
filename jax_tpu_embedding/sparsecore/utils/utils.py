@@ -39,7 +39,12 @@ NUM_SC_PER_DEVICE_MAP = {
 
 
 class DeviceLike(typing.Protocol):
-  device_kind: str
+  @property
+  def device_kind(self) -> str:
+    ...
+
+
+MeshLike: typing.TypeAlias = jax.sharding.Mesh | jax.sharding.AbstractMesh
 
 
 def num_sparsecores_per_device(
@@ -57,7 +62,7 @@ def num_sparsecores_per_device(
   Raises:
     ValueError: if the number of sparsecores cannot be determined.
   """
-  device = device or jax.devices()[0]  # pyrefly: ignore[bad-assignment]
+  device = device or jax.devices()[0]
 
   if not hasattr(device, 'device_kind'):
     raise ValueError(f'Cannot determine device kind for device: {device}')
@@ -73,7 +78,8 @@ def num_sparsecores_per_device(
 
 
 def embedding_table_format(
-    mesh: jax.sharding.Mesh, partition_spec: jax.sharding.PartitionSpec
+    mesh: MeshLike,
+    partition_spec: jax.sharding.PartitionSpec,
 ) -> jax.sharding.Sharding:
   """Returns the layout format of the embedding table."""
   return embedding_table_format_with_sharding(

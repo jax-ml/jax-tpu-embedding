@@ -74,6 +74,17 @@ class EmbeddingVariables(NamedTuple):
   slot: tuple[jax.Array, ...]
 
 
+def _resolve_scalar_minibatches(
+    val: np.ndarray | jax.ShapeDtypeStruct,
+) -> np.ndarray | jax.ShapeDtypeStruct:
+  """Resolves a 1D num_minibatches array or shape spec to its 0D scalar equivalent."""
+  if val.ndim == 1:
+    if isinstance(val, jax.ShapeDtypeStruct):
+      return jax.ShapeDtypeStruct((), val.dtype, sharding=val.sharding)
+    return val[0]
+  return val
+
+
 class SparseDenseMatmulInput(NamedTuple):
   """The result of preprocessing sparse dense matmul input."""
 
@@ -1079,11 +1090,11 @@ def tpu_sparse_dense_matmul(
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
   # Casting to int since primitives requires JSON serializable value.
-  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))  # pyrefly: ignore[bad-assignment]
+  sharding_strategy_val: int = int(sharding_strategy_to_enum(sharding_strategy))
 
-  num_minibatches = preprocessed_inputs.num_minibatches
-  if num_minibatches.ndim == 1:
-    num_minibatches = num_minibatches[0]
+  num_minibatches = _resolve_scalar_minibatches(
+      preprocessed_inputs.num_minibatches
+  )
 
   activations = {}
   for stacked_table_name in stacked_table_specs:
@@ -1109,7 +1120,7 @@ def tpu_sparse_dense_matmul(
             // global_device_count,
             max_ids_per_partition=stacked_table.max_ids_per_partition,
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
-            sharding_strategy=sharding_strategy,
+            sharding_strategy=sharding_strategy_val,
             quantization_config=quantization_config_tuple,
             enable_minibatching=enable_minibatching,
         )
@@ -1356,11 +1367,11 @@ def tpu_sparse_dense_matmul_grad(
   assert lhs_row_pointers.keys() == gradients.keys()
 
   # Casting to int since primitives requires JSON serializable value.
-  sharding_strategy = int(sharding_strategy_to_enum(sharding_strategy))  # pyrefly: ignore[bad-assignment]
+  sharding_strategy_val: int = int(sharding_strategy_to_enum(sharding_strategy))
 
-  num_minibatches = preprocessed_inputs.num_minibatches
-  if num_minibatches.ndim == 1:
-    num_minibatches = num_minibatches[0]
+  num_minibatches = _resolve_scalar_minibatches(
+      preprocessed_inputs.num_minibatches
+  )
 
   updated_embedding_variables = {}
   for stacked_table_name in stacked_table_specs:
@@ -1440,7 +1451,7 @@ def tpu_sparse_dense_matmul_grad(
           max_ids_per_partition=stack_table_spec.max_ids_per_partition,
           max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
           computation_name=symbol_name,
-          sharding_strategy=sharding_strategy,
+          sharding_strategy=sharding_strategy_val,
           enable_minibatching=enable_minibatching,
           **extra_kwargs,
       )
@@ -1557,7 +1568,7 @@ def _init_stacked_embedding_table(
             out_specs=global_sharding.spec,
         ),
         out_shardings=utils.embedding_table_format(
-            global_sharding.mesh, global_sharding.spec  # pyrefly: ignore[bad-argument-type]
+            global_sharding.mesh, global_sharding.spec
         ),
     )(
         rng,
@@ -1635,9 +1646,7 @@ def init_embedding_variables(
 
   if not bypass_mesh_check and (
       global_sharding.mesh.devices is None
-      or not np.array_equal(
-          global_sharding.mesh.devices.flatten(), jax.devices()  # pyrefly: ignore[bad-argument-type]
-      )
+      or list(global_sharding.mesh.devices.flatten()) != jax.devices()
   ):
     raise ValueError(
         "global_sharding needs to be created with default device order from"
@@ -1702,7 +1711,9 @@ def create_proto_from_feature_specs(
   Returns:
     An EmbeddingSpecProto.
   """
-  num_sparsecore_per_device = _get_num_sc_per_device(num_sparsecore_per_device)
+  if global_device_count is None:
+    global_device_count = jax.device_count()
+  num_sc_per_dev = _get_num_sc_per_device(num_sparsecore_per_device)
 
   stacked_table_specs: dict[str, embedding_spec_pb2.StackedTableSpecProto] = {}
   stack_to_table_specs: dict[
@@ -1720,7 +1731,7 @@ def create_proto_from_feature_specs(
               stack_embedding_dim=feature.table_spec.stacked_table_spec.stack_embedding_dim,
               total_sample_count=feature.table_spec.stacked_table_spec.total_sample_count,
               max_ids_per_partition=feature.table_spec.stacked_table_spec.max_ids_per_partition,
-              num_sparsecores=(num_sparsecore_per_device * global_device_count),  # pyrefly: ignore[unsupported-operation]
+              num_sparsecores=(num_sc_per_dev * global_device_count),
               max_unique_ids_per_partition=feature.table_spec.stacked_table_spec.max_unique_ids_per_partition,
           )
       )

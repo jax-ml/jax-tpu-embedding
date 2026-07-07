@@ -31,8 +31,8 @@ import numpy as np
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = Callable[[str, int], int]
-# Any to support tf.Ragged without needing an explicit TF dependency.
 ArrayLike: TypeAlias = jax.Array | np.ndarray | Any  # type: ignore
+_RowIdT = TypeVar("_RowIdT", int, jax.Array, np.ndarray)
 Shape: TypeAlias = tuple[int, ...]
 
 
@@ -1196,16 +1196,13 @@ def stack_and_shard_feature_tables(
   return ret
 
 
-Indexer = TypeVar("Indexer", int, jax.typing.ArrayLike)
-
-
 def compute_physical_row_ids(
     num_sparse_cores: int,
     stack_vocab_size: int,
     shard_rotation: int,
     row_offset_in_shard: int,
-    row_ids: Indexer,
-) -> Indexer:
+    row_ids: _RowIdT,
+) -> _RowIdT:
   """Computes the physical row IDs of a table in a stacked table buffer given its logical equivalents.
 
   Args:
@@ -1223,10 +1220,10 @@ def compute_physical_row_ids(
   """
   stack_shard_size = stack_vocab_size // num_sparse_cores
   shard_id = (
-      row_ids % num_sparse_cores + shard_rotation  # pyrefly: ignore[unsupported-operation]
+      row_ids % num_sparse_cores + shard_rotation
   ) % num_sparse_cores
-  sharded_row_id = row_ids // num_sparse_cores + row_offset_in_shard  # pyrefly: ignore[unsupported-operation]
-  return shard_id * stack_shard_size + sharded_row_id  # pyrefly: ignore[bad-return]
+  sharded_row_id = row_ids // num_sparse_cores + row_offset_in_shard
+  return shard_id * stack_shard_size + sharded_row_id
 
 
 def get_row_ids_in_stacked_table(
