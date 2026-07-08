@@ -224,7 +224,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
         *in_args,
         dim_var_values=[],
         const_lowering={},
-        outer_traceback=None,
+        outer_traceback=None,  # pyrefly: ignore[unexpected-keyword]
     )
 
     flat_out_vals = []
