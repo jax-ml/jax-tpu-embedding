@@ -112,8 +112,37 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         run: |
           export HERMETIC_PYTHON_VERSION=3.12
-          # Filter specifically for requires-tpu tagged tests; execute sequentially (--local_test_jobs=1) to prevent TPU device lock contention
-          bazel test --config=public_cache --build_tests_only --test_tag_filters=requires-tpu --local_test_jobs=1 --test_output=errors --keep_going //...
+          # Forward TPU cluster environment variables from runner host into Bazel test execution
+          bazel test --config=public_cache --build_tests_only \
+            --test_tag_filters=requires-tpu --local_test_jobs=1 \
+            --test_env=JAX_PLATFORMS=tpu,cpu \
+            --test_env=ALLOW_MULTIPLE_LIBTPU_LOAD=true \
+            --test_env=TPU_SKIP_MDS_QUERY=true \
+            --test_env=TPU_TOPOLOGY \
+            --test_env=TPU_WORKER_ID \
+            --test_env=TPU_TOPOLOGY_WRAP \
+            --test_env=TPU_CHIPS_PER_HOST_BOUNDS \
+            --test_env=TPU_ACCELERATOR_TYPE \
+            --test_env=TPU_RUNTIME_METRICS_PORTS \
+            --test_env=TPU_TOPOLOGY_ALT \
+            --test_env=TPU_HOST_BOUNDS \
+            --test_env=TPU_WORKER_HOSTNAMES \
+            --test_env=CHIPS_PER_HOST_BOUNDS \
+            --test_env=HOST_BOUNDS \
+            --test_env=VBAR_CONTROL_SERVICE_URL \
+            --test_output=errors --keep_going //...
+
+      - name: Build and verify wheel on TPU via Pytest
+        if: steps.check.outputs.skip == 'false'
+        env:
+          PYTHON_BIN: ${{ steps.setup_python.outputs.python-bin }}
+        run: |
+          export HERMETIC_PYTHON_VERSION=3.12
+          bazel run --config=public_cache //tools:build_wheel
+          uv pip install --python "$PYTHON_BIN" dist/*.whl pytest
+          # Run pytest across TPU tests from outside the workspace root to test installed wheel
+          mkdir -p /tmp/tpu_wheel_test && cd /tmp/tpu_wheel_test
+          JAX_PLATFORMS=tpu,cpu ALLOW_MULTIPLE_LIBTPU_LOAD=true TPU_SKIP_MDS_QUERY=true "$PYTHON_BIN" -m pytest --tb=short "$GITHUB_WORKSPACE/tests" "$GITHUB_WORKSPACE/sparsecore" -k "tpu or sparsecore or embedding"
 
       - name: Save Bazel cache
         if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
