@@ -9,19 +9,32 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read      # Lets the job check out your code
-  actions: write      # Lets the job write (save) the cache
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  UV_DEFAULT_INDEX: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+  PIP_INDEX_URL: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
 
 jobs:
   build-and-test-cpu:
     runs-on: linux-x86-n4-16
     container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
+    timeout-minutes: 60
+    permissions:
+      contents: read      # Lets the job check out your code
+      actions: write      # Lets the job write (save) the cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.12 via uv
+        id: setup_python
+        uses: google-ml-infra/actions/setup-uv-python@a1817800cb84c752378772c2a02781cf8309a399
         with:
           python-version: '3.12'
 
@@ -29,15 +42,17 @@ jobs:
         run: python -c "import sys; print(sys.version)"
 
       - name: Install dependencies
+        env:
+          PYTHON_BIN: ${{ steps.setup_python.outputs.python-bin }}
         run: |
-          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
+          uv pip install --python "$PYTHON_BIN" --upgrade pip setuptools wheel
           bash tools/install_bazelisk.sh
 
       # --- FOR PULL REQUESTS ---
       # Restore the cache from the main branch's base commit.
       - if: github.event_name == 'pull_request'
         name: Mount bazel cache (pull-request)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: "/__w/.cache/bazel"
           key: bazel-py3.12-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
@@ -50,7 +65,7 @@ jobs:
       # Restore the cache from the previous commit.
       - if: github.event_name != 'pull_request'
         name: Mount bazel cache (main)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: "/__w/.cache/bazel"
           # Try to find the cache from the exact commit *before* this push
@@ -84,7 +99,7 @@ jobs:
       # --- SAVE NEW CACHE ---
       - name: Save bazel cache (main)
         if: github.event_name != 'pull_request'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: "/__w/.cache/bazel"
           key: bazel-py3.12-${{ github.ref_name }}-${{ github.sha }}

@@ -1,0 +1,122 @@
+name: CI - TPU Test Suite
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "0 6 * * *"  # Daily at 06:00 UTC (Nightly full hardware verification)
+  workflow_dispatch:
+    inputs:
+      tpu_type:
+        description: "Select TPU architecture to test"
+        type: choice
+        required: true
+        default: "v5e-8"
+        options:
+          - "v5e-8"
+          - "v6e-8"
+          - "both"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  UV_DEFAULT_INDEX: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+  PIP_INDEX_URL: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+
+jobs:
+  tpu-test:
+    # SECURITY GUARD: Prevent untrusted fork code from executing on internal self-hosted TPU VMs.
+    if: github.event.repository.fork == false && github.repository_owner == 'jax-ml'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tpu_type: "v5e-8"
+            runner: "linux-x86-ct5lp-224-8tpu"
+            cores: "8"
+          - tpu_type: "v6e-8"
+            runner: "linux-x86-ct6e-180-8tpu"
+            cores: "8"
+    runs-on: ${{ matrix.runner }}
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: write  # For cache management
+    steps:
+      # Filter matrix for PR runs to only execute v5e-8 (conserving Trillium runner capacity)
+      - name: Check execution eligibility
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ matrix.tpu_type }}" == "v6e-8" ]; then
+            echo "Skipping v6e-8 on PR presubmit. Will run on scheduled nightly."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.tpu_type }}" != "both" ] && [ "${{ inputs.tpu_type }}" != "${{ matrix.tpu_type }}" ]; then
+            echo "Skipping unselected TPU type."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: steps.check.outputs.skip == 'false'
+        with:
+          persist-credentials: false
+
+      - name: Mark GitHub workspace as safe directory
+        if: steps.check.outputs.skip == 'false'
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set up Python 3.12 via uv
+        if: steps.check.outputs.skip == 'false'
+        id: setup_python
+        uses: google-ml-infra/actions/setup-uv-python@a1817800cb84c752378772c2a02781cf8309a399
+        with:
+          python-version: '3.12'
+
+      - name: Install build and TPU driver dependencies
+        if: steps.check.outputs.skip == 'false'
+        env:
+          PYTHON_BIN: ${{ steps.setup_python.outputs.python-bin }}
+        run: |
+          uv pip install --python "$PYTHON_BIN" --upgrade pip setuptools wheel
+          bash tools/install_bazelisk.sh
+          # Install JAX with TPU support and libtpu from official JAX release bucket
+          uv pip install --python "$PYTHON_BIN" --upgrade "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+          uv pip install --python "$PYTHON_BIN" -r third_party/py/requirements_lock_3_12.txt
+          # Verify TPU hardware driver detection
+          "$PYTHON_BIN" -c "import jax; print('Detected TPU devices:', jax.devices()); assert any(d.platform == 'tpu' for d in jax.devices())"
+
+      - name: Mount Bazel cache
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: "/__w/.cache/bazel"
+          key: bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}
+            bazel-tpu-${{ matrix.tpu_type }}-
+            bazel-tpu-
+            bazel-py3.12-
+
+      - name: Run Bazel TPU tests
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          export HERMETIC_PYTHON_VERSION=3.12
+          # Filter specifically for requires-tpu tagged tests; execute sequentially (--local_test_jobs=1) to prevent TPU device lock contention
+          bazel test --config=public_cache --build_tests_only --test_tag_filters=requires-tpu --local_test_jobs=1 --test_output=errors --keep_going //...
+
+      - name: Save Bazel cache
+        if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: "/__w/.cache/bazel"
+          key: bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}-${{ github.sha }}
