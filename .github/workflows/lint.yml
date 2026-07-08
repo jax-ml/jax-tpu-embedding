@@ -16,10 +16,12 @@ concurrency:
 env:
   UV_DEFAULT_INDEX: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
   PIP_INDEX_URL: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+  UV_INDEX_STRATEGY: "unsafe-best-match"
 
 jobs:
   pyrefly:
-    runs-on: ubuntu-latest
+    runs-on: linux-x86-n4-16
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
     timeout-minutes: 15
     permissions:
       contents: read
