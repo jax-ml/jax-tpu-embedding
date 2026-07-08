@@ -62,7 +62,7 @@ def num_sparsecores_per_device(
   Raises:
     ValueError: if the number of sparsecores cannot be determined.
   """
-  device = device or jax.devices()[0]
+  device = device or jax.devices()[0]  # pyrefly: ignore[bad-assignment]
 
   if not hasattr(device, 'device_kind'):
     raise ValueError(f'Cannot determine device kind for device: {device}')

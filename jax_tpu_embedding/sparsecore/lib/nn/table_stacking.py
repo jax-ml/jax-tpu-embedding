@@ -1220,10 +1220,10 @@ def compute_physical_row_ids(
   """
   stack_shard_size = stack_vocab_size // num_sparse_cores
   shard_id = (
-      row_ids % num_sparse_cores + shard_rotation
+      row_ids % num_sparse_cores + shard_rotation  # pyrefly: ignore[unsupported-operation]
   ) % num_sparse_cores
-  sharded_row_id = row_ids // num_sparse_cores + row_offset_in_shard
-  return shard_id * stack_shard_size + sharded_row_id
+  sharded_row_id = row_ids // num_sparse_cores + row_offset_in_shard  # pyrefly: ignore[unsupported-operation]
+  return shard_id * stack_shard_size + sharded_row_id  # pyrefly: ignore[bad-return]
 
 
 def get_row_ids_in_stacked_table(
