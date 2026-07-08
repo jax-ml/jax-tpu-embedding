@@ -42,3 +42,23 @@ include = ["jax_tpu_embedding*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.dylib", "*.so", "*.pyd"]
+
+[tool.pyrefly]
+preset = "basic"
+python-version = "3.12"
+project-includes = [
+    "jax_tpu_embedding/**/*.py*",
+    "jax_tpu_embedding/**/*.ipynb",
+]
+ignore-missing-imports = [
+    "absl.*",
+    "einops.*",
+    "flax.*",
+    "google_benchmark.*",
+    "jax.*",
+    "jaxlib.*",
+    "numpy.*",
+    "portpicker.*",
+    "setuptools.*",
+]
+untyped-def-behavior = "check-and-infer-return-any"
