@@ -225,7 +225,7 @@ def embedding_lookup(
       mesh=embedding_layer.mesh,
       in_specs=(pd, pt),
       out_specs=pd,
-      check_vma=False,
+      check_vma=False,  # pyrefly: ignore[unexpected-keyword]
   )(
       embedding_lookup_inputs,
       embedding_layer.embedding_table.value,
@@ -274,7 +274,7 @@ def embedding_lookup_bwd(res, g):
       mesh=embedding_layer.mesh,
       in_specs=(pd, pd, pt, None),
       out_specs=pt,
-      check_vma=False,
+      check_vma=False,  # pyrefly: ignore[unexpected-keyword]
   )(
       out_g,
       embedding_lookup_inputs,
