@@ -113,7 +113,7 @@ pytype_strict_contrib_test(
     ],
     args = [
         # TPU chip configuration,
-        "--xla_sc_pack_quantization_compute=true",
+        # "--xla_sc_pack_quantization_compute=true",
     ],
     main = "tpu_sparse_dense_matmul_test.py",
     tags = [

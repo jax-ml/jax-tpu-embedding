@@ -28,7 +28,7 @@ import numpy as np
 _BATCH_SIZE = 16
 _VOCAB_SIZE = 32
 _EMB_SIZE = 8
-_NUM_SC_PER_DEVICE = 4
+_NUM_SC_PER_DEVICE = utils.num_sparsecores_per_device(default_if_unknown=4)
 
 
 class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):

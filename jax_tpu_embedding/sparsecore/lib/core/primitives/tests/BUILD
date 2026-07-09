@@ -43,7 +43,7 @@ pytype_strict_contrib_test(
         # TPU chip configuration,
         "--logtostderr",
         # TODO(b/433283451): remove this flag once this is fixed.
-        "--xla_tpu_num_embedding_devices=1",
+        # "--xla_tpu_num_embedding_devices=1",
     ],
     tags = [
         "exclusive-if-local",

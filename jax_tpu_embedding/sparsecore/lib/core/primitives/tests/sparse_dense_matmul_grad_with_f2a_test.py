@@ -26,7 +26,7 @@ import numpy as np
 _BATCH_SIZE = 16
 _VOCAB_SIZE = 32
 _EMB_SIZE = 8
-_NUM_SC_PER_DEVICE = 4
+_NUM_SC_PER_DEVICE = utils.num_sparsecores_per_device(default_if_unknown=4)
 
 
 class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
@@ -553,11 +553,11 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         mesh,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
 
     def _shard_table(table):
-      return utils.shard_emb_table(table, num_devices=1, num_sc_per_device=4)
+      return utils.shard_emb_table(table, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE)
 
     embedding_table_sharded = _shard_table(np.asarray(embedding_table))
     accumulator_sharded = _shard_table(np.asarray(accumulator))
@@ -693,7 +693,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     # Assert
     def _unshard_table(table):
       return utils.unshard_emb_table(
-          jnp.expand_dims(table, axis=0), num_sc_per_device=4
+          jnp.expand_dims(table, axis=0), num_sc_per_device=_NUM_SC_PER_DEVICE
       )
 
     updated_embedding_table_unsharded = _unshard_table(updated_embedding_table)

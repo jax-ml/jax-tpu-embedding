@@ -23,7 +23,7 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-_NUM_SC_PER_DEVICE = 4
+_NUM_SC_PER_DEVICE = utils.num_sparsecores_per_device(default_if_unknown=4)
 
 
 class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
@@ -34,7 +34,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
 
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
     self.num_chips = 1
-    self.num_sc_per_device = 4
+    self.num_sc_per_device = _NUM_SC_PER_DEVICE
     self.vocab_size = 32
     self.emb_size = 8
     self.input_tensor = np.array(
@@ -345,7 +345,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         [self.input_tensor],
         [self.input_weights],
         mesh,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         enable_minibatching=True,
@@ -434,7 +434,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         features,
         weights,
         mesh,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         enable_minibatching=True,
@@ -532,7 +532,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         features,
         weights,
         mesh,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         enable_minibatching=True,

@@ -145,7 +145,7 @@ class ErrorHandlingTest(absltest.TestCase):
         feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
-        num_sc_per_device=4,
+        num_sc_per_device=num_sc_per_device,
         sharding_strategy="MOD",
         batch_number=batch_number,
     )
@@ -166,7 +166,7 @@ class ErrorHandlingTest(absltest.TestCase):
     emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
         num_devices=1,
-        num_sc_per_device=4,
+        num_sc_per_device=num_sc_per_device,
     )
     embedding_variables = {}
     embedding_variables["table"] = [
@@ -609,7 +609,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
-        num_sc_per_device=4,
+        num_sc_per_device=num_sc_per_device,
         sharding_strategy="MOD",
         has_leading_dimension=using_pmap,
         batch_number=batch_number,

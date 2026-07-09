@@ -39,6 +39,7 @@ _DIM_C = 18
 _VOC_D = 32
 _DIM_D = 8
 _BATCH_SIZE = 16
+_NUM_SC_PER_DEVICE = utils.num_sparsecores_per_device(default_if_unknown=4)
 
 
 def count_num(arr: embedding.Nested[jnp.ndarray], num: int) -> int:
@@ -242,7 +243,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     }
     embedding.prepare_feature_specs_for_training(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         global_device_count=len(devices),
     )
     batch_number = 42
@@ -257,7 +258,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         sharding_strategy="MOD",
         batch_number=batch_number,
     )
@@ -271,7 +272,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
         num_devices=1,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     embedding_variables = {}
     embedding_variables["table_a"] = [
@@ -299,7 +300,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_b_sharded = utils.shard_emb_table(
         emb_table_b,
         num_devices=1,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     embedding_variables["table_b"] = [
         jax.device_put(
@@ -323,7 +324,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_c_sharded = utils.shard_emb_table(
         emb_table_c,
         num_devices=1,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)  # pyrefly: ignore[bad-index]
     embedding_variables["table_c"] = (
@@ -363,7 +364,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_d_sharded = utils.shard_emb_table(
         emb_table_d,
         num_devices=1,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     accumulator_d_init = jnp.full(emb_table_d_sharded[0].shape, 0.1, np.float32)  # pyrefly: ignore[bad-index]
     local_step_d_init = jnp.zeros(emb_table_d_sharded[0].shape, np.float32)  # pyrefly: ignore[bad-index]
@@ -631,13 +632,13 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )
 
     expected_table_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
-        expected_table_d, num_devices=1, num_sc_per_device=4
+        expected_table_d, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
     )[0]
     expected_accumulator_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
-        expected_accumulator_d, num_devices=1, num_sc_per_device=4
+        expected_accumulator_d, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
     )[0]
     expected_local_step_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
-        expected_local_step_d, num_devices=1, num_sc_per_device=4
+        expected_local_step_d, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
     )[0]
 
     np.testing.assert_allclose(
@@ -686,7 +687,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs=feature_specs,
         local_device_count=num_devices,
         global_device_count=num_devices,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         sharding_strategy="MOD",
         batch_number=batch_number,
     )
@@ -699,7 +700,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_a_sharded = utils.shard_emb_table(
         emb_table_a,
         num_devices=2,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     embedding_variables = {}
     embedding_variables["table_a"] = [
@@ -727,7 +728,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_b_sharded = utils.shard_emb_table(
         emb_table_b,
         num_devices=2,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     embedding_variables["table_b"] = [
         jax.device_put(
@@ -752,7 +753,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     emb_table_c_sharded = utils.shard_emb_table(
         emb_table_c,
         num_devices=2,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     embedding_variables["table_c"] = (
         [
@@ -952,7 +953,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs=feature_specs,
         local_device_count=num_devices,
         global_device_count=num_devices,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         sharding_strategy="MOD",
         batch_number=batch_number,
     )
@@ -972,15 +973,15 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         test_utils.create_per_device_sharded_stacked_tables(
             [emb_table_a, emb_table_b],
             num_devices=num_devices,
-            num_sparsecore_per_device=4,
-            rotation=4,
+            num_sparsecore_per_device=_NUM_SC_PER_DEVICE,
+            rotation=_NUM_SC_PER_DEVICE,
         )
     )
     emb_sharded_per_device_c = (
         test_utils.create_per_device_sharded_stacked_tables(
             [emb_table_c],
             num_devices=num_devices,
-            num_sparsecore_per_device=4,
+            num_sparsecore_per_device=_NUM_SC_PER_DEVICE,
             rotation=0,
         )
     )
@@ -1341,7 +1342,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
     embedding.prepare_feature_specs_for_training(
         feature_specs,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         global_device_count=len(devices),
     )
 
@@ -1351,7 +1352,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs=feature_specs,
         local_device_count=1,
         global_device_count=1,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         sharding_strategy="MOD",
     )
 
@@ -1362,7 +1363,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         .astype(np.float32)
     )
     emb_table_c_sharded = utils.shard_emb_table(
-        emb_table_c, num_devices=1, num_sc_per_device=4
+        emb_table_c, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
     )
     accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)  # pyrefly: ignore[bad-index]
 
@@ -1481,7 +1482,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
   def test_custom_optimizer_stacked(self):
     devices = jax.devices()[:2]
-    num_sc_per_device = 4
+    num_sc_per_device = _NUM_SC_PER_DEVICE
     num_devices = len(devices)
     mesh = jax.sharding.Mesh(devices, "x")
 
@@ -1546,7 +1547,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs=feature_specs,
         local_device_count=num_devices,
         global_device_count=num_devices,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         sharding_strategy="MOD",
         batch_number=batch_number,
     )
@@ -1566,15 +1567,15 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         test_utils.create_per_device_sharded_stacked_tables(
             [emb_table_a, emb_table_b],
             num_devices=num_devices,
-            num_sparsecore_per_device=4,
-            rotation=4,
+            num_sparsecore_per_device=_NUM_SC_PER_DEVICE,
+            rotation=_NUM_SC_PER_DEVICE,
         )
     )
     emb_sharded_per_device_c = (
         test_utils.create_per_device_sharded_stacked_tables(
             [emb_table_c],
             num_devices=num_devices,
-            num_sparsecore_per_device=4,
+            num_sparsecore_per_device=_NUM_SC_PER_DEVICE,
             rotation=0,
         )
     )

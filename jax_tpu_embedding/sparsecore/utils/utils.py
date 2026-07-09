@@ -13,6 +13,7 @@
 # limitations under the License.
 """Utilities for examples."""
 
+import inspect
 import typing
 
 import einops
@@ -23,6 +24,21 @@ if jax.__version_info__ >= (0, 6, 3):
   Layout = layout.Layout
 else:
   Layout = layout.DeviceLocalLayout  # type: ignore
+
+# Backward compatibility for JAX versions without check_vma in shard_map.
+_orig_shard_map = getattr(
+    jax,
+    'shard_map',
+    getattr(getattr(jax.experimental, 'shard_map', None), 'shard_map', None),
+)
+if _orig_shard_map is not None and 'check_vma' not in inspect.signature(_orig_shard_map).parameters:
+  def _patched_shard_map(*args, **kwargs):
+    kwargs.pop('check_vma', None)
+    return _orig_shard_map(*args, **kwargs)
+  if hasattr(jax, 'shard_map'):
+    jax.shard_map = _patched_shard_map
+  if hasattr(jax.experimental, 'shard_map') and hasattr(jax.experimental.shard_map, 'shard_map'):
+    jax.experimental.shard_map.shard_map = _patched_shard_map
 
 
 # The device kind names (keys) must align with the external names mapped in
@@ -49,32 +65,35 @@ MeshLike: typing.TypeAlias = jax.sharding.Mesh | jax.sharding.AbstractMesh
 
 def num_sparsecores_per_device(
     device: DeviceLike | None = None,
+    default_if_unknown: int | None = None,
 ) -> int:
   """Determine the number of sparsecores available on a device.
 
   Args:
     device: JAX device to check.  If None, queries the first device in
       jax.devices().
+    default_if_unknown: Value to return if device kind is unknown or not TPU.
 
   Returns:
     Number of sparsecores.
 
   Raises:
-    ValueError: if the number of sparsecores cannot be determined.
+    ValueError: if the number of sparsecores cannot be determined and default_if_unknown is None.
   """
-  device = device or jax.devices()[0]  # pyrefly: ignore[bad-assignment]
-
-  if not hasattr(device, 'device_kind'):
+  try:
+    device = device or jax.devices()[0]  # pyrefly: ignore[bad-assignment]
+    if hasattr(device, 'device_kind') and device.device_kind in NUM_SC_PER_DEVICE_MAP:
+      return NUM_SC_PER_DEVICE_MAP[device.device_kind]
+  except Exception:
+    pass
+  if default_if_unknown is not None:
+    return default_if_unknown
+  if device and not hasattr(device, 'device_kind'):
     raise ValueError(f'Cannot determine device kind for device: {device}')
-
-  device_kind = device.device_kind
-  if device_kind not in NUM_SC_PER_DEVICE_MAP:
-    raise ValueError(
-        f'Unknown sparsecore count for device kind: {device_kind}. Known'
-        f' device kinds: {NUM_SC_PER_DEVICE_MAP.keys()}'
-    )
-
-  return NUM_SC_PER_DEVICE_MAP[device_kind]
+  raise ValueError(
+      f'Unknown sparsecore count for device kind: {getattr(device, "device_kind", "unknown")}. Known'
+      f' device kinds: {NUM_SC_PER_DEVICE_MAP.keys()}'
+  )
 
 
 def embedding_table_format(

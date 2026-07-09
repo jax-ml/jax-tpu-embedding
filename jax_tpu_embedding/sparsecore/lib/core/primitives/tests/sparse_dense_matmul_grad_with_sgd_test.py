@@ -32,7 +32,9 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
     self.batch_size = 16
     self.vocab_size = 32
     self.emb_size = 8
-    self.num_sc_per_device = 4
+    self.num_sc_per_device = utils.num_sparsecores_per_device(
+        default_if_unknown=4
+    )
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=self.num_chips,
@@ -103,7 +105,7 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
         mesh,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     emb_table_sharded = self._shard_table(
@@ -142,7 +144,8 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
     # Assert
     # Check the embedding activations.
     actual_emb_table_unsharded = utils.unshard_emb_table(
-        updated_emb_table[np.newaxis, :, :], num_sc_per_device=4
+        updated_emb_table[np.newaxis, :, :],
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     # Compute the expected results on CPU while the primitive runs on TPU.

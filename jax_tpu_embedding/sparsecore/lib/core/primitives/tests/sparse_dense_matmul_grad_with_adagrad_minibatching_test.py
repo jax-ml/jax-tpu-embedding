@@ -24,6 +24,9 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
+_NUM_SC_PER_DEVICE = utils.num_sparsecores_per_device(default_if_unknown=4)
+
+
 class SparseDenseMatmulGradWithAdagradWithMiniBatchingValidatorTest(
     parameterized.TestCase
 ):
@@ -309,7 +312,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
         num_devices=len(self.global_devices),
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
     )
     logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
 
@@ -352,7 +355,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
         self.features,
         self.weights,
         self.mesh,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         max_ids_per_partition=8,
         max_unique_ids_per_partition=8,
         enable_minibatching=True,
@@ -395,7 +398,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
         features,
         weights,
         mesh,
-        num_sc_per_device=4,
+        num_sc_per_device=_NUM_SC_PER_DEVICE,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         enable_minibatching=True,
@@ -441,10 +444,10 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     # Assert
     # Check the embedding activations.
     actual_table_unsharded = utils.unshard_emb_table(
-        updated_table[jnp.newaxis, :, :], num_sc_per_device=4
+        updated_table[jnp.newaxis, :, :], num_sc_per_device=_NUM_SC_PER_DEVICE
     )
     actual_accumulator_unsharded = utils.unshard_emb_table(
-        updated_accumulator[jnp.newaxis, :, :], num_sc_per_device=4
+        updated_accumulator[jnp.newaxis, :, :], num_sc_per_device=_NUM_SC_PER_DEVICE
     )
 
     # Compute the expected results on CPU while the primitive runs on TPU.

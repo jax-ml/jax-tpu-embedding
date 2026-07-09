@@ -37,6 +37,7 @@ index 0.
 """
 
 import functools
+import inspect
 import json
 from typing import Sequence, Tuple
 
@@ -215,6 +216,9 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     name_stack = source_info_util.NameStack()
     tokens_in = mlir.TokenSet()
 
+    kwargs = {}
+    if "outer_traceback" in inspect.signature(mlir.jaxpr_subcomp).parameters:
+      kwargs["outer_traceback"] = None
     out_vals, _ = mlir.jaxpr_subcomp(
         ctx.module_context,
         jaxpr.jaxpr,
@@ -224,7 +228,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
         *in_args,
         dim_var_values=[],
         const_lowering={},
-        outer_traceback=None,  # pyrefly: ignore[unexpected-keyword]
+        **kwargs,
     )
 
     flat_out_vals = []
