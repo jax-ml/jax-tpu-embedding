@@ -19,7 +19,7 @@ env:
   UV_INDEX_STRATEGY: "unsafe-best-match"
 
 jobs:
-  pyrefly:
+  lint_and_typecheck:
     runs-on: linux-x86-n4-16
     container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
     timeout-minutes: 15
