@@ -58,12 +58,12 @@ You can install JAX TPU Embedding from PyPI:
 Nightly Builds
 ^^^^^^^^^^^^^^
 
-To install the latest nightly builds from the public JAX registry:
+To install the latest nightly builds from the public JAX TPU Embedding registry:
 
 .. code-block:: sh
 
    pip install --pre \
-     --extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/ \
+     --extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax-tpu-embedding-public-nightly-artifacts-registry/simple/ \
      jax-tpu-embedding
 
 Building from Source
