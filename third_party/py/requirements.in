@@ -1,6 +1,6 @@
 # Library.
 absl-py
-flax @ https://github.com/google/flax/archive/e2134af.zip
+flax
 numpy
 # Pre-release of JAX required for SparseCore TPUs.
 jax[tpu] --pre

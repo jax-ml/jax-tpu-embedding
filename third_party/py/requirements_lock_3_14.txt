@@ -177,8 +177,9 @@ etils[epath,epy]==1.14.0 \
     # via
     #   clu
     #   orbax-checkpoint
-flax @ https://github.com/google/flax/archive/e2134af.zip \
-    --hash=sha256:6384171c69e4a09a1f4fa9c15acd6b48ad9332429c6b61a13412ecced088985d
+flax==0.12.7 \
+    --hash=sha256:79d590793fa3a282ac36b4464f2ea9d1e69fe1d026c4618451b01731e8086e32 \
+    --hash=sha256:abfd6acb17d6b93d1d7d7dfae7d3856222b92b35d35ab2487b77639c31dc673a
     # via
     #   -r third_party/py/requirements.in
     #   clu
