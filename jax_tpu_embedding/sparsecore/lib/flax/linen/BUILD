@@ -25,6 +25,7 @@ pytype_strict_library(
     srcs = [
         "embed.py",
     ],
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -40,6 +41,7 @@ pytype_strict_library(
     srcs = [
         "embed_optimizer.py",
     ],
+    type_checking = "pyrefly",
     deps = [
         ":embed",
         pypi_requirement("jax"),

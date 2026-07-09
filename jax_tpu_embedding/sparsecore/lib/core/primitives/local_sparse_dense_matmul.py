@@ -25,6 +25,7 @@ from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
 
 
@@ -134,19 +135,14 @@ def _tpu_local_sparse_dense_matmul_lowering(
       activation_init,
   ]
 
-  return jax.ffi.ffi_lowering(  # pyrefly: ignore[bad-return]
+  results = jax.ffi.ffi_lowering(
       "SparseDenseMatmulLocalOp",
-      result_types=[
-          mlir.aval_to_ir_type(ctx.module_context, out_aval)
-          if jax.__version_info__ >= (0, 10, 1)
-          else mlir.aval_to_ir_type(out_aval)  # pytype: disable=missing-parameter
-      ],
+      result_types=[utils.aval_to_ir_type(ctx, out_aval)],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,
-  )(
-      ctx, *operands
-  )  # type: ignore
+  )(ctx, *operands)
+  return utils.to_value_sequence(results)
 
 
 mlir.register_lowering(

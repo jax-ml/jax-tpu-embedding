@@ -61,7 +61,7 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _hlo_const(arr: core.ShapedArray) -> ir.Value:
+def _hlo_const(arr: np.ndarray) -> ir.Value:
   """Return an HLO constant from a NumPy array (any rank)."""
   return hlo.constant(
       ir.DenseElementsAttr.get(arr, type=mlir.dtype_to_ir_type(arr.dtype))
@@ -70,7 +70,7 @@ def _hlo_const(arr: core.ShapedArray) -> ir.Value:
 
 def _hlo_f32(x: float, emb_dim: int) -> ir.Value:
   """Return a <1 x emb_dim> f32 constant filled with x."""
-  return _hlo_const(np.full((1, emb_dim), x, dtype=np.float32))  # pyrefly: ignore[bad-argument-type]
+  return _hlo_const(np.full((1, emb_dim), x, dtype=np.float32))
 
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
@@ -97,7 +97,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[core.ShapedArray, core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_adagrad_momentum."""
   del enable_minibatching
   utils.validate_abstract_eval_params(
@@ -132,7 +132,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
         "embedding_table, accumulator and momentum must have identical shapes: "
         f"got {embedding_table.shape}, {accumulator.shape}, {momentum.shape}"
     )
-  return embedding_table, accumulator, momentum  # pyrefly: ignore[bad-return]
+  return embedding_table, accumulator, momentum
 
 
 tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive.def_abstract_eval(
@@ -353,14 +353,15 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
       api_version=1,
   )(ctx, *operands)
 
+  assert isinstance(custom_call_op[0], ir.Value)
   updated_table_op = _annotate_sparse_compute_type(
-      hlo.GetTupleElementOp(custom_call_op, 0)  # pyrefly: ignore[bad-argument-type]
+      hlo.GetTupleElementOp(custom_call_op[0], 0)
   )
   updated_accumulator_op = _annotate_sparse_compute_type(
-      hlo.GetTupleElementOp(custom_call_op, 1)  # pyrefly: ignore[bad-argument-type]
+      hlo.GetTupleElementOp(custom_call_op[0], 1)
   )
   updated_momentum_op = _annotate_sparse_compute_type(
-      hlo.GetTupleElementOp(custom_call_op, 2)  # pyrefly: ignore[bad-argument-type]
+      hlo.GetTupleElementOp(custom_call_op[0], 2)
   )
 
   return (  # pytype: disable=bad-return-type

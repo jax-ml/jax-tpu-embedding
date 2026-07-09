@@ -29,6 +29,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "file_fdo_client",
     srcs = ["file_fdo_client.py"],
+    type_checking = "pyrefly",
     deps = [
         ":fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -53,6 +54,7 @@ pytype_strict_contrib_test(
 pytype_strict_library(
     name = "csv_file_fdo_client",
     srcs = ["csv_file_fdo_client.py"],
+    type_checking = "pyrefly",
     deps = [
         ":fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

@@ -273,13 +273,15 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   )(ctx, *operands)
 
   result = []
+  assert isinstance(op[0], ir.Value)
   for i in range(len(tables)):
-    tuple_op = hlo.GetTupleElementOp(op, i)  # pyrefly: ignore[bad-argument-type]
+    tuple_op = hlo.GetTupleElementOp(op[0], i)
     tuple_op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
         {"_xla_compute_type": ir.StringAttr.get("sparse")}
     )
     result.append(tuple_op.results)
-  return tuple(result)
+  outputs: Tuple[Sequence[ir.Value], ...] = tuple(result)
+  return outputs
 
 
 mlir.register_lowering(

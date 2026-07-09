@@ -71,7 +71,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       lhs_gains,
       num_minibatches_per_physical_sparse_core,
       embedding_table,
-      activations_grad=np.zeros(  # pyrefly: ignore[bad-argument-type]
+      activations_grad=core.ShapedArray(
           (device_batch_size, embedding_table.shape[1]), np.float32
       ),  # Not used in the forward pass.
       max_ids_per_partition=max_ids_per_partition,
@@ -145,10 +145,13 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   # Add quantization params only when enabled
   if quantization_config is not None:
     q_min, q_max, q_buckets = quantization_config
-    sdmm_csr_config["quantization_config"] = {  # pyrefly: ignore[bad-assignment]
-        "min_value": q_min,
-        "max_value": q_max,
-        "num_buckets": q_buckets,
+    sdmm_csr_config = {
+        **sdmm_csr_config,
+        "quantization_config": {
+            "min_value": q_min,
+            "max_value": q_max,
+            "num_buckets": q_buckets,
+        },
     }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_csr_config,
@@ -178,19 +181,14 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     # We still have tests that use this format.
     call_target = "SparseDenseMatmulOp"
 
-  return jax.ffi.ffi_lowering(  # pyrefly: ignore[bad-return]
+  results = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[
-          mlir.aval_to_ir_type(ctx.module_context, out_aval)
-          if jax.__version_info__ >= (0, 10, 1)
-          else mlir.aval_to_ir_type(out_aval)  # pytype: disable=missing-parameter
-      ],
+      result_types=[utils.aval_to_ir_type(ctx, out_aval)],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,
-  )(
-      ctx, *operands
-  )  # type: ignore
+  )(ctx, *operands)
+  return utils.to_value_sequence(results)
 
 
 mlir.register_lowering(

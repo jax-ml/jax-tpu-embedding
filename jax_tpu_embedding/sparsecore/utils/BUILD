@@ -26,7 +26,7 @@ pytype_strict_library(
         "__init__.py",
         "utils.py",
     ],
-    # type_checking = "pyrefly",
+    type_checking = "pyrefly",
     deps = [
         pypi_requirement("einops"),
         pypi_requirement("jax"),

@@ -58,7 +58,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     # format between SparseDenseMatmulInputStats and separate files.
     # param_name -> table_name -> stats
     self._params: dict[str, dict[str, np.ndarray]] = {
-        field.name: collections.defaultdict(np.ndarray)  # pyrefly: ignore[no-matching-overload]
+        field.name: collections.defaultdict(lambda: np.zeros(0, dtype=np.int32))
         for field in _PARAM_FIELDS
     }
 
@@ -85,8 +85,9 @@ class NPZFileFDOClient(fdo_client.FDOClient):
             table_name,
             stats,
         )
+        stats = np.asarray(stats, dtype=np.int64)
         if table_name not in self._params[param_name]:
-          self._params[param_name][table_name] = stats  # pyrefly: ignore[unsupported-operation]
+          self._params[param_name][table_name] = stats
         else:
           self._params[param_name][table_name] = np.vstack(
               (self._params[param_name][table_name], stats)
@@ -153,7 +154,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     files = self._get_latest_files_by_process(glob.glob(files_glob))
     if not files:
       raise FileNotFoundError('No stats files found in %s' % files_glob)
-    stats = collections.defaultdict(np.ndarray)  # pyrefly: ignore[no-matching-overload]
+    stats = collections.defaultdict(lambda: np.zeros(0, dtype=np.int32))
     for file_name in files:
       logging.info('Reading stats from %s', file_name)
       loaded = np.load(file_name)

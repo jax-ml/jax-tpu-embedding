@@ -108,7 +108,7 @@ import dataclasses
 import functools
 import logging
 import os
-from typing import Any, Callable, Concatenate, NamedTuple, ParamSpec, TypeVar
+from typing import Any, Callable, Concatenate, Generic, NamedTuple, ParamSpec, TypeVar
 
 import jax
 import jax.extend as jex
@@ -137,13 +137,26 @@ class EmbeddingPipeliningState(NamedTuple):
   updates_0: list[jax.Array] | None = None
 
 
+FunctionArgs = ParamSpec('FunctionArgs')
+FunctionResults = TypeVar('FunctionResults')
+
+
 @dataclasses.dataclass
-class PipeliningFunction:
-  train_step_func: Callable[..., Any]
+class PipeliningFunction(Generic[FunctionArgs, FunctionResults]):
+  """Wrapper class that encapsulates the pipelined train step and finalize call."""
+  train_step_func: Callable[
+      Concatenate[EmbeddingPipeliningState, FunctionArgs],
+      tuple[EmbeddingPipeliningState, FunctionResults],
+  ]
   finalize: Callable[..., Any]
 
-  def __call__(self, state: EmbeddingPipeliningState, *args_2):
-    return self.train_step_func(state, *args_2)
+  def __call__(
+      self,
+      state: EmbeddingPipeliningState,
+      *args: FunctionArgs.args,
+      **kwargs: FunctionArgs.kwargs,
+  ) -> tuple[EmbeddingPipeliningState, FunctionResults]:
+    return self.train_step_func(state, *args, **kwargs)
 
 
 def init_state() -> EmbeddingPipeliningState:
@@ -210,18 +223,11 @@ def finalize_pipelining(
   return state, (carry, *res)
 
 
-FunctionArgs = ParamSpec('FunctionArgs')
-FunctionResults = TypeVar('FunctionResults')
-
-
 def auto_pipelining(
     fn: Callable[FunctionArgs, FunctionResults],
     out_shardings: tuple[Any, ...],
     static_argnums: tuple[int, ...] = (),
-) -> Callable[
-    Concatenate[EmbeddingPipeliningState, FunctionArgs],
-    tuple[EmbeddingPipeliningState, FunctionResults],
-]:
+) -> PipeliningFunction[FunctionArgs, FunctionResults]:
   """A decorator to transform a function for SparseCore pipelining."""
 
   def _build_runner(carry: Carry, args_2):
@@ -270,4 +276,4 @@ def auto_pipelining(
       finalize_pipeline, out_shardings=out_shardings, donate_argnames=('carry',)
   )
 
-  return PipeliningFunction(train_pipeline, finalize_pipeline)  # pyrefly: ignore[bad-return]
+  return PipeliningFunction(train_pipeline, finalize_pipeline)

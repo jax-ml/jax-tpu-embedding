@@ -164,7 +164,7 @@ pytype_strict_library(
     srcs = [
         "input_preprocessing.py",
     ],
-    # type_checking = "pyrefly",
+    type_checking = "pyrefly",
     deps = [
         ":constants",
         "//jax_tpu_embedding/sparsecore/utils",
@@ -330,6 +330,7 @@ cc_library(
 
 pytype_strict_library(
     name = "pybind_input_preprocessing_pyi",
+    pytype_srcs = ["pybind_input_preprocessing.pyi"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("numpy"),

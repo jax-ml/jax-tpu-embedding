@@ -22,6 +22,7 @@ package(
 pytype_strict_library(
     name = "utils",
     srcs = ["utils.py"],
+    type_checking = "pyrefly",
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
@@ -31,6 +32,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "decompose",
     srcs = ["decompose.py"],
+    type_checking = "pyrefly",
     deps = [
         ":preprocess",
         ":utils",
@@ -42,6 +44,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "preprocess",
     srcs = ["preprocess.py"],
+    type_checking = "pyrefly",
     deps = [
         ":utils",
         pypi_requirement("jax/extend"),
@@ -51,6 +54,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "auto_pipelining",
     srcs = ["auto_pipelining.py"],
+    type_checking = "pyrefly",
     deps = [
         ":decompose",
         pypi_requirement("jax"),

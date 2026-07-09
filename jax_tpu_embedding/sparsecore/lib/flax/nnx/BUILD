@@ -30,6 +30,7 @@ pytype_strict_library(
     srcs = [
         "embed.py",
     ],
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -44,6 +45,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "checkpoint_utils",
     srcs = ["checkpoint_utils.py"],
+    type_checking = "pyrefly",
     deps = [
         ":embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -54,6 +56,7 @@ pytype_strict_library(
         pypi_requirement("absl/logging"),
         pypi_requirement("flax/nnx:v1"),
         pypi_requirement("jax"),
+        pypi_requirement("jax/experimental:layout"),
         pypi_requirement("numpy"),
         pypi_requirement("orbax/checkpoint"),
     ],

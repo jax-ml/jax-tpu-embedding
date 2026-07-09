@@ -620,7 +620,9 @@ def _enforce_sharding_and_layout(
   ordering). This helper uses `with_layout_constraint` inside a `shard_map`
   to repack the underlying device buffers to match the expected layout.
   """
-  fmt = utils.embedding_table_format(base_sharding.mesh, base_sharding.spec)  # pyrefly: ignore[bad-argument-type]
+  assert base_sharding.mesh is not None
+  assert base_sharding.spec is not None
+  fmt = utils.embedding_table_format(base_sharding.mesh, base_sharding.spec)
   sharding_axis = next((s for s in base_sharding.spec if s is not None), None)
   repack = jax.jit(
       jax.shard_map(

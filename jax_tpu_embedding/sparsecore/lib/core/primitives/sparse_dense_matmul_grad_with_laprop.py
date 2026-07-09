@@ -60,7 +60,7 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _hlo_const(x: core.ShapedArray) -> ir.Value:
+def _hlo_const(x: np.ndarray) -> ir.Value:
   return hlo.constant(
       ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
   )
@@ -68,7 +68,7 @@ def _hlo_const(x: core.ShapedArray) -> ir.Value:
 
 def _hlo_f32(x: float, emb_dim: int):
   return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))  # pyrefly: ignore[bad-argument-type]
+      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
   )
 
 
@@ -400,11 +400,12 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
       api_version=1,
   )(ctx, *operands)
 
-  table_tuple_op = hlo.GetTupleElementOp(op, 0)  # pyrefly: ignore[bad-argument-type]
+  assert isinstance(op[0], ir.Value)
+  table_tuple_op = hlo.GetTupleElementOp(op[0], 0)
   table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  mu_tuple_op = hlo.GetTupleElementOp(op, 1)  # pyrefly: ignore[bad-argument-type]
+  mu_tuple_op = hlo.GetTupleElementOp(op[0], 1)
   mu_tuple_op = _annotate_sparse_compute_type(mu_tuple_op)
-  nu_tuple_op = hlo.GetTupleElementOp(op, 2)  # pyrefly: ignore[bad-argument-type]
+  nu_tuple_op = hlo.GetTupleElementOp(op[0], 2)
   nu_tuple_op = _annotate_sparse_compute_type(nu_tuple_op)
 
   return (

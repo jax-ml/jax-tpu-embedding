@@ -14,7 +14,6 @@
 """SparseCore embedding layer."""
 
 import functools
-from typing import Any
 
 from flax import nnx
 import jax
@@ -107,7 +106,7 @@ class PartitionedOptimizer(nnx.Optimizer):
   ):
     super().__init__(model, dense_optimizer, wrt=is_non_embedding_variables)
 
-  def update(self, model: nnx.Module, grads: Any):  # pyrefly: ignore[bad-override]
+  def update(self, model: nnx.Module, grads: optax.Updates, /, **kwargs):
     """Compute and apply optimzier updates for the model."""
 
     # JAX SparseCore returns the updated embedding variables as the gradients so

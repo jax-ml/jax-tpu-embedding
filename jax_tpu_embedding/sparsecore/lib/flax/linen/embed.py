@@ -101,11 +101,14 @@ class SparseCoreEmbed(nn.Module):
     )
     self.embedding_table = self.param(
         EMBEDDING_PARAM_NAME,
-        self._wrap_initializer(initializer),  # pyrefly: ignore[bad-argument-type]
+        self._wrap_initializer(initializer),
     )
 
   def _wrap_initializer(
-      self, initializer: Callable[[jax.Array], tuple[jax.Array, ...]]
+      self,
+      initializer: Callable[
+          [jax.Array], Mapping[str, embedding.EmbeddingVariables]
+      ],
   ):
     return with_sparsecore_layout(
         fn=initializer,

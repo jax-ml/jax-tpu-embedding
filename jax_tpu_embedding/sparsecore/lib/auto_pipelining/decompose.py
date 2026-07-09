@@ -174,7 +174,7 @@ def decompose(
       update_params, embedding_tables = utils.update_params(eqn)
       emb_slot_vars.extend(embedding_tables)
       update_param_outputs.extend(update_params)
-      cloned_params = utils.clone_vars(update_params)  # pyrefly: ignore[bad-argument-type]
+      cloned_params = utils.clone_vars(update_params)
       eqn = eqn.replace(invars=cloned_params + embedding_tables)
       update_param_inputs.extend(cloned_params)
       assert (

@@ -62,7 +62,7 @@ def _annotate_sparse_compute_type(op: ir.OpView):
   return op
 
 
-def _hlo_const(x: core.ShapedArray) -> ir.Value:
+def _hlo_const(x: np.ndarray) -> ir.Value:
   return hlo.constant(
       ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
   )
@@ -70,7 +70,7 @@ def _hlo_const(x: core.ShapedArray) -> ir.Value:
 
 def _hlo_f32(x: float, emb_dim: int):
   return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))  # pyrefly: ignore[bad-argument-type]
+      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
   )
 
 
@@ -300,7 +300,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     if multiply_linear_by_learning_rate:
       scale = lr_param
     else:
-      scale = _hlo_const(np.ones((1, emb_dim_size), np.float32))  # pyrefly: ignore[bad-argument-type]
+      scale = _hlo_const(np.ones((1, emb_dim_size), np.float32))
 
     l1_scaled = hlo.multiply(l1_param, scale)
     numerator = hlo.select(
@@ -382,14 +382,15 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
       api_version=1,
   )(ctx, *operands)
 
+  assert isinstance(custom_call_op[0], ir.Value)
   updated_table_op = _annotate_sparse_compute_type(
-      hlo.GetTupleElementOp(custom_call_op, 0)  # pyrefly: ignore[bad-argument-type]
+      hlo.GetTupleElementOp(custom_call_op[0], 0)
   )
   updated_accumulator_op = _annotate_sparse_compute_type(
-      hlo.GetTupleElementOp(custom_call_op, 1)  # pyrefly: ignore[bad-argument-type]
+      hlo.GetTupleElementOp(custom_call_op[0], 1)
   )
   updated_linear_op = _annotate_sparse_compute_type(
-      hlo.GetTupleElementOp(custom_call_op, 2)  # pyrefly: ignore[bad-argument-type]
+      hlo.GetTupleElementOp(custom_call_op[0], 2)
   )
 
   return (  # pytype: disable=bad-return-type

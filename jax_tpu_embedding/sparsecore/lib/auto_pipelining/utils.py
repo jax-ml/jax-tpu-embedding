@@ -93,13 +93,13 @@ def update_params(
   )
 
 
-def clone_vars(var_list: Iterable[jex.core.Var]) -> list[jex.core.Var]:
+def clone_vars(var_list: Iterable[jax.core.Atom]) -> list[jex.core.Var]:
   return [jex.core.Var(var.aval) for var in var_list]
 
 
 def inline_jaxpr(
     jaxpr: jex.core.Jaxpr,
-    invars: list[jex.core.Var],
+    invars: list[jax.core.Atom],
     outvars: list[jex.core.Var],
 ) -> list[jex.core.JaxprEqn]:
   """Inlines a jaxpr with given invars and outvars."""
@@ -120,12 +120,12 @@ def inline_jaxpr(
   def _translate_outvar(var: jex.core.Var) -> jex.core.Var:
     return var_mapping.setdefault(var, clone_vars([var])[0])
 
-  def _translate_invar(var: jex.core.Var) -> jex.core.Var:
+  def _translate_invar(var: jax.core.Atom) -> jax.core.Atom:
     return var if isinstance(var, jex.core.Literal) else var_mapping[var]
 
   return [
       eqn.replace(
-          invars=[_translate_invar(var) for var in eqn.invars],  # pyrefly: ignore[bad-argument-type]
+          invars=[_translate_invar(var) for var in eqn.invars],
           outvars=[_translate_outvar(var) for var in eqn.outvars],
       )
       for eqn in jaxpr.eqns

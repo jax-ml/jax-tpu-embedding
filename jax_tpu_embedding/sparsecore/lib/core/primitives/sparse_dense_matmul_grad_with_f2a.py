@@ -23,9 +23,10 @@ updated embedding table and F2A states.
 """
 
 import json
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import jax
+from jax import core
 import jax.extend as jex
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
@@ -68,15 +69,15 @@ def _hlo_f32(x: float, emb_dim: int):
 
 
 def _tpu_sparse_dense_matmul_grad_with_f2a_abstract_eval(
-    lhs_row_pointers: np.ndarray,
-    lhs_local_embedding_ids: np.ndarray,
-    lhs_local_sample_ids: np.ndarray,
-    lhs_gains: np.ndarray,
-    num_minibatches_per_physical_sparse_core: np.int32,
-    embedding_table: np.ndarray,
-    accumulator: np.ndarray,
-    local_step: np.ndarray,
-    activations_grad: np.ndarray,
+    lhs_row_pointers: core.ShapedArray,
+    lhs_local_embedding_ids: core.ShapedArray,
+    lhs_local_sample_ids: core.ShapedArray,
+    lhs_gains: core.ShapedArray,
+    num_minibatches_per_physical_sparse_core: core.ShapedArray,
+    embedding_table: core.ShapedArray,
+    accumulator: core.ShapedArray,
+    local_step: core.ShapedArray,
+    activations_grad: core.ShapedArray,
     # Hyperparameters
     learning_rate: np.float32,
     rho: np.float32,
@@ -93,17 +94,17 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[core.ShapedArray, core.ShapedArray, core.ShapedArray]:
   """Abstract evaluation for tpu_sparse_dense_matmul_grad_with_f2a."""
   del enable_minibatching
   utils.validate_abstract_eval_params(
-      lhs_row_pointers,  # pyrefly: ignore[bad-argument-type]
-      lhs_local_embedding_ids,  # pyrefly: ignore[bad-argument-type]
-      lhs_local_sample_ids,  # pyrefly: ignore[bad-argument-type]
-      lhs_gains,  # pyrefly: ignore[bad-argument-type]
-      num_minibatches_per_physical_sparse_core,  # pyrefly: ignore[bad-argument-type]
-      embedding_table,  # pyrefly: ignore[bad-argument-type]
-      activations_grad,  # pyrefly: ignore[bad-argument-type]
+      lhs_row_pointers,
+      lhs_local_embedding_ids,
+      lhs_local_sample_ids,
+      lhs_gains,
+      num_minibatches_per_physical_sparse_core,
+      embedding_table,
+      activations_grad,
       max_ids_per_partition=max_ids_per_partition,
       max_unique_ids_per_partition=max_unique_ids_per_partition,
       computation_name=computation_name,
@@ -170,7 +171,7 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[Sequence[ir.Value], Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for tpu_sparse_dense_matmul_grad_with_f2a."""
 
   sdmm_f2a_config = {
@@ -354,11 +355,12 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
       api_version=1,
   )(ctx, *operands)
 
-  table_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op, 0)  # pyrefly: ignore[bad-argument-type]
+  assert isinstance(sparse_core_custom_call_op[0], ir.Value)
+  table_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 0)
   table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  accumulator_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op, 1)  # pyrefly: ignore[bad-argument-type]
+  accumulator_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 1)
   accumulator_tuple_op = _annotate_sparse_compute_type(accumulator_tuple_op)
-  local_step_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op, 2)  # pyrefly: ignore[bad-argument-type]
+  local_step_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 2)
   local_step_tuple_op = _annotate_sparse_compute_type(local_step_tuple_op)
 
   return (  # pytype: disable=bad-return-type
@@ -370,5 +372,5 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
 
 mlir.register_lowering(
     tpu_sparse_dense_matmul_grad_with_f2a_primitive,
-    _tpu_sparse_dense_matmul_grad_with_f2a_lowering,  # pyrefly: ignore[bad-argument-type]
+    _tpu_sparse_dense_matmul_grad_with_f2a_lowering,
 )

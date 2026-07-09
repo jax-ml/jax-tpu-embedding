@@ -265,9 +265,10 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
       api_version=1,
   )(ctx, *operands)
 
-  table_tuple_op = hlo.GetTupleElementOp(op, 0)  # pyrefly: ignore[bad-argument-type]
+  assert isinstance(op[0], ir.Value)
+  table_tuple_op = hlo.GetTupleElementOp(op[0], 0)
   table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
-  accumulator_tuple_op = hlo.GetTupleElementOp(op, 1)  # pyrefly: ignore[bad-argument-type]
+  accumulator_tuple_op = hlo.GetTupleElementOp(op[0], 1)
   accumulator_tuple_op = _annotate_sparse_compute_type(accumulator_tuple_op)
 
   return (
