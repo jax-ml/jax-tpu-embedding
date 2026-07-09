@@ -32,7 +32,6 @@ else:
 NUM_SC_PER_DEVICE_MAP = {
     'TPU v5': 4,
     'TPU v5p': 4,  # Alias for 'TPU v5'.
-    'TPU v5 lite': 4,  # v5e.
     'TPU v6e': 2,  # Trillium.
     'TPU v6 lite': 2,  # Alias for 'TPU v6e'.
     'TPU7x': 2,  # Ironwood. Megacore is disabled.

@@ -15,11 +15,9 @@ on:
         description: "Select TPU architecture to test"
         type: choice
         required: true
-        default: "v5e-8"
+        default: "v6e-8"
         options:
-          - "v5e-8"
           - "v6e-8"
-          - "both"
 
 permissions: {}
 
@@ -40,9 +38,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - tpu_type: "v5e-8"
-            runner: "linux-x86-ct5lp-224-8tpu"
-            cores: "8"
           - tpu_type: "v6e-8"
             runner: "linux-x86-ct6e-180-8tpu"
             cores: "8"
@@ -53,14 +48,10 @@ jobs:
       contents: read
       actions: write  # For cache management
     steps:
-      # Filter matrix for PR runs to only execute v5e-8 (conserving Trillium runner capacity)
       - name: Check execution eligibility
         id: check
         run: |
-          if [ "${{ github.event_name }}" == "pull_request" ] && [ "${{ matrix.tpu_type }}" == "v6e-8" ]; then
-            echo "Skipping v6e-8 on PR presubmit. Will run on scheduled nightly."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.tpu_type }}" != "both" ] && [ "${{ inputs.tpu_type }}" != "${{ matrix.tpu_type }}" ]; then
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.tpu_type }}" != "${{ matrix.tpu_type }}" ]; then
             echo "Skipping unselected TPU type."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
