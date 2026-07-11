@@ -1,0 +1,33 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
+  hooks:
+  - id: check-ast
+  - id: check-merge-conflict
+  - id: check-toml
+  - id: check-yaml
+  - id: end-of-file-fixer
+    files: \.py$
+  - id: debug-statements
+    files: \.py$
+  - id: trailing-whitespace
+    files: \.py$
+
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: 0470f7c8a653e950f7cc5a653204ceb3fde4c02a  # frozen: v0.15.1
+  hooks:
+  - id: ruff
+
+- repo: https://github.com/rhysd/actionlint
+  rev: 393031adb9afb225ee52ae2ccd7a5af5525e03e8  # frozen: v1.7.11
+  hooks:
+    - id: actionlint
+      files: .github/workflows/
+
+- repo: local
+  hooks:
+  - id: pyrefly-check
+    name: Pyrefly (type checking)
+    entry: python3 -m pyrefly check
+    language: system
+    pass_filenames: false

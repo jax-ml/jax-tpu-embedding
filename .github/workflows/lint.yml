@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  pyrefly:
+  lint_and_typecheck:
     runs-on: linux-x86-n4-16
     container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
     steps:
@@ -27,8 +27,9 @@ jobs:
 
       - name: Install lint and project dependencies
         run: |
-          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel pyrefly
+          git config --global --add safe.directory "*"
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel pyrefly pre-commit
           python -m pip install --root-user-action=ignore -r third_party/py/requirements_lock_3_12.txt
 
-      - name: Run Pyrefly check
-        run: pyrefly check
+      - name: Run pre-commit checks
+        run: pre-commit run --show-diff-on-failure --color=always --all-files
