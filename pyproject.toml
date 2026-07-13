@@ -43,6 +43,67 @@ include = ["jax_tpu_embedding*"]
 [tool.setuptools.package-data]
 "*" = ["*.dylib", "*.so", "*.pyd"]
 
+[tool.ruff]
+preview = true
+exclude = [
+    ".git",
+    "build",
+    "__pycache__",
+]
+line-length = 80
+indent-width = 2
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    # Unnecessary collection call
+    "C408",
+    # Unnecessary map usage
+    "C417",
+    # Unnecessary dict comprehension for iterable
+    "C420",
+    # Object names too complex
+    "C901",
+    # Using `yield` and `return {value}` in a generator function can lead to confusing behavior
+    "B901",
+    # Class could be dataclass or namedtuple
+    "B903",
+    # Raise with from clause inside except block
+    "B904",
+    # Zip without explicit strict parameter
+    "B905",
+    # Unnecessary set/list comprehension inside functions
+    "C403",
+    "C409",
+    "C416",
+    "C419",
+    # Unnecessary generator/list conversions
+    "C401",
+    "C413",
+    "C414",
+    # Redefinition of unused name
+    "F811",
+]
+select = [
+    "B9",
+    "C",
+    "F",
+    "W",
+    "YTT",
+    "ASYNC",
+    "E101",
+    "E112",
+    "E113",
+    "E115",
+    "E117",
+    "E225",
+    "E227",
+    "E228",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 18
+
 [tool.pyrefly]
 preset = "basic"
 python-version = "3.12"

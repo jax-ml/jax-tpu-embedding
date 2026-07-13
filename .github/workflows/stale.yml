@@ -17,4 +17,6 @@ jobs:
           stale-pr-message: 'This PR was closed due to 90 days of inactivity. If this change is still desired, please recreate the PR from the latest main branch.'
           days-before-stale: 90
           days-before-close: 0 # Close PRs as soon as they are marked stale
-          only-pulls: true
+          # Setting days to -1 disables stale processing on issues (replacing the removed only-pulls: true option in actions/stale@v9)
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
