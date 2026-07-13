@@ -23,6 +23,7 @@ from jax.extend.mlir import ir
 from jax.interpreters import mlir
 from jax.interpreters import xla
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 
 
 tpu_sparse_dense_matmul_gradient_stack_primitive = jex.core.Primitive(
@@ -71,7 +72,7 @@ def _tpu_sparse_dense_matmul_gradient_stack_lowering(
 
   call_target = "SparseGradientsStackInterleaved"
 
-  return jax.ffi.ffi_lowering(  # pytype: disable=bad-return-type
+  results = jax.ffi.ffi_lowering(
       call_target,
       result_types=[
           ir.RankedTensorType.get(
@@ -83,6 +84,7 @@ def _tpu_sparse_dense_matmul_gradient_stack_lowering(
       result_layouts=result_layouts,
       api_version=1,
   )(ctx, *stacked_activations)
+  return utils.to_value_sequence(results)
 
 
 mlir.register_lowering(

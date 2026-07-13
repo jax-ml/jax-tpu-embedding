@@ -62,12 +62,14 @@ def num_sparsecores_per_device(
   Raises:
     ValueError: if the number of sparsecores cannot be determined.
   """
-  device = device or jax.devices()[0]  # pyrefly: ignore[bad-assignment]
+  target_device = device or jax.devices()[0]
 
-  if not hasattr(device, 'device_kind'):
-    raise ValueError(f'Cannot determine device kind for device: {device}')
+  if not hasattr(target_device, 'device_kind'):
+    raise ValueError(
+        f'Cannot determine device kind for device: {target_device}'
+    )
 
-  device_kind = device.device_kind
+  device_kind = target_device.device_kind
   if device_kind not in NUM_SC_PER_DEVICE_MAP:
     raise ValueError(
         f'Unknown sparsecore count for device kind: {device_kind}. Known'
@@ -80,7 +82,7 @@ def num_sparsecores_per_device(
 def embedding_table_format(
     mesh: MeshLike,
     partition_spec: jax.sharding.PartitionSpec,
-) -> jax.sharding.Sharding:
+) -> jax.sharding.Sharding | layout.Format:
   """Returns the layout format of the embedding table."""
   return embedding_table_format_with_sharding(
       jax.sharding.NamedSharding(mesh, partition_spec)
@@ -138,7 +140,7 @@ def unshard_emb_table(
 
 def embedding_table_format_with_sharding(
     sharding: jax.sharding.Sharding,
-) -> jax.sharding.Sharding:
+) -> jax.sharding.Sharding | layout.Format:
   """Returns the layout format of the embedding table."""
   if hasattr(sharding, 'mesh') and isinstance(
       sharding.mesh, jax.sharding.AbstractMesh
@@ -150,7 +152,7 @@ def embedding_table_format_with_sharding(
 
   if device_kind == 'cpu':
     return sharding
-  return layout.Format(  # pytype: disable=bad-return-type
+  return layout.Format(
       Layout(
           major_to_minor=(0, 1),
           tiling=((8,),),

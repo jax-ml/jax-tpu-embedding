@@ -363,10 +363,10 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
   local_step_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 2)
   local_step_tuple_op = _annotate_sparse_compute_type(local_step_tuple_op)
 
-  return (  # pytype: disable=bad-return-type
-      table_tuple_op.results,
-      accumulator_tuple_op.results,
-      local_step_tuple_op.results,
+  return (
+      utils.to_value_sequence(table_tuple_op.results),
+      utils.to_value_sequence(accumulator_tuple_op.results),
+      utils.to_value_sequence(local_step_tuple_op.results),
   )
 
 

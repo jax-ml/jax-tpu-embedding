@@ -393,10 +393,10 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
       hlo.GetTupleElementOp(custom_call_op[0], 2)
   )
 
-  return (  # pytype: disable=bad-return-type
-      updated_table_op.result,
-      updated_accumulator_op.result,
-      updated_linear_op.result,
+  return (
+      utils.to_value_sequence(updated_table_op.result),
+      utils.to_value_sequence(updated_accumulator_op.result),
+      utils.to_value_sequence(updated_linear_op.result),
   )
 
 

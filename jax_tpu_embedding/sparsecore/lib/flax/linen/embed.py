@@ -19,6 +19,7 @@ from typing import Any, Callable, Mapping, TypeVar
 from flax import linen as nn
 from flax import typing
 import jax
+from jax.experimental import layout as jax_layout
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
@@ -36,7 +37,9 @@ A = TypeVar('A')
 
 class WithSparseCoreLayout(nn.Partitioned[A]):
 
-  def get_sharding(self, _: jax.sharding.Mesh) -> jax.sharding.Sharding:
+  def get_sharding(
+      self, _: jax.sharding.Mesh
+  ) -> jax.sharding.Sharding | jax_layout.Format:
     assert self.mesh is not None
     return utils.embedding_table_format(self.mesh, self.get_partition_spec())
 

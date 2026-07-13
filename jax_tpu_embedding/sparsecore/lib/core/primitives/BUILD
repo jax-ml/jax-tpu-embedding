@@ -41,7 +41,9 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sparse_dense_matmul_activation_unstack",
     srcs = ["sparse_dense_matmul_activation_unstack.py"],
+    type_checking = "pyrefly",
     deps = [
+        ":utils",
         pypi_requirement("jax"),
         pypi_requirement("jax/experimental:layout"),
         pypi_requirement("jax/extend"),
@@ -52,7 +54,9 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sparse_dense_matmul_gradient_stack",
     srcs = ["sparse_dense_matmul_gradient_stack.py"],
+    type_checking = "pyrefly",
     deps = [
+        ":utils",
         pypi_requirement("jax"),
         pypi_requirement("jax/experimental:layout"),
         pypi_requirement("jax/extend"),

@@ -24,7 +24,7 @@ embedding table, accumulator, and momentum buffer.
 
 import functools
 import json
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import jax
 from jax import core
@@ -165,7 +165,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[ir.Value, ir.Value, ir.Value]:
+) -> Tuple[Sequence[ir.Value], Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad_momentum."""
   sdmm_config = {
       "max_ids_per_partition": max_ids_per_partition,
@@ -364,10 +364,10 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
       hlo.GetTupleElementOp(custom_call_op[0], 2)
   )
 
-  return (  # pytype: disable=bad-return-type
-      updated_table_op.results,
-      updated_accumulator_op.results,
-      updated_momentum_op.results,
+  return (
+      utils.to_value_sequence(updated_table_op.results),
+      utils.to_value_sequence(updated_accumulator_op.results),
+      utils.to_value_sequence(updated_momentum_op.results),
   )
 
 

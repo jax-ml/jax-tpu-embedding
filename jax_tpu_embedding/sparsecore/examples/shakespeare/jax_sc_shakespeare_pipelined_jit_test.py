@@ -217,12 +217,14 @@ class EmbeddingPipelineTest(absltest.TestCase):
     self.train_metrics = TrainMetrics.empty()
 
     # Define sharding for model input and output data
-    # pytype: disable=wrong-arg-types
-    # creating pytree sharding with value types as sharding
+
     self.pipeline_input_sharding = self.global_sharding
     self.output_sharding = ShakespeareModelOutput(
+        # pytype: disable=wrong-arg-types
+        # pyrefly: ignore[bad-argument-type]
         metrics_update=self.replicated_sharding
     )
+    # pytype: enable=wrong-arg-types
 
     # Define sharding for pipeline state
     self.pipeline_state_sharding = ep_utils.get_pipeline_state_sharding(
@@ -232,7 +234,6 @@ class EmbeddingPipelineTest(absltest.TestCase):
         pipeline_output_sharding=self.output_sharding,
         tc_aux_sharding=self.replicated_sharding,
     )
-    # pytype: enable=wrong-arg-types
 
     # Initialize the model.
     self.model, self.optimizer, self.train_state, self.feature_specs = (

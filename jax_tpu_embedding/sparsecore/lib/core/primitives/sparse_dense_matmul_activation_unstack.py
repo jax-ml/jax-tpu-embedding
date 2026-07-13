@@ -23,6 +23,7 @@ from jax.extend.mlir import ir
 from jax.interpreters import mlir
 from jax.interpreters import xla
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 
 
 tpu_sparse_dense_matmul_activation_unstack_primitive = jex.core.Primitive(
@@ -94,7 +95,7 @@ def _tpu_sparse_dense_matmul_activation_unstack_lowering(
       api_version=1,
   )(ctx, stacked_activations)
 
-  return tuple(op)  # pytype: disable=bad-return-type
+  return utils.to_value_sequence(op)
 
 
 mlir.register_lowering(

@@ -48,6 +48,9 @@ _TcTrainState = TypeVar('_TcTrainState')
 # Embedding variables for the SparseCore
 _EmbeddingVariables = TypeVar('_EmbeddingVariables')
 
+# Sharding structure for pipeline PyTree inputs and outputs
+_ShardingT = TypeVar('_ShardingT')
+
 _T = TypeVar('_T')
 _PipelineStateT = TypeVar('_PipelineStateT', bound=struct.PyTreeNode)
 _P = ParamSpec('_P')
@@ -429,10 +432,10 @@ def get_default_sc_bwd_function(
 
 def get_pipeline_state_sharding(
     pipeline_state_cls: Callable[..., _PipelineStateT],
-    dense_input_sharding: jax.sharding.Sharding,
+    dense_input_sharding: _ShardingT,
     sparse_input_sharding: jax.sharding.Sharding,
-    pipeline_output_sharding: jax.sharding.Sharding,
-    tc_aux_sharding: jax.sharding.Sharding,
+    pipeline_output_sharding: _ShardingT,
+    tc_aux_sharding: _ShardingT,
 ) -> _PipelineStateT:
   """Get the sharding for the pipeline state.
 

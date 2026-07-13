@@ -302,8 +302,8 @@ def get_stacked_table_specs(
       for feature_spec in jax.tree.leaves(feature_specs)
   ]
   return {
-      stacked_table_specs.stack_name: stacked_table_specs
-      for stacked_table_specs in stacked_table_specs  # pytype: disable=annotation-type-mismatch
+      stacked_table_spec.stack_name: stacked_table_spec
+      for stacked_table_spec in stacked_table_specs
   }
 
 

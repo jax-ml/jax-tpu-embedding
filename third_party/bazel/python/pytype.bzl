@@ -17,11 +17,13 @@ load("@bazel_skylib//lib:collections.bzl", "collections")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 # Placeholder to use until bazel supports pytype_library.
-def pytype_library(name, deps = [], **kwargs):
+def pytype_library(name, deps = [], type_checking = None, pytype_deps = [], pytype_srcs = [], **kwargs):
+    _ = (type_checking, pytype_deps, pytype_srcs)  # @unused
     py_library(name = name, deps = collections.uniq(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_binary.
-def pytype_strict_binary(name, deps = [], **kwargs):
+def pytype_strict_binary(name, deps = [], type_checking = None, pytype_deps = [], pytype_srcs = [], **kwargs):
+    _ = (type_checking, pytype_deps, pytype_srcs)  # @unused
     py_binary(name = name, deps = collections.uniq(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_library.
@@ -30,5 +32,6 @@ def pytype_strict_library(name, deps = [], type_checking = None, pytype_deps = [
     py_library(name = name, deps = collections.uniq(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_contrib_test.
-def pytype_strict_contrib_test(name, deps = [], **kwargs):
+def pytype_strict_contrib_test(name, deps = [], type_checking = None, pytype_deps = [], pytype_srcs = [], **kwargs):
+    _ = (type_checking, pytype_deps, pytype_srcs)  # @unused
     py_test(name = name, deps = collections.uniq(deps), **kwargs)

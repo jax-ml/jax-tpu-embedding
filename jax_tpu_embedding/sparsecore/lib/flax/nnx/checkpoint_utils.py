@@ -191,9 +191,10 @@ def restore_checkpoint(
     return
 
   if cp_manager is None:
+    assert input_checkpoint_path is not None
     logging.info('Restoring checkpoint from %s', input_checkpoint_path)
     cp_manager = create_checkpoint_manager(
-        cp_path=input_checkpoint_path,  # pytype: disable=wrong-arg-types
+        cp_path=input_checkpoint_path,
         cp_options=ocp.CheckpointManagerOptions(read_only=True),
         model_key=model_key,
         optimizer_key=optimizer_key,
@@ -391,18 +392,23 @@ def restore_cross_topology_checkpoint(
     sharding = ev.table.sharding
     # Reshape the 3D stacked table back to the expected 2D shape and enforce
     # the target TPU memory layout and sharding.
+    stacked_table = stacked_tables[k]
+    assert isinstance(stacked_table, jax.Array)
     new_table = _enforce_sharding_and_layout(
-        stacked_tables[k].reshape(ev.table.shape),  # pytype: disable=attribute-error
+        stacked_table.reshape(ev.table.shape),
         sharding,
     )
     # Process each optimizer slot variable for this table/stack identically.
-    new_slot_values = [
-        _enforce_sharding_and_layout(
-            stacked_slots[k][i].reshape(ev.slot[i].shape),  # pytype: disable=attribute-error
-            sharding,
-        )
-        for i in range(len(ev.slot))
-    ]
+    new_slot_values = []
+    for i in range(len(ev.slot)):
+      slot_var = stacked_slots[k][i]
+      assert isinstance(slot_var, jax.Array)
+      new_slot_values.append(
+          _enforce_sharding_and_layout(
+              slot_var.reshape(ev.slot[i].shape),
+              sharding,
+          )
+      )
     new_slot = (
         type(ev.slot)._make(new_slot_values)
         if hasattr(ev.slot, '_make')
@@ -624,13 +630,16 @@ def _enforce_sharding_and_layout(
   assert base_sharding.spec is not None
   fmt = utils.embedding_table_format(base_sharding.mesh, base_sharding.spec)
   sharding_axis = next((s for s in base_sharding.spec if s is not None), None)
+  if not isinstance(fmt, jax.experimental.layout.Format):
+    return jax.device_put(arr, fmt)
+
   repack = jax.jit(
       jax.shard_map(
           lambda x: jax.experimental.layout.with_layout_constraint(
               # x + 0.0 is a common JAX workaround to force the application of
               # layout constraints.
               x + 0.0,
-              fmt.layout,  # pytype: disable=attribute-error
+              fmt.layout,
           ),
           mesh=base_sharding.mesh,
           in_specs=jax.sharding.PartitionSpec(sharding_axis, None),
@@ -742,7 +751,7 @@ def _unstack_and_restack_slots(
     embedding_spec_proto: embedding_spec_pb2.EmbeddingSpecProto,
     table_specs: dict[str, embedding_spec.TableSpec],
     num_shards: int,
-) -> dict[str, tuple[Any, ...]]:
+) -> dict[str, tuple[jax.Array, ...]]:
   """Unstacks, unshards, and restacks/reshards optimizer slot variables."""
   proto_map = {
       spec.stack_name: embedding_spec_pb2.EmbeddingSpecProto(

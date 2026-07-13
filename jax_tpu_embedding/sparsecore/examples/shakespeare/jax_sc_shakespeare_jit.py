@@ -208,7 +208,7 @@ def run_model():
   data_sharding = NamedSharding(global_mesh, pd)
   embedding_sharding = NamedSharding(global_mesh, pe)
 
-  chkpt_mgr = None
+  chkpt_mgr: ocp.CheckpointManager | None = None
 
   # Note 1: InputProcessing is currently global so all the input batch features
   # and labels are global as well.
@@ -431,7 +431,7 @@ def run_model():
       embedding.update_preprocessing_parameters(
           feature_specs, loaded_stats, config.num_sc_per_device
       )
-    if chkpt_mgr:
+    if chkpt_mgr is not None:
       chkpt_mgr.save(
           step,
           args=ocp.args.Composite(**{
@@ -447,10 +447,12 @@ def run_model():
           }),
       )
 
-  if chkpt_mgr:
-    if chkpt_mgr.latest_step() != step:
+  if chkpt_mgr is not None:
+    # Alias to a local variable so pytype retains narrowing across method calls.
+    final_chkpt_mgr = chkpt_mgr
+    if final_chkpt_mgr.latest_step() != step:
       # Make sure the latest step is saved before exiting.
-      chkpt_mgr.save(  # pytype: disable=attribute-error
+      final_chkpt_mgr.save(
           step,
           args=ocp.args.Composite(**{
               'train_state': ocp.args.PyTreeSave(train_state),
