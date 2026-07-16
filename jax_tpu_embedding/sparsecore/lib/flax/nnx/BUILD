@@ -56,7 +56,6 @@ pytype_strict_library(
         pypi_requirement("absl/logging"),
         pypi_requirement("flax/nnx:v1"),
         pypi_requirement("jax"),
-        pypi_requirement("jax/experimental:layout"),
         pypi_requirement("numpy"),
         pypi_requirement("orbax/checkpoint"),
     ],

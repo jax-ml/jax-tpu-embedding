@@ -108,8 +108,8 @@ max-complexity = 18
 preset = "basic"
 python-version = "3.12"
 project-includes = [
-    "jax_tpu_embedding/**/*.py*",
-    "jax_tpu_embedding/**/*.ipynb",
+    "**/*.py*",
+    "**/*.ipynb",
 ]
 ignore-missing-imports = [
     "absl.*",
@@ -119,7 +119,23 @@ ignore-missing-imports = [
     "jax.*",
     "jaxlib.*",
     "numpy.*",
+    "orbax.*",
     "portpicker.*",
     "setuptools.*",
+    "tensorstore.*",
 ]
 untyped-def-behavior = "check-and-infer-return-any"
+
+[tool.pyrefly.errors]
+implicit-any-attribute = "error"
+bad-override-param-name = "error"
+implicitly-defined-attribute = "error"
+variance-mismatch = "error"
+unused-coroutine = "error"
+protocol-implicitly-defined-attribute = "error"
+redundant-condition = "error"
+unreachable = "error"
+unsafe-overlap = "error"
+bad-dunder-all = "error"
+bad-override-mutable-attribute = "error"
+abstract-method-call = "error"

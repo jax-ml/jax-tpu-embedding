@@ -31,22 +31,22 @@ from jax_tpu_embedding.sparsecore.utils import utils
 # stubs for user defined types (internal only, users should not use these types)
 
 # Input to the pipeline stages (SC fwd, TC fwd/bwd, SC bwd)
-_SparseInput = TypeVar('_SparseInput')
-_DenseInput = TypeVar('_DenseInput')
-_EmbeddingActivations = TypeVar('_EmbeddingActivations')
-_EmbeddingGradients = TypeVar('_EmbeddingGradients')
-_TcAux = TypeVar('_TcAux')
-_ScFwdAux = TypeVar('_ScFwdAux')
-_ScBwdAux = TypeVar('_ScBwdAux')
+_SparseInput = TypeVar('_SparseInput', infer_variance=True)
+_DenseInput = TypeVar('_DenseInput', infer_variance=True)
+_EmbeddingActivations = TypeVar('_EmbeddingActivations', infer_variance=True)
+_EmbeddingGradients = TypeVar('_EmbeddingGradients', infer_variance=True)
+_TcAux = TypeVar('_TcAux', infer_variance=True)
+_ScFwdAux = TypeVar('_ScFwdAux', infer_variance=True)
+_ScBwdAux = TypeVar('_ScBwdAux', infer_variance=True)
 
 # Output from the pipeline stages (TC fwd/bwd)
-_PipelineOutput = TypeVar('_PipelineOutput')
+_PipelineOutput = TypeVar('_PipelineOutput', infer_variance=True)
 
 # Train state for the TensorCore
-_TcTrainState = TypeVar('_TcTrainState')
+_TcTrainState = TypeVar('_TcTrainState', infer_variance=True)
 
 # Embedding variables for the SparseCore
-_EmbeddingVariables = TypeVar('_EmbeddingVariables')
+_EmbeddingVariables = TypeVar('_EmbeddingVariables', infer_variance=True)
 
 # Sharding structure for pipeline PyTree inputs and outputs
 _ShardingT = TypeVar('_ShardingT')

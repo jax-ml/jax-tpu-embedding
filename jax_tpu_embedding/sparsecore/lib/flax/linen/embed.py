@@ -18,12 +18,14 @@ from typing import Any, Callable, Mapping, TypeVar
 
 from flax import linen as nn
 from flax import typing
+from flax.core import meta
 import jax
 from jax.experimental import layout as jax_layout
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
+
 
 LogicalNames = typing.LogicalNames
 Nested = embedding.Nested
@@ -37,11 +39,16 @@ A = TypeVar('A')
 
 class WithSparseCoreLayout(nn.Partitioned[A]):
 
+  # SparseCore embedding tables return a Layout Format on TPU rather than
+  # a standard Sharding object, intentionally overriding the return type of
+  # Flax Partitioned.
+  # pytype: disable=signature-mismatch
+  # pyrefly: ignore[bad-override]
   def get_sharding(
-      self, _: jax.sharding.Mesh
+      self, mesh: jax.sharding.Mesh
   ) -> jax.sharding.Sharding | jax_layout.Format:
-    assert self.mesh is not None
-    return utils.embedding_table_format(self.mesh, self.get_partition_spec())
+    assert mesh is not None
+    return utils.embedding_table_format(mesh, self.get_partition_spec())
 
 
 def with_sparsecore_layout(
@@ -84,12 +91,29 @@ class SparseCoreEmbed(nn.Module):
 
     super().__post_init__()
 
+  # We define these derived helper values as properties rather than dataclass
+  # fields. This prevents Flax from exposing them as constructor arguments,
+  # allowing them to be cleanly derived from other instance configuration
+  # parameters (like `sharding_axis` and `mesh`).
+  @property
+  def embedding_table_partition(self) -> jax.sharding.PartitionSpec:
+    return jax.sharding.PartitionSpec(self.sharding_axis, None)
+
+  @property
+  def data_partition(self) -> jax.sharding.PartitionSpec:
+    return jax.sharding.PartitionSpec(self.sharding_axis)
+
+  @property
+  def num_shards(self) -> int:
+    return self.mesh.shape[self.sharding_axis]
+
+  @property
+  def embedding_table(self) -> embedding.Nested[jax.Array] | None:
+    if self.has_variable('params', EMBEDDING_PARAM_NAME):
+      return meta.unbox(self.get_variable('params', EMBEDDING_PARAM_NAME))
+    return None
+
   def setup(self):
-    self.embedding_table_partition = jax.sharding.PartitionSpec(
-        self.sharding_axis, None
-    )
-    self.data_partition = jax.sharding.PartitionSpec(self.sharding_axis)
-    self.num_shards = self.mesh.shape[self.sharding_axis]
 
     initializer = functools.partial(
         embedding.init_embedding_variables,
@@ -102,7 +126,7 @@ class SparseCoreEmbed(nn.Module):
         # JAX devices (build-in assumption to the check).
         bypass_mesh_check=len(self.mesh.devices) != jax.device_count(),
     )
-    self.embedding_table = self.param(
+    self.param(
         EMBEDDING_PARAM_NAME,
         self._wrap_initializer(initializer),
     )
@@ -170,6 +194,7 @@ class SparseCoreEmbed(nn.Module):
     Returns:
       The activations structure with the same structure as feature_specs.
     """
+    assert self.embedding_table is not None
     return _emb_lookup(
         self,
         embedding_lookup_inputs,
@@ -211,6 +236,7 @@ class SparseCoreEmbed(nn.Module):
     Returns:
       The updated activation embedding tables.
     """
+    assert self.embedding_table is not None
     _, embed_table = _emb_lookup_bwd(
         self,
         (embedding_lookup_inputs, self._ensure_float32(self.embedding_table)),
@@ -275,7 +301,7 @@ def _emb_lookup_fwd(
   )
 
 
-def _emb_lookup_bwd(embedding_layer, res, gradients):
+def _emb_lookup_bwd(embedding_layer: SparseCoreEmbed, res, gradients):
   """Backward pass for embedding lookup."""
   embedding_lookups, emb_table = res
 

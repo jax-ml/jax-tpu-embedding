@@ -205,10 +205,8 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.assertTrue((preprocessed_input.num_minibatches == 1).all())
 
   def test_single_host_minibatching_required(self):
-    self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
-            max_ids_per_partition=1, max_unique_ids_per_partition=1
-        )
+    self.feature_spec.table_spec.stacked_table_spec = self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
+        max_ids_per_partition=1, max_unique_ids_per_partition=1
     )
     inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=20
@@ -229,10 +227,8 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
   def test_single_host_minibatching_id_dropping(self):
     # Set max_ids_per_partition to a small value to trigger id dropping.
-    self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
-            max_ids_per_partition=1, max_unique_ids_per_partition=1
-        )
+    self.feature_spec.table_spec.stacked_table_spec = self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
+        max_ids_per_partition=1, max_unique_ids_per_partition=1
     )
     # Use large batch size to increase chance of dropping
     batch_size = (
@@ -262,10 +258,8 @@ class SingleHostMinibatchingTest(absltest.TestCase):
   def test_single_host_minibatching_unique_id_dropping(self):
     # Set max_unique_ids_per_partition to a small value to trigger unique id
     # dropping.
-    self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
-            max_ids_per_partition=10, max_unique_ids_per_partition=1
-        )
+    self.feature_spec.table_spec.stacked_table_spec = self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
+        max_ids_per_partition=10, max_unique_ids_per_partition=1
     )
     # Use large batch size to increase chance of dropping
     batch_size = (
@@ -312,10 +306,8 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
   def test_single_host_minibatching_forward_pass(self):
     # Test forward pass with minibatching
-    self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
-            max_ids_per_partition=2, max_unique_ids_per_partition=2
-        )
+    self.feature_spec.table_spec.stacked_table_spec = self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
+        max_ids_per_partition=2, max_unique_ids_per_partition=2
     )
     inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=20, seed=2025
@@ -347,10 +339,8 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
   def test_single_host_minibatching_backward_pass(self):
     # Test backward pass with minibatching
-    self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
-            max_ids_per_partition=2, max_unique_ids_per_partition=2
-        )
+    self.feature_spec.table_spec.stacked_table_spec = self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
+        max_ids_per_partition=2, max_unique_ids_per_partition=2
     )
     inputs = _generate_random_inputs(
         feature=self.feature_spec, max_sample_size=20, seed=2025
@@ -458,10 +448,8 @@ class MultiHostMinibatchingTest(absltest.TestCase):
         self.assertEqual(future.result().num_minibatches[0], 1)
 
   def test_multi_host_minibatching_required(self):
-    self.feature_spec.table_spec.stacked_table_spec = (
-        self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
-            max_ids_per_partition=1, max_unique_ids_per_partition=1
-        )
+    self.feature_spec.table_spec.stacked_table_spec = self.feature_spec.table_spec.stacked_table_spec.replace(  # pyrefly: ignore[missing-attribute]
+        max_ids_per_partition=1, max_unique_ids_per_partition=1
     )
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=self.num_hosts

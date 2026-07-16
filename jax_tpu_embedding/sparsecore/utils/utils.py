@@ -24,6 +24,7 @@ if jax.__version_info__ >= (0, 6, 3):
 else:
   Layout = layout.DeviceLocalLayout  # type: ignore
 
+_ArrayType = typing.TypeVar('_ArrayType', bound=jax.typing.ArrayLike)
 
 # The device kind names (keys) must align with the external names mapped in
 # https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#versions.
@@ -90,12 +91,12 @@ def embedding_table_format(
 
 
 def shard_emb_table(
-    table: jax.typing.ArrayLike,
+    table: _ArrayType,
     *,
     num_devices: int,
     num_sc_per_device: int,
     sharding_strategy: str = 'MOD',
-) -> jax.typing.ArrayLike:
+) -> _ArrayType:
   """Shards an embedding table for SparseCore using MOD sharding.
 
   Args:
@@ -116,10 +117,10 @@ def shard_emb_table(
 
 
 def unshard_emb_table(
-    sharded_table: jax.typing.ArrayLike,
+    sharded_table: _ArrayType,
     num_sc_per_device: int,
     sharding_strategy: str = 'MOD',
-) -> jax.typing.ArrayLike:
+) -> _ArrayType:
   """Unshards embedding table from MOD sharding.
 
   Args:

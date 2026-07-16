@@ -635,7 +635,9 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )[0]
     expected_accumulator_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
         expected_accumulator_d, num_devices=1, num_sc_per_device=4
-    )[0]
+    )[
+        0
+    ]
     expected_local_step_d = utils.shard_emb_table(  # pyrefly: ignore[bad-index]
         expected_local_step_d, num_devices=1, num_sc_per_device=4
     )[0]

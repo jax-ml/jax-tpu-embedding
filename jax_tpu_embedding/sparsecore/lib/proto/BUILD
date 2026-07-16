@@ -35,5 +35,4 @@ pytype_strict_library(
     name = "proto",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
-    deps = [":embedding_spec_py_pb2"],  # buildcleaner: keep
 )
