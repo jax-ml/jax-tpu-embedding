@@ -43,6 +43,7 @@ tpu_py_strict_test(
 tpu_py_strict_test(
     name = "embed_test",
     srcs = ["embed_test.py"],
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

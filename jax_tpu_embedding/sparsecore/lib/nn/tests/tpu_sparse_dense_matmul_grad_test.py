@@ -28,6 +28,8 @@ from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
+# Typeshed stubs for set_printoptions type threshold as int,
+# but np.inf (float) is valid.
 np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
 
 _VOC_A = 32
@@ -41,7 +43,10 @@ _DIM_D = 8
 _BATCH_SIZE = 16
 
 
-def count_num(arr: embedding.Nested[jnp.ndarray], num: int) -> int:
+def count_num(
+    arr: embedding.Nested[jnp.ndarray | np.ndarray],
+    num: int | float | np.ndarray | jnp.ndarray,
+) -> int:
   """Helper method that counts the number of occurrences of `num` in `arr`."""
   count = 0
   for array in arr:
@@ -68,7 +73,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=_VOC_A,
         embedding_dim=_DIM_A,
-        initializer=lambda: jnp.zeros((_VOC_A, _DIM_A), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda *_: jnp.zeros((_VOC_A, _DIM_A), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_a",
@@ -76,7 +81,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=_VOC_B,
         embedding_dim=_DIM_B,
-        initializer=lambda: jnp.zeros((_VOC_B, _DIM_B), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda *_: jnp.zeros((_VOC_B, _DIM_B), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_b",
@@ -84,7 +89,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=_VOC_C,
         embedding_dim=_DIM_C,
-        initializer=lambda: jnp.zeros((_VOC_C, _DIM_C), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda *_: jnp.zeros((_VOC_C, _DIM_C), dtype=jnp.float32),
         optimizer=embedding_spec.AdagradOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_c",
@@ -92,7 +97,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     self.table_spec_d = embedding_spec.TableSpec(
         vocabulary_size=_VOC_D,
         embedding_dim=_DIM_D,
-        initializer=lambda: jnp.zeros((_VOC_D, _DIM_D), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda *_: jnp.zeros((_VOC_D, _DIM_D), dtype=jnp.float32),
         optimizer=embedding_spec.F2AOptimizerSpec(
             learning_rate=0.01,
             rho=0.5,
@@ -276,6 +281,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     embedding_variables = {}
     embedding_variables["table_a"] = [
         jax.device_put(
+            # Pyrefly cannot statically infer tuple/list structure of sharded
+            # output.
             emb_table_a_sharded[0],  # pyrefly: ignore[bad-index]
             device=devices[0],
         ),

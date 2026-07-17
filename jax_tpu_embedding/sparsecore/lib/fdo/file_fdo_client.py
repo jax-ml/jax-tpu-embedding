@@ -28,7 +28,6 @@ from jax_tpu_embedding.sparsecore.lib.fdo import fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
 
-
 _FILE_NAME = 'fdo_stats'
 _FILE_EXTENSION = 'npz'
 _PARAM_FIELDS = dataclasses.fields(embedding.SparseDenseMatmulInputStats)
@@ -101,6 +100,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         _FILE_NAME, jax.process_index(), time.time_ns(), _FILE_EXTENSION
     )
     return os.path.join(self._base_dir, filename)
+
   # LINT.ThenChange(:_get_latest_files_by_process)
 
   def _get_latest_files_by_process(self, files: list[str]) -> list[str]:
@@ -113,7 +113,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     # Read files that match the file creation pattern.
     dir_path = os.path.split(files[0])[0]
     dir_prefix = len(dir_path) + 1
-    pattern = fr'{_FILE_NAME}_(\d+)_(\d+)\.{_FILE_EXTENSION}'
+    pattern = rf'{_FILE_NAME}_(\d+)_(\d+)\.{_FILE_EXTENSION}'
     # Group files as list of (process_idx, timestamp, files)
     file_groups = []
     for file in files:
@@ -135,6 +135,8 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     """Writes stats to a npz file."""
     file_name = self._generate_file_name()
     logging.info('Write stats to %s', file_name)
+    # Typeshed stubs for savez do not accept dictionary unpacking of
+    # Mapping[str, np.ndarray].
     jax.numpy.savez(file_name, **stats)  # pyrefly: ignore[bad-argument-type]
 
   def publish(self) -> None:
@@ -203,4 +205,6 @@ class NPZFileFDOClient(fdo_client.FDOClient):
             f' {[field.metadata["suffix"] for field in _PARAM_FIELDS]}'
         )
     self._params = result
-    return embedding.SparseDenseMatmulInputStats(**result)  # pytype:disable=missing-parameter
+    # Typeshed stubs reject dictionary unpacking of dict[str, np.ndarray] into
+    # kwargs expecting dict[str, int].
+    return embedding.SparseDenseMatmulInputStats(**result)  # pyrefly: ignore[bad-argument-type]

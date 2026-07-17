@@ -16,10 +16,9 @@
 from __future__ import annotations
 
 import abc
-import collections
 import dataclasses
 import inspect
-from typing import Any, Callable, NamedTuple, Sequence, TypeAlias
+from typing import Any, Callable, Iterator, NamedTuple, Sequence, TypeAlias
 
 from flax import struct
 import jax
@@ -34,16 +33,18 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
 
-
-NumericParameter: TypeAlias = float | jax.Array
-LearningRate: TypeAlias = (
-    NumericParameter | Callable[..., NumericParameter]
-)
+NumericParameter: TypeAlias = jax.typing.ArrayLike
+LearningRate: TypeAlias = NumericParameter | Callable[..., NumericParameter]
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
 # Standard initializers are defined in jax.nn.initializers. See
-# http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
-CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
+# http://jax.readthedocs.io/en/latest/jax.nn.initializers.html.
+# We expand the type union to also accept generic callables returning ArrayLike
+# so static type checkers (Pyrefly) can verify unannotated or vararg lambdas
+# commonly used across tests without requiring localized suppressions.
+CallableTableInitializer: TypeAlias = (
+    jax.nn.initializers.Initializer | Callable[..., jax.typing.ArrayLike]
+)
 
 
 class _OptimizerDefinition(NamedTuple):
@@ -52,27 +53,79 @@ class _OptimizerDefinition(NamedTuple):
   default_initializers: dict[str, CallableTableInitializer]
 
 
-SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
-AdagradSlotVariables = collections.namedtuple(
-    "AdagradSlotVariables", ["accumulator"]
-)
-F2ASlotVariables = collections.namedtuple(
-    "F2ASlotVariables", ["accumulator", "local_step"]
-)
-AdamSlotVariables = collections.namedtuple(
-    "AdamSlotVariables", ["momentum", "velocity"]
+SlotVariable: TypeAlias = CallableTableInitializer | jax.Array
+
+
+@struct.dataclass
+class _SlotVariablesBase:
+  """Base container for slot variables supporting tuple-like access."""
+
+  def __len__(self) -> int:
+    return len(dataclasses.fields(self))
+
+  def __iter__(self) -> Iterator[SlotVariable]:
+    return (getattr(self, field.name) for field in dataclasses.fields(self))
+
+  def __getitem__(self, index: int) -> SlotVariable:
+    fields = dataclasses.fields(self)
+    return getattr(self, fields[index].name)
+
+
+@struct.dataclass
+class SGDSlotVariables(_SlotVariablesBase):
+  pass
+
+
+@struct.dataclass
+class AdagradSlotVariables(_SlotVariablesBase):
+  accumulator: SlotVariable = struct.field(pytree_node=True)
+
+
+@struct.dataclass
+class F2ASlotVariables(_SlotVariablesBase):
+  accumulator: SlotVariable = struct.field(pytree_node=True)
+  local_step: SlotVariable = struct.field(pytree_node=True)
+
+
+@struct.dataclass
+class AdamSlotVariables(_SlotVariablesBase):
+  momentum: SlotVariable = struct.field(pytree_node=True)
+  velocity: SlotVariable = struct.field(pytree_node=True)
+
+
+@struct.dataclass
+class AdagradMomentumSlotVariables(_SlotVariablesBase):
+  accumulator: SlotVariable = struct.field(pytree_node=True)
+  momentum: SlotVariable = struct.field(pytree_node=True)
+
+
+@struct.dataclass
+class FTRLSlotVariables(_SlotVariablesBase):
+  accumulator: SlotVariable = struct.field(pytree_node=True)
+  linear: SlotVariable = struct.field(pytree_node=True)
+
+
+@struct.dataclass
+class LaPropSlotVariables(_SlotVariablesBase):
+  mu: SlotVariable = struct.field(pytree_node=True)
+  nu: SlotVariable = struct.field(pytree_node=True)
+
+
+SlotVariables: TypeAlias = (
+    SGDSlotVariables
+    | AdagradSlotVariables
+    | F2ASlotVariables
+    | AdamSlotVariables
+    | AdagradMomentumSlotVariables
+    | FTRLSlotVariables
+    | LaPropSlotVariables
 )
 
-AdagradMomentumSlotVariables = collections.namedtuple(
-    "AdagradMomentumSlotVariables", ["accumulator", "momentum"]
+OptimizerSlotVariablesInitializers: TypeAlias = (
+    SlotVariables | tuple[CallableTableInitializer, ...]
 )
 
-FTRLSlotVariables = collections.namedtuple(
-    "FtrlSlotVariables", ["accumulator", "linear"]
-)
-LaPropSlotVariables = collections.namedtuple(
-    "LaPropSlotVariables", ["mu", "nu"]
-)
+OptimizerSlotVariables: TypeAlias = SlotVariables | tuple[jax.Array, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -110,13 +163,13 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
           return jnp.array(learning_rate(step), dtype=jnp.float32)
         else:
           raise ValueError(
-              "Specified learning rate callable {learning_rate} requires "
-              "a `step` argument to be specified."
+              f"Specified learning rate callable {learning_rate} requires a"
+              " `step` argument to be specified."
           )
       else:
         raise ValueError(
-            "Learning rate callbacks should either take no parameters, or "
-            "a single step count argument."
+            "Learning rate callbacks should either take no parameters, or a"
+            " single step count argument."
         )
     else:
       return jnp.array(learning_rate, dtype=jnp.float32)
@@ -127,7 +180,9 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
     """Returns the hyperparameters for the optimizer."""
     return (self.get_learning_rate(step),)
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> OptimizerSlotVariablesInitializers:
     """Slot variables initializers for the optimizer.
 
     Derived classes should implement this method to return the initializers for
@@ -140,7 +195,7 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
 
   def slot_variables_count(self) -> int:
     """Returns the number of slot variables for the optimizer."""
-    return len(self.slot_variables_initializers())
+    return len(jax.tree_util.tree_leaves(self.slot_variables_initializers()))
 
   @abc.abstractmethod
   def get_optimizer_primitive(self) -> jex.core.Primitive:
@@ -191,7 +246,7 @@ class CustomOptimizerSpec(OptimizerSpec):
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(self) -> OptimizerSlotVariablesInitializers:
     return self.slot_variable_initializers_tuple
 
   def __hash__(self) -> int:
@@ -237,7 +292,7 @@ class SGDOptimizerSpec(OptimizerSpec):
   def short_name(self) -> str:
     return "sgd"
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(self) -> SGDSlotVariables:
     """SGD does not have any slot variables, hence this returns an empty tuple."""
     return SGDSlotVariables()
 
@@ -273,7 +328,9 @@ class AdagradOptimizerSpec(OptimizerSpec):
     )
     self.initial_accumulator_value = initial_accumulator_value
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> AdagradSlotVariables:
     return AdagradSlotVariables(
         accumulator=jax.nn.initializers.constant(self.initial_accumulator_value)
     )
@@ -329,7 +386,9 @@ class AdamOptimizerSpec(OptimizerSpec):
     self.beta_2 = beta_2
     self.epsilon = epsilon
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> AdamSlotVariables:
     return AdamSlotVariables(
         momentum=jax.nn.initializers.constant(0.0),
         velocity=jax.nn.initializers.constant(0.0),
@@ -429,7 +488,9 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
     self.initial_accumulator_value = initial_accumulator_value
     self.initial_momentum_value = initial_momentum_value
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> AdagradMomentumSlotVariables:
     return AdagradMomentumSlotVariables(
         accumulator=jax.nn.initializers.constant(
             self.initial_accumulator_value
@@ -508,7 +569,9 @@ class FTRLOptimizerSpec(OptimizerSpec):
     self.initial_linear_value = initial_linear_value
     self.multiply_linear_by_learning_rate = multiply_linear_by_learning_rate
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> FTRLSlotVariables:
     return FTRLSlotVariables(
         accumulator=jax.nn.initializers.constant(
             self.initial_accumulator_value
@@ -586,7 +649,9 @@ class LaPropOptimizerSpec(OptimizerSpec):
       )
     self.initial_slot_value = initial_slot_value
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> LaPropSlotVariables:
     return LaPropSlotVariables(
         mu=jax.nn.initializers.constant(self.initial_slot_value),
         nu=jax.nn.initializers.constant(self.initial_slot_value),
@@ -667,7 +732,9 @@ class F2AOptimizerSpec(OptimizerSpec):
     self.l2_regularization_strength = l2_regularization_strength
     self.max_lr_multiplier = max_lr_multiplier
 
-  def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
+  def slot_variables_initializers(
+      self,
+  ) -> F2ASlotVariables:
     return F2ASlotVariables(
         accumulator=jax.nn.initializers.constant(
             self.initial_accumulator_value
