@@ -1,9 +1,9 @@
 # Library.
 absl-py
-flax @ https://github.com/google/flax/archive/e2134af.zip
+flax >= 0.10.3
 numpy
 # Pre-release of JAX required for SparseCore TPUs.
-jax[tpu] --pre
+jax[tpu] >= 0.10.0 --pre
 portpicker
 
 # Build utilities.
@@ -14,6 +14,7 @@ setuptools
 wheel
 
 # Testing.
+chex
 clu
 einops
 google-benchmark

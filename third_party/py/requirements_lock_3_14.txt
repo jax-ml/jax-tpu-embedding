@@ -12,6 +12,7 @@ absl-py==2.4.0 \
     --hash=sha256:8c6af82722b35cf71e0f4d1d47dcaebfff286e27110a99fc359349b247dfb5d4
     # via
     #   -r third_party/py/requirements.in
+    #   chex
     #   clu
     #   ml-collections
     #   optax
@@ -163,6 +164,10 @@ charset-normalizer==3.4.7 \
     --hash=sha256:fbccdc05410c9ee21bbf16a35f4c1d16123dcdeb8a1d38f33654fa21d0234f79 \
     --hash=sha256:fea24543955a6a729c45a73fe90e08c743f0b3334bbf3201e6c4bc1b0c7fa464
     # via requests
+chex==0.1.92 \
+    --hash=sha256:f34989d9bff7954edfab09fba7757e3d62404da34577bff0d253599ec5b4f93d \
+    --hash=sha256:fa8beff1124204ae466a6eb13cb91ae3c24322a1c7216946aee93d031e2f1996
+    # via -r third_party/py/requirements.in
 clu==0.0.12 \
     --hash=sha256:0d183e7d25f7dd0700444510a264e24700e2f068bdabd199ed22866f7e54edba \
     --hash=sha256:f71eaa1afbd30f57f7709257ba7e1feb8ad5c1c3dcae3606672a138678bb3ce4
@@ -177,8 +182,9 @@ etils[epath,epy]==1.14.0 \
     # via
     #   clu
     #   orbax-checkpoint
-flax @ https://github.com/google/flax/archive/e2134af.zip \
-    --hash=sha256:6384171c69e4a09a1f4fa9c15acd6b48ad9332429c6b61a13412ecced088985d
+flax==0.12.7 \
+    --hash=sha256:79d590793fa3a282ac36b4464f2ea9d1e69fe1d026c4618451b01731e8086e32 \
+    --hash=sha256:abfd6acb17d6b93d1d7d7dfae7d3856222b92b35d35ab2487b77639c31dc673a
     # via
     #   -r third_party/py/requirements.in
     #   clu
@@ -217,6 +223,7 @@ jax[tpu]==0.10.0 \
     --hash=sha256:76c42ba163c8db3dc2e449e225b888c0edfb623ded31efdc96d85e0fda1d26e8
     # via
     #   -r third_party/py/requirements.in
+    #   chex
     #   clu
     #   flax
     #   optax
@@ -245,6 +252,7 @@ jaxlib==0.10.0 \
     --hash=sha256:e66bdc0b57ed5649950799d3f0d67a6bb67f03d06b49ea3fced0bdd6140a9943 \
     --hash=sha256:f62026c9fb1f05998592082a6dcb62f70b466342bc139f711802a9b184ba9a46
     # via
+    #   chex
     #   clu
     #   jax
     #   optax
@@ -453,6 +461,7 @@ numpy==2.4.4 \
     --hash=sha256:fcfe2045fd2e8f3cb0ce9d4ba6dba6333b8fa05bb8a4939c908cd43322d14c7e
     # via
     #   -r third_party/py/requirements.in
+    #   chex
     #   clu
     #   flax
     #   jax
@@ -822,6 +831,10 @@ tensorstore==0.1.83 \
     # via
     #   flax
     #   orbax-checkpoint
+toolz==1.1.0 \
+    --hash=sha256:15ccc861ac51c53696de0a5d6d4607f99c210739caf987b5d2054f3efed429d8 \
+    --hash=sha256:27a5c770d068c110d9ed9323f24f1543e83b2f300a687b7891c1a6d56b697b5b
+    # via chex
 treescope==0.1.10 \
     --hash=sha256:20f74656f34ab2d8716715013e8163a0da79bdc2554c16d5023172c50d27ea95 \
     --hash=sha256:dde52f5314f4c29d22157a6fe4d3bd103f9cae02791c9e672eefa32c9aa1da51
@@ -830,6 +843,7 @@ typing-extensions==4.15.0 \
     --hash=sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466 \
     --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
     # via
+    #   chex
     #   clu
     #   etils
     #   flax

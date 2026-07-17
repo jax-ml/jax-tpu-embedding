@@ -16,8 +16,8 @@ keywords = ["jax", "tpu", "embedding", "sparsecore", "machine learning", "sparse
 dependencies = [
     'absl-py',
     'einops',
-    'flax',
-    'jax',
+    'flax >= 0.10.3',
+    'jax >= 0.10.0',
     'numpy',
     'portpicker'
 ]
@@ -113,14 +113,18 @@ project-includes = [
 ]
 ignore-missing-imports = [
     "absl.*",
+    "chex.*",
+    "clu.*",
     "einops.*",
     "flax.*",
     "google_benchmark.*",
     "jax.*",
     "jaxlib.*",
     "numpy.*",
+    "optax.*",
     "orbax.*",
     "portpicker.*",
+    "scipy.*",
     "setuptools.*",
     "tensorstore.*",
 ]
