@@ -43,6 +43,7 @@ from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
+
 ArrayLike = jnp.ndarray | np.typing.ArrayLike
 
 
@@ -65,12 +66,12 @@ def _assert_same_structure(a, b, a_name: str = "a", b_name: str = "b"):
 
 class EmbeddingVariablesInitializer(NamedTuple):
   table: embedding_spec.CallableTableInitializer
-  slot: embedding_spec.OptimizerSlotVariablesInitializers
+  slot: tuple[embedding_spec.CallableTableInitializer, ...]
 
 
 class EmbeddingVariables(NamedTuple):
   table: jax.Array
-  slot: embedding_spec.OptimizerSlotVariables
+  slot: tuple[jax.Array, ...]
 
 
 def _resolve_scalar_minibatches(
@@ -1401,7 +1402,7 @@ def tpu_sparse_dense_matmul_grad(
         )
 
       dim_size = stack_table_spec.stack_embedding_dim
-      num_slots = stack_table_spec.optimizer.slot_variables_count()
+      num_slots = len(stack_table_spec.optimizer.slot_variables_initializers())
       num_hyperparams = len(hyper_params)
       aval = jax.ShapeDtypeStruct((1, dim_size), jnp.float32)
       # grad, table, slot_0, slot_1, ..., slot_n, hyperparam_0, hyperparam_1,

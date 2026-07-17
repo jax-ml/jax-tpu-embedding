@@ -56,27 +56,24 @@ class EmbedOptimizerTest(absltest.TestCase):
         )
     )
 
-    # Note: Pyrefly does not recognize flax.struct.dataclass as assignable to
-    # optax.Params, and jax.tree.map return type ArrayTree in stubs loses flax
-    # dataclass attributes (.params).
-    state = optimizer.init(model_params)  # pyrefly: ignore[bad-argument-type]
+    state = optimizer.init(model_params)  # pytype:disable=wrong-arg-types
     rand_key = jax.random.key(42)
     updates = jax.tree.map(
         lambda x: jax.random.uniform(rand_key, x.shape), model_params
     )
-    transformed_updates, _ = optimizer.update(updates, state, model_params)  # pyrefly: ignore[bad-argument-type]
+    transformed_updates, _ = optimizer.update(updates, state, model_params)  # pytype:disable=wrong-arg-types
     new_model_params: ModelParams = embed_optimizer.apply_updates_for_sc_model(
         model_params, transformed_updates
     )
     expected_updated_params = ModelParams(
         params={
-            "layers_0": updates.params[  # pyrefly: ignore[missing-attribute]
+            "layers_0": updates.params[
                 "layers_0"
             ],  # SC apply updates just return updates
             "layers_2": jax.tree.map(
                 operator.add,
                 model_params.params["layers_2"],
-                transformed_updates.params["layers_2"],  # pyrefly: ignore[missing-attribute]
+                transformed_updates.params["layers_2"],
             ),
         }
     )

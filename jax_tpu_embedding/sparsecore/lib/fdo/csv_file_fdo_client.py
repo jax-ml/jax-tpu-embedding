@@ -210,6 +210,4 @@ class CSVFileFDOClient(fdo_client.FDOClient):
             f' {[field.metadata["suffix"] for field in _PARAM_FIELDS]}'
         )
     self._params = result
-    # Typeshed stubs reject dictionary unpacking of dict[str, np.ndarray] into
-    # kwargs expecting dict[str, int].
-    return embedding.SparseDenseMatmulInputStats(**result)  # pyrefly: ignore[bad-argument-type]
+    return embedding.SparseDenseMatmulInputStats(**result)  # pytype:disable=missing-parameter

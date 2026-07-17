@@ -169,4 +169,4 @@ def aval_to_ir_type(
   if jax.__version_info__ >= (0, 10, 1):
     return mlir.aval_to_ir_type(ctx.module_context, aval)
   else:
-    return mlir.aval_to_ir_type(aval)  # pyrefly: ignore[missing-argument, bad-argument-type]
+    return mlir.aval_to_ir_type(aval)  # pytype: disable=missing-parameter

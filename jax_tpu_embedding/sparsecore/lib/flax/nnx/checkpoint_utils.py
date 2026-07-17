@@ -237,8 +237,14 @@ def restore_checkpoint(
   for k, ev in original_embedding_table.items():
     sharding = ev.table.sharding
     new_table = _enforce_sharding_and_layout(ev.table, sharding)
-    new_slot = jax.tree.map(
-        lambda arr, s=sharding: _enforce_sharding_and_layout(arr, s), ev.slot
+    new_slot_values = [
+        _enforce_sharding_and_layout(ev.slot[i], sharding)
+        for i in range(len(ev.slot))
+    ]
+    new_slot = (
+        type(ev.slot)._make(new_slot_values)
+        if hasattr(ev.slot, '_make')
+        else tuple(new_slot_values)
     )
     new_embedding_table[k] = embedding.EmbeddingVariables(
         table=new_table, slot=new_slot
@@ -393,18 +399,21 @@ def restore_cross_topology_checkpoint(
         sharding,
     )
     # Process each optimizer slot variable for this table/stack identically.
-    slot_leaves, slot_treedef = jax.tree_util.tree_flatten(ev.slot)
-    new_slot_leaves = []
-    for i, slot_leaf in enumerate(slot_leaves):
+    new_slot_values = []
+    for i in range(len(ev.slot)):
       slot_var = stacked_slots[k][i]
       assert isinstance(slot_var, jax.Array)
-      new_slot_leaves.append(
+      new_slot_values.append(
           _enforce_sharding_and_layout(
-              slot_var.reshape(slot_leaf.shape),
+              slot_var.reshape(ev.slot[i].shape),
               sharding,
           )
       )
-    new_slot = jax.tree_util.tree_unflatten(slot_treedef, new_slot_leaves)
+    new_slot = (
+        type(ev.slot)._make(new_slot_values)
+        if hasattr(ev.slot, '_make')
+        else tuple(new_slot_values)
+    )
     new_embedding_table[k] = embedding.EmbeddingVariables(
         table=new_table, slot=new_slot
     )
@@ -755,10 +764,9 @@ def _unstack_and_restack_slots(
   for k, ev in restored_embedding.items():
     spec_proto_k = proto_map[k]
     stacked_slots_k = []
-    slot_leaves, _ = jax.tree_util.tree_flatten(ev.slot)
-    for slot_leaf in slot_leaves:
+    for i in range(len(ev.slot)):
       slots = table_stacking.unstack_and_unshard_stacked_tables(
-          {k: slot_leaf},
+          {k: ev.slot[i]},
           spec_proto_k,
           donate=False,
       )

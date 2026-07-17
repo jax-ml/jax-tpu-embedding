@@ -52,7 +52,6 @@ tpu_py_strict_test(
 tpu_py_strict_test(
     name = "jax_spmd_tc_with_sc_tests",
     srcs = ["jax_spmd_tc_with_sc_tests.py"],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:dataset",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

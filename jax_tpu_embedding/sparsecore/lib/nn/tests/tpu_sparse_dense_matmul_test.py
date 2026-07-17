@@ -26,6 +26,7 @@ from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
+
 VariableInfo = collections.namedtuple("VariableInfo", ["shape", "offset"])
 
 
@@ -106,7 +107,7 @@ class ErrorHandlingTest(absltest.TestCase):
     long_spec = embedding_spec.TableSpec(
         vocabulary_size=1000,
         embedding_dim=8,
-        initializer=lambda *_: np.zeros((1000, 8), dtype=np.float32),
+        initializer=lambda: np.zeros((1000, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
@@ -170,8 +171,6 @@ class ErrorHandlingTest(absltest.TestCase):
     embedding_variables = {}
     embedding_variables["table"] = [
         jax.device_put(
-            # Pyrefly cannot statically infer tuple/list structure of sharded
-            # output.
             emb_table_a_sharded[0],  # pyrefly: ignore[bad-index]
             device=first_device,
         ),
@@ -214,7 +213,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,
-        initializer=lambda *_: jnp.zeros((32, 8), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_a",
@@ -224,7 +223,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.table_spec_aa = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,
-        initializer=lambda *_: jnp.zeros((32, 8), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_aa",
@@ -234,7 +233,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=16,
-        initializer=lambda *_: jnp.zeros((64, 16), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_b",
@@ -1119,7 +1118,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     country_table = embedding_spec.TableSpec(
         vocabulary_size=247,
         embedding_dim=16,
-        initializer=lambda *_: jnp.zeros((256, 16), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((256, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="country_table",
@@ -1324,7 +1323,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     quantized_table_spec = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=32,
-        initializer=lambda *_: jnp.zeros((32, 32), dtype=jnp.float32),
+        initializer=lambda: jnp.zeros((32, 32), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="quantized_table",
