@@ -43,7 +43,7 @@ _OUTPUT_DIR = flags.DEFINE_string(
 )
 
 
-def _extract_wheel_info(filename: str) -> dict[str, str]:
+def _extract_wheel_info(filename: str) -> re.Match[str]:
   """Extracts version and tag information from the wheel name.
 
   According to PEP-0427.
@@ -52,7 +52,7 @@ def _extract_wheel_info(filename: str) -> dict[str, str]:
     filename: wheel filename.
 
   Returns:
-    Dictionary with the filename components: distribution, version, build_tag,
+    Match object with the filename components: distribution, version, build_tag,
     python_tag, abi_tag, platform_tag.
 
   Raises:
@@ -99,7 +99,7 @@ def run_process(cmd: Sequence[str]):
   return process
 
 
-def run_build(output_dir: str) -> str:
+def run_build(output_dir: str) -> tuple[str, str]:
   """Builds the wheel using the python `build` package.
 
   Args:

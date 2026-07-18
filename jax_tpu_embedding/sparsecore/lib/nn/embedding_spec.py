@@ -35,15 +35,18 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
 
 
-NumericParameter: TypeAlias = float | jax.Array
-LearningRate: TypeAlias = (
-    NumericParameter | Callable[..., NumericParameter]
-)
+NumericParameter: TypeAlias = jax.typing.ArrayLike
+LearningRate: TypeAlias = NumericParameter | Callable[..., NumericParameter]
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
 # Standard initializers are defined in jax.nn.initializers. See
-# http://jax.readthedocs.io/en/latest/jax.nn.initializers.html
-CallableTableInitializer: TypeAlias = jax.nn.initializers.Initializer
+# http://jax.readthedocs.io/en/latest/jax.nn.initializers.html.
+# We expand the type union to also accept generic callables returning ArrayLike
+# so static type checkers (Pyrefly) can verify unannotated or vararg lambdas
+# commonly used across tests without requiring localized suppressions.
+CallableTableInitializer: TypeAlias = (
+    jax.nn.initializers.Initializer | Callable[..., jax.typing.ArrayLike]
+)
 
 
 class _OptimizerDefinition(NamedTuple):

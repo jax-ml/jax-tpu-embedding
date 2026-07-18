@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Methods for table stacking."""
+
 import collections
 from collections.abc import Mapping
 import hashlib
 import typing
-from typing import Any, Callable, Sequence, TypeAlias, TypeVar
+from typing import Callable, Sequence, TypeAlias, TypeVar
 
 from absl import logging
 import jax
@@ -27,11 +28,10 @@ from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import TableSpec
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 import numpy as np
 
-
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = Callable[[str, int], int]
-ArrayLike: TypeAlias = jax.Array | np.ndarray | Any  # type: ignore
+ArrayLike: TypeAlias = jax.typing.ArrayLike
 _RowIdT = TypeVar("_RowIdT", int, jax.Array, np.ndarray)
 Shape: TypeAlias = tuple[int, ...]
 
@@ -1206,8 +1206,8 @@ def compute_physical_row_ids(
   """Computes the physical row IDs of a table in a stacked table buffer given its logical equivalents.
 
   Args:
-    num_sparse_cores: The number of SparseCores the stacked table was
-      sharded for.
+    num_sparse_cores: The number of SparseCores the stacked table was sharded
+      for.
     stack_vocab_size: The total vocabulary size of the stacked table.
     shard_rotation: The shard rotation factor for the logical table in the
       stacked table.
@@ -1215,6 +1215,7 @@ def compute_physical_row_ids(
       table.
     row_ids: The target row IDs in the logical table. If an array, computes the
       physical row IDs for all elements in the array.
+
   Returns:
     The physical row IDs of the table in the stacked table buffer.
   """

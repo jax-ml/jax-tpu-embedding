@@ -254,6 +254,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "utils",
     srcs = ["utils.py"],
+    type_checking = "pyrefly",
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/extend/mlir:ir"),

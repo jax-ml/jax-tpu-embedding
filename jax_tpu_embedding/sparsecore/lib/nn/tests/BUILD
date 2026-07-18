@@ -120,6 +120,7 @@ pytype_strict_contrib_test(
         "exclusive-if-local",
         "requires-tpu",
     ],
+    type_checking = "pyrefly",
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -147,6 +148,7 @@ pytype_strict_contrib_test(
         "exclusive-if-local",
         "requires-tpu",
     ],
+    type_checking = "pyrefly",
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -166,6 +168,7 @@ tpu_py_strict_test(
     srcs = [
         "embedding_test.py",
     ],
+    type_checking = "pyrefly",
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/core/tests:test_utils",
@@ -187,6 +190,7 @@ tpu_py_strict_test(
     srcs = [
         "table_stacking_test.py",
     ],
+    type_checking = "pyrefly",
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -206,6 +210,7 @@ pytype_strict_contrib_test(
     name = "embedding_spec_test",
     srcs = ["embedding_spec_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_momentum",
@@ -226,6 +231,7 @@ pytype_strict_contrib_test(
         "exclusive-if-local",
         "requires-tpu",
     ],
+    type_checking = "pyrefly",
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

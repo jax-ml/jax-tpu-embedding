@@ -30,7 +30,6 @@ from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
-
 # Helpful for detailed debug prints.
 np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
 
@@ -1155,7 +1154,7 @@ class EmbeddingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,
-        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda *_: jnp.zeros((32, 8), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner="sum",
         name="table_a",
