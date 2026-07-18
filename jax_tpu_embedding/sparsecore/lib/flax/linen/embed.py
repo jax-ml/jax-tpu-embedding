@@ -42,7 +42,6 @@ class WithSparseCoreLayout(nn.Partitioned[A]):
   # SparseCore embedding tables return a Layout Format on TPU rather than
   # a standard Sharding object, intentionally overriding the return type of
   # Flax Partitioned.
-  # pytype: disable=signature-mismatch
   # pyrefly: ignore[bad-override]
   def get_sharding(
       self, mesh: jax.sharding.Mesh

@@ -37,7 +37,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
   table_spec = embedding_spec.TableSpec(
       vocabulary_size=512,
       embedding_dim=8,
-      initializer=lambda: np.zeros((512, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
+      initializer=lambda: np.zeros((512, 8), dtype=np.float32),
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -290,7 +290,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   table_spec = embedding_spec.TableSpec(
       vocabulary_size=16,
       embedding_dim=8,
-      initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
+      initializer=lambda: np.zeros((16, 8), dtype=np.float32),
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -506,7 +506,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   table_spec_a = embedding_spec.TableSpec(
       vocabulary_size=32,
       embedding_dim=8,
-      initializer=lambda: np.zeros((32, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
+      initializer=lambda: np.zeros((32, 8), dtype=np.float32),
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -537,7 +537,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
   table_spec_b = embedding_spec.TableSpec(
       vocabulary_size=16,
       embedding_dim=8,
-      initializer=lambda: np.zeros((16, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
+      initializer=lambda: np.zeros((16, 8), dtype=np.float32),
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),
@@ -1307,7 +1307,7 @@ class MeanCombinerTest(parameterized.TestCase):
   table_spec = embedding_spec.TableSpec(
       vocabulary_size=512,
       embedding_dim=8,
-      initializer=lambda: np.zeros((512, 8), dtype=np.float32),  # pyrefly: ignore[bad-argument-type]
+      initializer=lambda: np.zeros((512, 8), dtype=np.float32),
       optimizer=embedding_spec.SGDOptimizerSpec(
           learning_rate=0.001,
       ),

@@ -260,7 +260,7 @@ def run_model():
         config.num_sc_per_device,
     )
   emb_var_outsharding = utils.embedding_table_format(
-      embedding_sharding.mesh, embedding_sharding.spec  # pyrefly: ignore[bad-argument-type]
+      embedding_sharding.mesh, embedding_sharding.spec
   )
 
   @partial(

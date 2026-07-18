@@ -29,7 +29,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     self.batch_size = 16
     self.vocab_size = 32
     self.emb_size = 8
-    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])  # pyrefly: ignore[bad-argument-type]
+    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
     self.embedding_ids = np.asarray(
         [5, 3, 9, 1, 6, 12, 0, 4, 15, 13, 11, 7, 8, 14, 2, 10],
         dtype=np.int64,

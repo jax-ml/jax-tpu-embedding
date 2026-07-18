@@ -463,8 +463,8 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         .astype(np.float32)
     )
     emb_table_sharded = self._shard_table(emb_table)
-    mu_init = jnp.full_like(emb_table_sharded[0], 0.002)  # pyrefly: ignore[bad-index]
-    nu_init = jnp.full_like(emb_table_sharded[0], 0.004)  # pyrefly: ignore[bad-index]
+    mu_init = jnp.full_like(emb_table_sharded[0], 0.002)
+    nu_init = jnp.full_like(emb_table_sharded[0], 0.004)
 
     learning_rate = np.float32(0.1)
     b1 = np.float32(0.9)
@@ -532,7 +532,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
             lhs_local_sample_ids,
             lhs_gains,
             1,  # num_minibatches_per_physical_sparse_core
-            emb_table_sharded[0],  # pyrefly: ignore[bad-index]
+            emb_table_sharded[0],
             mu_init,
             nu_init,
             z_grad,

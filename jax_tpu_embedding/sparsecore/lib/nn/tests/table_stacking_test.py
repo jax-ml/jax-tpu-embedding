@@ -67,13 +67,13 @@ class TableStackingTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])  # pyrefly: ignore[bad-argument-type]
+    self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
 
   def test_no_stacking(self):
     table_spec = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_a',
@@ -99,7 +99,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_a',
@@ -109,7 +109,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_b',
@@ -222,7 +222,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=128,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_foo_bar_transaction_history_log',
@@ -232,7 +232,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=128,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_foo_bar_customer_profile_data',
@@ -294,7 +294,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_a',
@@ -304,7 +304,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_b',
@@ -375,7 +375,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.AdagradOptimizerSpec(
             learning_rate=0.5, initial_accumulator_value=1.0
         ),
@@ -387,7 +387,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.AdagradOptimizerSpec(
             learning_rate=0.5, initial_accumulator_value=1.0
         ),
@@ -506,7 +506,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
         combiner='sum',
         name='table_a',
@@ -516,7 +516,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_b',
@@ -526,7 +526,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=16,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='table_c',
@@ -641,7 +641,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
         combiner='sum',
         name='A',
@@ -651,7 +651,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
         combiner='sum',
         name='B',
@@ -661,7 +661,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
         combiner='sum',
         name='C',
@@ -719,7 +719,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.5),
         combiner='sum',
         name='A',
@@ -729,7 +729,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='B',
@@ -762,14 +762,14 @@ class TableStackingTest(parameterized.TestCase):
           feature_specs,
           ('A', 'B'),
           global_device_count=jax.device_count(),
-          num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),  # pyrefly: ignore[bad-argument-type]
+          num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
       )
 
   def test_manual_stacking_overlapping_stacks(self):
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=64,
         embedding_dim=12,
-        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((64, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='A',
@@ -779,7 +779,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=10,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='B',
@@ -789,7 +789,7 @@ class TableStackingTest(parameterized.TestCase):
     table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=120,
         embedding_dim=16,
-        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(),
         combiner='sum',
         name='C',

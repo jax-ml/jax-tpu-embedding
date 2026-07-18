@@ -85,7 +85,7 @@ class ShakespeareTest(absltest.TestCase):
     embedding_variables = {}
     embedding_variables[config.table_name] = [
         jax.device_put(
-            emb_table_sharded[i],  # pyrefly: ignore[bad-index]
+            emb_table_sharded[i],
             device=device,
         )
         for i, device in enumerate(config.global_devices)

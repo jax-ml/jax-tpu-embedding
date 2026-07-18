@@ -439,9 +439,9 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
             lhs_local_sample_ids,
             lhs_gains,
             1,  # num_minibatches_per_physical_sparse_core
-            embedding_table_sharded[0],  # pyrefly: ignore[bad-index]
-            accumulator_sharded[0],  # pyrefly: ignore[bad-index]
-            momentum_buffer_sharded[0],  # pyrefly: ignore[bad-index]
+            embedding_table_sharded[0],
+            accumulator_sharded[0],
+            momentum_buffer_sharded[0],
             activations_grad,
             learning_rate,
             momentum_param,

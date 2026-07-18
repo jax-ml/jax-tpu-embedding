@@ -158,7 +158,7 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),  # pyrefly: ignore[bad-argument-type]
+        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
     )
     with self.assertRaises(ValueError):
       embedding.get_stacked_table_specs(feature_specs)
@@ -357,7 +357,7 @@ class EmbeddingTest(parameterized.TestCase):
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),  # pyrefly: ignore[bad-argument-type]
+        num_sc_per_device=utils.num_sparsecores_per_device(jax.devices()[0]),
     )
     self.assertEqual(
         embedding.get_stacked_table_specs(feature_specs),
@@ -415,7 +415,7 @@ class EmbeddingTest(parameterized.TestCase):
         jax.random.PRNGKey(0),
         [table_a_spec, table_b_spec],
         global_sharding=global_sharding,
-        num_sparsecore_per_device=utils.num_sparsecores_per_device(devices[0]),  # pyrefly: ignore[bad-argument-type]
+        num_sparsecore_per_device=utils.num_sparsecores_per_device(devices[0]),
     )
 
     self.assertLen(
@@ -1150,7 +1150,7 @@ class EmbeddingTest(parameterized.TestCase):
   def test_preprocess_sparse_dense_matmul_input_from_sparse_tensor(self):
     # Arrange
     devices = jax.devices()[:1]
-    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])  # pyrefly: ignore[bad-argument-type]
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=6,

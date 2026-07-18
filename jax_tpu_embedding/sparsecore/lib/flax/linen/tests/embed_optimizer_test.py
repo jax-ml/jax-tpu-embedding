@@ -70,7 +70,7 @@ class EmbedOptimizerTest(absltest.TestCase):
     )
     expected_updated_params = ModelParams(
         params={
-            "layers_0": updates.params[  # pyrefly: ignore[missing-attribute]
+            "layers_0": updates.params[
                 "layers_0"
             ],  # SC apply updates just return updates
             "layers_2": jax.tree.map(

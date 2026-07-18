@@ -128,7 +128,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
             num_devices=1,
             num_sc_per_device=4,
         )
-        sharded_outputs.append(sharded_out[0])  # pyrefly: ignore[bad-index]
+        sharded_outputs.append(sharded_out[0])
       return tuple(sharded_outputs)
     else:
       updated_table = emb_table.at[unique_indices].set(outputs)
@@ -137,7 +137,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
           num_devices=1,
           num_sc_per_device=4,
       )
-      return updated_table_sharded[0]  # pyrefly: ignore[bad-index]
+      return updated_table_sharded[0]
 
   def test_sc_emb_backward_pass_with_sgd(self):
     # Process the input.
@@ -170,7 +170,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         0.01,
         np.float32,
     )
-    emb_tables = [emb_table_sharded[0]]  # pyrefly: ignore[bad-index]
+    emb_tables = [emb_table_sharded[0]]
     hyperparams = [0.01]
 
     def sgd_jax(grad, table, lr):
@@ -233,7 +233,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     )
 
     accumulator_init = jnp.zeros(
-        emb_table_sharded[0].shape,  # pyrefly: ignore[bad-index]
+        emb_table_sharded[0].shape,
         np.float32,
     )
 
@@ -246,7 +246,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         np.float32,
     )
 
-    emb_tables = [emb_table_sharded[0], accumulator_init]  # pyrefly: ignore[bad-index]
+    emb_tables = [emb_table_sharded[0], accumulator_init]
     hyperparams = [0.01]
 
     def adagrad_jax(grad, table, accum, lr):
@@ -326,9 +326,9 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         np.float32,
     )
 
-    accumulator_init = np.full_like(emb_table_sharded[0], 0.1, np.float32)  # pyrefly: ignore[bad-index]
-    linear_init = np.full_like(emb_table_sharded[0], 0.01, np.float32)  # pyrefly: ignore[bad-index]
-    emb_tables = [emb_table_sharded[0], accumulator_init, linear_init]  # pyrefly: ignore[bad-index]
+    accumulator_init = np.full_like(emb_table_sharded[0], 0.1, np.float32)
+    linear_init = np.full_like(emb_table_sharded[0], 0.01, np.float32)
+    emb_tables = [emb_table_sharded[0], accumulator_init, linear_init]
 
     hyperparams = [0.1, -0.5, 0.001, 0.002, 0.01]
 
@@ -447,9 +447,9 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         np.float32,
     )
 
-    momentum_init = np.full_like(emb_table_sharded[0], 0.002, np.float32)  # pyrefly: ignore[bad-index]
-    velocity_init = np.full_like(emb_table_sharded[0], 0.004, np.float32)  # pyrefly: ignore[bad-index]
-    emb_tables = [emb_table_sharded[0], momentum_init, velocity_init]  # pyrefly: ignore[bad-index]
+    momentum_init = np.full_like(emb_table_sharded[0], 0.002, np.float32)
+    velocity_init = np.full_like(emb_table_sharded[0], 0.004, np.float32)
+    emb_tables = [emb_table_sharded[0], momentum_init, velocity_init]
 
     learning_rate = 0.1
     beta_1 = 0.9

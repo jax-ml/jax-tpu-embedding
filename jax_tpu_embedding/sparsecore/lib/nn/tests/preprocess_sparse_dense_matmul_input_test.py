@@ -32,7 +32,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=32,
         embedding_dim=8,
-        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((32, 8), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
@@ -63,7 +63,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=16,
         embedding_dim=8,
-        initializer=lambda: jnp.zeros((16, 8), dtype=jnp.float32),  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros((16, 8), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),

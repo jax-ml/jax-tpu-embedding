@@ -109,12 +109,12 @@ class ShakespeareTest(absltest.TestCase):
     super().setUp()
     self.devices = jax.devices()
     self.mesh = Mesh(np.array(self.devices), axis_names=['device'])
-    self.num_sc_per_device = utils.num_sparsecores_per_device(self.devices[0])  # pyrefly: ignore[bad-argument-type]
+    self.num_sc_per_device = utils.num_sparsecores_per_device(self.devices[0])
 
     self.shakespeare_table_spec = embedding_spec.TableSpec(
         vocabulary_size=_VOCAB_SIZE.value,
         embedding_dim=_EMBEDDING_SIZE.value,
-        initializer=lambda: jnp.zeros(  # pyrefly: ignore[bad-argument-type]
+        initializer=lambda: jnp.zeros(
             (_VOCAB_SIZE.value, _EMBEDDING_SIZE.value),
             dtype=jnp.float32,
         ),
@@ -154,7 +154,7 @@ class ShakespeareTest(absltest.TestCase):
     self.embedding_variables = {}
     self.embedding_variables[self.shakespeare_table_spec.name] = [
         jax.device_put(
-            emb_table_sharded[i],  # pyrefly: ignore[bad-index]
+            emb_table_sharded[i],
             device=device,
         )
         for i, device in enumerate(self.devices)
