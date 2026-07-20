@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import abc
+import collections
 import dataclasses
 import inspect
 from typing import Any, Callable, NamedTuple, Sequence, TypeAlias
@@ -54,37 +55,27 @@ class _OptimizerDefinition(NamedTuple):
   default_initializers: dict[str, CallableTableInitializer]
 
 
-class SGDSlotVariables(NamedTuple):
-  pass
+SGDSlotVariables = collections.namedtuple("SGDSlotVariables", [])
+AdagradSlotVariables = collections.namedtuple(
+    "AdagradSlotVariables", ["accumulator"]
+)
+F2ASlotVariables = collections.namedtuple(
+    "F2ASlotVariables", ["accumulator", "local_step"]
+)
+AdamSlotVariables = collections.namedtuple(
+    "AdamSlotVariables", ["momentum", "velocity"]
+)
 
+AdagradMomentumSlotVariables = collections.namedtuple(
+    "AdagradMomentumSlotVariables", ["accumulator", "momentum"]
+)
 
-class AdagradSlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-
-
-class F2ASlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-  local_step: CallableTableInitializer
-
-
-class AdamSlotVariables(NamedTuple):
-  momentum: CallableTableInitializer
-  velocity: CallableTableInitializer
-
-
-class AdagradMomentumSlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-  momentum: CallableTableInitializer
-
-
-class FTRLSlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-  linear: CallableTableInitializer
-
-
-class LaPropSlotVariables(NamedTuple):
-  mu: CallableTableInitializer
-  nu: CallableTableInitializer
+FTRLSlotVariables = collections.namedtuple(
+    "FtrlSlotVariables", ["accumulator", "linear"]
+)
+LaPropSlotVariables = collections.namedtuple(
+    "LaPropSlotVariables", ["mu", "nu"]
+)
 
 
 @dataclasses.dataclass(frozen=True)

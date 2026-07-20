@@ -50,6 +50,11 @@ def row_id_initializer(
   )
 
 
+def formatted_array2string(arr: jax.Array) -> str:
+  """Force float-like values to be formatted with 6 decimal places."""
+  return np.array2string(arr, formatter={"float_kind": lambda x: "%.6f" % x})  # pyrefly: ignore[bad-argument-type]
+
+
 def row_col_id_initializer(
     leading_value: int = 0,
 ) -> jax.nn.initializers.Initializer:

@@ -1672,14 +1672,14 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       col_id = array[0]
       if col_id < 100:
         # Rows for table A
-        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
+        new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)  # pyrefly: ignore[bad-argument-type]
         expected_grad_table_ab[i, :_DIM_A] = np.full(
             (1, _DIM_A), new_col_id, dtype=np.float32
         )
       else:
         # Rows for table B
         new_col_id = col_id - (
-            count_num(self.input_tensor_table_b, col_id - 100) * 0.01
+            count_num(self.input_tensor_table_b, col_id - 100) * 0.01  # pyrefly: ignore[bad-argument-type]
         )
         expected_grad_table_ab[i, :_DIM_B] = np.full(
             (1, _DIM_B), new_col_id, dtype=np.float32
@@ -1687,7 +1687,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
     for i, array in enumerate(embedding_variables["table_c"][0]):
       col_id = array[0]
-      count = count_num(self.input_tensor_table_c, col_id)
+      count = count_num(self.input_tensor_table_c, col_id)  # pyrefly: ignore[bad-argument-type]
       if count > 0:
         new_col_id = col_id - 0.01 * count / (count + 1e-7)
       else:

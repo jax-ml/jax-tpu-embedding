@@ -13,7 +13,9 @@
 # limitations under the License.
 """Test for test utils."""
 
+import logging
 
+from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
 import einops
@@ -74,6 +76,11 @@ class TestUtilsTest(parameterized.TestCase):
     initializer = test_utils.row_col_id_initializer(leading_value)
     table = initializer(jax.random.PRNGKey(0), shape)
     self.assertEqual(table.shape, shape)
+    logging.debug(
+        "Row col id initialized table: shape: %s, content:%s",
+        table.shape,
+        test_utils.formatted_array2string(table),
+    )
     process_index_part = jax.process_index() / 1000000
     for i in range(shape[0]):
       expected_row_base_value = leading_value + i / 1000
