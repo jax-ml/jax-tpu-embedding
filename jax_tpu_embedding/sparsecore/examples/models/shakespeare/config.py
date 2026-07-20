@@ -99,7 +99,7 @@ def get_config() -> Config:
   global_devices = jax.devices()
   num_global_devices = len(global_devices)
   num_local_devices = len(local_devices)
-  num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])  # pyrefly: ignore[bad-argument-type]
+  num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])
 
   num_processes = jax.process_count()
   process_id = jax.process_index()

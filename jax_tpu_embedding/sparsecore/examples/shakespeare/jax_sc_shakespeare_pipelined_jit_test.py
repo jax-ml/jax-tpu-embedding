@@ -210,7 +210,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
     self.global_sharding = NamedSharding(self.global_mesh, self.pd)
     self.global_emb_sharding = NamedSharding(self.global_mesh, self.pe)
     self.global_emb_layout = utils.embedding_table_format(
-        self.global_emb_sharding.mesh, self.global_emb_sharding.spec  # pyrefly: ignore[bad-argument-type]
+        self.global_emb_sharding.mesh, self.global_emb_sharding.spec
     )
     self.replicated_sharding = NamedSharding(self.global_mesh, P())
 

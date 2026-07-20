@@ -19,10 +19,7 @@ import einops
 import jax
 from jax.experimental import layout
 
-if jax.__version_info__ >= (0, 6, 3):
-  Layout = layout.Layout
-else:
-  Layout = layout.DeviceLocalLayout  # type: ignore
+Layout = layout.Layout
 
 _ArrayType = typing.TypeVar('_ArrayType', bound=jax.typing.ArrayLike)
 

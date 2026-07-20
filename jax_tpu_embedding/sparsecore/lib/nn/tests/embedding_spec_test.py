@@ -300,7 +300,7 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (2, 3)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.accumulator(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
@@ -328,13 +328,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (2, 3)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.accumulator(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.momentum(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.momentum(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_momentum_value),
         )
     )
@@ -357,13 +357,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (3, 2)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.mu(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.mu(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_slot_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.nu(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.nu(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_slot_value),
         )
     )
@@ -388,13 +388,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (1, 5)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.accumulator(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.linear(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.linear(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_linear_value),
         )
     )
@@ -420,13 +420,13 @@ class OptimizerSpecTest(absltest.TestCase):
     dummy_shape = (1, 5)
     self.assertTrue(
         jnp.allclose(
-            slot_inits.accumulator(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.accumulator(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_accumulator_value),
         )
     )
     self.assertTrue(
         jnp.allclose(
-            slot_inits.local_step(dummy_key, dummy_shape),  # pyrefly: ignore[bad-argument-type]
+            slot_inits.local_step(dummy_key, dummy_shape),
             jnp.full(dummy_shape, op.initial_local_step_value),
         )
     )

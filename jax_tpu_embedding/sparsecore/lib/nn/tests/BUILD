@@ -97,7 +97,6 @@ pytype_strict_contrib_test(
     env = {"JAX_PLATFORMS": "cpu"},
     deps = [
         ":test_utils",
-        pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("einops"),
