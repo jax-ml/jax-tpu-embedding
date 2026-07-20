@@ -891,23 +891,30 @@ def _get_activation_for_feature(
       num_feature_slices_per_device,
       name=feature.name,
   )
-  # d: padded embedding_dim
-  # b: padded global (stacked-feature)-slice batch-size
+  # f: number of SC feature slices per device
+  # b: per-SC slice batch size for the combined (stacked) table
+  # d: padded embedding_dim (if 2D)
   activation_per_slice = einops.rearrange(
       stacked_table_activation,
-      "(f b) d -> f b d",
+      "(f b) ... -> f b ...",
       f=num_feature_slices_per_device,
   )
+  sl = (
+      slice(None),
+      slice(
+          row_offset_per_stacked_feature_slice,
+          row_offset_per_stacked_feature_slice + per_feature_slice_batch_size,
+      ),
+  )
+  if stacked_table_activation.ndim > 1:
+    sl += (slice(0, feature.output_shape[-1]),)
+
   # For each SC, take the subslice corresponding to the current feature.
-  feature_slice = activation_per_slice[
-      :,
-      row_offset_per_stacked_feature_slice : row_offset_per_stacked_feature_slice
-      + per_feature_slice_batch_size,
-      0 : feature.output_shape[-1],
-  ]
+  feature_slice = activation_per_slice[sl]
+
   # Merge SC outputs.
-  # b1: padded global (per-feature)-slice batch-size
-  return einops.rearrange(feature_slice, "f b1 d -> (f b1) d")
+  # b1: per-SC slice batch size for this single feature
+  return einops.rearrange(feature_slice, "f b1 ... -> (f b1) ...")
 
 
 def _unstack_activations_default(
@@ -1233,7 +1240,7 @@ def stack_embedding_gradients(
         # Slice the feature.
         # b: batch size per slice, d: padded embedding dim
         gradient = einops.rearrange(
-            gradient, "(f b) d -> f b d", f=num_sc_per_device
+            gradient, "(f b) ... -> f b ...", f=num_sc_per_device
         )
         stacked_table_to_gradients[stacked_table_name].append(gradient)
 
@@ -1243,7 +1250,7 @@ def stack_embedding_gradients(
       )
       # Merge the feature slice dimension with the batch dimension.
       result[stacked_table_name] = einops.rearrange(
-          result[stacked_table_name], "f b d -> (f b) d"
+          result[stacked_table_name], "f b ... -> (f b) ..."
       )
 
   return result

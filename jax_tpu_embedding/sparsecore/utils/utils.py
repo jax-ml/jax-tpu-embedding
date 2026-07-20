@@ -112,7 +112,7 @@ def shard_emb_table(
   if sharding_strategy != 'MOD':
     raise ValueError('Currently only MOD sharding strategy is supported')
   return einops.rearrange(
-      table, '(v c s) f -> c (s v) f', c=num_devices, s=num_sc_per_device
+      table, '(v c s) ... -> c (s v) ...', c=num_devices, s=num_sc_per_device
   )
 
 
@@ -135,7 +135,7 @@ def unshard_emb_table(
   if sharding_strategy != 'MOD':
     raise ValueError('Currently only MOD sharding strategy is supported')
   return einops.rearrange(
-      sharded_table, 'c (s v) f -> (v c s) f', s=num_sc_per_device
+      sharded_table, 'c (s v) ... -> (v c s) ...', s=num_sc_per_device
   )
 
 

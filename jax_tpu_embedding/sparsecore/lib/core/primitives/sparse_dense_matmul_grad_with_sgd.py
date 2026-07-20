@@ -69,6 +69,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_abstract_eval(
 ) -> core.ShapedArray:
   """Abstract eval for sparse_dense_matmul_sgd."""
   del enable_minibatching
+
   utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
@@ -129,20 +130,12 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  # Define the optimizer update function mlir.
-  # The expected signature is:
-  #   func @sgd_optimizer_update(%arg0: tensor<1xNxf32>,
-  #                             %arg1: tuple<tensor<1xNxf32>>,
-  #                             %arg2: tuple<tensor<1xNxf32>>)
-  #   -> tuple<tensor<1xNxf32>>
-  # where N is the embedding dimension size.
-  # The input arguments are:
-  #   %arg0: the gradient vector.
-  #   %arg1: the embedding tables before the update.
-  #   %arg2: the hyperparameters for the optimizer.
-  # The output is a tuple containing the updated embedding tables.
+  embedding_table_dim_size = (
+      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
+      if ir.RankedTensorType(embedding_table.type).rank > 1
+      else 1
+  )
 
-  # pylint: disable=attribute-error
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
       (
@@ -150,21 +143,21 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
               ir.RankedTensorType.get(
                   [
                       1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                      embedding_table_dim_size,
                   ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
                   [
                       1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                      embedding_table_dim_size,
                   ],
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
                   [
                       1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+                      embedding_table_dim_size,
                   ],
                   ir.F32Type.get(),
               ),
@@ -174,9 +167,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
                   ir.RankedTensorType.get(
                       [
                           1,
-                          ir.RankedTensorType(
-                              embedding_table.type
-                          ).get_dim_size(1),
+                          embedding_table_dim_size,
                       ],
                       ir.F32Type.get(),
                   )
@@ -186,7 +177,6 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
       ip=ctx.module_context.ip,
       visibility="private",
   )
-  # pylint: enable=attribute-error
 
   entry_block = optimizer_update.add_entry_block()
   with ir.InsertionPoint(entry_block):

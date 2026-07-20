@@ -496,6 +496,65 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     self.assertEqual(activations.shape, (self.batch_size, self.emb_size))
     self.assertEqual(activations.dtype, jnp.float32)
 
+  def test_sc_emb_forward_pass_dim1(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    # Input tensor with 2 duplicate IDs per sample
+    single_batch_2col = np.concatenate(
+        [self.input_tensor, self.input_tensor], axis=1
+    )
+    input_tensor = np.concatenate(
+        [single_batch_2col, single_batch_2col], axis=0
+    )
+    single_weights_2col = np.concatenate(
+        [self.input_weights, self.input_weights], axis=1
+    )
+    input_weights = np.concatenate(
+        [single_weights_2col, single_weights_2col], axis=0
+    )
+    batch_size = self.batch_size * 2
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    # Define embedding table with dim=1 (1D array) and non-trivial values
+    emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table_dim1,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    activations = self.tpu_sparse_dense_matmul_csr(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        1,  # num_minibatches_per_physical_sparse_core
+        emb_table_sharded[0],  # pyrefly: ignore[bad-index]
+        device_batch_size=batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        quantization_config=None,
+        enable_minibatching=False,
+    )
+
+    # Each sample looks up 2 duplicate IDs: (table[id]) * 2
+    single_expected = (self.input_tensor.squeeze() + 1.0) * 2.0
+    expected_activations = np.concatenate([single_expected, single_expected])
+    np.testing.assert_allclose(
+        activations, expected_activations, rtol=1e-5, atol=1e-5
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

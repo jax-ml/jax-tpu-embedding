@@ -64,6 +64,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
 
   del enable_minibatching
 
+  embedding_dim = utils.get_embedding_dim(embedding_table)
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
@@ -72,7 +73,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       num_minibatches_per_physical_sparse_core,
       embedding_table,
       activations_grad=core.ShapedArray(
-          (device_batch_size, embedding_table.shape[1]), np.float32
+          (device_batch_size, embedding_dim), np.float32
       ),  # Not used in the forward pass.
       max_ids_per_partition=max_ids_per_partition,
       max_unique_ids_per_partition=max_unique_ids_per_partition,
@@ -96,10 +97,12 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
           f" got {quantization_min_value} and {quantization_max_value}"
       )
 
-  return core.ShapedArray(
-      (device_batch_size, embedding_table.shape[1]),
-      dtype=jnp.float32,
+  shape = (
+      (device_batch_size, embedding_dim)
+      if len(embedding_table.shape) > 1
+      else (device_batch_size,)
   )
+  return core.ShapedArray(shape, dtype=jnp.float32)
 
 
 tpu_sparse_dense_matmul_csr_primitive.def_abstract_eval(
@@ -128,13 +131,21 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   (out_aval,) = ctx.avals_out
 
   constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
-  activation_init = hlo.broadcast(
-      constant_op,
-      mlir.dense_int_array([
-          device_batch_size,
-          ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-      ]),
-  )
+  if ir.RankedTensorType(embedding_table.type).rank > 1:
+    activation_init = hlo.broadcast(
+        constant_op,
+        mlir.dense_int_array([
+            device_batch_size,
+            ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+        ]),
+    )
+  else:
+    activation_init = hlo.broadcast(
+        constant_op,
+        mlir.dense_int_array([
+            device_batch_size,
+        ]),
+    )
 
   sdmm_csr_config = {
       "max_ids_per_partition": max_ids_per_partition,

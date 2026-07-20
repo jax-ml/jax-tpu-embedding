@@ -82,6 +82,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
 ) -> Tuple[core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
   del enable_minibatching
+
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
@@ -151,9 +152,11 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_dim_size = ir.RankedTensorType(
-      embedding_table.type
-  ).get_dim_size(1)
+  embedding_table_dim_size = (
+      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
+      if ir.RankedTensorType(embedding_table.type).rank > 1
+      else 1
+  )
 
   optimizer_update = func_dialect.FuncOp(
       computation_name,

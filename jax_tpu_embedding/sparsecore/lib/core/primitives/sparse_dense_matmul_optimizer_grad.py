@@ -42,7 +42,6 @@ from typing import Sequence, Tuple
 
 import jax
 from jax import core
-from jax import numpy as jnp
 import jax.extend as jex
 from jax.extend import source_info_util
 from jax.extend.mlir import ir
@@ -50,6 +49,7 @@ from jax.extend.mlir.dialects import func as func_dialect
 from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
+import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
@@ -91,6 +91,13 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
 
   if not embedding_variables:
     raise ValueError("At least one embedding variable must be passed.")
+
+  # Squeeze trailing dimensions of size 1 (e.g. [N, 1] -> [N]) to support 1D
+  # embedding variables.
+  activations_grad = utils.maybe_squeeze_abstract_eval(activations_grad, 1)
+  embedding_variables = tuple(
+      utils.maybe_squeeze_abstract_eval(var, 1) for var in embedding_variables
+  )
 
   utils.validate_abstract_eval_params(
       lhs_row_pointers=lhs_row_pointers,
@@ -172,11 +179,11 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   optimizer_update_computation_name = computation_name
 
   tables = list(embedding_variables)
-  table_shape = (
-      ir.RankedTensorType(tables[0].type).get_dim_size(0),
-      ir.RankedTensorType(tables[0].type).get_dim_size(1),
+  dim_size = (
+      ir.RankedTensorType(tables[0].type).get_dim_size(1)
+      if ir.RankedTensorType(tables[0].type).rank > 1
+      else 1
   )
-  dim_size = table_shape[1]
   row_tensor_type = ir.RankedTensorType.get([1, dim_size], ir.F32Type.get())
 
   wrapper_input_types: list[ir.Type] = [row_tensor_type]  # grad
@@ -242,15 +249,18 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       reshaped = hlo.reshape(f32type, param)
       hyperparams.append(reshaped)
 
+  activations_grad_sq = utils.maybe_squeeze_ir(activations_grad, 1)
+  tables_sq = [utils.maybe_squeeze_ir(table, 1) for table in tables]
+
   operands = (
       [
           lhs_row_pointers,
           lhs_local_embedding_ids,
           lhs_local_sample_ids,
           lhs_gains,
-          activations_grad,
+          activations_grad_sq,
       ]
-      + tables
+      + tables_sq
       + hyperparams
   )
   op = jax.ffi.ffi_lowering(

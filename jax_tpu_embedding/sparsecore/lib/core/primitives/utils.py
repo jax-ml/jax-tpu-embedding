@@ -68,10 +68,13 @@ def ensure_dtype(check: Any, expected_type: Any, object_name: str):
     )
 
 
-def ensure_dim(check: Any, expected_dim: int, object_name: str):
-  if len(check.shape) != expected_dim:
+def ensure_dim(
+    check: Any, expected_dim: int | tuple[int, ...], object_name: str
+):
+  expected = (expected_dim,) if isinstance(expected_dim, int) else expected_dim
+  if len(check.shape) not in expected:
     raise ValueError(
-        f"{object_name} must have dim {expected_dim!r}, got {check.shape!r}"
+        f"{object_name} must have dim in {expected!r}, got {check.shape!r}"
     )
 
 
@@ -103,13 +106,13 @@ def validate_abstract_eval_params(
   ensure_dtype(embedding_table, np.float32, "embedding_table")
   ensure_dtype(activations_grad, np.float32, "activations_grad")
   ensure_dim(lhs_row_pointers, 1, "lhs_row_pointers")
-  ensure_dim(embedding_table, 2, "embedding_table")
+  ensure_dim(embedding_table, (1, 2), "embedding_table")
   ensure_dim(
       num_minibatches_per_physical_sparse_core,
       0,
       "num_minibatches_per_physical_sparse_core",
   )
-  ensure_dim(activations_grad, 2, "activations_grad")
+  ensure_dim(activations_grad, (1, 2), "activations_grad")
   if (
       lhs_local_sample_ids.shape != lhs_local_embedding_ids.shape
       or lhs_gains.shape != lhs_local_embedding_ids.shape
@@ -120,7 +123,10 @@ def validate_abstract_eval_params(
         f"equal rank 1 shapes, got shapes {lhs_local_sample_ids.shape}, "
         f"{lhs_local_embedding_ids.shape} and {lhs_gains.shape}"
     )
-  if embedding_table.shape[-1] != activations_grad.shape[-1]:
+
+  embedding_dim = get_embedding_dim(embedding_table)
+  activations_grad_dim = get_embedding_dim(activations_grad)
+  if embedding_dim != activations_grad_dim:
     raise ValueError(
         "embedding_table and activations_grad must have equal feature (minor)"
         f" dimensions, got {embedding_table.shape}, {activations_grad.shape}"
@@ -151,6 +157,11 @@ def validate_abstract_eval_params(
     )
 
 
+def get_embedding_dim(val: core.ShapedArray) -> int:
+  """Returns the feature (embedding) dimension for a 1D or 2D shaped array."""
+  return val.shape[1] if len(val.shape) > 1 else 1
+
+
 def to_value_sequence(results: Any) -> Sequence[ir.Value]:
   """Converts FFI lowering results to a Sequence of ir.Values."""
   if isinstance(results, ir.Value):
@@ -170,3 +181,31 @@ def aval_to_ir_type(
     return mlir.aval_to_ir_type(ctx.module_context, aval)
   else:
     return mlir.aval_to_ir_type(aval)  # pyrefly: ignore[missing-argument, bad-argument-type]
+
+
+def maybe_squeeze_abstract_eval(
+    val: core.ShapedArray | Sequence[core.ShapedArray],
+    expected_dim: int,
+) -> Any:
+  """Squeezes trailing dimensions of size 1 until rank matches expected_dim."""
+  if isinstance(val, core.ShapedArray):
+    shape = list(val.shape)
+    while len(shape) > expected_dim and shape and shape[-1] == 1:
+      shape.pop()
+    return core.ShapedArray(tuple(shape), val.dtype)
+  return tuple(maybe_squeeze_abstract_eval(v, expected_dim) for v in val)
+
+
+def maybe_squeeze_ir(val: ir.Value, expected_dim: int) -> ir.Value:
+  """Squeezes trailing dimensions of size 1 until rank matches expected_dim."""
+  tensor_type = ir.RankedTensorType(val.type)
+  shape = list(tensor_type.shape)
+  dtype = tensor_type.element_type
+  changed = False
+  while len(shape) > expected_dim and shape and shape[-1] == 1:
+    shape.pop()
+    changed = True
+  if changed:
+    target_type = ir.RankedTensorType.get(shape, dtype)
+    return hlo.reshape(target_type, val)
+  return val
