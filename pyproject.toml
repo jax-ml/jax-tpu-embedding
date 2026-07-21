@@ -116,7 +116,6 @@ ignore-missing-imports = [
     "chex.*",
     "clu.*",
     "einops.*",
-    "flax.*",
     "google_benchmark.*",
     "jax.*",
     "jaxlib.*",
