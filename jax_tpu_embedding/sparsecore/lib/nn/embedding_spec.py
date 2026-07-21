@@ -18,7 +18,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 import inspect
-from typing import Any, Callable, NamedTuple, Sequence, TypeAlias
+from typing import Any, Callable, Generic, NamedTuple, Sequence, TypeAlias, TypeVar
 
 from flax import struct
 import jax
@@ -41,8 +41,7 @@ HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 # Standard initializers are defined in jax.nn.initializers. See
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html.
 # We expand the type union to also accept generic callables returning ArrayLike
-# so static type checkers (Pyrefly) can verify unannotated or vararg lambdas
-# commonly used across tests without requiring localized suppressions.
+# for compatibility with flax / optax initializer functions.
 CallableTableInitializer: TypeAlias = (
     jax.nn.initializers.Initializer | Callable[..., jax.typing.ArrayLike]
 )
@@ -54,37 +53,41 @@ class _OptimizerDefinition(NamedTuple):
   default_initializers: dict[str, CallableTableInitializer]
 
 
+_SlotVar1T = TypeVar("_SlotVar1T")
+_SlotVar2T = TypeVar("_SlotVar2T")
+
+
 class SGDSlotVariables(NamedTuple):
   pass
 
 
-class AdagradSlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
+class AdagradSlotVariables(NamedTuple, Generic[_SlotVar1T]):
+  accumulator: _SlotVar1T
 
 
-class F2ASlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-  local_step: CallableTableInitializer
+class F2ASlotVariables(NamedTuple, Generic[_SlotVar1T, _SlotVar2T]):
+  accumulator: _SlotVar1T
+  local_step: _SlotVar2T
 
 
-class AdamSlotVariables(NamedTuple):
-  momentum: CallableTableInitializer
-  velocity: CallableTableInitializer
+class AdamSlotVariables(NamedTuple, Generic[_SlotVar1T, _SlotVar2T]):
+  momentum: _SlotVar1T
+  velocity: _SlotVar2T
 
 
-class AdagradMomentumSlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-  momentum: CallableTableInitializer
+class AdagradMomentumSlotVariables(NamedTuple, Generic[_SlotVar1T, _SlotVar2T]):
+  accumulator: _SlotVar1T
+  momentum: _SlotVar2T
 
 
-class FTRLSlotVariables(NamedTuple):
-  accumulator: CallableTableInitializer
-  linear: CallableTableInitializer
+class FTRLSlotVariables(NamedTuple, Generic[_SlotVar1T, _SlotVar2T]):
+  accumulator: _SlotVar1T
+  linear: _SlotVar2T
 
 
-class LaPropSlotVariables(NamedTuple):
-  mu: CallableTableInitializer
-  nu: CallableTableInitializer
+class LaPropSlotVariables(NamedTuple, Generic[_SlotVar1T, _SlotVar2T]):
+  mu: _SlotVar1T
+  nu: _SlotVar2T
 
 
 @dataclasses.dataclass(frozen=True)
