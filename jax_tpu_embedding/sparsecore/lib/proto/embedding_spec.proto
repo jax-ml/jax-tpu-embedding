@@ -35,6 +35,34 @@ message FeatureSpecProto {
   int64 col_shift = 6;
 }
 
+message OptimizerSpecProto {
+  enum OptimizerType {
+    OPTIMIZER_TYPE_UNSPECIFIED = 0;
+    SGD = 1;
+    ADAGRAD = 2;
+    ADAM = 3;
+    FTRL = 4;
+    F2A = 5;
+    ADAGRAD_MOMENTUM = 6;
+    CUSTOM = 7;
+  }
+  OptimizerType type = 1;
+
+  // The learning rate may be a float constant or a callable/schedule function
+  // tag.
+  oneof learning_rate_spec {
+    // The constant learning rate float value.
+    float learning_rate = 2;
+    // Unique tag or identifier for callable learning rates or schedules. Used
+    // to differentiate tables with different callable learning rates during
+    // table stacking and cross-topology checkpoint conversion.
+    string learning_rate_tag = 3;
+  }
+  // Additional hyperparameters for the optimizer.
+  map<string, float> float_params = 4;
+  map<string, bool> bool_params = 5;
+}
+
 message TableSpecProto {
   // The name of the table.
   string table_name = 1;
@@ -66,6 +94,11 @@ message TableSpecProto {
   int64 shard_rotation = 10;
   // The list of features that point to this table.
   repeated FeatureSpecProto feature_specs = 11;
+  // The reduction combiner for features pointing to this table (e.g. sum,
+  // mean).
+  string combiner = 12;
+  // Specification for the optimizer used by this table.
+  OptimizerSpecProto optimizer = 13;
 }
 
 message StackedTableSpecProto {

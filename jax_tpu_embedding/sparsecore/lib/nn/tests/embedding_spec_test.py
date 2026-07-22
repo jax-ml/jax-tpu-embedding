@@ -21,7 +21,9 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_f2a
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
+from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from optax import schedules
 
 
@@ -596,6 +598,101 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(ts1, ts2)
     self.assertNotEqual(ts1, ts3)
+
+  def test_callable_placeholder_and_proto_tag(self):
+    def schedule_a(step):
+      return 0.1 * step
+
+    def schedule_b(step):
+      return 0.2 * step
+
+    opt_a = embedding_spec.SGDOptimizerSpec(learning_rate=schedule_a)
+    opt_b = embedding_spec.SGDOptimizerSpec(learning_rate=schedule_b)
+
+    proto_a = embedding.optimizer_spec_to_proto(opt_a)
+    proto_b = embedding.optimizer_spec_to_proto(opt_b)
+
+    self.assertIsNotNone(proto_a)
+    self.assertIsNotNone(proto_b)
+    assert proto_a is not None and proto_b is not None
+    self.assertTrue(proto_a.learning_rate_tag)
+    self.assertTrue(proto_b.learning_rate_tag)
+    self.assertNotEqual(proto_a.learning_rate_tag, proto_b.learning_rate_tag)
+
+    reconstructed_opt_a = embedding.proto_to_optimizer_spec(proto_a)
+    reconstructed_opt_b = embedding.proto_to_optimizer_spec(proto_b)
+
+    self.assertIsInstance(
+        reconstructed_opt_a.learning_rate, embedding_spec.CallablePlaceholder
+    )
+    self.assertIsInstance(
+        reconstructed_opt_b.learning_rate, embedding_spec.CallablePlaceholder
+    )
+    self.assertNotEqual(reconstructed_opt_a, reconstructed_opt_b)
+
+  def test_optimizer_spec_proto_roundtrip(self):
+    optimizers = [
+        embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
+        embedding_spec.AdagradOptimizerSpec(
+            learning_rate=0.01, initial_accumulator_value=0.2
+        ),
+        embedding_spec.AdamOptimizerSpec(
+            learning_rate=0.001, beta_1=0.85, beta_2=0.99, epsilon=1e-7
+        ),
+        embedding_spec.AdagradMomentumOptimizerSpec(
+            learning_rate=0.01,
+            momentum=0.95,
+            beta2=0.98,
+            epsilon=1e-6,
+            exponent=1.5,
+            use_nesterov=True,
+            initial_accumulator_value=0.2,
+            initial_momentum_value=0.05,
+        ),
+        embedding_spec.FTRLOptimizerSpec(
+            learning_rate=0.02,
+            learning_rate_power=-0.6,
+            l1_regularization_strength=0.1,
+            l2_regularization_strength=0.2,
+            beta=0.01,
+            initial_accumulator_value=0.15,
+            initial_linear_value=0.05,
+            multiply_linear_by_learning_rate=True,
+        ),
+        embedding_spec.F2AOptimizerSpec(
+            learning_rate=0.015,
+            rho=0.6,
+            initial_accumulator_value=0.25,
+            initial_local_step_value=1.0,
+            l1_regularization_strength=0.05,
+            l2_regularization_strength=0.1,
+            max_lr_multiplier=1e5,
+        ),
+    ]
+    for opt in optimizers:
+      with self.subTest(opt=type(opt).__name__):
+        proto = embedding.optimizer_spec_to_proto(opt)
+        self.assertIsNotNone(proto)
+        reconstructed = embedding.proto_to_optimizer_spec(proto)
+        self.assertIs(type(opt), type(reconstructed))
+        for attr, val in opt.__dict__.items():
+          rec_val = getattr(reconstructed, attr)
+          if isinstance(val, (float, int)):
+            self.assertAlmostEqual(val, rec_val, places=5)
+          else:
+            self.assertEqual(val, rec_val)
+
+  def test_optimizer_class_type_mapping(self):
+    self.assertIs(
+        embedding.get_optimizer_class(
+            embedding_spec_pb2.OptimizerSpecProto.ADAM
+        ),
+        embedding_spec.AdamOptimizerSpec,
+    )
+    self.assertEqual(
+        embedding.get_optimizer_type(embedding_spec.AdamOptimizerSpec),
+        embedding_spec_pb2.OptimizerSpecProto.ADAM,
+    )
 
 
 if __name__ == "__main__":

@@ -59,3 +59,20 @@ tpu_py_strict_test(
         pypi_requirement("portpicker"),
     ],
 )
+
+tpu_py_strict_test(
+    name = "checkpoint_utils_test",
+    srcs = ["checkpoint_utils_test.py"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/flax/nnx:checkpoint_utils",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/lib/nn:table_stacking",
+        "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
+        "//third_party/jax:tpu_support",  # buildcleaner: keep
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("jax"),
+        pypi_requirement("orbax/checkpoint"),
+    ],
+)

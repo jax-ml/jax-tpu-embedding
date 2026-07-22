@@ -37,12 +37,11 @@ from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_activation_unstack
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_gradient_stack
+from jax_tpu_embedding.sparsecore.lib.nn import embedding_proto_utils
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
-from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
-
 
 ArrayLike = jnp.ndarray | np.typing.ArrayLike
 
@@ -1697,80 +1696,14 @@ def init_embedding_variables(
   return stacked_mapping
 
 
-def create_proto_from_feature_specs(
-    feature_specs: Nested[embedding_spec.FeatureSpec],
-    global_device_count: int | None,
-    num_sparsecore_per_device: int | None = None,
-) -> embedding_spec_pb2.EmbeddingSpecProto:
-  """Creates a StackedTableSpecProto from a list of FeatureSpec.
-
-  This is used to create the proto for feature sets used for training. The proto
-  captures relevant information for the features such that the
-  training variables can be unsharded when being loaded from a checkpoint,
-  for serving.
-
-  Args:
-    feature_specs: A Nested (e.g., list, dict etc.) of FeatureSpec.
-    global_device_count: The number of devices in the system.
-    num_sparsecore_per_device: The number of sparse cores per device. If `None`,
-      it will be set to the number of sparse cores on the current host machine.
-
-  Returns:
-    An EmbeddingSpecProto.
-  """
-  if global_device_count is None:
-    global_device_count = jax.device_count()
-  num_sc_per_dev = _get_num_sc_per_device(num_sparsecore_per_device)
-
-  stacked_table_specs: dict[str, embedding_spec_pb2.StackedTableSpecProto] = {}
-  stack_to_table_specs: dict[
-      str, dict[str, embedding_spec_pb2.TableSpecProto]
-  ] = collections.defaultdict(dict)
-  # Traverse the feature specs and create the StackedTableSpecProto.
-  for feature in jax.tree.leaves(feature_specs):
-    current_stack_name = feature.table_spec.stacked_table_spec.stack_name
-    current_table_name = feature.table_spec.name
-    if current_stack_name not in stacked_table_specs:
-      stacked_table_specs[current_stack_name] = (
-          embedding_spec_pb2.StackedTableSpecProto(
-              stack_name=current_stack_name,
-              stack_vocab_size=feature.table_spec.stacked_table_spec.stack_vocab_size,
-              stack_embedding_dim=feature.table_spec.stacked_table_spec.stack_embedding_dim,
-              total_sample_count=feature.table_spec.stacked_table_spec.total_sample_count,
-              max_ids_per_partition=feature.table_spec.stacked_table_spec.max_ids_per_partition,
-              num_sparsecores=(num_sc_per_dev * global_device_count),
-              max_unique_ids_per_partition=feature.table_spec.stacked_table_spec.max_unique_ids_per_partition,
-          )
-      )
-    if current_table_name not in stack_to_table_specs[current_stack_name]:
-      stack_to_table_specs[current_stack_name][current_table_name] = (
-          embedding_spec_pb2.TableSpecProto(
-              table_name=current_table_name,
-              vocab_size=feature.table_spec.vocabulary_size,
-              embedding_dim=feature.table_spec.embedding_dim,
-              padded_vocab_size=feature.table_spec.setting_in_stack.padded_vocab_size,
-              padded_embedding_dim=feature.table_spec.setting_in_stack.padded_embedding_dim,
-              row_offset_in_shard=feature.table_spec.setting_in_stack.row_offset_in_shard,
-              shard_rotation=feature.table_spec.setting_in_stack.shard_rotation,
-          )
-      )
-    feature_spec = embedding_spec_pb2.FeatureSpecProto(
-        feature_name=feature.name,
-        row_offset=feature.id_transformation.row_offset,
-        col_offset=feature.id_transformation.col_offset,
-        col_shift=feature.id_transformation.col_shift,
-        input_shape=feature.input_shape,
-        output_shape=feature.output_shape,
-    )
-    stack_to_table_specs[current_stack_name][
-        current_table_name
-    ].feature_specs.append(feature_spec)
-
-  for stack_name, specs in stack_to_table_specs.items():
-    stacked_table_specs[stack_name].table_specs.extend(specs.values())
-  return embedding_spec_pb2.EmbeddingSpecProto(
-      stacked_table_specs=stacked_table_specs.values()
-  )
+# Re-export proto interop utilities for backward compatibility and convenience.
+get_optimizer_class = embedding_proto_utils.get_optimizer_class
+get_optimizer_type = embedding_proto_utils.get_optimizer_type
+optimizer_spec_to_proto = embedding_proto_utils.optimizer_spec_to_proto
+proto_to_optimizer_spec = embedding_proto_utils.proto_to_optimizer_spec
+create_proto_from_feature_specs = (
+    embedding_proto_utils.create_proto_from_feature_specs
+)
 
 
 def update_preprocessing_parameters(

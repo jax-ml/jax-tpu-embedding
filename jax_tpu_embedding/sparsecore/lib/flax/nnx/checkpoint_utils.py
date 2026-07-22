@@ -393,18 +393,14 @@ def restore_cross_topology_checkpoint(
         sharding,
     )
     # Process each optimizer slot variable for this table/stack identically.
-    slot_leaves, slot_treedef = jax.tree_util.tree_flatten(ev.slot)
-    new_slot_leaves = []
-    for i, slot_leaf in enumerate(slot_leaves):
-      slot_var = stacked_slots[k][i]
-      assert isinstance(slot_var, jax.Array)
-      new_slot_leaves.append(
-          _enforce_sharding_and_layout(
-              slot_var.reshape(slot_leaf.shape),
-              sharding,
-          )
-      )
-    new_slot = jax.tree_util.tree_unflatten(slot_treedef, new_slot_leaves)
+    new_slot = jax.tree.map(
+        lambda slot_arr, slot_leaf, s=sharding: _enforce_sharding_and_layout(
+            slot_arr.reshape(slot_leaf.shape),
+            s,
+        ),
+        stacked_slots[k],
+        ev.slot,
+    )
     new_embedding_table[k] = embedding.EmbeddingVariables(
         table=new_table, slot=new_slot
     )
@@ -421,11 +417,13 @@ def convert_cross_topology_checkpoint(
     output_checkpoint_path: str | None,
     num_global_devices: int,
     num_sc_per_device: int,
+    target_batch_size: int | None = None,
     model_key: str = 'model',
     optimizer_key: str = 'optimizer',
     embedding_spec_key: str = 'embedding_spec',
     restore_step: int | None = None,
     save_step: int | None = None,
+    target_feature_specs: Nested[embedding_spec.FeatureSpec] | None = None,
 ) -> None:
   """Converts a checkpoint from a different topology on CPU and saves a new checkpoint.
 
@@ -437,6 +435,8 @@ def convert_cross_topology_checkpoint(
     num_global_devices: Total number of global devices (chips) in the target
       topology.
     num_sc_per_device: Number of SparseCores per device in the target topology.
+    target_batch_size: Optional target global batch size for recomputing the
+      embedding specs.
     model_key: Checkpoint item key name for the model state.
     optimizer_key: Checkpoint item key name for the optimizer state.
     embedding_spec_key: Checkpoint item key name for the embedding spec
@@ -445,6 +445,9 @@ def convert_cross_topology_checkpoint(
       the latest step available in the input checkpoint directory.
     save_step: The checkpoint step to save the converted checkpoint as. If None,
       defaults to the restore_step.
+    target_feature_specs: Optional nested structure of FeatureSpecs defining the
+      target embedding configuration. If provided, the checkpoint will be
+      restacked according to the target stacking rules.
 
   Returns:
     None. A new checkpoint is saved to output_checkpoint_path.
@@ -501,7 +504,7 @@ def convert_cross_topology_checkpoint(
         "Could not find 'embedding_table' in the restored model state."
     )
 
-  print('Unstacking and unsharding tables on CPU...')
+  logging.info('Unstacking and unsharding tables on CPU...')
   start_time = time.time()
 
   if 'value' in restored_embedding:
@@ -521,9 +524,18 @@ def convert_cross_topology_checkpoint(
   if logging.vlog_is_on(1):
     _log_table_sizes(tables)
 
-  target_proto, logical_table_specs = _recompute_target_specs(
-      embedding_spec_proto, num_global_devices, num_sc_per_device
-  )
+  if target_feature_specs is not None:
+    logical_table_specs = _get_table_specs(target_feature_specs)
+    target_proto = embedding.create_proto_from_feature_specs(
+        target_feature_specs, num_global_devices, num_sc_per_device
+    )
+  else:
+    target_proto, logical_table_specs = _recompute_target_specs(
+        embedding_spec_proto,
+        num_global_devices,
+        num_sc_per_device,
+        target_batch_size=target_batch_size,
+    )
 
   num_shards = num_global_devices * num_sc_per_device
   stacked_tables = table_stacking.stack_and_shard_tables(
@@ -532,44 +544,31 @@ def convert_cross_topology_checkpoint(
       num_shards=num_shards,
   )
 
-  stacked_slots = {}
-  proto_map = {
-      spec.stack_name: embedding_spec_pb2.EmbeddingSpecProto(
-          stacked_table_specs=[spec]
-      )
-      for spec in embedding_spec_proto.stacked_table_specs
-  }
-
-  for k, ev in actual_tables_dict.items():
-    spec_proto_k = proto_map[k]
-    stacked_slots_k = []
-    slots_to_iterate = (
-        ev['slot'].values() if isinstance(ev['slot'], dict) else ev['slot']
-    )
-    for slot_val in slots_to_iterate:
-      slots = table_stacking.unstack_and_unshard_stacked_tables(
-          {k: slot_val},
-          spec_proto_k,
-          donate=False,
-      )
-      table_specs_k = {
-          name: spec
-          for name, spec in logical_table_specs.items()
-          if name in slots
-      }
-      stacked_slot = table_stacking.stack_and_shard_tables(
-          table_specs_k,
-          slots,
-          num_shards=num_shards,
-          pad_value=0.0,
-      )
-      stacked_slots_k.append(stacked_slot[k])
-    stacked_slots[k] = tuple(stacked_slots_k)
-
+  stacked_slots = _unstack_and_restack_slots(
+      actual_tables_dict,
+      embedding_spec_proto,
+      logical_table_specs,
+      num_shards,
+  )
+  new_actual_tables_dict = {}
   # Inject the reshaped parameters back into the model pure arrays dictionary
-  for k in actual_tables_dict.keys():
-    actual_tables_dict[k]['table'] = stacked_tables[k]
-    actual_tables_dict[k]['slot'] = stacked_slots[k]
+  for st_name, stacked_table in stacked_tables.items():
+    assert isinstance(stacked_table, jax.Array)
+    reshaped_table = stacked_table.reshape((-1, stacked_table.shape[-1]))
+    reshaped_slot = jax.tree.map(
+        lambda sv: sv.reshape((-1, sv.shape[-1])),
+        stacked_slots[st_name],
+    )
+    new_actual_tables_dict[st_name] = {
+        'table': reshaped_table,
+        'slot': reshaped_slot,
+    }
+
+  if 'value' in restored_embedding:
+    restored_embedding['value'] = new_actual_tables_dict
+  else:
+    restored_embedding.clear()
+    restored_embedding.update(new_actual_tables_dict)
 
   # Save the new checkpoint for the updated topology
   logging.info('Saving converted checkpoint to %s', output_checkpoint_path)
@@ -736,44 +735,68 @@ def _get_checkpoint_step(
 
 
 def _unstack_and_restack_slots(
-    restored_embedding: collections.abc.Mapping[
-        str, embedding.EmbeddingVariables
-    ],
+    restored_embedding: collections.abc.Mapping[str, Any],
     embedding_spec_proto: embedding_spec_pb2.EmbeddingSpecProto,
     table_specs: dict[str, embedding_spec.TableSpec],
     num_shards: int,
-) -> dict[str, tuple[jax.Array, ...]]:
+) -> dict[str, Any]:
   """Unstacks, unshards, and restacks/reshards optimizer slot variables."""
-  proto_map = {
-      spec.stack_name: embedding_spec_pb2.EmbeddingSpecProto(
-          stacked_table_specs=[spec]
-      )
-      for spec in embedding_spec_proto.stacked_table_specs
+  source_slots = {
+      k: ev['slot'] if isinstance(ev, dict) else ev.slot
+      for k, ev in restored_embedding.items()
   }
+  if not source_slots:
+    return {}
 
-  stacked_slots = {}
-  for k, ev in restored_embedding.items():
-    spec_proto_k = proto_map[k]
-    stacked_slots_k = []
-    slot_leaves, _ = jax.tree_util.tree_flatten(ev.slot)
-    for slot_leaf in slot_leaves:
-      slots = table_stacking.unstack_and_unshard_stacked_tables(
-          {k: slot_leaf},
-          spec_proto_k,
-          donate=False,
+  first_slot = next(iter(source_slots.values()))
+  if not jax.tree.leaves(first_slot):
+    target_stack_names = {
+        tspec.stacked_table_spec.stack_name
+        if tspec.stacked_table_spec
+        else tspec.name
+        for tspec in table_specs.values()
+    }
+    return {st_name: first_slot for st_name in target_stack_names}
+
+  target_stack_names = set()
+  for tspec in table_specs.values():
+    if tspec.stacked_table_spec:
+      target_stack_names.add(tspec.stacked_table_spec.stack_name)
+    else:
+      target_stack_names.add(tspec.name)
+
+  def _restack_leaf(
+      *leaves_across_source_stacks: jax.Array,
+  ) -> dict[str, Any]:
+    source_stacked_slot_dict = dict(
+        zip(source_slots.keys(), leaves_across_source_stacks, strict=True)
+    )
+    unstacked_slot_tables = table_stacking.unstack_and_unshard_stacked_tables(
+        source_stacked_slot_dict,
+        embedding_spec_proto,
+        donate=False,
+    )
+    return table_stacking.stack_and_shard_tables(
+        table_specs,
+        unstacked_slot_tables,
+        num_shards=num_shards,
+        pad_value=0.0,
+    )
+
+  tree_of_target_slots = jax.tree.map(
+      _restack_leaf,
+      *source_slots.values(),
+  )
+
+  target_slots = {
+      st_name: jax.tree.map(
+          lambda target_stacked_map, s_name=st_name: target_stacked_map[s_name],
+          tree_of_target_slots,
+          is_leaf=lambda x, s_name=st_name: isinstance(x, dict) and s_name in x,
       )
-      table_specs_k = {
-          name: spec for name, spec in table_specs.items() if name in slots
-      }
-      stacked_slot = table_stacking.stack_and_shard_tables(
-          table_specs_k,
-          slots,
-          num_shards=num_shards,
-          pad_value=0.0,
-      )
-      stacked_slots_k.append(stacked_slot[k])
-    stacked_slots[k] = tuple(stacked_slots_k)
-  return stacked_slots
+      for st_name in target_stack_names
+  }
+  return target_slots
 
 
 def _log_table_sizes(tables: collections.abc.Mapping[str, jax.Array]):
@@ -806,10 +829,71 @@ def _next_largest_multiple(value: int, multiple: int) -> int:
   return ((value + multiple - 1) // multiple) * multiple
 
 
+def _reconstruct_feature_specs_from_proto(
+    source_proto: embedding_spec_pb2.EmbeddingSpecProto,
+    target_batch_size: int | None = None,
+) -> dict[str, embedding_spec.FeatureSpec]:
+  """Reconstructs unstacked FeatureSpecs from an EmbeddingSpecProto.
+
+  Args:
+    source_proto: The source embedding spec proto.
+    target_batch_size: Optional target global batch size.
+
+  Returns:
+    A dictionary mapping feature names to reconstructed unstacked FeatureSpecs.
+  """
+  specs = {}
+  for stack_proto in source_proto.stacked_table_specs:
+    for t_proto in stack_proto.table_specs:
+      if t_proto.HasField('optimizer'):
+        opt = embedding.proto_to_optimizer_spec(t_proto.optimizer)
+      else:
+        opt = embedding_spec.SGDOptimizerSpec(learning_rate=0.0)
+      combiner = t_proto.combiner if t_proto.combiner else 'mean'
+      tspec = embedding_spec.TableSpec(
+          vocabulary_size=t_proto.vocab_size,
+          embedding_dim=t_proto.embedding_dim,
+          initializer=jax.nn.initializers.constant(0.0),
+          optimizer=opt,
+          combiner=combiner,
+          name=t_proto.table_name,
+      )
+      if t_proto.feature_specs:
+        for f_proto in t_proto.feature_specs:
+          in_shape = list(f_proto.input_shape)
+          out_shape = list(f_proto.output_shape)
+          if target_batch_size is not None and in_shape:
+            in_shape[0] = target_batch_size
+          if target_batch_size is not None and out_shape:
+            out_shape[0] = target_batch_size
+          fspec = embedding_spec.FeatureSpec(
+              table_spec=tspec,
+              input_shape=tuple(in_shape),
+              output_shape=tuple(out_shape),
+              name=f_proto.feature_name,
+          )
+          specs[f_proto.feature_name] = fspec
+      else:
+        bs = (
+            target_batch_size
+            if target_batch_size is not None
+            else stack_proto.total_sample_count
+        )
+        fspec = embedding_spec.FeatureSpec(
+            table_spec=tspec,
+            input_shape=(bs, 1),
+            output_shape=(bs, t_proto.embedding_dim),
+            name=f'feature_{t_proto.table_name}',
+        )
+        specs[fspec.name] = fspec
+  return specs
+
+
 def _recompute_target_specs(
     source_proto: embedding_spec_pb2.EmbeddingSpecProto,
     num_global_devices: int,
     num_sc_per_device: int,
+    target_batch_size: int | None = None,
 ) -> tuple[
     embedding_spec_pb2.EmbeddingSpecProto, dict[str, embedding_spec.TableSpec]
 ]:
@@ -819,10 +903,34 @@ def _recompute_target_specs(
     source_proto: The source embedding spec proto.
     num_global_devices: The number of global devices.
     num_sc_per_device: The number of SparseCores per device.
+    target_batch_size: Optional target global batch size.
 
   Returns:
     A tuple of the target embedding spec proto and a dictionary of table specs.
   """
+  # If source_proto contains combiner and optimizer specs, perform automatic
+  # stack regrouping via auto_stack_tables.
+  has_full_metadata = False
+  for s in source_proto.stacked_table_specs:
+    if any(t.combiner and t.HasField('optimizer') for t in s.table_specs):
+      has_full_metadata = True
+      break
+
+  if has_full_metadata:
+    reconstructed_specs = _reconstruct_feature_specs_from_proto(
+        source_proto, target_batch_size=target_batch_size
+    )
+    table_stacking.auto_stack_tables(
+        reconstructed_specs,
+        global_device_count=num_global_devices,
+        num_sc_per_device=num_sc_per_device,
+    )
+    target_proto = embedding.create_proto_from_feature_specs(
+        reconstructed_specs, num_global_devices, num_sc_per_device
+    )
+    logical_table_specs = _get_table_specs(reconstructed_specs)
+    return target_proto, logical_table_specs
+
   num_shards = num_global_devices * num_sc_per_device
   target_proto = embedding_spec_pb2.EmbeddingSpecProto()
   target_proto.CopyFrom(source_proto)
@@ -830,6 +938,40 @@ def _recompute_target_specs(
   logical_table_specs = {}
 
   for stacked_spec_proto in target_proto.stacked_table_specs:
+    stack_activation_mem_bytes = 0
+    for t in stacked_spec_proto.table_specs:
+      padded_dim = _next_largest_multiple(t.embedding_dim, 8)
+      if t.feature_specs:
+        table_sample_count = sum(
+            int(np.prod(f.output_shape[:-1])) for f in t.feature_specs
+        )
+      else:
+        table_sample_count = stacked_spec_proto.total_sample_count
+      if (
+          target_batch_size is not None
+          and stacked_spec_proto.total_sample_count
+      ):
+        scale = target_batch_size / stacked_spec_proto.total_sample_count
+        table_sample_count = int(table_sample_count * scale)
+
+      table_sample_count_per_sc = table_sample_count // num_shards
+      stack_activation_mem_bytes += padded_dim * table_sample_count_per_sc * 4
+
+    activation_mem_bytes_limit = 2048 * 1024  # 2 MiB
+    if (
+        len(stacked_spec_proto.table_specs) > 1
+        and stack_activation_mem_bytes > activation_mem_bytes_limit
+    ):
+      raise ValueError(
+          f"Stack '{stacked_spec_proto.stack_name}' has per-SparseCore"
+          f' activation memory of {stack_activation_mem_bytes} bytes,'
+          f' exceeding the 2 MiB limit ({activation_mem_bytes_limit} bytes) for'
+          f' target topology ({num_global_devices} devices,'
+          f' {num_sc_per_device} SC/device). The target model will group tables'
+          ' into different stacks. Please provide target_feature_specs to'
+          ' convert_cross_topology_checkpoint.'
+      )
+
     stack_embedding_dim = max([
         _next_largest_multiple(t.embedding_dim, 8)
         for t in stacked_spec_proto.table_specs
@@ -851,7 +993,8 @@ def _recompute_target_specs(
         rotation=num_sc_per_device,
     )
 
-    stack_vocab_size = 0
+    stack_vocab_size = sum(table_to_padded_vocab_size.values())
+    stacked_spec_proto.stack_vocab_size = stack_vocab_size
 
     for table_spec_proto in stacked_spec_proto.table_specs:
       setting = table_to_setting[table_spec_proto.table_name]
@@ -859,8 +1002,6 @@ def _recompute_target_specs(
       table_spec_proto.padded_embedding_dim = setting.padded_embedding_dim
       table_spec_proto.row_offset_in_shard = setting.row_offset_in_shard
       table_spec_proto.shard_rotation = setting.shard_rotation
-
-      stack_vocab_size += setting.padded_vocab_size
 
       tspec = embedding_spec.TableSpec(
           name=table_spec_proto.table_name,
@@ -874,7 +1015,7 @@ def _recompute_target_specs(
 
       tspec.stacked_table_spec = embedding_spec.StackedTableSpec(
           stack_name=stacked_spec_proto.stack_name,
-          stack_vocab_size=stacked_spec_proto.stack_vocab_size,
+          stack_vocab_size=stack_vocab_size,
           stack_embedding_dim=stacked_spec_proto.stack_embedding_dim,
           optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.0),
           combiner='mean',
@@ -882,8 +1023,6 @@ def _recompute_target_specs(
       )
 
       logical_table_specs[table_spec_proto.table_name] = tspec
-
-    stacked_spec_proto.stack_vocab_size = stack_vocab_size
 
   return target_proto, logical_table_specs
 

@@ -1113,6 +1113,11 @@ class EmbeddingTest(parameterized.TestCase):
             col_offset: 0
             col_shift: 0
           }}
+          combiner: "sum"
+          optimizer {{
+            type: SGD
+            learning_rate: 0.001
+          }}
         }}
         table_specs {{
           table_name: "table_b"
@@ -1131,6 +1136,11 @@ class EmbeddingTest(parameterized.TestCase):
             row_offset: 16
             col_offset: {padded_vocab_size_a}
             col_shift: {self.num_sc_per_device}
+          }}
+          combiner: "sum"
+          optimizer {{
+            type: SGD
+            learning_rate: 0.001
           }}
         }}
       }}""",

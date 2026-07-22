@@ -33,7 +33,6 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
 
-
 NumericParameter: TypeAlias = jax.typing.ArrayLike
 LearningRate: TypeAlias = NumericParameter | Callable[..., NumericParameter]
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
@@ -45,6 +44,32 @@ HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 CallableTableInitializer: TypeAlias = (
     jax.nn.initializers.Initializer | Callable[..., jax.typing.ArrayLike]
 )
+
+
+class CallablePlaceholder:
+  """Placeholder for callable learning rates reconstructed from proto."""
+
+  def __init__(self, tag: str):
+    """Initializes the instance."""
+    self.tag = tag
+
+  def __call__(self, *args: Any, **kwargs: Any) -> jax.typing.ArrayLike:
+    raise RuntimeError(
+        f"CallablePlaceholder '{self.tag}' cannot be evaluated during model"
+        " execution. It is intended only for spec inspection and table"
+        " stacking."
+    )
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, CallablePlaceholder):
+      return False
+    return self.tag == other.tag
+
+  def __hash__(self) -> int:
+    return hash(self.tag)
+
+  def __repr__(self) -> str:
+    return f"CallablePlaceholder({self.tag!r})"
 
 
 class _OptimizerDefinition(NamedTuple):
@@ -104,6 +129,7 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
       self,
       learning_rate: LearningRate,
   ):
+    """Initializes the instance."""
     self.learning_rate = learning_rate
 
   def get_learning_rate(self, step: jax.Array | int | None = None) -> jax.Array:
@@ -180,6 +206,42 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
       return False
     return self.__hash__() == other.__hash__()
 
+  _float_params: tuple[str, ...] = ()
+  _bool_params: tuple[str, ...] = ()
+
+  def get_float_params(self) -> dict[str, float]:
+    """Returns float hyperparameter names to float values dict for serialization."""
+    res: dict[str, float] = {}
+    for param in self._float_params:
+      if hasattr(self, param):
+        res[param] = float(getattr(self, param))
+    return res
+
+  def get_bool_params(self) -> dict[str, bool]:
+    """Returns bool hyperparameter names to bool values dict for serialization."""
+    res: dict[str, bool] = {}
+    for param in self._bool_params:
+      if hasattr(self, param):
+        res[param] = bool(getattr(self, param))
+    return res
+
+  @classmethod
+  def from_float_and_bool_params(
+      cls,
+      float_params: dict[str, float],
+      bool_params: dict[str, bool],
+      learning_rate: LearningRate,
+  ) -> OptimizerSpec:
+    """Reconstructs an OptimizerSpec instance from float_params, bool_params, and learning_rate."""
+    kwargs: dict[str, Any] = {"learning_rate": learning_rate}
+    for param in cls._float_params:
+      if param in float_params:
+        kwargs[param] = float(float_params[param])
+    for param in cls._bool_params:
+      if param in bool_params:
+        kwargs[param] = bool(bool_params[param])
+    return cls(**kwargs)
+
 
 class CustomOptimizerSpec(OptimizerSpec):
   """Spec for the Custom Optimizer.
@@ -201,6 +263,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       ] = (),
       short_name_str: str = "custom",
   ):
+    """Initializes the instance."""
     super().__init__(learning_rate=learning_rate)
     self.custom_computation_fn = custom_computation_fn
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
@@ -242,6 +305,7 @@ class SGDOptimizerSpec(OptimizerSpec):
       self,
       learning_rate: LearningRate = 0.001,
   ):
+    """Initializes the instance."""
     super().__init__(
         learning_rate=learning_rate,
     )
@@ -283,6 +347,7 @@ class AdagradOptimizerSpec(OptimizerSpec):
       learning_rate: LearningRate = 0.001,
       initial_accumulator_value: float | jax.Array = 0.1,
   ):
+    """Initializes the instance."""
     super().__init__(
         learning_rate=learning_rate,
     )
@@ -306,6 +371,8 @@ class AdagradOptimizerSpec(OptimizerSpec):
     return (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
     )
+
+  _float_params = ("initial_accumulator_value",)
 
 
 class AdamOptimizerSpec(OptimizerSpec):
@@ -337,6 +404,7 @@ class AdamOptimizerSpec(OptimizerSpec):
       beta_2: float | jax.Array = 0.999,
       epsilon: float | jax.Array = 1e-8,
   ):
+    """Initializes the instance."""
     super().__init__(
         learning_rate=learning_rate,
     )
@@ -401,6 +469,8 @@ class AdamOptimizerSpec(OptimizerSpec):
         sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive
     )
 
+  _float_params = ("beta_1", "beta_2", "epsilon")
+
 
 class AdagradMomentumOptimizerSpec(OptimizerSpec):
   """Spec for the Adagrad with Momentum optimizer.
@@ -433,6 +503,7 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
       initial_accumulator_value: float = 0.1,
       initial_momentum_value: float = 0.0,
   ):
+    """Initializes the instance."""
     super().__init__(
         learning_rate=learning_rate,
     )
@@ -482,6 +553,16 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
         sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive
     )
 
+  _float_params = (
+      "momentum",
+      "beta2",
+      "epsilon",
+      "exponent",
+      "initial_accumulator_value",
+      "initial_momentum_value",
+  )
+  _bool_params = ("use_nesterov",)
+
 
 class FTRLOptimizerSpec(OptimizerSpec):
   """Spec for the FTRL optimizer.
@@ -514,6 +595,7 @@ class FTRLOptimizerSpec(OptimizerSpec):
       initial_linear_value: float = 0.0,
       multiply_linear_by_learning_rate: bool = False,
   ):
+    """Initializes the instance."""
     super().__init__(learning_rate=learning_rate)
     self.learning_rate_power = learning_rate_power
     self.l1_regularization_strength = l1_regularization_strength
@@ -563,6 +645,16 @@ class FTRLOptimizerSpec(OptimizerSpec):
         sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive
     )
 
+  _float_params = (
+      "learning_rate_power",
+      "l1_regularization_strength",
+      "l2_regularization_strength",
+      "beta",
+      "initial_accumulator_value",
+      "initial_linear_value",
+  )
+  _bool_params = ("multiply_linear_by_learning_rate",)
+
 
 class LaPropOptimizerSpec(OptimizerSpec):
   """Spec for the LaProp optimizer.
@@ -589,6 +681,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
       rms_clip_threshold: float | None = None,
       initial_slot_value: float = 0.0,
   ):
+    """Initializes the instance."""
     super().__init__(
         learning_rate=learning_rate,
     )
@@ -649,6 +742,8 @@ class LaPropOptimizerSpec(OptimizerSpec):
         sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive
     )
 
+  _float_params = ("b1", "b2", "eps", "initial_slot_value")
+
 
 class F2AOptimizerSpec(OptimizerSpec):
   """Spec for the Frequency Aware Adagrad (F2A) optimizer.
@@ -674,6 +769,7 @@ class F2AOptimizerSpec(OptimizerSpec):
       l2_regularization_strength: float = 0.0,
       max_lr_multiplier: float = 1e6,
   ):
+    """Initializes the instance."""
     super().__init__(learning_rate=learning_rate)
     self.rho = rho
     self.initial_accumulator_value = initial_accumulator_value
@@ -723,6 +819,15 @@ class F2AOptimizerSpec(OptimizerSpec):
     return (
         sparse_dense_matmul_grad_with_f2a.tpu_sparse_dense_matmul_grad_with_f2a_primitive
     )
+
+  _float_params = (
+      "rho",
+      "initial_accumulator_value",
+      "initial_local_step_value",
+      "l1_regularization_strength",
+      "l2_regularization_strength",
+      "max_lr_multiplier",
+  )
 
 
 @dataclasses.dataclass(eq=True, frozen=True)
@@ -905,6 +1010,7 @@ class TableSpec:
     self._stacked_table_spec = stacked_table_spec
 
   def is_stacked(self) -> bool:
+    """Returns True if the table is stacked."""
     return self._stacked_table_spec is not None
 
   def __post_init__(
@@ -1019,4 +1125,5 @@ class QuantizationConfig:
       raise ValueError("min_value must be < max_value.")
 
   def as_tuple(self) -> tuple[float, float, int]:
+    """Returns the quantization config parameters as a tuple."""
     return (self.min_value, self.max_value, self.num_buckets)

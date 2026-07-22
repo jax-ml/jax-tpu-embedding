@@ -13,6 +13,8 @@
 # limitations under the License.
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+
+# copybara:uncomment load("//tools/build_defs/testing:bzl_library.bzl", "bzl_library")
 load(":configure_file.bzl", "configure_file")
 
 package(
@@ -63,4 +65,14 @@ pytype_strict_library(
 
 # copybara:uncomment_begin(internal)
 # exports_files(srcs = ["METADATA"])
+# copybara:uncomment_end
+
+# copybara:uncomment_begin(internal)
+# bzl_library(
+#     name = "configure_file_bzl",
+#     srcs = ["configure_file.bzl"],
+#     parse_tests = False,
+#     visibility = ["//visibility:private"],
+#     deps = ["//third_party/bazel_skylib/rules:common_settings"],
+# )
 # copybara:uncomment_end

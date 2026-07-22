@@ -46,19 +46,31 @@ pytype_strict_library(
     srcs = ["embedding.py"],
     type_checking = "pyrefly",
     deps = [
+        ":embedding_proto_utils",
         ":embedding_spec",
         ":table_stacking",
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_activation_unstack",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_gradient_stack",
-        "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
         "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("absl/logging"),
         pypi_requirement("einops"),
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
+    name = "embedding_proto_utils",
+    srcs = ["embedding_proto_utils.py"],
+    type_checking = "pyrefly",
+    deps = [
+        ":embedding_spec",
+        "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
+        "//jax_tpu_embedding/sparsecore/utils",
+        pypi_requirement("jax"),
     ],
 )
 
@@ -96,6 +108,7 @@ pytype_strict_library(
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
     deps = [
         ":embedding",  # buildcleaner: keep
+        ":embedding_proto_utils",  # buildcleaner: keep
         ":embedding_spec",  # buildcleaner: keep
         ":table_stacking",  # buildcleaner: keep
     ],

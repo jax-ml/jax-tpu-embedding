@@ -45,6 +45,11 @@ _TARGET_DEVICE_KIND = flags.DEFINE_string(
     'TPU v5',
     'Device kind of the target TPU topology.',
 )
+_TARGET_GLOBAL_BATCH_SIZE = flags.DEFINE_integer(
+    'target_global_batch_size',
+    None,
+    'Optional target global batch size for the target topology.',
+)
 
 
 class FakeDevice:
@@ -108,6 +113,7 @@ def run_conversion() -> None:
       output_checkpoint_path=expand_directory_path(_OUTPUT_CHECKPOINT.value),
       num_global_devices=len(fake_devices),
       num_sc_per_device=num_sc_per_device,
+      target_batch_size=_TARGET_GLOBAL_BATCH_SIZE.value,
   )
   logging.info(
       'Exiting cleanly after offline cross-topology checkpoint conversion.'
