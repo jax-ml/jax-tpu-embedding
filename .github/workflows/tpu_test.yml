@@ -1,0 +1,140 @@
+name: CI - TPU Test Suite
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "0 6 * * *"  # Daily at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      tpu_type:
+        description: "Select TPU architecture to test"
+        type: choice
+        required: true
+        default: "v6e-8"
+        options:
+          - "v6e-8"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PIP_INDEX_URL: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+
+jobs:
+  tpu-test:
+    # SECURITY GUARD: Prevent untrusted fork code from executing on internal self-hosted TPU VMs.
+    if: github.event.repository.fork == false && github.repository_owner == 'jax-ml'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tpu_type: "v6e-8"
+            runner: "linux-x86-ct6e-180-8tpu"
+            cores: "8"
+    runs-on: ${{ matrix.runner }}
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: write  # For cache management
+    steps:
+      - name: Check execution eligibility
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.tpu_type }}" != "${{ matrix.tpu_type }}" ]; then
+            echo "Skipping unselected TPU type."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip == 'false'
+        with:
+          persist-credentials: false
+
+      - name: Mark GitHub workspace as safe directory
+        if: steps.check.outputs.skip == 'false'
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set up Python 3.12
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build and TPU driver dependencies
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel
+          bash tools/install_bazelisk.sh
+          # Install JAX with TPU support and libtpu from official JAX release bucket
+          python -m pip install --root-user-action=ignore "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+          python -m pip install --root-user-action=ignore -r third_party/py/requirements_lock_3_12.txt
+          # Verify TPU hardware driver detection
+          python -c "import jax; print('Detected TPU devices:', jax.devices()); assert any(d.platform == 'tpu' for d in jax.devices())"
+
+      - name: Mount Bazel cache
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/cache/restore@v4
+        with:
+          path: "/__w/.cache/bazel"
+          key: bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}
+            bazel-tpu-${{ matrix.tpu_type }}-
+            bazel-tpu-
+            bazel-py3.12-
+
+      - name: Run Bazel TPU tests
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          export HERMETIC_PYTHON_VERSION=3.12
+          # Forward TPU cluster environment variables from runner host into Bazel test execution
+          bazel test --config=public_cache --build_tests_only \
+            --local_test_jobs=1 \
+            --test_env=JAX_PLATFORMS=tpu,cpu \
+            --test_env=ALLOW_MULTIPLE_LIBTPU_LOAD=true \
+            --test_env=TPU_SKIP_MDS_QUERY=true \
+            --test_env=TPU_TOPOLOGY \
+            --test_env=TPU_WORKER_ID \
+            --test_env=TPU_TOPOLOGY_WRAP \
+            --test_env=TPU_CHIPS_PER_HOST_BOUNDS \
+            --test_env=TPU_ACCELERATOR_TYPE \
+            --test_env=TPU_RUNTIME_METRICS_PORTS \
+            --test_env=TPU_TOPOLOGY_ALT \
+            --test_env=TPU_HOST_BOUNDS \
+            --test_env=TPU_WORKER_HOSTNAMES \
+            --test_env=CHIPS_PER_HOST_BOUNDS \
+            --test_env=HOST_BOUNDS \
+            --test_env=VBAR_CONTROL_SERVICE_URL \
+            --test_output=errors \
+            //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_csr_test
+
+      # Verify installed wheel on real TPU hardware (outside Bazel sandbox) to ensure compiled C++
+      # extensions and Pybind11 bindings correctly link with libtpu.so and execute on SparseCore.
+      - name: Build and verify wheel on TPU via Pytest
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          export HERMETIC_PYTHON_VERSION=3.12
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          bazel run --config=public_cache //tools:build_wheel -- --output_dir="$GITHUB_WORKSPACE/dist"
+          python -m pip install --root-user-action=ignore "$GITHUB_WORKSPACE/dist"/*.whl pytest
+          # Run pytest on the simple TPU test from outside the workspace root
+          mkdir -p /tmp/tpu_wheel_test && cd /tmp/tpu_wheel_test
+          JAX_PLATFORMS=tpu,cpu ALLOW_MULTIPLE_LIBTPU_LOAD=true TPU_SKIP_MDS_QUERY=true python -m pytest --tb=short "$GITHUB_WORKSPACE/jax_tpu_embedding/sparsecore/lib/core/primitives/tests/sparse_dense_matmul_csr_test.py"
+
+      - name: Save Bazel cache
+        if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: "/__w/.cache/bazel"
+          key: bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}-${{ github.sha }}
