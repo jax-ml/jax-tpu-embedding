@@ -1077,8 +1077,7 @@ class FeatureSpec:
     self._id_transformation = id_transformation
 
 
-@struct.dataclass(eq=True, frozen=True, kw_only=True)
-class StackedTableSpec:
+class StackedTableSpec(struct.PyTreeNode, eq=True, frozen=True, kw_only=True):
   """Spec for a stacked table that is a combination of multiple tables."""
 
   stack_name: str
