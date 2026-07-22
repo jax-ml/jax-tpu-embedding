@@ -26,6 +26,7 @@ from absl import flags
 from absl import logging
 from clu import metrics
 from clu import parameter_overview
+from etils import epath
 import flax
 from flax import linen as nn
 import jax
@@ -363,7 +364,7 @@ def run_model():
   # Distributed training.
   parameter_overview.log_parameter_overview(train_state.params)
 
-  out_path = os.path.join(_FDO_DIR.value, 'fdo_dump')
+  out_path = os.fspath(epath.Path(_FDO_DIR.value) / 'fdo_dump')
   os.makedirs(out_path, exist_ok=True)
   logging.info('FDO storage path: %s', out_path)
   fdo_client = file_fdo_client.NPZFileFDOClient(out_path)

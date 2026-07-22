@@ -54,6 +54,7 @@ pytype_strict_library(
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
         "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("flax/nnx:v1"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
@@ -84,6 +85,7 @@ pytype_strict_library(
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
     ],
 )
 
@@ -98,6 +100,7 @@ pytype_strict_binary(
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
     ],
 )
 
@@ -121,5 +124,6 @@ pytype_strict_test(
         pypi_requirement("absl:app"),
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
     ],
 )

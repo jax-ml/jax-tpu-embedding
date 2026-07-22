@@ -14,9 +14,9 @@
 """Unit tests for CSV based FDO client."""
 
 import csv
-import os
 
 from absl.testing import absltest
+from etils import epath
 from jax_tpu_embedding.sparsecore.lib.fdo import csv_file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
@@ -130,12 +130,10 @@ class CsvFdoClientTest(absltest.TestCase):
     )
 
   def test_load_multiple_files(self):
-    base_dir = self.create_tempdir().full_path
+    base_dir = epath.Path(self.create_tempdir().full_path)
 
     # File 1
-    with open(
-        os.path.join(base_dir, "fdo_stats_0_10.csv"), "w", newline=""
-    ) as f:
+    with open(base_dir / "fdo_stats_0_10.csv", "w", newline="") as f:
       writer = csv.writer(f)
       writer.writerow(["key", "values"])
       writer.writerow(["t_one_max_ids", "10 20 30 40"])
@@ -146,9 +144,7 @@ class CsvFdoClientTest(absltest.TestCase):
       writer.writerow(["t_two_required_buffer_size", "128"])
 
     # File 2
-    with open(
-        os.path.join(base_dir, "fdo_stats_1_11.csv"), "w", newline=""
-    ) as f:
+    with open(base_dir / "fdo_stats_1_11.csv", "w", newline="") as f:
       writer = csv.writer(f)
       writer.writerow(["key", "values"])
       writer.writerow(["t_one_max_ids", "20 10 40 30"])

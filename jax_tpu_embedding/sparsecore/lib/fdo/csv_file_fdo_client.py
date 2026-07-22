@@ -24,6 +24,7 @@ import time
 from typing import Mapping
 
 from absl import logging
+from etils import epath
 import jax
 from jax_tpu_embedding.sparsecore.lib.fdo import fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
@@ -52,8 +53,8 @@ class CSVFileFDOClient(fdo_client.FDOClient):
     stats = client.load()
   """
 
-  def __init__(self, base_dir: str, retain_history: bool = True):
-    self._base_dir = base_dir
+  def __init__(self, base_dir: epath.PathLike, retain_history: bool = True):
+    self._base_dir = epath.Path(base_dir)
     self._retain_history = retain_history
     # We store the params in a dict for easy updation and as an intermediate
     # format between SparseDenseMatmulInputStats and separate files.
@@ -112,14 +113,14 @@ class CSVFileFDOClient(fdo_client.FDOClient):
     filename = '{}_{}_{}.{}'.format(
         _FILE_NAME, jax.process_index(), time.time_ns(), _FILE_EXTENSION
     )
-    return os.path.join(self._base_dir, filename)
+    return os.fspath(self._base_dir / filename)
 
   def _get_latest_files_by_process(self, files: list[str]) -> list[str]:
     """Returns the latest file for each process."""
     if not files:
       return []
-    dir_path = os.path.split(files[0])[0]
-    dir_prefix = len(dir_path) + 1
+    dir_path = epath.Path(files[0]).parent
+    dir_prefix = len(os.fspath(dir_path)) + 1
     pattern = rf'{_FILE_NAME}_(\d+)_(\d+)\.{_FILE_EXTENSION}'
     file_groups = []
     for file in files:
@@ -188,8 +189,8 @@ class CSVFileFDOClient(fdo_client.FDOClient):
 
   def load(self) -> embedding.SparseDenseMatmulInputStats:
     """Loads state of local FDO client from disk."""
-    files_glob = os.path.join(
-        self._base_dir, '{}*.{}'.format(_FILE_NAME, _FILE_EXTENSION)
+    files_glob = os.fspath(
+        self._base_dir / '{}*.{}'.format(_FILE_NAME, _FILE_EXTENSION)
     )
     stats = self._read_from_file(files_glob)
 

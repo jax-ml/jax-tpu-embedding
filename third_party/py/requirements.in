@@ -1,5 +1,6 @@
 # Library.
 absl-py
+etils[epath]
 flax >= 0.10.3
 numpy
 # Pre-release of JAX required for SparseCore TPUs.

@@ -13,9 +13,9 @@
 # limitations under the License.
 """Tests for SparseCore NNX checkpoint_utils."""
 
-import os
 from absl import flags
 from absl.testing import absltest
+from etils import epath
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.flax.nnx import checkpoint_utils
@@ -32,7 +32,7 @@ class CheckpointUtilsTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.temp_dir = self.create_tempdir().full_path
+    self.temp_dir = epath.Path(self.create_tempdir().full_path)
 
   def _create_feature_specs(
       self, batch_size: int = 2048, dim: int = 640
@@ -70,7 +70,7 @@ class CheckpointUtilsTest(absltest.TestCase):
     }
     self.assertLen(src_stacks, 1)
 
-    src_dir = os.path.join(self.temp_dir, 'source_cp')
+    src_dir = self.temp_dir / 'source_cp'
     src_proto = embedding.create_proto_from_feature_specs(
         src_specs, src_devices, num_sc
     )
@@ -127,7 +127,7 @@ class CheckpointUtilsTest(absltest.TestCase):
     self.assertLen(target_stacks, 2)
 
     # Automatic conversion WITHOUT target_feature_specs
-    out_dir = os.path.join(self.temp_dir, 'converted_cp_auto')
+    out_dir = self.temp_dir / 'converted_cp_auto'
     checkpoint_utils.convert_cross_topology_checkpoint(
         input_checkpoint_path=src_dir,
         output_checkpoint_path=out_dir,
@@ -168,7 +168,7 @@ class CheckpointUtilsTest(absltest.TestCase):
         src_specs, global_device_count=src_devices, num_sc_per_device=num_sc
     )
 
-    src_dir = os.path.join(self.temp_dir, 'source_cp_bs')
+    src_dir = self.temp_dir / 'source_cp_bs'
     src_proto = embedding.create_proto_from_feature_specs(
         src_specs, src_devices, num_sc
     )
@@ -215,7 +215,7 @@ class CheckpointUtilsTest(absltest.TestCase):
     # With target_batch_size=1024, per-SC activation memory =
     # 640 * (1024 // 8) * 4 = 320 KiB/table. 4 tables = 1.25 MiB < 2 MiB ->
     # 1 stack.
-    out_dir_bs1024 = os.path.join(self.temp_dir, 'converted_cp_bs1024')
+    out_dir_bs1024 = self.temp_dir / 'converted_cp_bs1024'
     checkpoint_utils.convert_cross_topology_checkpoint(
         input_checkpoint_path=src_dir,
         output_checkpoint_path=out_dir_bs1024,
@@ -296,7 +296,7 @@ class CheckpointUtilsTest(absltest.TestCase):
         src_specs, global_device_count=src_devices, num_sc_per_device=num_sc
     )
 
-    src_dir = os.path.join(self.temp_dir, 'source_cp_dict_slots')
+    src_dir = self.temp_dir / 'source_cp_dict_slots'
     src_proto = embedding.create_proto_from_feature_specs(
         src_specs, src_devices, num_sc
     )
@@ -343,7 +343,7 @@ class CheckpointUtilsTest(absltest.TestCase):
     cp_mgr.wait_until_finished()
 
     target_devices = 4
-    out_dir = os.path.join(self.temp_dir, 'converted_cp_dict_slots')
+    out_dir = self.temp_dir / 'converted_cp_dict_slots'
     checkpoint_utils.convert_cross_topology_checkpoint(
         input_checkpoint_path=src_dir,
         output_checkpoint_path=out_dir,

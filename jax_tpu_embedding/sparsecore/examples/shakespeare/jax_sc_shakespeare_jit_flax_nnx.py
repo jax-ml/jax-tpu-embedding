@@ -20,6 +20,7 @@ import os
 from absl import app
 from absl import flags
 from absl import logging
+from etils import epath
 from flax import nnx
 import jax
 import jax.numpy as jnp
@@ -95,16 +96,16 @@ def expand_directory_path(input_dir: str) -> str | None:
   if input_dir is None:
     return None
 
-  # Leave absolute paths alone.
-  if input_dir.startswith('/'):
+  # Leave absolute paths and URI schemes (like gs://) alone.
+  if input_dir.startswith('/') or '://' in input_dir:
     return input_dir
 
   # Special handling for test output subdirectories.
   if input_dir.startswith(testdir_key + '/'):
     if not testdir_env_var:
       raise ValueError(f'{testdir_key} environment variable is not set.')
-    expanded_dir = os.path.join(
-        testdir_env_var, input_dir[len(testdir_key + '/') :]
+    expanded_dir = os.fspath(
+        epath.Path(testdir_env_var) / input_dir[len(testdir_key + '/') :]
     )
     os.makedirs(expanded_dir, exist_ok=True)
     return expanded_dir
@@ -115,7 +116,7 @@ def expand_directory_path(input_dir: str) -> str | None:
       raise ValueError(f'{testdir_key} environment variable is not set.')
     return testdir_env_var
 
-  return os.path.abspath(input_dir)
+  return os.fspath(epath.Path(input_dir).resolve())
 
 
 def create_fdo_client() -> csv_file_fdo_client.CSVFileFDOClient | None:

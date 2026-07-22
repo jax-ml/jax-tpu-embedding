@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 from absl import logging
+from etils import epath
 from flax import nnx
 import jax
 from jax_tpu_embedding.sparsecore.lib.flax.nnx import embed
@@ -52,13 +53,15 @@ def decompress_checkpoint(checkpoint_path: str) -> str:
         'TEST_UNDECLARED_OUTPUTS_DIR environment variable is not set.'
     )
 
-  archive_name = os.path.basename(checkpoint_path)
+  archive_name = epath.Path(checkpoint_path).name
   if archive_name.endswith('.tgz'):
     dir_name = archive_name[: -len('.tgz')]
   else:
     dir_name = archive_name
 
-  output_dir = os.path.join(testdir, 'decompressed_checkpoints', dir_name)
+  output_dir = os.fspath(
+      epath.Path(testdir) / 'decompressed_checkpoints' / dir_name
+  )
   os.makedirs(output_dir, exist_ok=True)
   logging.info('Decompressing checkpoint %s to %s', checkpoint_path, output_dir)
   shutil.unpack_archive(checkpoint_path, output_dir)
@@ -67,7 +70,7 @@ def decompress_checkpoint(checkpoint_path: str) -> str:
 
 def create_checkpoint_manager(
     *,
-    cp_path: str,
+    cp_path: epath.PathLike,
     cp_options: ocp.CheckpointManagerOptions,
     model_key: str = 'model',
     optimizer_key: str = 'optimizer',
@@ -76,7 +79,8 @@ def create_checkpoint_manager(
   """Creates a checkpoint manager for the given checkpoint path.
 
   Args:
-    cp_path: The path to the checkpoint directory.
+    cp_path: The path to the checkpoint directory. Supports local paths, GCS
+      (gs://...) and absolute paths.
     cp_options: The checkpoint manager options.
     model_key: The checkpoint item key name for the model state.
     optimizer_key: The checkpoint item key name for the optimizer state.
@@ -86,7 +90,7 @@ def create_checkpoint_manager(
   Returns:
     The checkpoint manager.
   """
-  cp_path = os.path.abspath(cp_path)
+  cp_path = epath.Path(cp_path)
   handler_registry = ocp.DefaultCheckpointHandlerRegistry()
   std_handler = ocp.StandardCheckpointHandler()
   proto_handler = ocp.ProtoCheckpointHandler()
@@ -158,7 +162,7 @@ def save_checkpoint(
 def restore_checkpoint(
     *,
     cp_manager: ocp.CheckpointManager | None = None,
-    input_checkpoint_path: str | None = None,
+    input_checkpoint_path: epath.PathLike | None = None,
     step: int | None = None,
     model: nnx.Module,
     optimizer: nnx.Optimizer,
@@ -251,7 +255,7 @@ def restore_checkpoint(
 
 def restore_cross_topology_checkpoint(
     *,
-    cross_topology_checkpoint_restore_path: str | None,
+    cross_topology_checkpoint_restore_path: epath.PathLike | None,
     model: nnx.Module,
     optimizer: nnx.Optimizer,
     target_feature_specs: Nested[embedding_spec.FeatureSpec],
@@ -413,8 +417,8 @@ def restore_cross_topology_checkpoint(
 
 def convert_cross_topology_checkpoint(
     *,
-    input_checkpoint_path: str | None,
-    output_checkpoint_path: str | None,
+    input_checkpoint_path: epath.PathLike | None,
+    output_checkpoint_path: epath.PathLike | None,
     num_global_devices: int,
     num_sc_per_device: int,
     target_batch_size: int | None = None,
@@ -574,7 +578,7 @@ def convert_cross_topology_checkpoint(
   logging.info('Saving converted checkpoint to %s', output_checkpoint_path)
 
   # Set up CheckpointManager for saving
-  out_cp_path = os.path.abspath(output_checkpoint_path)
+  out_cp_path = epath.Path(output_checkpoint_path)
   out_cp_manager = create_checkpoint_manager(
       cp_path=out_cp_path,
       cp_options=ocp.CheckpointManagerOptions(create=True),

@@ -34,6 +34,7 @@ pytype_strict_library(
         ":fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],
@@ -48,6 +49,7 @@ pytype_strict_contrib_test(
         ":file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("numpy"),
     ],
 )
@@ -60,6 +62,7 @@ pytype_strict_library(
         ":fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],
@@ -73,6 +76,7 @@ pytype_strict_contrib_test(
         ":csv_file_fdo_client",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("numpy"),
     ],
 )

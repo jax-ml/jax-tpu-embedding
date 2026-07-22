@@ -16,10 +16,11 @@ keywords = ["jax", "tpu", "embedding", "sparsecore", "machine learning", "sparse
 dependencies = [
     'absl-py',
     'einops',
+    'etils[epath]',
     'flax >= 0.10.3',
     'jax >= 0.10.0',
     'numpy',
-    'portpicker'
+    'portpicker',
 ]
 
 # `version` is set by setuptools to use `jax_tpu_embedding.sparsecore.__version__`.

@@ -13,9 +13,8 @@
 # limitations under the License.
 """Unit tests for file based FDO client."""
 
-import os
-
 from absl.testing import absltest
+from etils import epath
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
@@ -82,9 +81,9 @@ class NpzFdoClientTest(absltest.TestCase):
     )
 
   def test_load_multiple_files(self):
-    base_dir = self.create_tempdir().full_path
+    base_dir = epath.Path(self.create_tempdir().full_path)
     np.savez(
-        os.path.join(base_dir, "fdo_stats_0_10.npz"),
+        base_dir / "fdo_stats_0_10.npz",
         **{
             "t_one_max_ids": np.array([10, 20, 30, 40]),
             "t_two_max_ids": np.array([50, 60, 70, 80]),
@@ -95,7 +94,7 @@ class NpzFdoClientTest(absltest.TestCase):
         },
     )
     np.savez(
-        os.path.join(base_dir, "fdo_stats_1_11.npz"),
+        base_dir / "fdo_stats_1_11.npz",
         **{
             "t_one_max_ids": np.array([20, 10, 40, 30]),
             "t_two_max_ids": np.array([60, 60, 80, 70]),

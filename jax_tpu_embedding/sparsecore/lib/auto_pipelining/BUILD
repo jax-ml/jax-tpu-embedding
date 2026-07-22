@@ -57,6 +57,7 @@ pytype_strict_library(
     type_checking = "pyrefly",
     deps = [
         ":decompose",
+        pypi_requirement("etils/epath"),
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
     ],

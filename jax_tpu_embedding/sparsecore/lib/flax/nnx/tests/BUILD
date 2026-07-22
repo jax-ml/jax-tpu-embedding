@@ -72,6 +72,7 @@ tpu_py_strict_test(
         "//third_party/jax:tpu_support",  # buildcleaner: keep
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("jax"),
         pypi_requirement("orbax/checkpoint"),
     ],

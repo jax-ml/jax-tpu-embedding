@@ -180,6 +180,7 @@ etils[epath,epy]==1.14.0 \
     --hash=sha256:8136e7f4c4173cd0af0ca5481c4475152f0b8686192951eefa60ee8711e1ede4 \
     --hash=sha256:b5df7341f54dbe1405a4450b2741207b4a8c279780402b45f87202b94dfc52b4
     # via
+    #   -r third_party/py/requirements.in
     #   clu
     #   orbax-checkpoint
 flax==0.12.7 \

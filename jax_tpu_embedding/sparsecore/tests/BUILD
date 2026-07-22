@@ -42,6 +42,7 @@ tpu_py_strict_test(
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("etils/epath"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
         pypi_requirement("optax"),

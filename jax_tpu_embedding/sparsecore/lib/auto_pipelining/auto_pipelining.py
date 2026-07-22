@@ -110,6 +110,7 @@ import logging
 import os
 from typing import Any, Callable, Concatenate, Generic, NamedTuple, ParamSpec, TypeVar
 
+from etils import epath
 import jax
 import jax.extend as jex
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import decompose
@@ -123,7 +124,7 @@ def dump_jaxpr(jaxpr: jex.core.ClosedJaxpr | jex.core.Jaxpr, name: str) -> None:
   dirname = os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
   if not dirname:
     return
-  dump_path = os.path.join(dirname, f'jaxpr_{name}.txt')
+  dump_path = os.fspath(epath.Path(dirname) / f'jaxpr_{name}.txt')
 
   logging.info('Writing %s Jaxpr to %s', name, dump_path)
 

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
-import os
 
 from absl import flags
 from absl import logging
 from absl.testing import absltest
+from etils import epath
 import jax
 import jax.numpy as jnp
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
@@ -42,7 +42,7 @@ class ShakespeareTest(absltest.TestCase):
     FLAGS.batch_size = 8
     FLAGS.num_steps = 1000
     config = shakespeare_config.get_config()
-    chkpt_dir = os.path.join(FLAGS.test_tmpdir, 'shakespeare_test')
+    chkpt_dir = epath.Path(FLAGS.test_tmpdir) / 'shakespeare_test'
     chkpt_manager = ocp.CheckpointManager(
         ocp.test_utils.erase_and_create_empty(chkpt_dir),
         item_names=('params', 'opt_state', 'embedding'),
