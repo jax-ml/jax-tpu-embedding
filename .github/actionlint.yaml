@@ -2,3 +2,5 @@
 self-hosted-runner:
   labels:
     - "linux-x86-n4-16" # Linux X86 runner using the 16 vcpu n4-standard-16 machine.
+    - "linux-x86-ct6e-180-8tpu" # Trillium (v6e-8) Cloud TPU VM self-hosted runner.
+    - "linux-x86-ct5lp-224-8tpu" # TPU v5p self-hosted runner.
