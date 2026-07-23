@@ -116,6 +116,7 @@ ignore-missing-imports = [
     "absl.*",
     "chex.*",
     "clu.*",
+    "colabtools.*",
     "einops.*",
     "google_benchmark.*",
     "jax.*",
