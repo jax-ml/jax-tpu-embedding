@@ -37,7 +37,7 @@ jobs:
       # Restore the cache from the main branch's base commit.
       - if: github.event_name == 'pull_request'
         name: Mount bazel cache (pull-request)
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: "/__w/.cache/bazel"
           key: bazel-py3.12-${{ github.base_ref }}-${{ github.event.pull_request.base.sha }}
@@ -50,7 +50,7 @@ jobs:
       # Restore the cache from the previous commit.
       - if: github.event_name != 'pull_request'
         name: Mount bazel cache (main)
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: "/__w/.cache/bazel"
           # Try to find the cache from the exact commit *before* this push
