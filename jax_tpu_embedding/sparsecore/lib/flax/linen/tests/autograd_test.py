@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+import sys
 from typing import Any
 
 from absl import flags
@@ -30,7 +31,7 @@ import optax
 
 Nested = embedding.Nested
 FLAGS = flags.FLAGS
-np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize)
 
 
 ################################################################################

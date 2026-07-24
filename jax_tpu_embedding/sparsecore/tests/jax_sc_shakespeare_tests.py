@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+import sys
 
 from absl import flags
 from absl import logging
@@ -30,7 +31,7 @@ import optax
 import orbax.checkpoint as ocp
 
 
-np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize)
 FLAGS = flags.FLAGS
 
 

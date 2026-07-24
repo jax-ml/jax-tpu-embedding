@@ -19,6 +19,7 @@ from __future__ import annotations
 import collections
 from functools import partial
 import os
+import sys
 from typing import Any, Mapping
 
 from absl import app
@@ -45,7 +46,7 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize)
 Nested = embedding.Nested
 
 

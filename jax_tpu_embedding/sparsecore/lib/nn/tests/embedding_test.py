@@ -15,6 +15,7 @@
 
 import functools
 import logging
+import sys
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -31,7 +32,7 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 # Helpful for detailed debug prints.
-np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize, suppress=True)
 
 _PARTITION_ERR_STR = (
     "PartitionSpec of the global sharding either needs to be in the format"
