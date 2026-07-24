@@ -66,6 +66,14 @@ To install the latest nightly builds from the public JAX TPU Embedding registry:
      --extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax-tpu-embedding-public-nightly-artifacts-registry/simple/ \
      jax-tpu-embedding
 
+To install a specific nightly dev release version, pin the exact version specifier:
+
+.. code-block:: sh
+
+   pip install \
+     --extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax-tpu-embedding-public-nightly-artifacts-registry/simple/ \
+     jax-tpu-embedding==0.2.0.devYYYYMMDD
+
 Building from Source
 ^^^^^^^^^^^^^^^^^^^^
 
