@@ -116,8 +116,9 @@ jobs:
             --test_env=CHIPS_PER_HOST_BOUNDS \
             --test_env=HOST_BOUNDS \
             --test_env=VBAR_CONTROL_SERVICE_URL \
+            --test_tag_filters=requires-tpu \
             --test_output=errors \
-            //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_csr_test
+            //jax_tpu_embedding/sparsecore/...
 
       # Verify installed wheel on real TPU hardware (outside Bazel sandbox) to ensure compiled C++
       # extensions and Pybind11 bindings correctly link with libtpu.so and execute on SparseCore.
