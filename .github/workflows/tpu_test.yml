@@ -7,6 +7,13 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'jax_tpu_embedding/sparsecore/docs/**'
+      - 'jax_tpu_embedding/sparsecore/examples/**'
+      - '**/*.{md,rst,yaml,yml}'
+      - '!.github/workflows/tpu_test.yml'
+      - '.gitignore'
+      - 'LICENSE'
   schedule:
     - cron: "0 6 * * *" # Daily at 06:00 UTC
   workflow_dispatch:
