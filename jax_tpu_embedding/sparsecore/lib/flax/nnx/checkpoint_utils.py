@@ -17,6 +17,7 @@ import collections.abc
 import os
 import shutil
 import time
+import typing
 from typing import Any
 
 from absl import logging
@@ -33,6 +34,22 @@ import numpy as np
 import orbax.checkpoint as ocp
 
 Nested = embedding.Nested
+
+
+class TargetTopology(typing.NamedTuple):
+  """Target TPU topology specification for cross-topology conversion.
+
+  Attributes:
+    num_global_devices: Total number of global devices (chips) in the target
+      topology.
+    num_sc_per_device: Number of SparseCores per device in the target topology.
+    device_kind: Optional TPU device kind (e.g. 'TPU v4', 'TPU v5') for
+      debugging.
+  """
+
+  num_global_devices: int
+  num_sc_per_device: int
+  device_kind: str | None = None
 
 
 def decompress_checkpoint(checkpoint_path: str) -> str:
@@ -419,8 +436,7 @@ def convert_cross_topology_checkpoint(
     *,
     input_checkpoint_path: epath.PathLike | None,
     output_checkpoint_path: epath.PathLike | None,
-    num_global_devices: int,
-    num_sc_per_device: int,
+    target_topology: TargetTopology | None = None,
     target_batch_size: int | None = None,
     model_key: str = 'model',
     optimizer_key: str = 'optimizer',
@@ -436,9 +452,9 @@ def convert_cross_topology_checkpoint(
       from. If None, no conversion is performed.
     output_checkpoint_path: Path to the output checkpoint directory to save the
       converted checkpoint. If None, no conversion is performed.
-    num_global_devices: Total number of global devices (chips) in the target
-      topology.
-    num_sc_per_device: Number of SparseCores per device in the target topology.
+    target_topology: Optional target TPU topology specification. If None,
+      checkpoint tables will be unstacked and unsharded without restacking for a
+      target topology.
     target_batch_size: Optional target global batch size for recomputing the
       embedding specs.
     model_key: Checkpoint item key name for the model state.
@@ -528,44 +544,58 @@ def convert_cross_topology_checkpoint(
   if logging.vlog_is_on(1):
     _log_table_sizes(tables)
 
-  if target_feature_specs is not None:
-    logical_table_specs = _get_table_specs(target_feature_specs)
-    target_proto = embedding.create_proto_from_feature_specs(
-        target_feature_specs, num_global_devices, num_sc_per_device
+  if target_topology is not None:
+    num_global_devices = target_topology.num_global_devices
+    num_sc_per_device = target_topology.num_sc_per_device
+    if target_feature_specs is not None:
+      logical_table_specs = _get_table_specs(target_feature_specs)
+      target_proto = embedding.create_proto_from_feature_specs(
+          target_feature_specs, num_global_devices, num_sc_per_device
+      )
+    else:
+      target_proto, logical_table_specs = _recompute_target_specs(
+          embedding_spec_proto,
+          num_global_devices,
+          num_sc_per_device,
+          target_batch_size=target_batch_size,
+      )
+
+    num_shards = num_global_devices * num_sc_per_device
+    stacked_tables = table_stacking.stack_and_shard_tables(
+        logical_table_specs,
+        tables,
+        num_shards=num_shards,
     )
-  else:
-    target_proto, logical_table_specs = _recompute_target_specs(
+
+    stacked_slots = _unstack_and_restack_slots(
+        actual_tables_dict,
         embedding_spec_proto,
-        num_global_devices,
-        num_sc_per_device,
-        target_batch_size=target_batch_size,
+        logical_table_specs,
+        num_shards,
     )
-
-  num_shards = num_global_devices * num_sc_per_device
-  stacked_tables = table_stacking.stack_and_shard_tables(
-      logical_table_specs,
-      tables,
-      num_shards=num_shards,
-  )
-
-  stacked_slots = _unstack_and_restack_slots(
-      actual_tables_dict,
-      embedding_spec_proto,
-      logical_table_specs,
-      num_shards,
-  )
-  new_actual_tables_dict = {}
-  # Inject the reshaped parameters back into the model pure arrays dictionary
-  for st_name, stacked_table in stacked_tables.items():
-    assert isinstance(stacked_table, jax.Array)
-    reshaped_table = stacked_table.reshape((-1, stacked_table.shape[-1]))
-    reshaped_slot = jax.tree.map(
-        lambda sv: sv.reshape((-1, sv.shape[-1])),
-        stacked_slots[st_name],
-    )
-    new_actual_tables_dict[st_name] = {
-        'table': reshaped_table,
-        'slot': reshaped_slot,
+    new_actual_tables_dict = {}
+    # Inject the reshaped parameters back into the model pure arrays dictionary
+    for st_name, stacked_table in stacked_tables.items():
+      assert isinstance(stacked_table, jax.Array)
+      reshaped_table = stacked_table.reshape((-1, stacked_table.shape[-1]))
+      reshaped_slot = jax.tree.map(
+          lambda sv: sv.reshape((-1, sv.shape[-1])),
+          stacked_slots[st_name],
+      )
+      new_actual_tables_dict[st_name] = {
+          'table': reshaped_table,
+          'slot': reshaped_slot,
+      }
+  else:
+    logging.info('Unstacking checkpoint without target topology restacking...')
+    target_proto = embedding_spec_proto
+    unstacked_slots = _unstack_slots(actual_tables_dict, embedding_spec_proto)
+    new_actual_tables_dict = {
+        t_name: {
+            'table': unstacked_table,
+            'slot': unstacked_slots.get(t_name, ()),
+        }
+        for t_name, unstacked_table in tables.items()
     }
 
   if 'value' in restored_embedding:
@@ -736,6 +766,55 @@ def _get_checkpoint_step(
         f'Step {step} not found in checkpoint directory {cp_manager.directory}'
     )
   return step
+
+
+def _unstack_slots(
+    restored_embedding: collections.abc.Mapping[str, Any],
+    embedding_spec_proto: embedding_spec_pb2.EmbeddingSpecProto,
+) -> dict[str, Any]:
+  """Unstacks and unshards optimizer slot variables without restacking."""
+  source_slots = {
+      k: ev['slot'] if isinstance(ev, dict) else ev.slot
+      for k, ev in restored_embedding.items()
+  }
+  if not source_slots:
+    return {}
+
+  table_names = []
+  for s in embedding_spec_proto.stacked_table_specs:
+    for t in s.table_specs:
+      table_names.append(t.table_name)
+
+  first_slot = next(iter(source_slots.values()))
+  if not jax.tree.leaves(first_slot):
+    return {t_name: first_slot for t_name in table_names}
+
+  def _unstack_leaf(
+      *leaves_across_source_stacks: jax.Array,
+  ) -> dict[str, Any]:
+    source_stacked_slot_dict = dict(
+        zip(source_slots.keys(), leaves_across_source_stacks, strict=True)
+    )
+    return table_stacking.unstack_and_unshard_stacked_tables(
+        source_stacked_slot_dict,
+        embedding_spec_proto,
+        donate=False,
+    )
+
+  tree_of_unstacked_slots = jax.tree.map(
+      _unstack_leaf,
+      *source_slots.values(),
+  )
+
+  unstacked_slots = {
+      t_name: jax.tree.map(
+          lambda unstacked_map, tbl=t_name: unstacked_map[tbl],
+          tree_of_unstacked_slots,
+          is_leaf=lambda x, tbl=t_name: isinstance(x, dict) and tbl in x,
+      )
+      for t_name in table_names
+  }
+  return unstacked_slots
 
 
 def _unstack_and_restack_slots(

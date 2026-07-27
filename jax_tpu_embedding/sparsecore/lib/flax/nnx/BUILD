@@ -127,3 +127,23 @@ pytype_strict_test(
         pypi_requirement("etils/epath"),
     ],
 )
+
+pytype_strict_test(
+    name = "offline_converter_unstacked_test",
+    srcs = ["offline_converter.py"],
+    args = [
+        "--input_checkpoint=jax_tpu_embedding/sparsecore/examples/shakespeare/testdata/checkpoint-2x2x2.tgz",
+        "--output_checkpoint=TEST_UNDECLARED_OUTPUTS_DIR/unstacked_checkpoints",
+    ],
+    data = ["//jax_tpu_embedding/sparsecore/examples/shakespeare:checkpoint_2x2x2"],
+    main = "offline_converter.py",
+    deps = [
+        ":checkpoint_utils",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl:app"),
+        pypi_requirement("absl/flags"),
+        pypi_requirement("absl/logging"),
+        pypi_requirement("etils/epath"),
+    ],
+)

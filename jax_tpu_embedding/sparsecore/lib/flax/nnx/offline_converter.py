@@ -38,8 +38,10 @@ _OUTPUT_CHECKPOINT = flags.DEFINE_string(
 )
 _TARGET_NUM_DEVICES = flags.DEFINE_integer(
     'target_num_devices',
-    4,
-    'Number of TPU devices in the target topology.',
+    None,
+    'Number of TPU devices in the target topology. If not provided, checkpoint '
+    'tables will only be unstacked and unsharded without restacking for a '
+    'target topology.',
 )
 _TARGET_DEVICE_KIND = flags.DEFINE_string(
     'target_device_kind',
@@ -99,11 +101,20 @@ def expand_directory_path(input_dir: str) -> str | None:
 
 def run_conversion() -> None:
   """Executes general offline checkpoint conversion for the target TPU topology."""
-  fake_devices = [
-      FakeDevice(i, device_kind=_TARGET_DEVICE_KIND.value.replace('_', ' '))
-      for i in range(_TARGET_NUM_DEVICES.value)
-  ]
-  num_sc_per_device = utils.num_sparsecores_per_device(fake_devices[0])
+  if _TARGET_NUM_DEVICES.value is not None:
+    fake_devices = [
+        FakeDevice(i, device_kind=_TARGET_DEVICE_KIND.value.replace('_', ' '))
+        for i in range(_TARGET_NUM_DEVICES.value)
+    ]
+    num_sc_per_device = utils.num_sparsecores_per_device(fake_devices[0])
+    num_global_devices = len(fake_devices)
+    target_topology = checkpoint_utils.TargetTopology(
+        num_global_devices=num_global_devices,
+        num_sc_per_device=num_sc_per_device,
+        device_kind=fake_devices[0].device_kind,
+    )
+  else:
+    target_topology = None
 
   input_path = expand_directory_path(_INPUT_CHECKPOINT.value)
   if input_path is not None and input_path.endswith('.tgz'):
@@ -112,8 +123,7 @@ def run_conversion() -> None:
   checkpoint_utils.convert_cross_topology_checkpoint(
       input_checkpoint_path=input_path,
       output_checkpoint_path=expand_directory_path(_OUTPUT_CHECKPOINT.value),
-      num_global_devices=len(fake_devices),
-      num_sc_per_device=num_sc_per_device,
+      target_topology=target_topology,
       target_batch_size=_TARGET_GLOBAL_BATCH_SIZE.value,
   )
   logging.info(

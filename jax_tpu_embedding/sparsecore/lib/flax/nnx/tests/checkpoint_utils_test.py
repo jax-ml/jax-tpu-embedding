@@ -131,8 +131,10 @@ class CheckpointUtilsTest(absltest.TestCase):
     checkpoint_utils.convert_cross_topology_checkpoint(
         input_checkpoint_path=src_dir,
         output_checkpoint_path=out_dir,
-        num_global_devices=target_devices,
-        num_sc_per_device=num_sc,
+        target_topology=checkpoint_utils.TargetTopology(
+            num_global_devices=target_devices,
+            num_sc_per_device=num_sc,
+        ),
     )
 
     out_cp_mgr = checkpoint_utils.create_checkpoint_manager(
@@ -219,8 +221,10 @@ class CheckpointUtilsTest(absltest.TestCase):
     checkpoint_utils.convert_cross_topology_checkpoint(
         input_checkpoint_path=src_dir,
         output_checkpoint_path=out_dir_bs1024,
-        num_global_devices=target_devices,
-        num_sc_per_device=num_sc,
+        target_topology=checkpoint_utils.TargetTopology(
+            num_global_devices=target_devices,
+            num_sc_per_device=num_sc,
+        ),
         target_batch_size=1024,
     )
 
@@ -347,8 +351,10 @@ class CheckpointUtilsTest(absltest.TestCase):
     checkpoint_utils.convert_cross_topology_checkpoint(
         input_checkpoint_path=src_dir,
         output_checkpoint_path=out_dir,
-        num_global_devices=target_devices,
-        num_sc_per_device=num_sc,
+        target_topology=checkpoint_utils.TargetTopology(
+            num_global_devices=target_devices,
+            num_sc_per_device=num_sc,
+        ),
     )
 
     out_cp_mgr = checkpoint_utils.create_checkpoint_manager(
@@ -373,6 +379,96 @@ class CheckpointUtilsTest(absltest.TestCase):
       self.assertIsInstance(ev_dict['slot'], dict)
       self.assertIn('m', ev_dict['slot'])
       self.assertIn('v', ev_dict['slot'])
+
+  def test_cross_topology_conversion_without_target_topology(self):
+    src_devices = 8
+    num_sc = 2
+    src_specs = self._create_feature_specs(batch_size=2048, dim=640)
+    table_stacking.auto_stack_tables(
+        src_specs, global_device_count=src_devices, num_sc_per_device=num_sc
+    )
+
+    src_dir = self.temp_dir / 'source_cp_no_target'
+    src_proto = embedding.create_proto_from_feature_specs(
+        src_specs, src_devices, num_sc
+    )
+
+    table_specs = checkpoint_utils._get_table_specs(src_specs)
+    num_shards = src_devices * num_sc
+    dummy_tables = {
+        name: jnp.ones((spec.vocabulary_size, spec.embedding_dim))
+        for name, spec in table_specs.items()
+    }
+    stacked_tables = table_stacking.stack_and_shard_tables(
+        table_specs, dummy_tables, num_shards=num_shards
+    )
+    mock_model_state_table = {}
+    for s_name, arr in stacked_tables.items():
+      assert isinstance(arr, jax.Array)
+      mock_model_state_table[s_name] = {
+          'table': arr.reshape((-1, arr.shape[-1])),
+          'slot': {
+              'm': arr.reshape((-1, arr.shape[-1])),
+              'v': arr.reshape((-1, arr.shape[-1])) * 2.0,
+          },
+      }
+    mock_model_state = {
+        'embedding': {'embedding_table': mock_model_state_table}
+    }
+    mock_opt_state = {'step': 1}
+
+    cp_mgr = checkpoint_utils.create_checkpoint_manager(
+        cp_path=src_dir,
+        cp_options=ocp.CheckpointManagerOptions(create=True),
+        model_key='model',
+        optimizer_key='optimizer',
+        embedding_spec_key='embedding_spec',
+    )
+    cp_mgr.save(
+        1,
+        args=ocp.args.Composite(
+            model=ocp.args.StandardSave(mock_model_state),
+            optimizer=ocp.args.StandardSave(mock_opt_state),
+            embedding_spec=ocp.args.ProtoSave(src_proto),
+        ),
+    )
+    cp_mgr.wait_until_finished()
+
+    out_dir = self.temp_dir / 'converted_cp_unstacked'
+    checkpoint_utils.convert_cross_topology_checkpoint(
+        input_checkpoint_path=src_dir,
+        output_checkpoint_path=out_dir,
+        target_topology=None,
+    )
+
+    out_cp_mgr = checkpoint_utils.create_checkpoint_manager(
+        cp_path=out_dir,
+        cp_options=ocp.CheckpointManagerOptions(read_only=True),
+        model_key='model',
+        optimizer_key='optimizer',
+        embedding_spec_key='embedding_spec',
+    )
+    restored = out_cp_mgr.restore(
+        1,
+        args=ocp.args.Composite(
+            model=ocp.args.StandardRestore(),
+            optimizer=ocp.args.StandardRestore(),
+            embedding_spec=ocp.args.ProtoRestore(
+                embedding_spec_pb2.EmbeddingSpecProto
+            ),
+        ),
+    )
+    restored_table_dict = restored['model']['embedding']['embedding_table']
+    expected_tables = {'table_a', 'table_b', 'table_c', 'table_d'}
+    self.assertEqual(set(restored_table_dict.keys()), expected_tables)
+    for t_name in expected_tables:
+      ev_dict = restored_table_dict[t_name]
+      self.assertEqual(ev_dict['table'].shape, (2048, 640))
+      self.assertIsInstance(ev_dict['slot'], dict)
+      self.assertIn('m', ev_dict['slot'])
+      self.assertIn('v', ev_dict['slot'])
+      self.assertEqual(ev_dict['slot']['m'].shape, (2048, 640))
+      self.assertEqual(ev_dict['slot']['v'].shape, (2048, 640))
 
 
 if __name__ == '__main__':
