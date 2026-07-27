@@ -13,6 +13,7 @@
 # limitations under the License.
 import dataclasses
 import functools
+import sys
 from typing import Callable
 
 from absl.testing import absltest
@@ -28,9 +29,7 @@ from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
-# Typeshed stubs for set_printoptions type threshold as int,
-# but np.inf (float) is valid.
-np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize, suppress=True)
 
 _VOC_A = 32
 _DIM_A = 4

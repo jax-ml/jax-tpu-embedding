@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import sys
 from absl import flags
 from absl import logging
 from absl.testing import absltest
@@ -30,7 +31,7 @@ import optax
 
 Nested = embedding.Nested
 FLAGS = flags.FLAGS
-np.set_printoptions(threshold=np.inf)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize)
 
 
 ################################################################################

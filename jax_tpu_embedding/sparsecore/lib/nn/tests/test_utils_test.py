@@ -14,6 +14,7 @@
 """Test for test utils."""
 
 
+import sys
 from absl.testing import absltest
 from absl.testing import parameterized
 import einops
@@ -21,7 +22,7 @@ import jax
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 import numpy as np
 
-np.set_printoptions(threshold=np.inf, suppress=True)  # pyrefly: ignore[bad-argument-type]
+np.set_printoptions(threshold=sys.maxsize, suppress=True)
 
 
 class TestUtilsTest(parameterized.TestCase):
