@@ -67,10 +67,8 @@ def _hlo_const(x: np.ndarray) -> ir.Value:
   )
 
 
-def _hlo_f32(x: float, emb_dim: int):
-  return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
-  )
+def _hlo_f32(x: float, row_shape: list[int]):
+  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
 
 
 def _tpu_sparse_dense_matmul_grad_with_adam_abstract_eval(
@@ -208,86 +206,32 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  embedding_table_dim_size = ir.RankedTensorType(
-      embedding_table.type
-  ).get_dim_size(1)
-  hlo_f32 = functools.partial(_hlo_f32, emb_dim=embedding_table_dim_size)
+  row_shape = (
+      [1, ir.RankedTensorType(embedding_table.type).get_dim_size(1)]
+      if ir.RankedTensorType(embedding_table.type).rank > 1
+      else [1]
+  )
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
+  hlo_f32 = functools.partial(_hlo_f32, row_shape=row_shape)
 
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
       (
           [
-              ir.RankedTensorType.get(  # grad
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # embedding_table
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # momentum
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # velocity
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # alpha_t
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # beta_1
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # beta_2
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # epsilon_hat
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
-                  ir.F32Type.get(),
-              ),
+              row_type,  # grad
+              row_type,  # embedding_table
+              row_type,  # momentum
+              row_type,  # velocity
+              row_type,  # alpha_t
+              row_type,  # beta_1
+              row_type,  # beta_2
+              row_type,  # epsilon_hat
           ],
           [
               ir.TupleType.get_tuple([
-                  ir.RankedTensorType.get(  # embedding_table
-                      [1, embedding_table_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(  # momentum
-                      [1, embedding_table_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(  # velocity
-                      [1, embedding_table_dim_size],
-                      ir.F32Type.get(),
-                  ),
+                  row_type,  # embedding_table
+                  row_type,  # momentum
+                  row_type,  # velocity
               ]),
           ],
       ),

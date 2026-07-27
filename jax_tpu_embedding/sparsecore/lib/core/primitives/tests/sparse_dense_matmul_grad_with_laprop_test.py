@@ -560,6 +560,145 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
     np.testing.assert_allclose(expected_mu, updated_mu, atol=1e-5)
     np.testing.assert_allclose(expected_nu, updated_nu, atol=1e-5)
 
+  def test_laprop_optimizer_update_1d(self):
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(16)],
+        dtype=np.float32,
+    )
+
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=utils.num_sparsecores_per_device(),
+    )
+
+    def _shard_table(table):
+      return utils.shard_emb_table(
+          table,
+          num_devices=1,
+          num_sc_per_device=utils.num_sparsecores_per_device(),
+      )
+
+    embedding_table = np.arange(1, _VOCAB_SIZE + 1, dtype=np.float32)
+    embedding_table_sharded = _shard_table(embedding_table)
+
+    mu = jnp.full(embedding_table.shape, 0.002, np.float32)
+    mu_sharded = _shard_table(np.asarray(mu))
+
+    nu = jnp.full(embedding_table.shape, 0.004, np.float32)
+    nu_sharded = _shard_table(np.asarray(nu))
+
+    learning_rate = np.float32(0.001)
+    b1 = np.float32(0.9)
+    decay_rate = np.float32(0.999)
+    eps = np.float32(1e-8)
+
+    activations_grad = jnp.full((_BATCH_SIZE,), 0.01, np.float32)
+
+    def _compute_laprop(theta, g, mu_, nu_, alpha, beta_1, decay_r, epsilon):
+      grad_square = g * g + epsilon
+      nu_new = decay_r * nu_ + (1.0 - decay_r) * grad_square
+      update = g / jnp.sqrt(nu_new)
+      mu_new = beta_1 * mu_ + jnp.sqrt(1.0 - beta_1**2) * update
+      theta_new = theta - alpha * mu_new
+      return (theta_new, mu_new, nu_new)
+
+    table_grad = jnp.zeros(shape=(_VOCAB_SIZE,))
+    sparse_rows = jnp.unique(input_tensor.flatten())
+    sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool_)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows].set(True)
+    table_grad = table_grad.at[sparse_rows].set(0.01)
+
+    expected_embedding_table, expected_mu, expected_nu = _compute_laprop(
+        np.asarray(embedding_table),
+        np.asarray(table_grad),
+        np.asarray(mu),
+        np.asarray(nu),
+        learning_rate,
+        b1,
+        decay_rate,
+        eps,
+    )
+
+    expected_embedding_table = jnp.where(
+        sparse_update_mask, expected_embedding_table, embedding_table
+    )
+    expected_mu = jnp.where(sparse_update_mask, expected_mu, mu)
+    expected_nu = jnp.where(sparse_update_mask, expected_nu, nu)
+
+    tpu_laprop = (
+        sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive.bind
+    )
+
+    updated_vars = tpu_laprop(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        1,
+        embedding_table_sharded[0],
+        mu_sharded[0],
+        nu_sharded[0],
+        activations_grad,
+        learning_rate,
+        b1,
+        decay_rate,
+        eps,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        computation_name="laprop_test_computation_1d",
+        sharding_strategy=1,
+    )
+
+    updated_table, updated_mu, updated_nu = updated_vars
+
+    def _unshard_table(table):
+      return utils.unshard_emb_table(
+          jnp.expand_dims(table, axis=0),
+          num_sc_per_device=utils.num_sparsecores_per_device(),
+      )
+
+    updated_table_unsharded = _unshard_table(updated_table)
+    updated_mu_unsharded = _unshard_table(updated_mu)
+    updated_nu_unsharded = _unshard_table(updated_nu)
+
+    np.testing.assert_allclose(
+        expected_embedding_table, updated_table_unsharded, atol=1e-5
+    )
+    np.testing.assert_allclose(expected_mu, updated_mu_unsharded, atol=1e-5)
+    np.testing.assert_allclose(expected_nu, updated_nu_unsharded, atol=1e-5)
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -152,43 +152,26 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_dim_size = (
-      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
+  row_shape = (
+      [1, ir.RankedTensorType(embedding_table.type).get_dim_size(1)]
       if ir.RankedTensorType(embedding_table.type).rank > 1
-      else 1
+      else [1]
   )
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
 
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
           [
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
-                  ir.F32Type.get(),
-              ),
+              row_type,
+              row_type,
+              row_type,
+              row_type,
           ],
           [
               ir.TupleType.get_tuple([
-                  ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size],
-                      ir.F32Type.get(),
-                  ),
+                  row_type,
+                  row_type,
               ]),
           ],
       ),
