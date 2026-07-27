@@ -162,39 +162,22 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
   if is_1d:
     squeezed_activations_grad = utils.maybe_squeeze_ir(activations_grad, 1)
 
-  param_shape = [1] if is_1d else [1, embedding_table_dim_size]
+  row_shape = [1] if is_1d else [1, embedding_table_dim_size]
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
 
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
           [
-              ir.RankedTensorType.get(
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
+              row_type,
+              row_type,
+              row_type,
+              row_type,
           ],
           [
               ir.TupleType.get_tuple([
-                  ir.RankedTensorType.get(
-                      param_shape,
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(
-                      param_shape,
-                      ir.F32Type.get(),
-                  ),
+                  row_type,
+                  row_type,
               ]),
           ],
       ),
