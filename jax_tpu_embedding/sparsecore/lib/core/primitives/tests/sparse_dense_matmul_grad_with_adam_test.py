@@ -26,7 +26,6 @@ import numpy as np
 _BATCH_SIZE = 16
 _VOCAB_SIZE = 32
 _EMB_SIZE = 8
-_NUM_SC_PER_DEVICE = 4
 
 
 class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
@@ -413,11 +412,15 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
 
   def _shard_table(self, table):
     return utils.shard_emb_table(
-        table, num_devices=1, num_sc_per_device=_NUM_SC_PER_DEVICE
+        table,
+        num_devices=1,
+        num_sc_per_device=utils.num_sparsecores_per_device(),
     )
 
   def _unshard_table(self, table):
-    return utils.unshard_emb_table(table, num_sc_per_device=_NUM_SC_PER_DEVICE)
+    return utils.unshard_emb_table(
+        table, num_sc_per_device=utils.num_sparsecores_per_device()
+    )
 
   def _compute_table_grad(self, inputs, weights, activation_grad):
     # Assemble input as matrix:
@@ -478,7 +481,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
         mesh,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
-        num_sc_per_device=_NUM_SC_PER_DEVICE,
+        num_sc_per_device=utils.num_sparsecores_per_device(),
     )
     embedding_table = (
         np.array(

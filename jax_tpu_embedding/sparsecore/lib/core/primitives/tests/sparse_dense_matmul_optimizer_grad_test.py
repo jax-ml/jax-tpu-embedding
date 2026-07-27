@@ -30,7 +30,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     self.batch_size = 16
     self.vocab_size = 32
     self.emb_size = 8
-    self.num_sc_per_device = 4
+    self.num_sc_per_device = utils.num_sparsecores_per_device()
     self.input_tensor = np.array(
         [
             [5],
@@ -126,7 +126,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         sharded_out = utils.shard_emb_table(
             out,
             num_devices=1,
-            num_sc_per_device=4,
+            num_sc_per_device=self.num_sc_per_device,
         )
         sharded_outputs.append(sharded_out[0])
       return tuple(sharded_outputs)
@@ -135,7 +135,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
       updated_table_sharded = utils.shard_emb_table(
           updated_table,
           num_devices=1,
-          num_sc_per_device=4,
+          num_sc_per_device=self.num_sc_per_device,
       )
       return updated_table_sharded[0]
 
@@ -159,7 +159,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
         num_devices=len(self.global_devices),
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     z_grad = jnp.full(
@@ -229,7 +229,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
         num_devices=len(self.global_devices),
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     accumulator_init = jnp.zeros(
@@ -314,7 +314,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
         num_devices=len(self.global_devices),
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     z_grad = jnp.full(
@@ -435,7 +435,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
         num_devices=len(self.global_devices),
-        num_sc_per_device=4,
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     z_grad = jnp.full(

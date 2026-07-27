@@ -30,7 +30,6 @@ import numpy as np
 _BATCH_SIZE = 16
 _VOCAB_SIZE = 32
 _EMB_SIZE = 8
-_NUM_SC_PER_DEVICE = 4
 
 
 class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
@@ -38,13 +37,14 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
+    self.num_sc_per_device = utils.num_sparsecores_per_device()
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=1,
-        num_sc_per_device=_NUM_SC_PER_DEVICE,
+        num_sc_per_device=self.num_sc_per_device,
     )
     self._unshard_table = functools.partial(
-        utils.unshard_emb_table, num_sc_per_device=_NUM_SC_PER_DEVICE
+        utils.unshard_emb_table, num_sc_per_device=self.num_sc_per_device
     )
 
   row_pointers = np.array([0, 1, 2, 4], dtype=np.int32)
@@ -363,7 +363,7 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         mesh,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
-        num_sc_per_device=_NUM_SC_PER_DEVICE,
+        num_sc_per_device=self.num_sc_per_device,
     )
 
     embedding_table = (

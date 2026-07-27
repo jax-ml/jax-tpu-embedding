@@ -37,18 +37,12 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "local_sparse_dense_matmul_test",
     srcs = ["local_sparse_dense_matmul_test.py"],
     args = [
-        # TPU chip configuration,
-        "--logtostderr",
         # TODO(b/433283451): remove this flag once this is fixed.
         "--xla_tpu_num_embedding_devices=1",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
     ],
     type_checking = "pyrefly",
     deps = [
@@ -157,18 +151,10 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_adagrad_momentum_test",
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad_momentum_test.py",
-    ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -182,18 +168,10 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_sgd_test",
     srcs = [
         "sparse_dense_matmul_grad_with_sgd_test.py",
-    ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -207,18 +185,10 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_optimizer_grad_test",
     srcs = [
         "sparse_dense_matmul_optimizer_grad_test.py",
-    ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -231,18 +201,10 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_adagrad_test",
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad_test.py",
-    ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
     ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
@@ -256,17 +218,9 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_adam_test",
     srcs = ["sparse_dense_matmul_grad_with_adam_test.py"],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adam",
@@ -279,17 +233,9 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_ftrl_test",
     srcs = ["sparse_dense_matmul_grad_with_ftrl_test.py"],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_ftrl",
@@ -302,17 +248,9 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_laprop_test",
     srcs = ["sparse_dense_matmul_grad_with_laprop_test.py"],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_laprop",
@@ -325,17 +263,9 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_f2a_test",
     srcs = ["sparse_dense_matmul_grad_with_f2a_test.py"],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_f2a",
