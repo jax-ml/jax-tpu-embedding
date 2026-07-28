@@ -92,13 +92,6 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
   if not embedding_variables:
     raise ValueError("At least one embedding variable must be passed.")
 
-  # Squeeze trailing dimensions of size 1 (e.g. [N, 1] -> [N]) to support 1D
-  # embedding variables.
-  activations_grad = utils.maybe_squeeze_abstract_eval(activations_grad, 1)
-  embedding_variables = tuple(
-      utils.maybe_squeeze_abstract_eval(var, 1) for var in embedding_variables
-  )
-
   utils.validate_abstract_eval_params(
       lhs_row_pointers=lhs_row_pointers,
       lhs_local_embedding_ids=lhs_local_embedding_ids,
@@ -122,8 +115,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
       )
 
   for var in embedding_variables:
-    if len(var.shape) != 2:
-      raise ValueError(f"embedding variables must have rank 2, got {var.shape}")
+    if len(var.shape) not in (1, 2):
+      raise ValueError(
+          f"embedding variables must have rank 1 or 2, got {var.shape}"
+      )
   if not isinstance(jaxpr, jex.core.ClosedJaxpr):
     raise ValueError("jaxpr must be a ClosedJaxpr")
 
@@ -184,7 +179,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       if ir.RankedTensorType(tables[0].type).rank > 1
       else 1
   )
-  row_tensor_type = ir.RankedTensorType.get([1, dim_size], ir.F32Type.get())
+  if ir.RankedTensorType(tables[0].type).rank == 1:
+    row_tensor_type = ir.RankedTensorType.get([1, dim_size], ir.F32Type.get())
+  else:
+    row_tensor_type = ir.RankedTensorType.get([1], ir.F32Type.get())
 
   wrapper_input_types: list[ir.Type] = [row_tensor_type]  # grad
   for _ in tables:
@@ -248,18 +246,15 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       reshaped = hlo.reshape(f32type, param)
       hyperparams.append(reshaped)
 
-  activations_grad_sq = utils.maybe_squeeze_ir(activations_grad, 1)
-  tables_sq = [utils.maybe_squeeze_ir(table, 1) for table in tables]
-
   operands = (
       [
           lhs_row_pointers,
           lhs_local_embedding_ids,
           lhs_local_sample_ids,
           lhs_gains,
-          activations_grad_sq,
+          activations_grad,
       ]
-      + tables_sq
+      + tables
       + hyperparams
   )
   op = jax.ffi.ffi_lowering(
