@@ -385,7 +385,7 @@ class CheckpointUtilsTest(parameterized.TestCase):
         ),
     )
     restored_table_dict = restored['model']['embedding']['embedding_table']
-    for s_name, ev_dict in restored_table_dict.items():
+    for unused_s_name, ev_dict in restored_table_dict.items():
       self.assertIsInstance(ev_dict['slot'], dict)
       self.assertIn('m', ev_dict['slot'])
       self.assertIn('v', ev_dict['slot'])
@@ -479,6 +479,41 @@ class CheckpointUtilsTest(parameterized.TestCase):
       self.assertIn('v', ev_dict['slot'])
       self.assertEqual(ev_dict['slot']['m'].shape, (2048, 640))
       self.assertEqual(ev_dict['slot']['v'].shape, (2048, 640))
+
+  def test_recompute_target_specs_preserves_table_registration_order(
+      self,
+  ) -> None:
+    opt = embedding_spec.SGDOptimizerSpec(learning_rate=0.01)
+    specs = []
+    for name in ['table_z', 'table_a']:
+      tspec = embedding_spec.TableSpec(
+          vocabulary_size=2048,
+          embedding_dim=64,
+          initializer=jax.nn.initializers.ones,
+          optimizer=opt,
+          combiner='sum',
+          name=name,
+      )
+      fspec = embedding_spec.FeatureSpec(
+          table_spec=tspec,
+          input_shape=(128, 1),
+          output_shape=(128, 64),
+          name=f'feature_{name}',
+      )
+      specs.append(fspec)
+
+    table_stacking.auto_stack_tables(
+        specs, global_device_count=4, num_sc_per_device=2
+    )
+    src_proto = embedding.create_proto_from_feature_specs(specs, 4, 2)
+    src_stack_name = src_proto.stacked_table_specs[0].stack_name
+
+    target_proto, _ = checkpoint_utils._recompute_target_specs(
+        src_proto, num_global_devices=8, num_sc_per_device=2
+    )
+    target_stack_name = target_proto.stacked_table_specs[0].stack_name
+
+    self.assertEqual(target_stack_name, src_stack_name)
 
 
 if __name__ == '__main__':

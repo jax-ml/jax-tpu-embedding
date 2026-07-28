@@ -13,6 +13,7 @@
 # limitations under the License.
 """Checkpointing utilities for SparseCore NNX models."""
 
+import collections
 import collections.abc
 import os
 import shutil
@@ -915,7 +916,7 @@ def _next_largest_multiple(value: int, multiple: int) -> int:
 def _reconstruct_feature_specs_from_proto(
     source_proto: embedding_spec_pb2.EmbeddingSpecProto,
     target_batch_size: int | None = None,
-) -> dict[str, embedding_spec.FeatureSpec]:
+) -> collections.OrderedDict[str, embedding_spec.FeatureSpec]:
   """Reconstructs unstacked FeatureSpecs from an EmbeddingSpecProto.
 
   Args:
@@ -923,9 +924,10 @@ def _reconstruct_feature_specs_from_proto(
     target_batch_size: Optional target global batch size.
 
   Returns:
-    A dictionary mapping feature names to reconstructed unstacked FeatureSpecs.
+    An OrderedDict mapping feature names to reconstructed unstacked
+    FeatureSpecs.
   """
-  specs = {}
+  specs = collections.OrderedDict()
   for stack_proto in source_proto.stacked_table_specs:
     for t_proto in stack_proto.table_specs:
       if t_proto.HasField('optimizer'):
