@@ -15,6 +15,7 @@
 
 from absl import flags
 from absl.testing import absltest
+from absl.testing import parameterized
 from etils import epath
 import jax
 import jax.numpy as jnp
@@ -28,7 +29,7 @@ import orbax.checkpoint as ocp
 FLAGS = flags.FLAGS
 
 
-class CheckpointUtilsTest(absltest.TestCase):
+class CheckpointUtilsTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -57,9 +58,17 @@ class CheckpointUtilsTest(absltest.TestCase):
       specs[f'feature_{name}'] = fspec
     return specs
 
-  def test_cross_topology_conversion_automatic_regrouping(self):
+  @parameterized.named_parameters(
+      ('2sc_to_4sc', 2, 4),
+      ('4sc_to_2sc', 4, 2),
+      ('2sc_to_2sc', 2, 2),
+      ('4sc_to_4sc', 4, 4),
+  )
+  def test_cross_topology_conversion_automatic_regrouping(
+      self, src_num_sc, dst_num_sc
+  ):
     src_devices = 8
-    num_sc = 2
+    num_sc = src_num_sc
     src_specs = self._create_feature_specs(batch_size=2048, dim=640)
     table_stacking.auto_stack_tables(
         src_specs, global_device_count=src_devices, num_sc_per_device=num_sc
@@ -118,13 +127,14 @@ class CheckpointUtilsTest(absltest.TestCase):
     table_stacking.auto_stack_tables(
         target_specs,
         global_device_count=target_devices,
-        num_sc_per_device=num_sc,
+        num_sc_per_device=dst_num_sc,
     )
     target_stacks = {
         v.table_spec.stacked_table_spec.stack_name
         for v in target_specs.values()
     }
-    self.assertLen(target_stacks, 2)
+    expected_stacks = 2 if dst_num_sc == 2 else 1
+    self.assertLen(target_stacks, expected_stacks)
 
     # Automatic conversion WITHOUT target_feature_specs
     out_dir = self.temp_dir / 'converted_cp_auto'
@@ -133,7 +143,7 @@ class CheckpointUtilsTest(absltest.TestCase):
         output_checkpoint_path=out_dir,
         target_topology=checkpoint_utils.TargetTopology(
             num_global_devices=target_devices,
-            num_sc_per_device=num_sc,
+            num_sc_per_device=dst_num_sc,
         ),
     )
 

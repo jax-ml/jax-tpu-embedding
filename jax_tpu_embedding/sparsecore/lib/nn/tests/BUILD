@@ -32,6 +32,7 @@ pytype_strict_contrib_test(
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],

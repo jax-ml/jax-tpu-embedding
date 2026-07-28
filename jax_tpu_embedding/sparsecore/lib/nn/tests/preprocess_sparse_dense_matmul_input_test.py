@@ -16,6 +16,7 @@ import functools
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
@@ -25,7 +26,7 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 import numpy as np
 
 
-class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
+class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -239,7 +240,11 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
           allow_id_dropping=True,
       )
 
-  def test_preprocess_suggested_buffer_size(self):
+  @parameterized.named_parameters(
+      ("2sc", 2),
+      ("4sc", 4),
+  )
+  def test_preprocess_suggested_buffer_size(self, num_sc_per_device):
     # theoretical max = max ids * num_sc_per_device * num_scs = 16 * 4 * 4 = 256
     # This deeply nested setting in unwieldly, but we plan to move these
     # settings out (b/418042262)
@@ -258,7 +263,7 @@ class PreprocessSparseDenseMatmulInputTest(absltest.TestCase):
         },
         local_device_count=1,
         global_device_count=1,
-        num_sc_per_device=4,
+        num_sc_per_device=num_sc_per_device,
         sharding_strategy="MOD",
         batch_number=42,
     )

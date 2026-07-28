@@ -107,10 +107,14 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   )
   local_device_count = 1
   global_device_count = 1
-  num_sc_per_device = 4
 
-  @parameterized.parameters(False, True)
-  def test_transformation_with_col_transformations(self, has_leading_dimension):
+  @parameterized.product(
+      has_leading_dimension=(False, True),
+      num_sc_per_device=(2, 4),
+  )
+  def test_transformation_with_col_transformations(
+      self, has_leading_dimension, num_sc_per_device
+  ):
     batch_number = 42
     row_pointers_raw, embedding_ids_raw, sample_ids_raw, gains_raw, *_ = (
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
@@ -119,7 +123,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             [self.feature_spec],
             local_device_count=self.local_device_count,
             global_device_count=self.global_device_count,
-            num_sc_per_device=self.num_sc_per_device,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -143,9 +147,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     )
     # (col_ids + col_shift) % num_sc_shards +
     #    (col_ids // num_sc_shards * num_sc_shards) + col_offset
-    num_sc_shards = int(
-        math.log2(self.global_device_count * self.num_sc_per_device)
-    )
+    num_sc_shards = int(math.log2(self.global_device_count * num_sc_per_device))
     input_features_shifted = (
         (self.input_features + self.feature_spec.id_transformation.col_shift)
         % num_sc_shards
@@ -160,7 +162,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             [feature_spec_no_col_shift],
             local_device_count=self.local_device_count,
             global_device_count=self.global_device_count,
-            num_sc_per_device=self.num_sc_per_device,
+            num_sc_per_device=num_sc_per_device,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -173,7 +175,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
     assert_equal_coo_buffer = functools.partial(
         test_utils.assert_equal_coo_buffer,
         self.local_device_count,
-        self.num_sc_per_device,
+        num_sc_per_device,
         row_pointers[stack_name],
     )
     assert_equal_coo_buffer(
