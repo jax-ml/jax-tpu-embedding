@@ -55,19 +55,12 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_csr_minibatching_test",
     srcs = [
         "sparse_dense_matmul_csr_minibatching_test.py",
     ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
@@ -99,19 +92,12 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_sgd_minibatching_test",
     srcs = [
         "sparse_dense_matmul_grad_with_sgd_minibatching_test.py",
     ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd",
@@ -125,19 +111,12 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "sparse_dense_matmul_grad_with_adagrad_minibatching_test",
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad_minibatching_test.py",
     ],
-    args = [
-        # TPU chip configuration,
-        "--logtostderr",
-    ],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
+    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
