@@ -60,7 +60,7 @@ All the above steps are customizable and a typical flow looks as follows:
             # and so all the processes can read the same data.
             jax.experimental.multihost_utils.sync_global_devices("FDO_publish_barrier")
             # Load FDO stats dumps and update feature specs.
-            loaded_stats: embedding.PreprocessSparseDenseMatmulStats = fdo_client.load()
+            loaded_stats: embedding.SparseDenseMatmulInputStats = fdo_client.load()
             # Any custom code to adjust the stats can go here.
             # `transform` is a user-defined function to modify the FDO statistics.
             # For example:

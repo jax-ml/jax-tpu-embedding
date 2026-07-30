@@ -97,22 +97,53 @@ class SparseDenseMatmulInput(NamedTuple):
 class SparseDenseMatmulInputStats:
   """The stats of preprocessing sparse dense matmul input.
 
-  Multiple value indicate per partition or per sparsecore values, whereas a
-  single value could also be used in cases where maximum is required.
+  Multiple values indicate per-partition or per-SparseCore values, whereas a
+  single scalar value is used when maximums across partitions or SparseCores
+  are taken.
+
+  Example:
+    Computation for 2 SparseCores (``num_sc = 2``, ``SC0`` and ``SC1``),
+    batch size 2 (Sample 0 on ``SC0``, Sample 1 on ``SC1``), and buffer
+    counts aligned to 32 bytes/8 elements:
+
+    **1. Input samples**
+
+    * Sample 0 (source ``SC0``): ``[0, 0, 0, 2, 4, 1]``
+    * Sample 1 (source ``SC1``): ``[1, 1, 1, 3, 3, 5, 5, 7, 7, 0]``
+
+    **2. Partition by destination SC** (``id % 2``)
+
+    * From ``SC0``: Partition 0 gets 5 IDs (3 unique); Partition 1 gets
+      1 ID (1 unique).
+    * From ``SC1``: Partition 0 gets 1 ID (1 unique); Partition 1 gets
+      9 IDs (4 unique).
+
+    **3. Computed stats** (element-wise max across source SCs; all return
+    different values)
+
+    * ``max_ids_per_partition`` = ``[5, 9]`` (scalar max = 9).
+    * ``max_unique_ids_per_partition`` = ``[3, 4]`` (scalar max = 4).
+    * ``required_buffer_size_per_sc`` = ``[16, 24]`` (scalar max = 24),
+      computed by summing partition ID counts aligned to 8 elements
+      for each source SC (``SC0``: 8 + 8 = 16; ``SC1``: 8 + 16 = 24).
   """
 
   max_ids_per_partition: dict[str, np.ndarray] = dataclasses.field(
       metadata={"suffix": "_max_ids"}
   )
+  """Mapping of table name to maximum total IDs per partition."""
   max_unique_ids_per_partition: dict[str, np.ndarray] = dataclasses.field(
       metadata={"suffix": "_max_unique_ids"}
   )
+  """Mapping of table name to maximum unique IDs per partition."""
   required_buffer_size_per_sc: dict[str, np.ndarray] = dataclasses.field(
       metadata={"suffix": "_required_buffer_size"}, default_factory=dict
   )
+  """Mapping of table name to required CSR COO buffer size per SparseCore."""
   id_drop_counters: dict[str, int] = dataclasses.field(
       metadata={"suffix": "_id_drop_counters"}, default_factory=dict
   )
+  """Mapping of table name to total dropped ID count."""
 
   @classmethod
   def from_cc(
@@ -620,7 +651,9 @@ def preprocess_sparse_dense_matmul_input(
       required for single-host minibatching.
 
   Returns:
-    A tuple of PreprocessResults and SparseDenseMatmulInputStats.
+    A tuple of PreprocessResults and SparseDenseMatmulInputStats (see
+    :class:`SparseDenseMatmulInputStats` for details on how statistics are
+    computed from input samples).
   """
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(features, feature_specs, "features", "feature_specs")

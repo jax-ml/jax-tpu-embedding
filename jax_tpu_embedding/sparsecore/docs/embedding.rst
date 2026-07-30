@@ -51,6 +51,9 @@ API
 
 .. currentmodule:: jax_tpu_embedding.sparsecore.lib.nn.embedding
 
+.. autoclass:: SparseDenseMatmulInputStats
+   :members:
+
 .. autofunction:: tpu_sparse_dense_matmul
 
 .. autofunction:: tpu_sparse_dense_matmul_grad

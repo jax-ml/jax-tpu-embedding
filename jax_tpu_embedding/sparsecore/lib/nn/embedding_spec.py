@@ -919,10 +919,14 @@ class TableSpec:
   example, sum or mean."""
   max_ids_per_partition: int = 256
   """The maximum number of embedding IDs that can be packed into a single
-  partition."""
+  partition. See
+  :class:`~jax_tpu_embedding.sparsecore.lib.nn.embedding.SparseDenseMatmulInputStats`
+  for details on how this is computed from input samples."""
   max_unique_ids_per_partition: int = 256
   """The maximum number of unique embedding IDs that can be packed into a
-  single partition."""
+  single partition. See
+  :class:`~jax_tpu_embedding.sparsecore.lib.nn.embedding.SparseDenseMatmulInputStats`
+  for details on how this is computed from input samples."""
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create."""
@@ -1096,10 +1100,14 @@ class StackedTableSpec(struct.PyTreeNode, eq=True, frozen=True, kw_only=True):
   """The total batch size of all features that point to tables in this
   stack."""
   max_ids_per_partition: int = 256
-  """The maximum number of IDs per partition for lookups from this stack."""
+  """The maximum number of IDs per partition for lookups from this stack. See
+  :class:`~jax_tpu_embedding.sparsecore.lib.nn.embedding.SparseDenseMatmulInputStats`
+  for details on how this is computed from input samples."""
   max_unique_ids_per_partition: int = 256
   """The maximum number of unique IDs per partition for lookups from this
-  stack."""
+  stack. See
+  :class:`~jax_tpu_embedding.sparsecore.lib.nn.embedding.SparseDenseMatmulInputStats`
+  for details on how this is computed from input samples."""
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create for this stack."""

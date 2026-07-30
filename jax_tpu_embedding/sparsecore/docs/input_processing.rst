@@ -7,7 +7,8 @@ The SparseCore accepts sparse inputs (ragged/list of list) packed into a
 `COO <https://openxla.org/xla/sparsecore#3_conversion_to_coo_tensors>`__ format
 (see below). To convert sparse inputs into this format we provide the
 :func:`preprocess_sparse_dense_matmul_input` API.
-This function also returns the input statistics to tune :doc:`FDO <advanced/fdo>`.
+This function also returns the input statistics (:class:`SparseDenseMatmulInputStats`)
+to tune :doc:`FDO <advanced/fdo>`.
 
 This preprocessed input can be directly fed to the :func:`tpu_sparse_dense_matmul`
 and :func:`tpu_sparse_dense_matmul_grad` functions.
