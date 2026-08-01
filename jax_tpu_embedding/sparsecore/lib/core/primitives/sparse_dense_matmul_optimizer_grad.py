@@ -179,12 +179,12 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   optimizer_update_computation_name = computation_name
 
   tables = list(embedding_variables)
-  dim_size = (
-      ir.RankedTensorType(tables[0].type).get_dim_size(1)
+  row_shape = (
+      [1, ir.RankedTensorType(tables[0].type).get_dim_size(1)]
       if ir.RankedTensorType(tables[0].type).rank > 1
-      else 1
+      else [1]
   )
-  row_tensor_type = ir.RankedTensorType.get([1, dim_size], ir.F32Type.get())
+  row_tensor_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
 
   wrapper_input_types: list[ir.Type] = [row_tensor_type]  # grad
   for _ in tables:
