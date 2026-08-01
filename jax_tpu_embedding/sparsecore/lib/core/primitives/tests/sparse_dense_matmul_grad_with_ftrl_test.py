@@ -344,6 +344,26 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
     )
     return np.asarray(table_grad)
 
+  def _compute_table_grad_1d(
+      self, inputs_ids, inputs_weights, activations_grad_samples
+  ):
+    inputs_ids_jnp = jnp.asarray(inputs_ids)
+    inputs_weights_jnp = jnp.asarray(inputs_weights)
+    activations_grad_samples_jnp = jnp.asarray(activations_grad_samples)
+
+    batch_size = activations_grad_samples_jnp.shape[0]
+    sample_lengths = jnp.array([inputs_ids_jnp.shape[1]] * batch_size)
+
+    rows = jnp.repeat(jnp.arange(batch_size), sample_lengths)
+    cols = inputs_ids_jnp.flatten()
+    vals = inputs_weights_jnp.flatten()
+
+    table_grad = jnp.zeros(shape=(_VOCAB_SIZE,), dtype=jnp.float32)
+    table_grad = table_grad.at[cols].add(
+        vals * activations_grad_samples_jnp[rows]
+    )
+    return np.asarray(table_grad)
+
   @parameterized.named_parameters(
       ("no_clipping", None, None),
       ("clipping", 2.0, 12.0),
@@ -495,6 +515,143 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
 
     # Note that expected values are computed on CPU while the primitive
     # runs on TPU.
+    np.testing.assert_allclose(
+        expected_accumulator, updated_accumulator_unsharded, atol=1e-5
+    )
+    np.testing.assert_allclose(
+        expected_linear, updated_linear_unsharded, atol=1e-5
+    )
+    np.testing.assert_allclose(
+        expected_embedding_table, updated_table_unsharded, atol=1e-5
+    )
+
+  def test_ftrl_optimizer_update_1d(self):
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(16)],
+        dtype=np.float32,
+    )
+
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=utils.num_sparsecores_per_device(),
+    )
+
+    embedding_table = np.arange(1, _VOCAB_SIZE + 1, dtype=np.float32)
+    embedding_table_sharded = self._shard_table(embedding_table)
+
+    accumulator = jnp.full(embedding_table.shape, 0.002, np.float32)
+    accumulator_sharded = self._shard_table(np.asarray(accumulator))
+
+    linear = jnp.full(embedding_table.shape, 0.004, np.float32)
+    linear_sharded = self._shard_table(np.asarray(linear))
+
+    learning_rate = np.float32(0.1)
+    learning_rate_power = np.float32(-0.05)
+    l1_regularization_strength = np.float32(2.0)
+    l2_regularization_strength = np.float32(3.0)
+    beta = np.float32(0.5)
+    multiply_linear_by_learning_rate = np.bool_(False)
+
+    activations_grad = jnp.full((_BATCH_SIZE,), 0.012, np.float32)
+
+    table_grad = self._compute_table_grad_1d(
+        input_tensor, input_weights, activations_grad
+    )
+
+    sparse_rows = jnp.unique(input_tensor.flatten())
+    sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool_)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows].set(True)
+
+    expected_embedding_table, expected_accumulator, expected_linear = (
+        self._compute_ftrl(
+            np.asarray(embedding_table)[:, np.newaxis],
+            np.asarray(table_grad)[:, np.newaxis],
+            np.asarray(accumulator)[:, np.newaxis],
+            np.asarray(linear)[:, np.newaxis],
+            learning_rate,
+            learning_rate_power,
+            l1_regularization_strength,
+            l2_regularization_strength,
+            beta,
+            multiply_linear_by_learning_rate,
+        )
+    )
+    expected_embedding_table = expected_embedding_table.squeeze(-1)
+    expected_accumulator = expected_accumulator.squeeze(-1)
+    expected_linear = expected_linear.squeeze(-1)
+
+    expected_embedding_table = jnp.where(
+        sparse_update_mask, expected_embedding_table, embedding_table
+    )
+    expected_accumulator = jnp.where(
+        sparse_update_mask, expected_accumulator, accumulator
+    )
+    expected_linear = jnp.where(sparse_update_mask, expected_linear, linear)
+
+    updated_table, updated_accumulator, updated_linear = (
+        sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive.bind(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,
+            embedding_table_sharded[0],
+            accumulator_sharded[0],
+            linear_sharded[0],
+            activations_grad,
+            learning_rate,
+            learning_rate_power,
+            l1_regularization_strength,
+            l2_regularization_strength,
+            beta,
+            multiply_linear_by_learning_rate=multiply_linear_by_learning_rate,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=64,
+            computation_name="optimizer_test_computation_1d",
+            sharding_strategy=1,
+        )
+    )
+
+    updated_table_unsharded = self._unshard_table(updated_table[jnp.newaxis, :])
+    updated_accumulator_unsharded = self._unshard_table(
+        updated_accumulator[jnp.newaxis, :]
+    )
+    updated_linear_unsharded = self._unshard_table(
+        updated_linear[jnp.newaxis, :]
+    )
+
     np.testing.assert_allclose(
         expected_accumulator, updated_accumulator_unsharded, atol=1e-5
     )
