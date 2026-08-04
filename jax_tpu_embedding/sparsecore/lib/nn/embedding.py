@@ -459,6 +459,8 @@ def auto_stack_tables(
     stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     use_short_stack_names: bool = True,
+    *,
+    activation_mem_bytes_limit: int | None = None,
 ) -> None:
   """Computes the stacked tables based on the feature specs.
 
@@ -473,6 +475,8 @@ def auto_stack_tables(
     stack_to_max_unique_ids_per_partition: Override the
       max_unique_ids_per_partition for each stack.
     use_short_stack_names: If true, use the short stack names.
+    activation_mem_bytes_limit: Optional limit on activation memory bytes used
+      during table stacking.
 
   Returns:
     None. The feature specs are updated with stacking information.
@@ -485,6 +489,7 @@ def auto_stack_tables(
       stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
       stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
       use_short_stack_names=use_short_stack_names,
+      activation_mem_bytes_limit=activation_mem_bytes_limit,
   )
 
 

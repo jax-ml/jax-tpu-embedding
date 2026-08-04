@@ -126,6 +126,8 @@ message StackedTableSpecProto {
   int64 num_sparsecores = 9;
   // Specs for the table that are stacked.
   repeated TableSpecProto table_specs = 10;
+  // Optional activation memory limit in bytes used during table stacking.
+  optional int64 activation_mem_bytes_limit = 11;
 }
 
 message EmbeddingSpecProto {

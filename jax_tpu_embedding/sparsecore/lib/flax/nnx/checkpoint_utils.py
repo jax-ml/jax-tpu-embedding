@@ -1005,16 +1005,31 @@ def _recompute_target_specs(
     reconstructed_specs = _reconstruct_feature_specs_from_proto(
         source_proto, target_batch_size=target_batch_size
     )
+    activation_mem_bytes_limit = (
+        table_stacking.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
+    )
+    for s in source_proto.stacked_table_specs:
+      if s.HasField('activation_mem_bytes_limit'):
+        activation_mem_bytes_limit = s.activation_mem_bytes_limit
+        break
     table_stacking.auto_stack_tables(
         reconstructed_specs,
         global_device_count=num_global_devices,
         num_sc_per_device=num_sc_per_device,
+        activation_mem_bytes_limit=activation_mem_bytes_limit,
     )
     target_proto = embedding.create_proto_from_feature_specs(
-        reconstructed_specs, num_global_devices, num_sc_per_device
+        reconstructed_specs,
+        num_global_devices,
+        num_sc_per_device,
     )
     logical_table_specs = _get_table_specs(reconstructed_specs)
     return target_proto, logical_table_specs
+
+  logging.info(
+      'Source proto does not contain full metadata. Reconstructing target specs'
+      ' without stack regrouping.'
+  )
 
   num_shards = num_global_devices * num_sc_per_device
   target_proto = embedding_spec_pb2.EmbeddingSpecProto()
@@ -1042,16 +1057,20 @@ def _recompute_target_specs(
       table_sample_count_per_sc = table_sample_count // num_shards
       stack_activation_mem_bytes += padded_dim * table_sample_count_per_sc * 4
 
-    activation_mem_bytes_limit = 2048 * 1024  # 2 MiB
+    activation_mem_bytes_limit = (
+        stacked_spec_proto.activation_mem_bytes_limit
+        if stacked_spec_proto.HasField('activation_mem_bytes_limit')
+        else table_stacking.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
+    )
     if (
         len(stacked_spec_proto.table_specs) > 1
         and stack_activation_mem_bytes > activation_mem_bytes_limit
     ):
       raise ValueError(
           f"Stack '{stacked_spec_proto.stack_name}' has per-SparseCore"
-          f' activation memory of {stack_activation_mem_bytes} bytes,'
-          f' exceeding the 2 MiB limit ({activation_mem_bytes_limit} bytes) for'
-          f' target topology ({num_global_devices} devices,'
+          f' activation memory of {stack_activation_mem_bytes} bytes, exceeding'
+          f' the activation memory limit ({activation_mem_bytes_limit} bytes)'
+          f' for target topology ({num_global_devices} devices,'
           f' {num_sc_per_device} SC/device). The target model will group tables'
           ' into different stacks. Please provide target_feature_specs to'
           ' convert_cross_topology_checkpoint.'

@@ -1077,6 +1077,7 @@ class EmbeddingTest(parameterized.TestCase):
         feature_specs,
         num_sc_per_device=self.num_sc_per_device,
         global_device_count=jax.device_count(),
+        activation_mem_bytes_limit=64 * 1024 * 1024,  # 64 MiB
     )
     expected_proto = embedding_spec_pb2.EmbeddingSpecProto()
     num_sparsecores = self.num_sc_per_device * jax.device_count()
@@ -1096,6 +1097,7 @@ class EmbeddingTest(parameterized.TestCase):
         max_ids_per_partition: 256
         max_unique_ids_per_partition: 256
         num_sparsecores: {num_sparsecores}
+        activation_mem_bytes_limit: 67108864
         table_specs {{
           table_name: "table_a"
           vocab_size: 32
@@ -1156,6 +1158,10 @@ class EmbeddingTest(parameterized.TestCase):
     self.assertEqual(
         text_format.MessageToString(expected_proto),
         text_format.MessageToString(actual),
+    )
+    self.assertEqual(
+        actual.stacked_table_specs[0].activation_mem_bytes_limit,
+        67108864,
     )
 
   def test_preprocess_sparse_dense_matmul_input_from_sparse_tensor(self):

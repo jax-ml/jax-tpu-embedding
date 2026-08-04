@@ -33,6 +33,10 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
 
+# The default activation memory limit (2 MiB) per SparseCore for table stacking.
+DEFAULT_ACTIVATION_MEM_BYTES_LIMIT: int = 2048 * 1024
+
+
 NumericParameter: TypeAlias = jax.typing.ArrayLike
 LearningRate: TypeAlias = NumericParameter | Callable[..., NumericParameter]
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
@@ -1108,6 +1112,8 @@ class StackedTableSpec(struct.PyTreeNode, eq=True, frozen=True, kw_only=True):
   stack. See
   :class:`~jax_tpu_embedding.sparsecore.lib.nn.embedding.SparseDenseMatmulInputStats`
   for details on how this is computed from input samples."""
+  activation_mem_bytes_limit: int = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
+  """The activation memory limit in bytes used when stacking tables."""
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create for this stack."""

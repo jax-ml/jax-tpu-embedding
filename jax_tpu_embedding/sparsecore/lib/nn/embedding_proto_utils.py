@@ -241,6 +241,7 @@ def create_proto_from_feature_specs(
               max_ids_per_partition=stacked_spec.max_ids_per_partition,
               num_sparsecores=(num_sc_per_dev * global_device_count),
               max_unique_ids_per_partition=stacked_spec.max_unique_ids_per_partition,
+              activation_mem_bytes_limit=stacked_spec.activation_mem_bytes_limit,
           )
       )
     if current_table_name not in stack_to_table_specs[current_stack_name]:

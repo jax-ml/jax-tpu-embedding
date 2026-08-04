@@ -23,17 +23,22 @@ from absl import logging
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
-from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import StackedTableSpec
-from jax_tpu_embedding.sparsecore.lib.nn.embedding_spec import TableSpec
 from jax_tpu_embedding.sparsecore.lib.proto import embedding_spec_pb2
 import numpy as np
 
+TableSpec = embedding_spec.TableSpec
+StackedTableSpec = embedding_spec.StackedTableSpec
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = Callable[[str, int], int]
 ArrayLike: TypeAlias = jax.typing.ArrayLike
 _RowIdT = TypeVar("_RowIdT", int, jax.Array, np.ndarray)
 Shape: TypeAlias = tuple[int, ...]
+
+# The default activation memory limit (2 MiB) per SparseCore for table stacking.
+DEFAULT_ACTIVATION_MEM_BYTES_LIMIT: int = (
+    embedding_spec.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
+)
 
 
 def _next_largest_multiple(value: int, multiple: int) -> int:
@@ -629,6 +634,7 @@ def _get_limits_for_stack(
 
 
 def _stack_feature_specs(
+    *,
     stack_name: str,
     features: Nested[embedding_spec.FeatureSpec],
     table_names: Sequence[str],
@@ -637,8 +643,9 @@ def _stack_feature_specs(
     global_device_count: int,
     num_sc_per_device: int,
     rotation: int,
-    stack_to_max_ids_per_partition: LimitsCallable = get_default_limits,
-    stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
+    stack_to_max_ids_per_partition: LimitsCallable,
+    stack_to_max_unique_ids_per_partition: LimitsCallable,
+    activation_mem_bytes_limit: int = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT,
 ) -> None:
   """Updated the feature spec based on provided groups and stacking logic."""
 
@@ -694,6 +701,7 @@ def _stack_feature_specs(
       total_sample_count=stack_sample_count,
       max_ids_per_partition=max_ids_per_partition,
       max_unique_ids_per_partition=max_unique_ids_per_partition,
+      activation_mem_bytes_limit=activation_mem_bytes_limit,
   )
 
   def _update_feature(
@@ -778,6 +786,8 @@ def stack_tables(
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     stack_name: str | None = None,
     fail_on_excess_padding: bool = False,
+    *,
+    activation_mem_bytes_limit: int = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT,
 ) -> None:
   """Creates new feature specs based on specified stacking groups.
 
@@ -803,6 +813,9 @@ def stack_tables(
     fail_on_excess_padding: If `True`, raises an error if the embedding
       dimensions of the tables to stack would lead to excessive padding (i.e. do
       not match when rounded up to the nearest multiple of 8 values).
+    activation_mem_bytes_limit: The maximum activation memory usage for a
+      stacked table. If the activation memory usage is larger than this limit,
+      the table will not be stacked. Default is 2 MiB.
   """
 
   if not stack_name:
@@ -864,6 +877,7 @@ def stack_tables(
       rotation=rotation,
       stack_to_max_ids_per_partition=stack_to_max_ids_per_partition,
       stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
+      activation_mem_bytes_limit=activation_mem_bytes_limit,
   )
 
 
@@ -876,7 +890,7 @@ def auto_stack_tables(
     stack_to_max_unique_ids_per_partition: LimitsCallable = get_default_limits,
     *,
     use_short_stack_names: bool = True,
-    activation_mem_bytes_limit=2048 * 1024,
+    activation_mem_bytes_limit: int | None = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT,
 ) -> None:
   """Creates new feature specs based on auto stacking logic.
 
@@ -900,8 +914,10 @@ def auto_stack_tables(
       to avoid long names. Otherwise, the stack name will be the concatenation
       of the table names.
     activation_mem_bytes_limit: If the activation memory usage is larger than
-      this limit, the table will not be stacked. Default is 2MB.
+      this limit, the table will not be stacked. Default is 2 MiB.
   """
+  if activation_mem_bytes_limit is None:
+    activation_mem_bytes_limit = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
   flatten_features = jax.tree.leaves(features)
   flatten_tables = {
       feature.table_spec.name: feature.table_spec
@@ -927,6 +943,7 @@ def auto_stack_tables(
         stack_to_max_unique_ids_per_partition=stack_to_max_unique_ids_per_partition,
         fail_on_excess_padding=False,  # Guaranteed to be satisfied.
         stack_name=_get_stack_name(group, use_short_stack_names),
+        activation_mem_bytes_limit=activation_mem_bytes_limit,
     )
 
 

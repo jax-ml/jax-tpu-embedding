@@ -515,6 +515,50 @@ class CheckpointUtilsTest(parameterized.TestCase):
 
     self.assertEqual(target_stack_name, src_stack_name)
 
+  def test_recompute_target_specs_respects_activation_mem_bytes_limit(
+      self,
+  ) -> None:
+    opt = embedding_spec.SGDOptimizerSpec(learning_rate=0.01)
+    specs = []
+    for name in ['table_x', 'table_y']:
+      tspec = embedding_spec.TableSpec(
+          vocabulary_size=2048,
+          embedding_dim=64,
+          initializer=jax.nn.initializers.ones,
+          optimizer=opt,
+          combiner='sum',
+          name=name,
+      )
+      fspec = embedding_spec.FeatureSpec(
+          table_spec=tspec,
+          input_shape=(128, 1),
+          output_shape=(128, 64),
+          name=f'feature_{name}',
+      )
+      specs.append(fspec)
+
+    table_stacking.auto_stack_tables(
+        specs,
+        global_device_count=4,
+        num_sc_per_device=2,
+        activation_mem_bytes_limit=67108864,
+    )
+    src_proto = embedding.create_proto_from_feature_specs(
+        specs,
+        global_device_count=4,
+        num_sparsecore_per_device=2,
+    )
+    self.assertEqual(
+        src_proto.stacked_table_specs[0].activation_mem_bytes_limit, 67108864
+    )
+
+    target_proto, _ = checkpoint_utils._recompute_target_specs(
+        src_proto, num_global_devices=8, num_sc_per_device=2
+    )
+    self.assertEqual(
+        target_proto.stacked_table_specs[0].activation_mem_bytes_limit, 67108864
+    )
+
 
 if __name__ == '__main__':
   absltest.main()
