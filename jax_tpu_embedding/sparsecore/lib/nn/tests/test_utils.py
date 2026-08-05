@@ -65,8 +65,13 @@ def row_col_id_initializer(
         + col_indices[None, :] / 1000000.0
     )
 
-  def init(key, shape) -> jax.Array:
-    del key
+  def init(
+      key: jax.Array,
+      shape: Sequence[int],
+      dtype: jax.typing.DTypeLike | None = None,
+      out_sharding: object = None,
+  ) -> jax.Array:
+    del key, dtype, out_sharding
     # We should have 7 digits for fp32
     assert leading_value <= 9  # 1 digit for leading value
     assert len(shape) == 2
@@ -74,7 +79,7 @@ def row_col_id_initializer(
     assert shape[1] <= 999  # 3 digits for cols
     return create_array(leading_value, shape)
 
-  return init  # pyrefly: ignore[bad-return]
+  return init
 
 
 def row_id_with_offset_initializer_value(
@@ -98,11 +103,16 @@ def row_id_with_offset_initializer(
     # Reshape to (rows, 1) and broadcast to (rows, cols)
     return jnp.broadcast_to(row_values[:, jnp.newaxis], (rows, cols))
 
-  def init(key, shape) -> jax.Array:
-    del key
+  def init(
+      key: jax.Array,
+      shape: Sequence[int],
+      dtype: jax.typing.DTypeLike | None = None,
+      out_sharding: object = None,
+  ) -> jax.Array:
+    del key, dtype, out_sharding
     return create_array(offset_value, shape)
 
-  return init  # pyrefly: ignore[bad-return]
+  return init
 
 
 def rotate_sharded_table(
@@ -200,4 +210,4 @@ def row_initialize_with_padding(
   )
   array = row_id_initializer(shape=shape, offset=offset)
   paddings = tuple((0, y - x) for x, y in zip(shape, padded_shape))
-  return np.pad(array, paddings, mode="constant", constant_values=pad_value)  # pyrefly: ignore[bad-return]
+  return jnp.pad(array, paddings, mode="constant", constant_values=pad_value)

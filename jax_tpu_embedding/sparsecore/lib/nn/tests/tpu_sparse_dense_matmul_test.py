@@ -1382,7 +1382,8 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         tuple(jax.tree.leaves(feature_specs)),
     ).compile()
     hlo = compiled.as_text()
-    self.assertIn("u8", hlo)  # pyrefly: ignore[bad-argument-type]
+    self.assertIsNotNone(hlo)
+    self.assertIn("u8", hlo)
 
     activations = sparse_matmul(
         preprocessed_inputs,
