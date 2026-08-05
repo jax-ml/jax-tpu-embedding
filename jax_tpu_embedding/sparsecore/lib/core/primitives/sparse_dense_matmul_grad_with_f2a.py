@@ -187,9 +187,17 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
-  embedding_table_dim_size = ir.RankedTensorType(
-      embedding_table.type
-  ).get_dim_size(1)
+  embedding_table_dim_size = (
+      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
+      if ir.RankedTensorType(embedding_table.type).rank > 1
+      else 1
+  )
+  squeezed_activations_grad = activations_grad
+  is_1d = ir.RankedTensorType(embedding_table.type).rank == 1
+  if is_1d:
+    squeezed_activations_grad = utils.maybe_squeeze_ir(activations_grad, 1)
+
+  param_shape = [1] if is_1d else [1, embedding_table_dim_size]
 
   optimizer_update_computation_name = computation_name
 
@@ -198,60 +206,34 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
       ir.FunctionType.get(
           [
               # Grad.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Param.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Accum.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Local step.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Learning rate.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Rho.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # L1 regularization strength.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # L2 regularization strength.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Max LR multiplier.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               # Global step.
-              ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size], ir.F32Type.get()
-              ),
+              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
           ],
           [
               ir.TupleType.get_tuple([
                   # Updated embedding table.
-                  ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size], ir.F32Type.get()
-                  ),
+                  ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
                   # Updated accumulator.
-                  ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size], ir.F32Type.get()
-                  ),
+                  ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
                   # Updated local step.
-                  ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size], ir.F32Type.get()
-                  ),
+                  ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
               ]),
           ],
       ),
@@ -322,12 +304,12 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
         embedding_table,
         accumulator,
         local_step,
-        activations_grad,
+        squeezed_activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        activations_grad,
+        squeezed_activations_grad,
         embedding_table,
         accumulator,
         local_step,

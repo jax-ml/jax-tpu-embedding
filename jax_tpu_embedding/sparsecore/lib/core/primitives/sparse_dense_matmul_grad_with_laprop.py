@@ -207,9 +207,17 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  embedding_table_dim_size = ir.RankedTensorType(
-      embedding_table.type
-  ).get_dim_size(1)
+  embedding_table_dim_size = (
+      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
+      if ir.RankedTensorType(embedding_table.type).rank > 1
+      else 1
+  )
+  squeezed_activations_grad = activations_grad
+  is_1d = ir.RankedTensorType(embedding_table.type).rank == 1
+  if is_1d:
+    squeezed_activations_grad = utils.maybe_squeeze_ir(activations_grad, 1)
+
+  param_shape = [1] if is_1d else [1, embedding_table_dim_size]
   hlo_f32 = functools.partial(_hlo_f32, emb_dim=embedding_table_dim_size)
 
   optimizer_update = func_dialect.FuncOp(
@@ -217,74 +225,50 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
       (
           [
               ir.RankedTensorType.get(  # grad
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # embedding_table
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # mu
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # nu
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # learning_rate
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # b1
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # decay_rate
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(  # eps
-                  [
-                      1,
-                      ir.RankedTensorType(embedding_table.type).get_dim_size(1),
-                  ],
+                  param_shape,
                   ir.F32Type.get(),
               ),
           ],
           [
               ir.TupleType.get_tuple([
                   ir.RankedTensorType.get(  # embedding_table
-                      [1, embedding_table_dim_size],
+                      param_shape,
                       ir.F32Type.get(),
                   ),
                   ir.RankedTensorType.get(  # mu
-                      [1, embedding_table_dim_size],
+                      param_shape,
                       ir.F32Type.get(),
                   ),
                   ir.RankedTensorType.get(  # nu
-                      [1, embedding_table_dim_size],
+                      param_shape,
                       ir.F32Type.get(),
                   ),
               ]),
@@ -371,12 +355,12 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
         mu,
         nu,
         # activations grad
-        activations_grad,
+        squeezed_activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        activations_grad,
+        squeezed_activations_grad,
         embedding_table,
         # slot variables
         mu,

@@ -157,36 +157,42 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
       if ir.RankedTensorType(embedding_table.type).rank > 1
       else 1
   )
+  squeezed_activations_grad = activations_grad
+  is_1d = ir.RankedTensorType(embedding_table.type).rank == 1
+  if is_1d:
+    squeezed_activations_grad = utils.maybe_squeeze_ir(activations_grad, 1)
+
+  param_shape = [1] if is_1d else [1, embedding_table_dim_size]
 
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
           [
               ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
+                  param_shape,
                   ir.F32Type.get(),
               ),
               ir.RankedTensorType.get(
-                  [1, embedding_table_dim_size],
+                  param_shape,
                   ir.F32Type.get(),
               ),
           ],
           [
               ir.TupleType.get_tuple([
                   ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size],
+                      param_shape,
                       ir.F32Type.get(),
                   ),
                   ir.RankedTensorType.get(
-                      [1, embedding_table_dim_size],
+                      param_shape,
                       ir.F32Type.get(),
                   ),
               ]),
@@ -242,12 +248,12 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
         # slot variables
         accumulator,
         # activations grad
-        activations_grad,
+        squeezed_activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        activations_grad,
+        squeezed_activations_grad,
         embedding_table,
         # slot variables
         accumulator,
