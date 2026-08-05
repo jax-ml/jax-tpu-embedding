@@ -27,6 +27,15 @@ concurrency:
 
 env:
   PIP_INDEX_URL: "https://us-python.pkg.dev/ml-oss-artifacts-published/pypi-mirror/simple"
+  JAX_PLATFORMS: "tpu,cpu"
+  ALLOW_MULTIPLE_LIBTPU_LOAD: "true"
+  TPU_SKIP_MDS_QUERY: "true"
+  REPRESENTATIVE_TEST_TARGETS: >-
+    //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_csr_test
+    //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_csr_minibatching_test
+    //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_grad_with_sgd_minibatching_test
+    //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_grad_with_adagrad_minibatching_test
+    //jax_tpu_embedding/sparsecore/lib/nn/tests:minibatching_test
 
 jobs:
   tpu-test:
@@ -96,14 +105,15 @@ jobs:
 
       - name: Run Bazel TPU tests
         if: steps.check.outputs.skip == 'false'
+        shell: bash
         run: |
           export HERMETIC_PYTHON_VERSION=3.12
           # Forward TPU cluster environment variables from runner host into Bazel test execution
           bazel test --config=public_cache --build_tests_only \
             --local_test_jobs=1 \
-            --test_env=JAX_PLATFORMS=tpu,cpu \
-            --test_env=ALLOW_MULTIPLE_LIBTPU_LOAD=true \
-            --test_env=TPU_SKIP_MDS_QUERY=true \
+            --test_env=JAX_PLATFORMS \
+            --test_env=ALLOW_MULTIPLE_LIBTPU_LOAD \
+            --test_env=TPU_SKIP_MDS_QUERY \
             --test_env=TPU_TOPOLOGY \
             --test_env=TPU_WORKER_ID \
             --test_env=TPU_TOPOLOGY_WRAP \
@@ -117,20 +127,28 @@ jobs:
             --test_env=HOST_BOUNDS \
             --test_env=VBAR_CONTROL_SERVICE_URL \
             --test_output=errors \
-            //jax_tpu_embedding/sparsecore/lib/core/primitives/tests:sparse_dense_matmul_csr_test
+            $REPRESENTATIVE_TEST_TARGETS
 
       # Verify installed wheel on real TPU hardware (outside Bazel sandbox) to ensure compiled C++
       # extensions and Pybind11 bindings correctly link with libtpu.so and execute on SparseCore.
       - name: Build and verify wheel on TPU via Pytest
         if: steps.check.outputs.skip == 'false'
+        shell: bash
         run: |
           export HERMETIC_PYTHON_VERSION=3.12
           mkdir -p "$GITHUB_WORKSPACE/dist"
           bazel run --config=public_cache //tools:build_wheel -- --output_dir="$GITHUB_WORKSPACE/dist"
           python -m pip install --root-user-action=ignore "$GITHUB_WORKSPACE/dist"/*.whl pytest
-          # Run pytest on the simple TPU test from outside the workspace root
+          # Run pytest on representative TPU tests from outside the workspace root
           mkdir -p /tmp/tpu_wheel_test && cd /tmp/tpu_wheel_test
-          JAX_PLATFORMS=tpu,cpu ALLOW_MULTIPLE_LIBTPU_LOAD=true TPU_SKIP_MDS_QUERY=true python -m pytest --tb=short "$GITHUB_WORKSPACE/jax_tpu_embedding/sparsecore/lib/core/primitives/tests/sparse_dense_matmul_csr_test.py"
+          # Dynamically convert each Bazel test target to Python file path and run pytest in an isolated process.
+          # Example: "//jax_tpu_embedding/sparsecore/lib/nn/tests:minibatching_test" ->
+          #          "$GITHUB_WORKSPACE/jax_tpu_embedding/sparsecore/lib/nn/tests/minibatching_test.py"
+          for t in $REPRESENTATIVE_TEST_TARGETS; do
+            rel="${t#//}" # Strip leading "//" prefix from Bazel target name
+            f="$GITHUB_WORKSPACE/${rel//:/\/}.py" # Convert target colon ":" to slash "/" and append ".py" extension
+            python -m pytest --tb=short "$f"
+          done
 
       - name: Save Bazel cache
         if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'

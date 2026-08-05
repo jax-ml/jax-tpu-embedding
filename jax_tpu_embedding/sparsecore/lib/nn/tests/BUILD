@@ -226,13 +226,9 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+tpu_py_strict_test(
     name = "minibatching_test",
     srcs = ["minibatching_test.py"],
-    tags = [
-        "exclusive-if-local",
-        "requires-tpu",
-    ],
     type_checking = "pyrefly",
     deps = [
         ":test_utils",
