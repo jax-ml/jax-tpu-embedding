@@ -139,6 +139,9 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist"
           bazel run --config=public_cache //tools:build_wheel -- --output_dir="$GITHUB_WORKSPACE/dist"
           python -m pip install --root-user-action=ignore "$GITHUB_WORKSPACE/dist"/*.whl pytest
+          SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
+          cp -r "$GITHUB_WORKSPACE/jax_tpu_embedding/sparsecore/lib/nn/tests" "$SITE_PACKAGES/jax_tpu_embedding/sparsecore/lib/nn/"
+          cp -r "$GITHUB_WORKSPACE/jax_tpu_embedding/sparsecore/lib/core/primitives/tests" "$SITE_PACKAGES/jax_tpu_embedding/sparsecore/lib/core/primitives/"
           # Run pytest on representative TPU tests from outside the workspace root
           mkdir -p /tmp/tpu_wheel_test && cd /tmp/tpu_wheel_test
           # Dynamically convert each Bazel test target to Python file path and run pytest in an isolated process.
