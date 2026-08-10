@@ -59,6 +59,7 @@ def _default_stacked_table_spec(
       total_sample_count=batch_size,
       max_ids_per_partition=table_spec.max_ids_per_partition,
       max_unique_ids_per_partition=table_spec.max_unique_ids_per_partition,
+      quantization_config=table_spec.quantization_config,
   )
 
 
@@ -381,7 +382,7 @@ def _group_tables_for_stacking(
     num_sc: int,
     flatten_tables: Mapping[str, embedding_spec.TableSpec],
 ) -> list[list[str]]:
-  """Groups table names by padded dimension, optimizer, and combiner."""
+  """Groups table names by padded dimension, optimizer, combiner, and quantization_config."""
   table_to_padded_dim, _ = round_up_dim_and_vocab_size(flatten_tables, num_sc)
   table_name_map = collections.defaultdict(list)
   for table_name, dim in table_to_padded_dim.items():
@@ -389,6 +390,7 @@ def _group_tables_for_stacking(
         dim,
         flatten_tables[table_name].optimizer,
         flatten_tables[table_name].combiner,
+        flatten_tables[table_name].quantization_config,
     )
     table_name_map[key].append(table_name)
   return list(table_name_map.values())
@@ -553,6 +555,16 @@ def _verify_stack_tables(
     raise ValueError(
         f"Tables {table_names} in group {stack_name} have different combiners."
     )
+  # All tables in a group should have same quantization config.
+  if not all(
+      tables[t].quantization_config
+      == tables[table_names[0]].quantization_config
+      for t in table_names
+  ):
+    raise ValueError(
+        f"Tables {table_names} in group {stack_name} have different"
+        " quantization configs."
+    )
 
 
 def compute_table_to_setting_in_stack(
@@ -702,6 +714,7 @@ def _stack_feature_specs(
       max_ids_per_partition=max_ids_per_partition,
       max_unique_ids_per_partition=max_unique_ids_per_partition,
       activation_mem_bytes_limit=activation_mem_bytes_limit,
+      quantization_config=stacked_features[0].table_spec.quantization_config,
   )
 
   def _update_feature(

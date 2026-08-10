@@ -1636,6 +1636,201 @@ class TableStackingTest(parameterized.TestCase):
 
       self.assertEqual(stacked_row_ids_map[stack_name], expected_ids)
 
+  def test_auto_stack_tables_with_quantization_config(self):
+    q_cfg = embedding_spec.QuantizationConfig(
+        min_value=-5.0, max_value=5.0, num_buckets=256
+    )
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=64,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=q_cfg,
+    )
+    table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_b',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=q_cfg,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_a,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_a.embedding_dim),
+            name='feature_spec_a',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_b.embedding_dim),
+            name='feature_spec_b',
+        ),
+    ]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=1,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    self.assertEqual(
+        feature_specs[0].table_spec.stacked_table_spec.quantization_config,
+        q_cfg,
+    )
+    self.assertEqual(
+        feature_specs[1].table_spec.stacked_table_spec.quantization_config,
+        q_cfg,
+    )
+    self.assertEqual(
+        feature_specs[0].table_spec.setting_in_stack.stack_name,
+        'table_a_table_b',
+    )
+
+  def test_auto_stack_tables_different_quantization_configs_split(self):
+    q_cfg_1 = embedding_spec.QuantizationConfig(
+        min_value=-5.0, max_value=5.0, num_buckets=256
+    )
+    q_cfg_2 = embedding_spec.QuantizationConfig(
+        min_value=-2.0, max_value=2.0, num_buckets=256
+    )
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=64,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=q_cfg_1,
+    )
+    table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_b',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=q_cfg_2,
+    )
+    table_spec_c = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_c',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=None,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_a,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_a.embedding_dim),
+            name='feature_spec_a',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_b.embedding_dim),
+            name='feature_spec_b',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_c,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_c.embedding_dim),
+            name='feature_spec_c',
+        ),
+    ]
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=1,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    self.assertEqual(
+        feature_specs[0].table_spec.setting_in_stack.stack_name, 'table_a'
+    )
+    self.assertEqual(
+        feature_specs[1].table_spec.setting_in_stack.stack_name, 'table_b'
+    )
+    self.assertEqual(
+        feature_specs[2].table_spec.setting_in_stack.stack_name, 'table_c'
+    )
+    self.assertEqual(
+        feature_specs[0].table_spec.stacked_table_spec.quantization_config,
+        q_cfg_1,
+    )
+    self.assertEqual(
+        feature_specs[1].table_spec.stacked_table_spec.quantization_config,
+        q_cfg_2,
+    )
+    self.assertIsNone(
+        feature_specs[2].table_spec.stacked_table_spec.quantization_config
+    )
+
+  def test_manual_stacking_different_quantization_configs_raises(self):
+    q_cfg_1 = embedding_spec.QuantizationConfig(
+        min_value=-5.0, max_value=5.0, num_buckets=256
+    )
+    q_cfg_2 = embedding_spec.QuantizationConfig(
+        min_value=-2.0, max_value=2.0, num_buckets=256
+    )
+    table_spec_a = embedding_spec.TableSpec(
+        vocabulary_size=64,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=q_cfg_1,
+    )
+    table_spec_b = embedding_spec.TableSpec(
+        vocabulary_size=120,
+        embedding_dim=10,
+        initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_b',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=q_cfg_2,
+    )
+    feature_specs = [
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_a,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_a.embedding_dim),
+            name='feature_spec_a',
+        ),
+        embedding_spec.FeatureSpec(
+            table_spec=table_spec_b,
+            input_shape=(16, 1),
+            output_shape=(16, table_spec_b.embedding_dim),
+            name='feature_spec_b',
+        ),
+    ]
+    with self.assertRaisesRegex(ValueError, 'different quantization configs'):
+      table_stacking.stack_tables(
+          feature_specs,
+          ['table_a', 'table_b'],
+          global_device_count=1,
+          num_sc_per_device=self.num_sc_per_device,
+      )
+
 
 if __name__ == '__main__':
   absltest.main()
