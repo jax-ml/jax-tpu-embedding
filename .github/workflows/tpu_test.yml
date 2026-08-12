@@ -4,9 +4,15 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - '**.rst'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - '**.rst'
   schedule:
     - cron: "0 6 * * *" # Daily at 06:00 UTC
   workflow_dispatch:

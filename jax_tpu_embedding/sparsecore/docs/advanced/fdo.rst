@@ -42,7 +42,7 @@ All the above steps are customizable and a typical flow looks as follows:
     jit_train_step = jax.jit(train_step, static_argnums=0, ...)
 
     # Create an instance of fdo client
-    fdo_dir = '/tmp/fdo_dumps/"
+    fdo_dir = '/tmp/fdo_dumps/'
     fdo_client = file_fdo_client.NPZFileFDOClient(fdo_dir)
 
     for step in range(100):

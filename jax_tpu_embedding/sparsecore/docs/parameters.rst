@@ -87,7 +87,7 @@ of training, leading to an error like the following:
     Observed max ids per partition: 320 for table: user_table is greater than the
     set max ids per partition: 256...
 
-Next, set ``allow_id_dropping = true`` in
+Next, set ``allow_id_dropping = True`` in
 ``embedding.preprocess_sparse_dense_matmul_input(...)``. This will get past the
 above error and continue training with dropping any extra ids. While this will
 degrade the model quality, it will allows the trainer to analyze more input

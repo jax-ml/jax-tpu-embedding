@@ -127,13 +127,13 @@ If you want to use table stacking call :func:`auto_stack_tables` as follows:
 
 .. code:: python
 
-    from jax_tpu_embedding.sparsecore.lib import embedding
+    from jax_tpu_embedding.sparsecore.lib.nn import embedding
 
     # Optional, only needed if you want to stack tables.
     embedding.auto_stack_tables(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=4, # 4 for TPU v5, 2 for TPU v6e
+        num_sc_per_device=4, # 4 for TPU v5, 2 for TPU v6e and TPU7x
     )
     # Required, this will populate feature stacking related info when more than
     # one feature use same table. It will also do some basic validations on the
@@ -141,7 +141,7 @@ If you want to use table stacking call :func:`auto_stack_tables` as follows:
     embedding.prepare_feature_specs_for_training(
         feature_specs,
         global_device_count=jax.device_count(),
-        num_sc_per_device=4, # 4 for TPU v5, 2 for TPU v6e
+        num_sc_per_device=4, # 4 for TPU v5, 2 for TPU v6e and TPU7x
     )
 
 There is also an API to manually stack tables: :func:`stack_tables`.

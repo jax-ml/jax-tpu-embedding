@@ -13,10 +13,10 @@ Embedding Specification
 Configuring your embedding is done through two primary specs: the :class:`TableSpec`
 and the :class:`FeatureSpec`.
 
-A :class:`FeatureSpec` specifies things like the embedding table size (vocabulary and
+A :class:`TableSpec` specifies things like the embedding table size (vocabulary and
 embedding sizes) and optimizer.
 
-A :class:`TableSpec` specifies which table an embedding feature uses (multiple features
+A :class:`FeatureSpec` specifies which table an embedding feature uses (multiple features
 can use the same table) and the input/output shape of the feature lookup.
 
 Details of the embedding specification are described in the :doc:`Embedding Specification <embedding>`
@@ -40,7 +40,7 @@ performance and which you choose depends on your modeling preference.
 **Flax API**: Using a Flax layer is often the preferred choice as it's a more natural
 fit for Flax based models. Here, the details of performing the embedding lookup and
 gradient based weight update are implemented by the SparseCoreEmbed Flax layer. An example
-of using this can be found in the [Shakespeare on Flax APIs] Colab example.
+of using this can be found in the :doc:`Shakespeare on Flax APIs <tutorials/shakespeare_flax>` Colab example.
 
 .. currentmodule:: jax_tpu_embedding.sparsecore.lib.nn.embedding
 
@@ -61,7 +61,7 @@ and productionize the integration with your model and infrastructure.
 * :doc:`FDO <advanced/fdo>`: Dynamically adapt TPU buffer sizes to optimize memory usage.
 * :doc:`Table and Feature Stacking <advanced/stacking>`: Make fewer, larger lookups to
   reduce memory usage and increase performance.
-* Embedding Pipelining: Overlap SparseCore and TensorCore compute to maximize TPU
+* :doc:`Embedding Pipelining <advanced/embedding_pipelining>`: Overlap SparseCore and TensorCore compute to maximize TPU
   performance.
 * :doc:`Checkpointing <advanced/checkpointing>`: Save and restore from checkpoints for
   increased robustness.
