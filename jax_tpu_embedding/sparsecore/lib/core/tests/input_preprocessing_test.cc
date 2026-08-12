@@ -407,9 +407,9 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   }
 
   TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
-                          PreprocessSparseDenseMatmulInput(
-                              absl::MakeSpan(input_batches), stacked_tables,
-                              options, &output_csr_arrays));
+                       PreprocessSparseDenseMatmulInput(
+                           absl::MakeSpan(input_batches), stacked_tables,
+                           options, &output_csr_arrays));
 
   for (const auto& [table_name, _] : stacked_tables) {
     // Verify that the returned output structure has empty matrices for this
@@ -762,9 +762,9 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
           .batch_number = 100,
           .all_reduce_interface = &all_reducers[host_id]};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
-                              PreprocessSparseDenseMatmulInput(
-                                  absl::MakeSpan(*input_batches[host_id]),
-                                  stacked_tables, options));
+                           PreprocessSparseDenseMatmulInput(
+                               absl::MakeSpan(*input_batches[host_id]),
+                               stacked_tables, options));
       {
         absl::MutexLock lock(mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
@@ -811,9 +811,9 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
           .enable_minibatching = true,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
-                              PreprocessSparseDenseMatmulInput(
-                                  absl::MakeSpan(*input_batches[host_id]),
-                                  stacked_tables, options));
+                           PreprocessSparseDenseMatmulInput(
+                               absl::MakeSpan(*input_batches[host_id]),
+                               stacked_tables, options));
       {
         absl::MutexLock lock(mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
@@ -862,9 +862,9 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
           .enable_minibatching = true,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
-                              PreprocessSparseDenseMatmulInput(
-                                  absl::MakeSpan(*input_batches[host_id]),
-                                  stacked_tables, options));
+                           PreprocessSparseDenseMatmulInput(
+                               absl::MakeSpan(*input_batches[host_id]),
+                               stacked_tables, options));
       {
         absl::MutexLock lock(mutex);
         minibatches_per_host[host_id] = output.num_minibatches;
