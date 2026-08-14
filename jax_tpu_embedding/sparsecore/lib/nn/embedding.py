@@ -1452,9 +1452,10 @@ def tpu_sparse_dense_matmul_grad(
       # grad, table, slot_0, slot_1, ..., slot_n, hyperparam_0, hyperparam_1,
       # ..., hyperparam_n
       in_avals = [aval] * (1 + 1 + num_slots + num_hyperparams)
-      custom_jaxpr = jax.make_jaxpr(
+      lowered_opt = jax.jit(
           stack_table_spec.optimizer.custom_computation_fn
-      )(*in_avals)
+      ).lower(*in_avals)
+      stablehlo_text = lowered_opt.as_text(dialect="stablehlo")
 
       updated_variables = optimizer_primitive.bind(
           row_pointer,
@@ -1466,7 +1467,7 @@ def tpu_sparse_dense_matmul_grad(
           *hyper_params,
           *flatten_variables,
           num_hyperparameters=len(hyper_params),
-          jaxpr=custom_jaxpr,
+          stablehlo=stablehlo_text,
           max_ids_per_partition=stack_table_spec.max_ids_per_partition,
           max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
           computation_name=symbol_name,

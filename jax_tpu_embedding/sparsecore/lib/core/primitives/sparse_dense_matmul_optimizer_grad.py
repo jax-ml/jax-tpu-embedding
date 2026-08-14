@@ -43,9 +43,7 @@ from typing import Sequence, Tuple
 import jax
 from jax import core
 import jax.extend as jex
-from jax.extend import source_info_util
 from jax.extend.mlir import ir
-from jax.extend.mlir.dialects import func as func_dialect
 from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
@@ -79,7 +77,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
     activations_grad: core.ShapedArray,
     *hyperparams_and_embedding_vars: core.ShapedArray,
     num_hyperparameters: int,
-    jaxpr: jex.core.ClosedJaxpr,
+    stablehlo: str | bytes | ir.Module,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
@@ -124,8 +122,11 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
   for var in embedding_variables:
     if len(var.shape) != 2:
       raise ValueError(f"embedding variables must have rank 2, got {var.shape}")
-  if not isinstance(jaxpr, jex.core.ClosedJaxpr):
-    raise ValueError("jaxpr must be a ClosedJaxpr")
+  if not isinstance(stablehlo, (str, bytes, ir.Module)):
+    raise ValueError(
+        "stablehlo must be a string, bytes, or ir.Module, got"
+        f" {type(stablehlo)}"
+    )
 
   return tuple(
       core.ShapedArray(
@@ -151,7 +152,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     activations_grad: ir.BlockArgument,
     *hyperparams_and_embedding_vars: ir.BlockArgument,
     num_hyperparameters: int,
-    jaxpr: jex.core.ClosedJaxpr,
+    stablehlo: str | bytes | ir.Module,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
@@ -176,68 +177,21 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
-  optimizer_update_computation_name = computation_name
-
   tables = list(embedding_variables)
-  dim_size = (
-      ir.RankedTensorType(tables[0].type).get_dim_size(1)
-      if ir.RankedTensorType(tables[0].type).rank > 1
-      else 1
+
+  if isinstance(stablehlo, (str, bytes)):
+    submodule = ir.Module.parse(stablehlo, context=ctx.module_context.context)
+  elif isinstance(stablehlo, ir.Module):
+    submodule = stablehlo
+  else:
+    raise ValueError(f"Unsupported stablehlo type: {type(stablehlo)}")
+
+  optimizer_update_computation_name = mlir.merge_mlir_modules(
+      ctx.module_context.module,
+      computation_name,
+      submodule,
+      dst_symtab=ctx.module_context.symbol_table,
   )
-  row_tensor_type = ir.RankedTensorType.get([1, dim_size], ir.F32Type.get())
-
-  wrapper_input_types: list[ir.Type] = [row_tensor_type]  # grad
-  for _ in tables:
-    wrapper_input_types.append(row_tensor_type)
-  for _ in range(num_hyperparameters):
-    wrapper_input_types.append(row_tensor_type)
-
-  const_types = [utils.aval_to_ir_type(ctx, v.aval) for v in jaxpr.constvars]
-  wrapper_input_types.extend(const_types)
-
-  output_types = [row_tensor_type for _ in range(num_slot_variables + 1)]
-
-  wrapper_func = func_dialect.FuncOp(
-      optimizer_update_computation_name,
-      (
-          wrapper_input_types,
-          [ir.TupleType.get_tuple(output_types)],
-      ),
-      ip=ctx.module_context.ip,
-      visibility="private",
-  )
-
-  entry_block = wrapper_func.add_entry_block()
-  with ir.InsertionPoint(entry_block):
-    wa = list(entry_block.arguments)
-
-    in_args = wa[: 1 + len(tables) + num_hyperparameters]
-    consts_wa = wa[1 + len(tables) + num_hyperparameters :]
-
-    name_stack = source_info_util.NameStack()
-    tokens_in = mlir.TokenSet()
-
-    out_vals, _ = mlir.jaxpr_subcomp(
-        ctx.module_context,
-        jaxpr.jaxpr,
-        name_stack,
-        tokens_in,
-        consts_wa,
-        *in_args,
-        dim_var_values=[],
-        const_lowering={},
-        outer_traceback=None,
-    )
-
-    flat_out_vals = []
-    for v in out_vals:
-      if isinstance(v, (list, tuple)):
-        flat_out_vals.extend(v)
-      else:
-        flat_out_vals.append(v)
-
-    result_tuple = hlo.tuple(flat_out_vals)
-    func_dialect.ReturnOp([result_tuple])
 
   hyperparams = []
   f32type = utils.aval_to_ir_type(ctx, core.ShapedArray((), np.float32))

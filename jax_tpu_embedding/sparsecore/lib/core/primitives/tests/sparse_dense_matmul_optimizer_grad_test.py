@@ -180,7 +180,11 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
-    closed_jaxpr = jax.make_jaxpr(sgd_jax)(grad_aval, table_aval, lr_aval)
+    stablehlo = (
+        jax.jit(sgd_jax)
+        .lower(grad_aval, table_aval, lr_aval)
+        .as_text(dialect="stablehlo")
+    )
 
     # Do the embedding update.
     (updated_emb_table,) = self.tpu_sparse_dense_matmul_grad_with_optimizer(
@@ -193,7 +197,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
         *hyperparams,
         *emb_tables,
         num_hyperparameters=len(hyperparams),
-        jaxpr=closed_jaxpr,
+        stablehlo=stablehlo,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         computation_name="optimizer_test_computation",
@@ -258,8 +262,10 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     accum_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
-    closed_jaxpr = jax.make_jaxpr(adagrad_jax)(
-        grad_aval, table_aval, accum_aval, lr_aval
+    stablehlo = (
+        jax.jit(adagrad_jax)
+        .lower(grad_aval, table_aval, accum_aval, lr_aval)
+        .as_text(dialect="stablehlo")
     )
 
     updated_table, updated_accumulator = (
@@ -273,7 +279,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
             *hyperparams,
             *emb_tables,
             num_hyperparameters=len(hyperparams),
-            jaxpr=closed_jaxpr,
+            stablehlo=stablehlo,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
@@ -363,16 +369,20 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     l2_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     beta_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
 
-    closed_jaxpr = jax.make_jaxpr(ftrl_jax)(
-        grad_aval,
-        table_aval,
-        accum_aval,
-        linear_aval,
-        lr_aval,
-        lr_power_aval,
-        l1_aval,
-        l2_aval,
-        beta_aval,
+    stablehlo = (
+        jax.jit(ftrl_jax)
+        .lower(
+            grad_aval,
+            table_aval,
+            accum_aval,
+            linear_aval,
+            lr_aval,
+            lr_power_aval,
+            l1_aval,
+            l2_aval,
+            beta_aval,
+        )
+        .as_text(dialect="stablehlo")
     )
 
     updated_table, updated_accumulator, updated_linear = (
@@ -386,7 +396,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
             *hyperparams,
             *emb_tables,
             num_hyperparameters=len(hyperparams),
-            jaxpr=closed_jaxpr,
+            stablehlo=stablehlo,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
@@ -479,15 +489,19 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     beta_2_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     epsilon_hat_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
 
-    closed_jaxpr = jax.make_jaxpr(adam_jax)(
-        grad_aval,
-        table_aval,
-        m_aval,
-        v_aval,
-        alpha_t_aval,
-        beta_1_aval,
-        beta_2_aval,
-        epsilon_hat_aval,
+    stablehlo = (
+        jax.jit(adam_jax)
+        .lower(
+            grad_aval,
+            table_aval,
+            m_aval,
+            v_aval,
+            alpha_t_aval,
+            beta_1_aval,
+            beta_2_aval,
+            epsilon_hat_aval,
+        )
+        .as_text(dialect="stablehlo")
     )
 
     updated_table, updated_momentum, updated_velocity = (
@@ -501,7 +515,7 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
             *hyperparams,
             *emb_tables,
             num_hyperparameters=len(hyperparams),
-            jaxpr=closed_jaxpr,
+            stablehlo=stablehlo,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
             computation_name="optimizer_test_computation",
