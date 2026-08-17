@@ -284,7 +284,7 @@ def run_model():
       preprocessed_inputs,
       emb_variables,
       labels,
-  ) -> tuple[TrainState, TrainMetrics, Nested[jax.Array]]:
+  ) -> tuple[TrainState, TrainMetrics, Nested[embedding.EmbeddingVariables]]:
     """Performs a single training step at the chip level."""
 
     # Sparse forward pass - embedding lookup.

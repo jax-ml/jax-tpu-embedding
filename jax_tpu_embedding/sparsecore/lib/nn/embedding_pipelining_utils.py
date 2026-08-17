@@ -317,7 +317,7 @@ NestedEmbeddingVariables = embedding.Nested[embedding.EmbeddingVariables]
 # You could make these a PyTree and include more information to be passed
 # between SC and TC stagest.
 DefaultSparseInputs = embedding.PreprocessedInput
-DefaultEmbeddingActivations = jax.Array | None
+DefaultEmbeddingActivations = NestedArray | None
 DefaultEmbeddingGradients = jax.Array | None
 DefaultScFwdAux = types.NoneType
 DefaultTcAux = types.NoneType
