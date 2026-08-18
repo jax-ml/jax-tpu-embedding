@@ -543,6 +543,86 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     np.testing.assert_allclose(updated_momentum, expected_updated_m)
     np.testing.assert_allclose(updated_velocity, expected_updated_v)
 
+  def test_sc_emb_backward_pass_with_clipping(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_sharded = utils.shard_emb_table(
+        self.emb_table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    z_grad = jnp.full(
+        (
+            self.batch_size // self.num_chips,
+            self.emb_size,
+        ),
+        10.0,
+        np.float32,
+    )
+    emb_tables = [emb_table_sharded[0]]
+    hyperparams = [1.0]
+
+    def sgd_jax(grad, table, lr):
+      return table - lr * grad
+
+    emb_size = self.emb_size
+    grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+    lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+
+    min_value = -2.0
+    max_value = 5.0
+
+    def sgd_with_clip(grad, table, lr):
+      return jnp.clip(sgd_jax(grad, table, lr), min_value, max_value)
+
+    stablehlo = (
+        jax.jit(sgd_with_clip)
+        .lower(grad_aval, table_aval, lr_aval)
+        .as_text(dialect="stablehlo")
+    )
+
+    (updated_emb_table,) = self.tpu_sparse_dense_matmul_grad_with_optimizer(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        np.int32(1),
+        z_grad,
+        *hyperparams,
+        *emb_tables,
+        num_hyperparameters=len(hyperparams),
+        stablehlo=stablehlo,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        computation_name="optimizer_test_computation",
+        sharding_strategy=1,
+    )
+
+    expected_updated_emb_table = self._get_expected_updated_table(
+        self.emb_table,
+        z_grad,
+        self.input_tensor,
+        self.input_weights,
+        sgd_with_clip,
+        hyperparams[0],
+    )
+    np.testing.assert_allclose(updated_emb_table, expected_updated_emb_table)
+
 
 if __name__ == "__main__":
   absltest.main()

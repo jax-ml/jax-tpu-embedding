@@ -1440,22 +1440,41 @@ def tpu_sparse_dense_matmul_grad(
     if isinstance(
         stack_table_spec.optimizer, embedding_spec.CustomOptimizerSpec
     ):
-      if stack_table_spec.optimizer.custom_computation_fn is None:
-        raise ValueError(
-            "custom_computation_fn must be provided for CustomOptimizerSpec"
-        )
-
       dim_size = stack_table_spec.stack_embedding_dim
       num_slots = len(stack_table_spec.optimizer.slot_variables_initializers())
       num_hyperparams = len(hyper_params)
-      aval = jax.ShapeDtypeStruct((1, dim_size), jnp.float32)
-      # grad, table, slot_0, slot_1, ..., slot_n, hyperparam_0, hyperparam_1,
-      # ..., hyperparam_n
-      in_avals = [aval] * (1 + 1 + num_slots + num_hyperparams)
-      lowered_opt = jax.jit(
-          stack_table_spec.optimizer.custom_computation_fn
-      ).lower(*in_avals)
-      stablehlo_text = lowered_opt.as_text(dialect="stablehlo")
+      min_val, max_val = None, None
+      if (
+          embedding_var_limits is not None
+          and stacked_table_name in embedding_var_limits
+      ):
+        min_val, max_val = embedding_var_limits[stacked_table_name]
+
+      if stack_table_spec.optimizer.stablehlo is not None:
+        stablehlo_text = (
+            embedding_spec.CustomOptimizerSpec.wrap_stablehlo_with_limits(
+                stack_table_spec.optimizer.stablehlo,
+                embedding_dim=dim_size,
+                num_slot_variables=num_slots,
+                num_hyperparameters=num_hyperparams,
+                min_value=min_val,
+                max_value=max_val,
+            )
+        )
+      elif stack_table_spec.optimizer.custom_computation_fn is not None:
+        stablehlo_text = embedding_spec.CustomOptimizerSpec.lower_to_stablehlo(
+            stack_table_spec.optimizer.custom_computation_fn,
+            embedding_dim=dim_size,
+            num_slot_variables=num_slots,
+            num_hyperparameters=num_hyperparams,
+            min_value=min_val,
+            max_value=max_val,
+        )
+      else:
+        raise ValueError(
+            "Either stablehlo or custom_computation_fn must be provided for"
+            " CustomOptimizerSpec"
+        )
 
       updated_variables = optimizer_primitive.bind(
           row_pointer,
@@ -1471,6 +1490,8 @@ def tpu_sparse_dense_matmul_grad(
           max_ids_per_partition=stack_table_spec.max_ids_per_partition,
           max_unique_ids_per_partition=stack_table_spec.max_unique_ids_per_partition,
           computation_name=symbol_name,
+          sharding_strategy=sharding_strategy_val,
+          enable_minibatching=enable_minibatching,
       )
     else:
       extra_kwargs = {}

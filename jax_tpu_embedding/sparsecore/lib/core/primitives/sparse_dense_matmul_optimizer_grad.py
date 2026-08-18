@@ -82,8 +82,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
+    enable_minibatching: bool = False,
 ) -> Tuple[core.ShapedArray, ...]:
-  """Abstract eval for sparse_dense_matmul_adagrad."""
+  """Abstract eval for sparse_dense_matmul_optimizer_grad."""
+  del enable_minibatching
   hyperparameters = hyperparams_and_embedding_vars[:num_hyperparameters]
   embedding_variables = hyperparams_and_embedding_vars[num_hyperparameters:]
 
@@ -157,9 +159,9 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     max_unique_ids_per_partition: int,
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
+    enable_minibatching: bool = False,
 ) -> Tuple[Sequence[ir.Value], ...]:
   """Lowering for sparse_dense_matmul_optimizer_grad."""
-  del num_minibatches_per_physical_sparse_core
   hyperparameters = hyperparams_and_embedding_vars[:num_hyperparameters]
   embedding_variables = hyperparams_and_embedding_vars[num_hyperparameters:]
 
@@ -205,19 +207,36 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   activations_grad_sq = utils.maybe_squeeze_ir(activations_grad, 1)
   tables_sq = [utils.maybe_squeeze_ir(table, 1) for table in tables]
 
-  operands = (
-      [
-          lhs_row_pointers,
-          lhs_local_embedding_ids,
-          lhs_local_sample_ids,
-          lhs_gains,
-          activations_grad_sq,
-      ]
-      + tables_sq
-      + hyperparams
-  )
+  if enable_minibatching:
+    call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
+    operands = (
+        [
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            num_minibatches_per_physical_sparse_core,
+        ]
+        + tables_sq
+        + [activations_grad_sq]
+        + hyperparams
+    )
+  else:
+    call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
+    operands = (
+        [
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            activations_grad_sq,
+        ]
+        + tables_sq
+        + hyperparams
+    )
+
   op = jax.ffi.ffi_lowering(
-      "SparseDenseMatmulGradOpWithOptimizerUpdate",
+      call_target,
       result_types=[
           ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])
       ],

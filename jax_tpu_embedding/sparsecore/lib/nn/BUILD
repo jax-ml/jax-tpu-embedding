@@ -38,6 +38,8 @@ pytype_strict_library(
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
     ],
 )
 
