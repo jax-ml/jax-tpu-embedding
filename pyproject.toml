@@ -63,8 +63,6 @@ ignore = [
     "C417",
     # Unnecessary dict comprehension for iterable
     "C420",
-    # Object names too complex
-    "C901",
     # Using `yield` and `return {value}` in a generator function can lead to confusing behavior
     "B901",
     # Class could be dataclass or namedtuple
@@ -103,7 +101,18 @@ select = [
 ]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 18
+# Baseline: covers 99% of existing functions cleanly.
+max-complexity = 12
+
+# TODO(b/548662551): Refactor legacy files exceeding McCabe complexity threshold.
+[tool.ruff.lint.per-file-ignores]
+"**/checkpoint_utils.py" = ["C901"]
+"**/table_stacking.py" = ["C901"]
+"**/embedding.py" = ["C901"]
+"**/input_preprocessing.py" = ["C901"]
+"**/csv_file_fdo_client.py" = ["C901"]
+"**/jax_sc_shakespeare_jit.py" = ["C901"]
+"**/jax_sc_shakespeare_jit_flax_nnx.py" = ["C901"]
 
 [tool.pyrefly]
 preset = "basic"
