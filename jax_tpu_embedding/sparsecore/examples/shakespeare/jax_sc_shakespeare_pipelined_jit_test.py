@@ -219,10 +219,9 @@ class EmbeddingPipelineTest(absltest.TestCase):
     # Define sharding for model input and output data
 
     self.pipeline_input_sharding = self.global_sharding
+    # pytype: disable=wrong-arg-types
     self.output_sharding = ShakespeareModelOutput(
-        # pytype: disable=wrong-arg-types
-        # pyrefly: ignore[bad-argument-type]
-        metrics_update=self.replicated_sharding
+        metrics_update=self.replicated_sharding,
     )
     # pytype: enable=wrong-arg-types
 
@@ -437,8 +436,11 @@ class EmbeddingPipelineTest(absltest.TestCase):
   def _post_train_step(self, step: int, model_output: ShakespeareModelOutput):
     """Performs any special handling or consumption of the train step outputs."""
 
-    if ep_utils.is_output_valid(step, self.config.num_steps):
-      self.train_metrics = self.train_metrics.merge(model_output.metrics_update)  # pyrefly: ignore[bad-argument-type]
+    if (
+        ep_utils.is_output_valid(step, self.config.num_steps)
+        and model_output.metrics_update is not None
+    ):
+      self.train_metrics = self.train_metrics.merge(model_output.metrics_update)
 
     if (step + 1) % self.config.log_frequency == 0:
       m = self.train_metrics.compute()
@@ -454,8 +456,8 @@ class EmbeddingPipelineTest(absltest.TestCase):
     This test trains the model for a number of steps and then checks that the
     final loss is less than a certain threshold.
     """
-    pipeline_state: ShakespeareModelPipelineState = None  # pyrefly: ignore[bad-assignment]
-    pipeline_input: ShakesperaeModelPipelineCurrentStepInput = None  # pyrefly: ignore[bad-assignment]
+    pipeline_state: ShakespeareModelPipelineState | None = None
+    pipeline_input: ShakesperaeModelPipelineCurrentStepInput | None = None
     train_step = None
     fake_tc_train_step = None
 
