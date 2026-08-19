@@ -242,3 +242,15 @@ tpu_py_strict_test(
         pypi_requirement("portpicker"),
     ],
 )
+
+pytype_strict_contrib_test(
+    name = "custom_optimizer_lowering_test",
+    srcs = ["custom_optimizer_lowering_test.py"],
+    env = {"JAX_PLATFORMS": "cpu"},
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:custom_optimizer_lowering",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("jax"),
+    ],
+)

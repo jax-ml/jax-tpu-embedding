@@ -21,12 +21,27 @@ package(
 )
 
 pytype_strict_library(
+    name = "custom_optimizer_lowering",
+    srcs = [
+        "custom_optimizer_lowering.py",
+    ],
+    type_checking = "pyrefly",
+    deps = [
+        pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
+    ],
+)
+
+pytype_strict_library(
     name = "embedding_spec",
     srcs = [
         "embedding_spec.py",
     ],
     type_checking = "pyrefly",
     deps = [
+        ":custom_optimizer_lowering",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_momentum",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adam",
@@ -38,8 +53,6 @@ pytype_strict_library(
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
-        pypi_requirement("jax/extend/mlir:ir"),
-        pypi_requirement("jax/extend/mlir/dialects:func_dialect"),
     ],
 )
 
@@ -48,6 +61,7 @@ pytype_strict_library(
     srcs = ["embedding.py"],
     type_checking = "pyrefly",
     deps = [
+        ":custom_optimizer_lowering",
         ":embedding_proto_utils",
         ":embedding_spec",
         ":table_stacking",
@@ -109,6 +123,7 @@ pytype_strict_library(
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
     deps = [
+        ":custom_optimizer_lowering",  # buildcleaner: keep
         ":embedding",  # buildcleaner: keep
         ":embedding_proto_utils",  # buildcleaner: keep
         ":embedding_spec",  # buildcleaner: keep

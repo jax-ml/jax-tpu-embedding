@@ -37,6 +37,7 @@ from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_activation_unstack
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_gradient_stack
+from jax_tpu_embedding.sparsecore.lib.nn import custom_optimizer_lowering
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_proto_utils
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
@@ -1451,18 +1452,16 @@ def tpu_sparse_dense_matmul_grad(
         min_val, max_val = embedding_var_limits[stacked_table_name]
 
       if stack_table_spec.optimizer.stablehlo is not None:
-        stablehlo_text = (
-            embedding_spec.CustomOptimizerSpec.wrap_stablehlo_with_limits(
-                stack_table_spec.optimizer.stablehlo,
-                embedding_dim=dim_size,
-                num_slot_variables=num_slots,
-                num_hyperparameters=num_hyperparams,
-                min_value=min_val,
-                max_value=max_val,
-            )
+        stablehlo_text = custom_optimizer_lowering.wrap_stablehlo_with_limits(
+            stack_table_spec.optimizer.stablehlo,
+            embedding_dim=dim_size,
+            num_slot_variables=num_slots,
+            num_hyperparameters=num_hyperparams,
+            min_value=min_val,
+            max_value=max_val,
         )
       elif stack_table_spec.optimizer.custom_computation_fn is not None:
-        stablehlo_text = embedding_spec.CustomOptimizerSpec.lower_to_stablehlo(
+        stablehlo_text = custom_optimizer_lowering.lower_to_stablehlo(
             stack_table_spec.optimizer.custom_computation_fn,
             embedding_dim=dim_size,
             num_slot_variables=num_slots,
