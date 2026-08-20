@@ -19,7 +19,7 @@ internal link:jax-sc-embedding-pipelining
 from collections.abc import Callable
 import functools
 import types
-from typing import Generic, ParamSpec, Protocol, TypeAlias, TypeVar
+from typing import Any, Generic, ParamSpec, Protocol, TypeAlias, TypeVar
 
 from flax import struct
 import jax
@@ -27,6 +27,7 @@ import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
+import numpy as np
 
 # stubs for user defined types (internal only, users should not use these types)
 
@@ -72,6 +73,13 @@ def _eval_shape(
       out,
       sharding,
   )
+
+
+def _safe_copy(x: Any) -> Any:
+  """Safe copy of a JAX or NumPy array; passes through non-arrays."""
+  if isinstance(x, (jax.Array, np.ndarray)):
+    return jnp.copy(x)
+  return x
 
 
 def _replace_shape_dtype_struct(
@@ -610,13 +618,13 @@ def get_initial_state(
       ),
       step_before_last_step_inputs=StepBeforeLastStepInput(
           sparse_inputs=jax.tree.map(
-              jnp.copy, placeholder_pipeline_input.sparse_inputs
+              _safe_copy, placeholder_pipeline_input.sparse_inputs
           ),
           embedding_gradients=placeholder_emb_grads,
           tc_aux=aux,
       ),
       placeholder_output=placeholder_output,
-      placeholder_tc_aux=jax.tree.map(jnp.copy, aux),
+      placeholder_tc_aux=jax.tree.map(_safe_copy, aux),
   )
 
 
