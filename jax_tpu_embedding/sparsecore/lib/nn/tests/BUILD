@@ -254,3 +254,16 @@ pytype_strict_contrib_test(
         pypi_requirement("jax"),
     ],
 )
+
+pytype_strict_contrib_test(
+    name = "embedding_pipelining_utils_test",
+    srcs = ["embedding_pipelining_utils_test.py"],
+    env = {"JAX_PLATFORMS": "cpu"},
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_pipelining_utils",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
+)
