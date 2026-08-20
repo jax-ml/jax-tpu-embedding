@@ -15,11 +15,9 @@
 
 from typing import Any, Sequence
 
-import jax
 from jax import core
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import stablehlo as hlo
-from jax.interpreters import mlir
 import numpy as np
 
 
@@ -171,18 +169,6 @@ def to_value_sequence(results: Any) -> Sequence[ir.Value]:
     assert isinstance(r, ir.Value)
     typed_results.append(r)
   return typed_results
-
-
-def aval_to_ir_type(
-    ctx: mlir.LoweringRuleContext, aval: core.AbstractValue
-) -> ir.Type:
-  """Converts an abstract value to an MLIR type with JAX version compatibility."""
-  if jax.__version_info__ >= (0, 10, 1):
-    return mlir.aval_to_ir_type(ctx.module_context, aval)
-
-  else:
-    func = getattr(mlir, "aval_to_ir_type")
-    return func(aval)
 
 
 def maybe_squeeze_abstract_eval(

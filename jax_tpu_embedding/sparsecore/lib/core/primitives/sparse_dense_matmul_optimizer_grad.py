@@ -196,7 +196,9 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   )
 
   hyperparams = []
-  f32type = utils.aval_to_ir_type(ctx, core.ShapedArray((), np.float32))
+  f32type = mlir.aval_to_ir_type(
+      ctx.module_context, core.ShapedArray((), np.float32)
+  )
   for param in hyperparameters:
     if ir.RankedTensorType(param.type).rank == 0:
       hyperparams.append(param)

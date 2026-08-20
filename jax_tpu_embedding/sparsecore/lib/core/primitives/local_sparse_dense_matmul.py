@@ -137,7 +137,7 @@ def _tpu_local_sparse_dense_matmul_lowering(
 
   results = jax.ffi.ffi_lowering(
       "SparseDenseMatmulLocalOp",
-      result_types=[utils.aval_to_ir_type(ctx, out_aval)],
+      result_types=[mlir.aval_to_ir_type(ctx.module_context, out_aval)],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,

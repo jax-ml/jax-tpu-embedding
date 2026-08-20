@@ -18,7 +18,7 @@ dependencies = [
     'einops',
     'etils[epath]',
     'flax >= 0.10.3',
-    'jax >= 0.10.0',
+    'jax >= 0.10.1',
     'numpy',
     'portpicker',
 ]
