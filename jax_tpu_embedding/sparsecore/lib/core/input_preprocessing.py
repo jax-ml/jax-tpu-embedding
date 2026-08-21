@@ -128,6 +128,7 @@ def _preprocess_batch_to_partitions(
     features_weights: PartitionWeightInput,
     num_scs: int,
     num_sc_per_device: int,
+    sample_ids_are_global: bool = False,
 ) -> PartitionMap:
   """Core logic: converts a single batch to structured partitions.
 
@@ -136,6 +137,7 @@ def _preprocess_batch_to_partitions(
     features_weights: Input weights corresponding to each feature.
     num_scs: Total number of global SparseCores.
     num_sc_per_device: Number of SparseCores per device.
+    sample_ids_are_global: Whether sample IDs should be global batch indices.
 
   Returns:
     A mapping from (local_sc_id, global_sc_id) to a list of
@@ -155,7 +157,9 @@ def _preprocess_batch_to_partitions(
       zip(features, features_weights, strict=True)
   ):
     local_sc_id = row_id // batch_size_per_sc
-    local_row_id = row_id % batch_size_per_sc
+    local_row_id = (
+        row_id if sample_ids_are_global else (row_id % batch_size_per_sc)
+    )
     for col_id, weight in zip(sample_feat, sample_weight, strict=True):
       global_sc_id = int(col_id) % num_scs
       local_col_id = int(col_id) // num_scs
@@ -301,6 +305,7 @@ def preprocess_sparse_dense_matmul_input(
     num_sc_per_device: int = -1,
     sharding_strategy: str = "MOD",
     enable_minibatching: bool = False,
+    sample_ids_are_global: bool = False,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Preprocesses standard input into SparseCore CSR wrapped COO format.
 
@@ -316,6 +321,7 @@ def preprocess_sparse_dense_matmul_input(
     num_sc_per_device: Number of sparse cores per device.
     sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
     enable_minibatching: Whether or not minibatching is enabled.
+    sample_ids_are_global: Whether sample IDs should be global batch indices.
 
   Returns:
     A tuple (row_pointers, col_ids, row_ids, gains) forming the CSR wrapped COO
@@ -360,7 +366,11 @@ def preprocess_sparse_dense_matmul_input(
   ##############################################################################
   all_partitions: list[PartitionMap] = [
       _preprocess_batch_to_partitions(
-          feat_batch, weight_batch, num_scs, num_sc_per_device
+          feat_batch,
+          weight_batch,
+          num_scs,
+          num_sc_per_device,
+          sample_ids_are_global=sample_ids_are_global,
       )
       for feat_batch, weight_batch in zip(
           feature_batches, weight_batches, strict=True

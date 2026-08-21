@@ -122,8 +122,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
       )
 
   for var in embedding_variables:
-    if len(var.shape) != 2:
-      raise ValueError(f"embedding variables must have rank 2, got {var.shape}")
+    if len(var.shape) not in (1, 2):
+      raise ValueError(
+          f"embedding variables must have rank 1 or 2, got {var.shape}"
+      )
   if not isinstance(stablehlo, (str, bytes, ir.Module)):
     raise ValueError(
         "stablehlo must be a string, bytes, or ir.Module, got"
@@ -180,7 +182,6 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   })
 
   tables = list(embedding_variables)
-
   if isinstance(stablehlo, (str, bytes)):
     submodule = ir.Module.parse(stablehlo, context=ctx.module_context.context)
   elif isinstance(stablehlo, ir.Module):
