@@ -164,7 +164,6 @@ pytype_strict_library(
     srcs = [
         "input_preprocessing.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":constants",
         "//jax_tpu_embedding/sparsecore/utils",

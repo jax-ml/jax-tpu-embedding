@@ -25,7 +25,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_csr.py",
     ],
-    type_checking = "pyrefly",
     visibility = CORE_USERS,
     deps = [
         ":utils",
@@ -41,7 +40,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sparse_dense_matmul_activation_unstack",
     srcs = ["sparse_dense_matmul_activation_unstack.py"],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         pypi_requirement("jax"),
@@ -54,7 +52,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sparse_dense_matmul_gradient_stack",
     srcs = ["sparse_dense_matmul_gradient_stack.py"],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         pypi_requirement("jax"),
@@ -67,7 +64,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "local_sparse_dense_matmul",
     srcs = ["local_sparse_dense_matmul.py"],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         pypi_requirement("jax"),
@@ -83,7 +79,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_grad_with_sgd.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -101,7 +96,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -119,7 +113,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad_momentum.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -135,7 +128,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sparse_dense_matmul_grad_with_laprop",
     srcs = ["sparse_dense_matmul_grad_with_laprop.py"],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -153,7 +145,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_grad_with_adam.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -171,7 +162,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_grad_with_ftrl.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -187,7 +177,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sparse_dense_matmul_grad_with_f2a",
     srcs = ["sparse_dense_matmul_grad_with_f2a.py"],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -218,7 +207,6 @@ pytype_strict_library(
     srcs = [
         "sparse_dense_matmul_optimizer_grad.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -252,7 +240,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "utils",
     srcs = ["utils.py"],
-    type_checking = "pyrefly",
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/extend/mlir:ir"),
