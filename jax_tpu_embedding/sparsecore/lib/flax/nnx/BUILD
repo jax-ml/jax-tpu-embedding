@@ -30,7 +30,6 @@ pytype_strict_library(
     srcs = [
         "embed.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -45,7 +44,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "checkpoint_utils",
     srcs = ["checkpoint_utils.py"],
-    type_checking = "pyrefly",
     deps = [
         ":embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

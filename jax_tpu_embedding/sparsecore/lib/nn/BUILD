@@ -25,7 +25,6 @@ pytype_strict_library(
     srcs = [
         "custom_optimizer_lowering.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
@@ -39,7 +38,6 @@ pytype_strict_library(
     srcs = [
         "embedding_spec.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":custom_optimizer_lowering",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
@@ -59,7 +57,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "embedding",
     srcs = ["embedding.py"],
-    type_checking = "pyrefly",
     deps = [
         ":custom_optimizer_lowering",
         ":embedding_proto_utils",
@@ -81,7 +78,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "embedding_proto_utils",
     srcs = ["embedding_proto_utils.py"],
-    type_checking = "pyrefly",
     deps = [
         ":embedding_spec",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
@@ -93,7 +89,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "table_stacking",
     srcs = ["table_stacking.py"],
-    type_checking = "pyrefly",
     deps = [
         ":embedding_spec",
         "//jax_tpu_embedding/sparsecore/lib/proto:embedding_spec_py_pb2",
@@ -108,7 +103,6 @@ pytype_strict_library(
     srcs = [
         "embedding_pipelining_utils.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         ":embedding",
         ":embedding_spec",

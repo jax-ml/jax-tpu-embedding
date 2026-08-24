@@ -74,7 +74,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "config",
     srcs = ["config.py"],
-    type_checking = "pyrefly",
     deps = [
         ":dataset",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
