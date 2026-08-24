@@ -59,7 +59,6 @@ pytype_strict_binary(
     ],
     main = "jax_sc_shakespeare_jit.py",
     tags = ["oss_exclude"],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
@@ -93,7 +92,6 @@ tpu_py_strict_test(
     tags = [
         "requires-net:external",  # For xprof uploading.
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",

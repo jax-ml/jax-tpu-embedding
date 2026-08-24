@@ -22,7 +22,6 @@ package(
 tpu_py_strict_test(
     name = "embed_test",
     srcs = ["embed_test.py"],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -62,7 +61,6 @@ tpu_py_strict_test(
 tpu_py_strict_test(
     name = "embed_optimizer_test",
     srcs = ["embed_optimizer_test.py"],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed_optimizer",
         "//third_party/jax:tpu_support",

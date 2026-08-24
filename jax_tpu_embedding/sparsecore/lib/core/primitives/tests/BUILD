@@ -25,7 +25,6 @@ tpu_py_strict_test(
     srcs = [
         "sparse_dense_matmul_csr_test.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
@@ -44,7 +43,6 @@ tpu_py_strict_test(
         # TODO(b/433283451): remove this flag once this is fixed.
         "--xla_tpu_num_embedding_devices=1",
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:local_sparse_dense_matmul",
         "//jax_tpu_embedding/sparsecore/utils",
@@ -60,7 +58,6 @@ tpu_py_strict_test(
     srcs = [
         "sparse_dense_matmul_csr_minibatching_test.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
@@ -97,7 +94,6 @@ tpu_py_strict_test(
     srcs = [
         "sparse_dense_matmul_grad_with_sgd_minibatching_test.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_sgd",
@@ -116,7 +112,6 @@ tpu_py_strict_test(
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad_minibatching_test.py",
     ],
-    type_checking = "pyrefly",
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
