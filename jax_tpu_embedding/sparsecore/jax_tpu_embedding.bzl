@@ -28,7 +28,6 @@ def tpu_py_strict_test(
         tags = None,
         deps = None,
         args = [],
-        type_checking = None,
         pytype_deps = [],
         pytype_srcs = [],
         **kwargs):
@@ -39,7 +38,6 @@ def tpu_py_strict_test(
         tags: BUILD tags to apply to tests.
         deps: Dependencies of the test.
         args: Arguments to apply to tests.
-        type_checking: Type checking tool (bypassed in OSS).
         pytype_deps: Pytype dependencies (bypassed in OSS).
         pytype_srcs: Pytype sources (bypassed in OSS).
         **kwargs: Additional named arguments to apply to tests.
@@ -63,7 +61,6 @@ def tpu_py_strict_test(
         tags = tags,
         deps = deps,
         args = args,
-        type_checking = type_checking,
         pytype_deps = pytype_deps,
         pytype_srcs = pytype_srcs,
         **kwargs
