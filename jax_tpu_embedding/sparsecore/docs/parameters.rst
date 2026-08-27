@@ -57,71 +57,100 @@ Suggested COO buffer size
 
 After we pack all the partitions (with HBM granularity/alignment), we may end up
 with variable partition counts and sizes that further require alignment - the
-final size per SparseCore is ``suggested_coo_buffer_size_per_sc``.
+final size per SparseCore is ``suggested_coo_buffer_size_per_sc`` (and
+``suggested_coo_buffer_size_per_device = suggested_coo_buffer_size_per_sc * num_sc_per_device``).
+
+.. note::
+
+    **Buffer Sizing Invariant:** Because the SparseCore buffer slice on each
+    core must accommodate all incoming partitions combined, the per-core buffer
+    size must always be at least as large as the maximum partition limit:
+
+    .. code-block:: text
+
+        max_ids_per_partition <= suggested_coo_buffer_size_per_sc
 
 Choosing a value for the parameters
 -----------------------------------
 
-The appropriate values for these parameters depend on the model size and input
-training data distribution. However, there are some guidelines to estimate and
-tune these values.
+The appropriate values for these parameters depend on model architecture
+(valency, table stacking), hardware topology (chips, SparseCores per chip), and
+input data distribution.
 
-Batch sizes specified in ``FeatureSpec`` input and output shapes are typically
-global batch sizes (i.e., across all devices). However, buffer size parameters
-like ``max_ids_per_partition`` are estimated based on data distribution on
-each SparseCore, which depends on the batch size per device or per SparseCore.
-When using heuristics like the ones below, ensure that ``batch_size`` refers to
-the batch size processed by a single SparseCore.
+Batch sizes specified in ``FeatureSpec`` shapes are typically global batch sizes
+across all devices. Buffer sizing parameters depend on local per-device or
+per-SparseCore quantities:
 
-Firstly, if not much is known, start with the following:
+* **Device batch size**: ``device_batch_size = global_batch_size // global_device_count``
+* **SparseCore batch size**: ``sc_batch_size = device_batch_size // num_sc_per_device``
+* **Global SparseCore count**: ``total_sparse_cores = global_device_count * num_sc_per_device``
+* **Effective valency** (``valency``): Total average embedding lookups per sample across all stacked features.
 
-.. code:: python
+Recommended Rules of Thumb
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    max_ids_per_partition = 0.4 * global_batch_size
-    max_unique_ids_per_partition = 0.1 * global_batch_size
-    suggested_coo_buffer_size_per_sc = 0.4 * global_batch_size
+If optimal dataset statistics are not yet known, use the following closed-form
+formulas [#f2]_ (where ``sc_total_lookups = sc_batch_size * valency``):
 
-If these are too low, then ids will be dropped during input preprocessing step
-of training, leading to an error like the following:
+1. **Max IDs per Partition** (accounts for ~20% hot-shard concentration under Zipfian skew):
 
-    Observed max ids per partition: 320 for table: user_table is greater than the
-    set max ids per partition: 256...
+   * ``hot_shard_lookups = 0.20 * sc_total_lookups``
+   * ``background_avg_lookups = 0.80 * sc_total_lookups / total_sparse_cores``
+   * ``tail_fluctuation = 2.0 * sqrt(sc_total_lookups / total_sparse_cores)``
+   * ``expected_peak_lookups = hot_shard_lookups + background_avg_lookups + tail_fluctuation``
+   * ``peak_partition_ids = headroom_factor * expected_peak_lookups`` (where ``headroom_factor = 1.25``)
+   * ``max_ids_per_partition = round_up_to_8(peak_partition_ids)``
+   * ``max_unique_ids_per_partition = round_up_to_8(0.5 * peak_partition_ids)``
 
-Next, set ``allow_id_dropping = True`` in
-``embedding.preprocess_sparse_dense_matmul_input(...)``. This will get past the
-above error and continue training with dropping any extra ids. While this will
-degrade the model quality, it will allows the trainer to analyze more input
-batches leading to better estimates of the table limits.
+2. **Suggested COO Buffer Size per Device** (must be at least ``num_sc_per_device * max_ids_per_partition``):
 
-To avoid dropping ids, now increase the ``max_ids_per_partition`` etc. by using
-the reported extra ids count in error message above. Note that when
-``allow_id_dropping`` is true, the above error message is logged as a warning so
-you can still see the observed limits in logs.
+   * ``min_device_buffer = num_sc_per_device * max_ids_per_partition``
+   * ``estimated_device_lookups = 1.2 * device_batch_size * valency + 14 * total_sparse_cores``
+   * ``suggested_coo_buffer_size_per_device = round_up_to_alignment(max(min_device_buffer, estimated_device_lookups), 8 * num_sc_per_device)``
 
-The main function that you will use for preprocessing the input would be
-``preprocess_sparse_dense_matmul_input`` in ``embedding.py``. It returns the
-preprocessed inputs as well as the input statistics (for all the above
-parameters). These can also be used to directly update the feature specs as
-follows. Note, this direct approach to updating the ``feature_specs`` should not
-be used in a multi-host setup as different processes will observe different
-stats leading to different buffer sizes. The correct way to update these stats
-is to use the same values across all processes. You can learn more about this
-using :doc:`FDO <advanced/fdo>`.
+.. tip::
+
+    You can compute these parameters programmatically using ``jax_tpu_embedding.sparsecore.utils.estimate_preprocessing_parameters(...)``.
+
+Common Pitfalls & Troubleshooting
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. **Compiler Invariant Assertion Failure**:
+
+   .. code-block:: text
+
+       max_ids_per_partition <= coo_buffer_size_per_sc
+
+   *Cause:* ``max_ids_per_partition > suggested_coo_buffer_size_per_sc`` (e.g., testing small batch sizes while passing production partition limits).
+   *Fix:* Ensure ``suggested_coo_buffer_size_per_sc >= round_up_to(max_ids_per_partition, 8)`` (or ``suggested_coo_buffer_size_per_device >= num_sc_per_device * round_up_to(max_ids_per_partition, 8)``).
+
+2. **Observed ID Dropping Warning/Error**:
+
+   .. code-block:: text
+
+       Observed max ids per partition: 320 for table: user_table is greater than the set max ids per partition: 256...
+
+   *Cause:* An input partition (or minibatching bucket) exceeded ``max_ids_per_partition``.
+   *Fix:* Increase ``max_ids_per_partition``, enable :doc:`minibatching <advanced/minibatching>`, or set ``allow_id_dropping = True`` during initial warm-up to collect FDO statistics.
+
+3. **Compiler Out-of-Memory (OOM)**:
+
+   .. code-block:: text
+
+       No viable logical replica count for...
+
+   *Cause:* ``max_ids_per_partition`` is too large for available TileSpmem.
+   *Fix:* Decrease batch size, reduce overly conservative limits, or use :doc:`minibatching <advanced/minibatching>`.
+
+Tuning via FDO (Feedback-Directed Optimization)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The recommended production workflow is to use :doc:`FDO <advanced/fdo>`:
 
 .. code:: python
 
     _, stats = embedding.preprocess_sparse_dense_matmul_input(...)
-    embedding.update_preprocessing_parameters(feature_specs, stats)
-
-Another common scenario is when the max ids per partition is very high leading
-to the following compiler error which means it was unable to allocate the
-requested buffer sizes.
-
-    No viable logical replica count for...
-
-This is an indicator that the max ids per partition setting is too high for that
-batch size and topology. It is recommended to decrease the batch size,
-``max_ids_per_partition`` or both to get to compiling stage again.
+    embedding.update_preprocessing_parameters(feature_specs, stats, num_sc_per_device)
 
 Terminology
 -----------
@@ -142,3 +171,11 @@ Terminology
   partition each SparseCore ends up with.
 
 .. [#f1] If ``allow_id_dropping=True``, otherwise would throw an error.
+.. [#f2] Assumes a Zipfian / power-law distribution typical of real-world
+   recommendation systems (e.g., DLRM, content recommenders, search ranking)
+   and sequence models, where popular items and default fallback tokens
+   (e.g. ``0`` or ``UNK``) concentrate ~20% of batch traffic onto the hottest
+   destination SparseCore shard. Under a strictly uniform distribution,
+   ``max_ids_per_partition`` can be scaled closer to
+   ``sc_batch_size * valency / total_sparse_cores``, but uniform sizing severely
+   under-provisions real-world workloads leading to ID dropping.
