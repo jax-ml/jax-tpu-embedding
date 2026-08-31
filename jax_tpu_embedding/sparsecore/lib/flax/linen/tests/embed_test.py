@@ -27,7 +27,6 @@ from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
-
 _VOC_A = 31
 _VOC_B = 75
 _VOC_C = 33
@@ -729,6 +728,144 @@ class EmbeddingLayerTest(parameterized.TestCase):
     embedding._assert_same_structure(
         params_updates[_EMBED_PARAM], params['params'][_EMBED_PARAM].value
     )
+
+  def test_forward_and_backward_with_multi_axis_sharding(self) -> None:
+    devices = jax.devices()
+    device_count = len(devices)
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+
+    mesh_shape = (
+        (2, device_count // 2) if device_count % 2 == 0 else (1, device_count)
+    )
+    sharding_axis = ('x', 'y')
+    mesh = jax.sharding.Mesh(
+        np.array(devices).reshape(mesh_shape), sharding_axis
+    )
+
+    feature_specs = (self.feature_spec_a,)
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        global_device_count=device_count,
+        num_sc_per_device=num_sc_per_device,
+    )
+
+    sc_module = embed.SparseCoreEmbed(
+        feature_specs=feature_specs,
+        mesh=mesh,
+        sharding_axis=sharding_axis,
+    )
+
+    self.assertEqual(sc_module.embedding_table_partition, P(('x', 'y'), None))
+    self.assertEqual(sc_module.data_partition, P(('x', 'y')))
+    self.assertEqual(sc_module.num_shards, mesh.size)
+
+    embedding_lookup_input = sc_module.preprocess_inputs(
+        step=42,
+        features=(self.input_tensor,),
+        features_weights=None,
+    )
+
+    emb_table_a = test_utils.row_initialize_with_padding(
+        self.feature_spec_a.table_spec, pad_value=_PAD_VALUE
+    )
+    emb_table_a_sharded = utils.shard_emb_table(
+        emb_table_a,
+        num_devices=device_count,
+        num_sc_per_device=num_sc_per_device,
+    )
+    table_a_arrays = [
+        jax.device_put(
+            emb_table_a_sharded[i],
+            device=local_device,
+        )
+        for i, local_device in enumerate(devices)
+    ]
+    embedding_variables = {
+        'table_a': embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(
+                    self.feature_spec_a.table_spec.setting_in_stack.padded_vocab_size,
+                    self.feature_spec_a.table_spec.setting_in_stack.padded_embedding_dim,
+                ),
+                sharding=NamedSharding(mesh, P(('x', 'y'), None)),
+                arrays=table_a_arrays,
+            ),
+            slot=embedding_spec.SGDSlotVariables(),
+        ),
+    }
+    var_spec = jax.eval_shape(
+        sc_module.init,
+        jax.random.PRNGKey(0),
+        embedding_lookup_input,
+    )
+
+    out_sharding = nn.get_sharding(var_spec, mesh)
+
+    params = jax.jit(
+        sc_module.init,
+        in_shardings=(
+            NamedSharding(mesh, P()),
+            NamedSharding(mesh, P(sharding_axis)),
+        ),
+        out_shardings=out_sharding,
+    )(
+        jax.random.PRNGKey(0),
+        embedding_lookup_input,
+    )
+
+    params['params'][_EMBED_PARAM] = params['params'][
+        _EMBED_PARAM
+    ].replace_boxed(embedding_variables)
+
+    activations = jax.jit(sc_module.apply)(
+        params,
+        embedding_lookup_input,
+    )
+
+    expected_emb_activations = np.broadcast_to(
+        np.array(
+            [
+                [11.0],
+                [3.0],
+                [9.0],
+                [26.0],
+                [29.0],
+                [31.0],
+                [67.0],
+                [57.0],
+                [15.0],
+                [13.0],
+                [11.0],
+                [8.0],
+                [17.0],
+                [42.0],
+                [30.0],
+                [26.0],
+            ],
+            dtype=np.float32,
+        ),
+        (_BATCH_SIZE, _DIM_A),
+    )
+    np.testing.assert_allclose(
+        activations[0], expected_emb_activations, rtol=1e-2
+    )
+
+    activations_grad = (
+        jnp.ones(
+            (_BATCH_SIZE, _DIM_A),
+            dtype=jnp.float32,
+        ),
+    )
+
+    params_updates = jax.jit(
+        functools.partial(sc_module.apply, method=sc_module.apply_gradient),
+    )(
+        params,
+        activations_grad,
+        embedding_lookup_input,
+    )
+
+    self.assertLen(params_updates, 1)
 
 
 if __name__ == '__main__':
