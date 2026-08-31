@@ -68,9 +68,9 @@ def _hlo_const(arr: np.ndarray) -> ir.Value:
   )
 
 
-def _hlo_f32(x: float, emb_dim: int) -> ir.Value:
-  """Return a <1 x emb_dim> f32 constant filled with x."""
-  return _hlo_const(np.full((1, emb_dim), x, dtype=np.float32))
+def _hlo_f32(x: float, row_shape: list[int]) -> ir.Value:
+  """Return an f32 constant filled with x matching row_shape."""
+  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
 
 
 def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
@@ -183,69 +183,35 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  emb_dim_size = (
-      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
-      if ir.RankedTensorType(embedding_table.type).rank > 1
-      else 1
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  is_1d = embedding_table_type.rank == 1
+  squeezed_activations_grad = (
+      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
   )
+  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
           [
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
               ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size], ir.IntegerType.get_signless(1)
+                  row_shape, ir.IntegerType.get_signless(1)
               ),
           ],
           [
               ir.TupleType.get_tuple([
-                  ir.RankedTensorType.get(
-                      [1, emb_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(
-                      [1, emb_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(
-                      [1, emb_dim_size],
-                      ir.F32Type.get(),
-                  ),
+                  row_type,
+                  row_type,
+                  row_type,
               ]),
           ],
       ),
@@ -268,8 +234,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
         use_nesterov_flag_,
     ) = entry_block.arguments
 
-    one_ = _hlo_f32(1.0, emb_dim_size)
-    neg_one_ = _hlo_f32(-1.0, emb_dim_size)
+    one_ = _hlo_f32(1.0, row_shape)
+    neg_one_ = _hlo_f32(-1.0, row_shape)
 
     # Accumulator
     grad_sq_ = hlo.multiply(grad_, grad_)
@@ -323,7 +289,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
           else []
       )
       + [
-          activations_grad,
+          squeezed_activations_grad,
           embedding_table,
           # slot variables
           accumulator,

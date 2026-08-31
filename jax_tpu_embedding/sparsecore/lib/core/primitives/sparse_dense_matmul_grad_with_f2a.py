@@ -62,10 +62,8 @@ def _hlo_const(x: np.ndarray) -> ir.Value:
   )
 
 
-def _hlo_f32(x: float, emb_dim: int):
-  return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
-  )
+def _hlo_f32(x: float, row_shape: list[int]):
+  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
 
 
 def _tpu_sparse_dense_matmul_grad_with_f2a_abstract_eval(
@@ -187,17 +185,13 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
       "device_type": "DEVICE_TYPE_SPARSECORE",
   })
 
-  embedding_table_dim_size = (
-      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
-      if ir.RankedTensorType(embedding_table.type).rank > 1
-      else 1
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  is_1d = embedding_table_type.rank == 1
+  squeezed_activations_grad = (
+      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
   )
-  squeezed_activations_grad = activations_grad
-  is_1d = ir.RankedTensorType(embedding_table.type).rank == 1
-  if is_1d:
-    squeezed_activations_grad = utils.maybe_squeeze_ir(activations_grad, 1)
-
-  param_shape = [1] if is_1d else [1, embedding_table_dim_size]
+  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
 
   optimizer_update_computation_name = computation_name
 
@@ -206,34 +200,34 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
       ir.FunctionType.get(
           [
               # Grad.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Param.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Accum.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Local step.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Learning rate.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Rho.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # L1 regularization strength.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # L2 regularization strength.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Max LR multiplier.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
               # Global step.
-              ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+              row_type,
           ],
           [
               ir.TupleType.get_tuple([
                   # Updated embedding table.
-                  ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+                  row_type,
                   # Updated accumulator.
-                  ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+                  row_type,
                   # Updated local step.
-                  ir.RankedTensorType.get(param_shape, ir.F32Type.get()),
+                  row_type,
               ]),
           ],
       ),
@@ -254,7 +248,7 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
     max_lr_multiplier_val = entry_block.arguments[8]
     g_step = entry_block.arguments[9]
 
-    one_broadcasted = _hlo_f32(1.0, embedding_table_dim_size)
+    one_broadcasted = _hlo_f32(1.0, row_shape)
 
     # fa_multiplier = (global_step / local_step) ^ rho
     new_local_step = hlo.add(l_step, one_broadcasted)

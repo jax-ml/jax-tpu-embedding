@@ -131,12 +131,13 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   (out_aval,) = ctx.avals_out
 
   constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
-  if ir.RankedTensorType(embedding_table.type).rank > 1:
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  if embedding_table_type.rank > 1:
     activation_init = hlo.broadcast(
         constant_op,
         mlir.dense_int_array([
             device_batch_size,
-            ir.RankedTensorType(embedding_table.type).get_dim_size(1),
+            embedding_table_type.get_dim_size(1),
         ]),
     )
   else:

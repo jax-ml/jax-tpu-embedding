@@ -436,6 +436,17 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     grad = grad.at[cols, :].add(vals * activation_grad[rows, :])
     return grad
 
+  def _compute_table_grad_1d(self, inputs, weights, activation_grad):
+    batch_size = activation_grad.shape[0]
+    sample_lengths = jnp.array([len(sample) for sample in inputs])
+    rows = jnp.repeat(jnp.arange(batch_size), sample_lengths)
+    cols = jnp.concatenate(np.unstack(inputs))
+    vals = jnp.concatenate(np.unstack(weights))
+
+    grad = jnp.zeros(shape=(_VOCAB_SIZE,))
+    grad = grad.at[cols].add(vals * activation_grad[rows])
+    return grad
+
   @parameterized.named_parameters(
       ("no_clipping", None, None),
       ("clipping", 2.0, 10.0),
@@ -580,6 +591,116 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
 
     # Note that expected values are computed on CPU while the primitive
     # runs on TPU.
+    np.testing.assert_allclose(expected_momentum, updated_momentum, atol=1e-5)
+    np.testing.assert_allclose(expected_velocity, updated_velocity, atol=1e-5)
+    np.testing.assert_allclose(
+        expected_embedding_table, updated_table, atol=1e-5
+    )
+
+  def test_adam_optimizer_update_1d(self):
+    input_tensor = np.array(
+        [[i % _VOCAB_SIZE] for i in range(32)],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(32)],
+        dtype=np.float32,
+    )
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=utils.num_sparsecores_per_device(),
+    )
+    embedding_table = np.arange(1, _VOCAB_SIZE + 1, dtype=np.float32)
+    embedding_table_sharded = self._shard_table(embedding_table)
+
+    momentum = jnp.full(embedding_table.shape, 0.002, np.float32)
+    momentum_sharded = self._shard_table(np.asarray(momentum))
+
+    velocity = jnp.full(embedding_table.shape, 0.004, np.float32)
+    velocity_sharded = self._shard_table(np.asarray(velocity))
+
+    learning_rate = np.float32(0.1)
+    beta_1 = np.float32(0.9)
+    beta_2 = np.float32(0.999)
+    epsilon = np.float32(1e-8)
+
+    activations_grad = jnp.full((32,), 0.012, np.float32)
+    table_grad = self._compute_table_grad_1d(
+        input_tensor, input_weights, activations_grad
+    )
+
+    expected_embedding_table, expected_momentum, expected_velocity = (
+        self._compute_adam(
+            embedding_table[:, np.newaxis],
+            table_grad[:, np.newaxis],
+            momentum[:, np.newaxis],
+            velocity[:, np.newaxis],
+            learning_rate,
+            beta_1,
+            beta_2,
+            epsilon,
+            t=0,
+        )
+    )
+    expected_embedding_table = expected_embedding_table.squeeze(-1)
+    expected_momentum = expected_momentum.squeeze(-1)
+    expected_velocity = expected_velocity.squeeze(-1)
+
+    sparse_update_mask = np.zeros(_VOCAB_SIZE, dtype=bool)
+    for sample_ids in input_tensor:
+      for id_val in sample_ids:
+        sparse_update_mask[id_val] = True
+    expected_embedding_table = jnp.where(
+        sparse_update_mask, expected_embedding_table, embedding_table
+    )
+    expected_momentum = jnp.where(
+        sparse_update_mask, expected_momentum, momentum
+    )
+    expected_velocity = jnp.where(
+        sparse_update_mask, expected_velocity, velocity
+    )
+
+    c_2 = jnp.sqrt(1.0 - beta_2)
+    alpha_t = learning_rate * c_2 / (1.0 - beta_1)
+    epsilon_hat = epsilon * c_2
+
+    tpu_adam = (
+        sparse_dense_matmul_grad_with_adam
+        .tpu_sparse_dense_matmul_grad_with_adam_primitive.bind
+    )
+
+    updated_table, updated_momentum, updated_velocity = tpu_adam(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        np.int32(1),
+        embedding_table_sharded[0],
+        momentum_sharded[0],
+        velocity_sharded[0],
+        activations_grad,
+        alpha_t,
+        beta_1,
+        beta_2,
+        epsilon_hat,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+    )
+    updated_table = self._unshard_table(updated_table[jnp.newaxis, :])
+    updated_momentum = self._unshard_table(updated_momentum[jnp.newaxis, :])
+    updated_velocity = self._unshard_table(updated_velocity[jnp.newaxis, :])
+
     np.testing.assert_allclose(expected_momentum, updated_momentum, atol=1e-5)
     np.testing.assert_allclose(expected_velocity, updated_velocity, atol=1e-5)
     np.testing.assert_allclose(

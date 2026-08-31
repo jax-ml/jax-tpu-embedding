@@ -661,7 +661,8 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     )
 
     tpu_f2a = (
-        sparse_dense_matmul_grad_with_f2a.tpu_sparse_dense_matmul_grad_with_f2a_primitive.bind
+        sparse_dense_matmul_grad_with_f2a
+        .tpu_sparse_dense_matmul_grad_with_f2a_primitive.bind
     )
 
     # Act
@@ -694,6 +695,176 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     )
 
     # Assert
+    def _unshard_table(table):
+      return utils.unshard_emb_table(
+          jnp.expand_dims(table, axis=0),
+          num_sc_per_device=utils.num_sparsecores_per_device(),
+      )
+
+    updated_embedding_table_unsharded = _unshard_table(updated_embedding_table)
+    updated_accumulator_unsharded = _unshard_table(updated_accumulator)
+    updated_local_step_unsharded = _unshard_table(updated_local_step)
+
+    np.testing.assert_allclose(
+        updated_embedding_table_unsharded,
+        expected_embedding_table,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        updated_accumulator_unsharded,
+        expected_accumulator,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        updated_local_step_unsharded,
+        expected_local_step,
+        atol=1e-5,
+    )
+
+  def test_f2a_optimizer_update_1d(self):
+    input_tensor = np.array(
+        [[i % _VOCAB_SIZE] for i in range(32)],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(32)],
+        dtype=np.float32,
+    )
+    embedding_table = np.arange(1, _VOCAB_SIZE + 1, dtype=np.float32)
+    accumulator = np.full((_VOCAB_SIZE,), 2.0, dtype=np.float32)
+    local_step = np.full((_VOCAB_SIZE,), 1.0, dtype=np.float32)
+
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=utils.num_sparsecores_per_device(),
+    )
+
+    def _shard_table(table):
+      return utils.shard_emb_table(
+          table,
+          num_devices=1,
+          num_sc_per_device=utils.num_sparsecores_per_device(),
+      )
+
+    embedding_table_sharded = _shard_table(np.asarray(embedding_table))
+    accumulator_sharded = _shard_table(np.asarray(accumulator))
+    local_step_sharded = _shard_table(np.asarray(local_step))
+
+    learning_rate = 0.01
+    rho = 1.0
+    global_step = 100.0
+    l1_regularization_strength = 0.01
+    l2_regularization_strength = 0.01
+    max_lr_multiplier = 10.0
+
+    activations_grad = jnp.full((32,), 0.1, np.float32)
+
+    def _compute_table_grad_1d(inputs, weights, activation_grad):
+      batch_size = activation_grad.shape[0]
+      sample_lengths = jnp.array([len(sample) for sample in inputs])
+      rows = jnp.repeat(jnp.arange(batch_size), sample_lengths)
+      cols = jnp.concatenate(np.unstack(inputs))
+      vals = jnp.concatenate(np.unstack(weights))
+
+      grad = jnp.zeros(shape=(_VOCAB_SIZE,))
+      grad = grad.at[cols].add(vals * activation_grad[rows])
+      return grad
+
+    def _compute_f2a(
+        theta, g, a, l_step, alpha, rho, l1, l2, max_lr_mult, g_step
+    ):
+      l_step_new = l_step + 1.0
+      safe_g_step = jnp.maximum(g_step, 1.0)
+      frequency_ratio = safe_g_step / l_step_new
+      fa_multiplier = jnp.power(frequency_ratio, rho)
+      fa_multiplier = jnp.minimum(fa_multiplier, max_lr_mult)
+      a_new = a + g * g
+      denominator = jnp.sqrt(a_new)
+
+      l1_decay = l1 * jnp.sign(theta)
+      l2_shrinkage = l2 * theta
+
+      update = ((fa_multiplier * g) / denominator) + l1_decay + l2_shrinkage
+      theta_new = theta - alpha * update
+      return theta_new, a_new, l_step_new
+
+    table_grad = _compute_table_grad_1d(
+        input_tensor, input_weights, activations_grad
+    )
+
+    expected_embedding_table, expected_accumulator, expected_local_step = (
+        _compute_f2a(
+            np.asarray(embedding_table),
+            np.asarray(table_grad),
+            np.asarray(accumulator),
+            np.asarray(local_step),
+            learning_rate,
+            rho,
+            l1_regularization_strength,
+            l2_regularization_strength,
+            max_lr_multiplier,
+            global_step,
+        )
+    )
+
+    sparse_rows = jnp.unique(input_tensor.flatten())
+    sparse_update_mask = jnp.zeros(embedding_table.shape, dtype=jnp.bool_)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows].set(True)
+
+    expected_embedding_table = jnp.where(
+        sparse_update_mask,
+        expected_embedding_table,
+        embedding_table,
+    )
+    expected_accumulator = jnp.where(
+        sparse_update_mask, expected_accumulator, accumulator
+    )
+    expected_local_step = jnp.where(
+        sparse_update_mask, expected_local_step, local_step
+    )
+
+    tpu_f2a = (
+        sparse_dense_matmul_grad_with_f2a
+        .tpu_sparse_dense_matmul_grad_with_f2a_primitive.bind
+    )
+
+    updated_vars = tpu_f2a(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        1,
+        embedding_table_sharded[0],
+        accumulator_sharded[0],
+        local_step_sharded[0],
+        activations_grad,
+        learning_rate,
+        rho,
+        l1_regularization_strength,
+        l2_regularization_strength,
+        max_lr_multiplier,
+        global_step,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        computation_name="f2a_test_computation_1d",
+        sharding_strategy=1,
+    )
+
+    updated_embedding_table, updated_accumulator, updated_local_step = (
+        updated_vars
+    )
+
     def _unshard_table(table):
       return utils.unshard_emb_table(
           jnp.expand_dims(table, axis=0),

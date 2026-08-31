@@ -66,10 +66,8 @@ def _hlo_const(x: np.ndarray) -> ir.Value:
   )
 
 
-def _hlo_f32(x: float, emb_dim: int):
-  return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
-  )
+def _hlo_f32(x: float, row_shape: list[int]):
+  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
 
 
 def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
@@ -207,70 +205,33 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  embedding_table_dim_size = (
-      ir.RankedTensorType(embedding_table.type).get_dim_size(1)
-      if ir.RankedTensorType(embedding_table.type).rank > 1
-      else 1
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  is_1d = embedding_table_type.rank == 1
+  squeezed_activations_grad = (
+      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
   )
-  squeezed_activations_grad = activations_grad
-  is_1d = ir.RankedTensorType(embedding_table.type).rank == 1
-  if is_1d:
-    squeezed_activations_grad = utils.maybe_squeeze_ir(activations_grad, 1)
-
-  param_shape = [1] if is_1d else [1, embedding_table_dim_size]
-  hlo_f32 = functools.partial(_hlo_f32, emb_dim=embedding_table_dim_size)
+  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
+  hlo_f32 = functools.partial(_hlo_f32, row_shape=row_shape)
 
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
       (
           [
-              ir.RankedTensorType.get(  # grad
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # embedding_table
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # mu
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # nu
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # learning_rate
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # b1
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # decay_rate
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(  # eps
-                  param_shape,
-                  ir.F32Type.get(),
-              ),
+              row_type,  # grad
+              row_type,  # embedding_table
+              row_type,  # mu
+              row_type,  # nu
+              row_type,  # learning_rate
+              row_type,  # b1
+              row_type,  # decay_rate
+              row_type,  # eps
           ],
           [
               ir.TupleType.get_tuple([
-                  ir.RankedTensorType.get(  # embedding_table
-                      param_shape,
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(  # mu
-                      param_shape,
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(  # nu
-                      param_shape,
-                      ir.F32Type.get(),
-                  ),
+                  row_type,  # embedding_table
+                  row_type,  # mu
+                  row_type,  # nu
               ]),
           ],
       ),

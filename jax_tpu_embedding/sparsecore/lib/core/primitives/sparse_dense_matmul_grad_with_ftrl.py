@@ -68,10 +68,8 @@ def _hlo_const(x: np.ndarray) -> ir.Value:
   )
 
 
-def _hlo_f32(x: float, emb_dim: int):
-  return _hlo_const(
-      np.array(emb_dim * [x], dtype=np.float32).reshape((1, emb_dim))
-  )
+def _hlo_f32(x: float, row_shape: list[int]):
+  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
 
 
 def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
@@ -193,63 +191,33 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  emb_dim_size = ir.RankedTensorType(embedding_table.type).get_dim_size(1)
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  is_1d = embedding_table_type.rank == 1
+  squeezed_activations_grad = (
+      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
+  )
+  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
 
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
       (
           [
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
-              ir.RankedTensorType.get(
-                  [1, emb_dim_size],
-                  ir.F32Type.get(),
-              ),
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
+              row_type,
           ],
           [
               ir.TupleType.get_tuple([
-                  ir.RankedTensorType.get(
-                      [1, emb_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(
-                      [1, emb_dim_size],
-                      ir.F32Type.get(),
-                  ),
-                  ir.RankedTensorType.get(
-                      [1, emb_dim_size],
-                      ir.F32Type.get(),
-                  ),
+                  row_type,
+                  row_type,
+                  row_type,
               ]),
           ],
       ),
@@ -272,8 +240,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
         beta_param,  # βZ
     ) = entry_block.arguments
 
-    two = _hlo_f32(2.0, emb_dim_size)
-    zero = _hlo_f32(0.0, emb_dim_size)
+    two = _hlo_f32(2.0, row_shape)
+    zero = _hlo_f32(0.0, row_shape)
 
     # Accumulator
     accumulator_new = hlo.add(accumulator_arg, hlo.multiply(grad, grad))
@@ -300,7 +268,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     if multiply_linear_by_learning_rate:
       scale = lr_param
     else:
-      scale = _hlo_const(np.ones((1, emb_dim_size), np.float32))
+      scale = _hlo_const(np.ones(row_shape, np.float32))
 
     l1_scaled = hlo.multiply(l1_param, scale)
     numerator = hlo.select(
@@ -350,12 +318,12 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
         accumulator,
         linear,
         # activations grad
-        activations_grad,
+        squeezed_activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        activations_grad,
+        squeezed_activations_grad,
         embedding_table,
         # slot variables
         accumulator,
