@@ -18,6 +18,7 @@ cross-topology checkpoint restoration.
 ```
 offline_converter --input_checkpoint=checkpoint-2x2x2.tgz --output_checkpoint=converted-2x2x1 --target_num_devices=4 --target_device_kind=TPU_v5
 ```
+
 (Note: After generating `converted-2x2x1`, compress its `1000` subdirectory into
 `converted-2x2x1.tgz` using `tar -czf converted-2x2x1.tgz -C converted-2x2x1
 1000` and remove the uncompressed directory).
@@ -63,4 +64,3 @@ tar -czf checkpoint-2x2x2.tgz -C <path_to_checkpoint_dir> 1000
 After updating the checkpoint files, run the
 `jax_sc_shakespeare_jit_flax_nnx_restore_test` to verify that the new checkpoint
 successfully restores on a 2x2x1 topology.
-

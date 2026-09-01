@@ -5,8 +5,8 @@
 [![Documentation Status](https://readthedocs.org/projects/jax-tpu-embedding/badge/?version=latest)](https://jax-tpu-embedding.readthedocs.io/en/latest/?badge=latest)
 
 [**Quick Overview**](https://jax-tpu-embedding.readthedocs.io/en/latest/overview.html)
-| [**Install guide**](#installation)
-| [**Reference docs**](https://jax-tpu-embedding.readthedocs.io/en/latest/)
+| [**Install guide**](#installation) |
+[**Reference docs**](https://jax-tpu-embedding.readthedocs.io/en/latest/)
 
 ## What is JAX TPU Embedding?
 
@@ -32,11 +32,15 @@ You can install JAX TPU Embedding from PyPI:
 pip install jax-tpu-embedding
 ```
 
-*Note: To use TPU acceleration, you must run in an environment with access to TPU v5+ hardware and have the appropriate `jax` and `jaxlib` TPU releases installed (see the [JAX installation guide](https://github.com/google/jax#installation)).*
+*Note: To use TPU acceleration, you must run in an environment with access to
+TPU v5+ hardware and have the appropriate `jax` and `jaxlib` TPU releases
+installed (see the
+[JAX installation guide](https://github.com/google/jax#installation)).*
 
 ## Documentation
 
-For detailed guides, specifications, and tutorials, see the [JAX TPU Embedding Documentation](https://jax-tpu-embedding.readthedocs.io/en/latest/).
+For detailed guides, specifications, and tutorials, see the
+[JAX TPU Embedding Documentation](https://jax-tpu-embedding.readthedocs.io/en/latest/).
 
 *   [Quick Overview for Users](https://jax-tpu-embedding.readthedocs.io/en/latest/overview.html)
 *   [Embedding Specification](https://jax-tpu-embedding.readthedocs.io/en/latest/embedding.html)

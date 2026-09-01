@@ -8,8 +8,8 @@ vulnerability in JAX SC and how to report them.
 ## JAX models are programs
 
 JAX models are python programs that are compiled (typically via `jax.jit`) into
-XLA computation graphs. Since models are programs, executing untrusted models
-is equivalent to running untrusted code.
+XLA computation graphs. Since models are programs, executing untrusted models is
+equivalent to running untrusted code.
 
 If you need to run untrusted models, execute them inside a sandbox.
 
@@ -28,13 +28,13 @@ checkpoint could alter the target of these operations.
 Configuration parameters such as `max_ids_per_partition`,
 `max_unique_ids_per_partition`, embedding table dimensions, device counts
 (`local_device_count`, `global_device_count`), and hardware/SparseCore counts
-(`num_sc_per_device`) are considered part of the model definition (code).
-Since these parameters are defined in code, they are trusted. Resource
-exhaustion (such as Out-of-Memory crashes) or arithmetic errors (such as
-division by zero) caused by setting these configuration parameters to invalid
-or excessively large values are not considered vulnerabilities. An attacker
-with the ability to modify these parameters already has the ability to execute
-arbitrary code in the training process.
+(`num_sc_per_device`) are considered part of the model definition (code). Since
+these parameters are defined in code, they are trusted. Resource exhaustion
+(such as Out-of-Memory crashes) or arithmetic errors (such as division by zero)
+caused by setting these configuration parameters to invalid or excessively large
+values are not considered vulnerabilities. An attacker with the ability to
+modify these parameters already has the ability to execute arbitrary code in the
+training process.
 
 ### Minibatching Server (Multi-host training)
 
@@ -43,12 +43,11 @@ process-local gRPC server (`MinibatchingNode`) on each host to synchronize
 decisions across hosts (using `AllReduceGrpcService`).
 
 In the open-source version of JAX SC, the default credentials used for the gRPC
-server and client channels are insecure (unencrypted and unauthenticated).
-This server only handles basic synchronization metadata and does not support
+server and client channels are insecure (unencrypted and unauthenticated). This
+server only handles basic synchronization metadata and does not support
 arbitrary code execution. Consequently, the security risk is limited to
-eavesdropping on synchronization traffic and potential denial of service
-(such as training deadlocks) if a malicious actor sends fake synchronization
-requests.
+eavesdropping on synchronization traffic and potential denial of service (such
+as training deadlocks) if a malicious actor sends fake synchronization requests.
 
 ## Untrusted inputs during training and prediction
 
