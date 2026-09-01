@@ -33,8 +33,14 @@ EmbeddingLookupInput = embedding.PreprocessedInput
 
 EMBEDDING_PARAM_NAME = 'sc_embedding_variables'
 
+AxisName = str | tuple[str, ...] | None
+PartitionNames = tuple[AxisName, ...] | LogicalNames
 
 A = TypeVar('A')
+
+EmbeddingInitializer = Callable[
+    [jax.Array], Mapping[str, embedding.EmbeddingVariables]
+]
 
 
 class WithSparseCoreLayout(nn.Partitioned[A]):
@@ -50,16 +56,34 @@ class WithSparseCoreLayout(nn.Partitioned[A]):
     return utils.embedding_table_format(mesh, self.get_partition_spec())
 
 
+SparseCoreLayoutInitializer = Callable[
+    [jax.Array],
+    WithSparseCoreLayout[Mapping[str, embedding.EmbeddingVariables]],
+]
+
+
 def with_sparsecore_layout(
-    fn: Callable[..., Any],
-    names: LogicalNames,
+    fn: EmbeddingInitializer,
+    names: PartitionNames,
     mesh: jax.sharding.Mesh,
-) -> Callable[..., Any]:
+) -> SparseCoreLayoutInitializer:
   """Wraps a function to add a SparseCore layout."""
 
   @functools.wraps(fn)
   def wrapper(*args, **kwargs):
-    return WithSparseCoreLayout(fn(*args, **kwargs), names, mesh=mesh)
+    # Flax's `nn.Partitioned` accepts only `LogicalNames`
+    # (`tuple[str | None, ...]`), which models abstract dimension names.
+    # SparseCore embedding tables bypass the logical rules engine and supply
+    # explicit physical multi-axis partition specifications (e.g.
+    # `(('data', 'sparsecore_sharding'), None)`). Flax's runtime
+    # `logical_to_mesh_axes` allows non-string entries to fall through
+    # untouched into `jax.sharding.PartitionSpec`, so passing `PartitionNames`
+    # here is safe at runtime.
+    return WithSparseCoreLayout(
+        fn(*args, **kwargs),
+        names,  # pyrefly: ignore[bad-argument-type]
+        mesh=mesh,
+    )
 
   return wrapper
 
@@ -140,13 +164,11 @@ class SparseCoreEmbed(nn.Module):
 
   def _wrap_initializer(
       self,
-      initializer: Callable[
-          [jax.Array], Mapping[str, embedding.EmbeddingVariables]
-      ],
-  ):
+      initializer: EmbeddingInitializer,
+  ) -> SparseCoreLayoutInitializer:
     return with_sparsecore_layout(
         fn=initializer,
-        names=(self.sharding_axis, None),  # pyrefly: ignore[bad-argument-type]
+        names=(self.sharding_axis, None),
         mesh=self.mesh,
     )
 
