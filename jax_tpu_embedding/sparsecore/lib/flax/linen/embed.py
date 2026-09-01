@@ -14,6 +14,7 @@
 """SparseCore embedding layer."""
 
 import functools
+import math
 from typing import Any, Callable, Mapping, TypeVar
 
 from flax import linen as nn
@@ -25,7 +26,6 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
-
 
 LogicalNames = typing.LogicalNames
 Nested = embedding.Nested
@@ -70,19 +70,25 @@ class SparseCoreEmbed(nn.Module):
   # A sequence of FeatureSpecs to specify the configurations for the
   # input feature.
   feature_specs: embedding.Nested[embedding_spec.FeatureSpec]
-  # Axis in the mesh to use for sharding.
-  sharding_axis: str = 'sparsecore_sharding'
-  # Mesh to use for the embedding layer.
-  mesh: jax.sharding.Mesh = None  # type: ignore  # initialized in __post_init__
+  # Axis or tuple of axes in the mesh to use for sharding.
+  sharding_axis: str | tuple[str, ...] = 'sparsecore_sharding'
+  # Mesh to use for the embedding layer. Initialized in __post_init__.
+  mesh: jax.sharding.Mesh = None  # pyrefly: ignore[bad-assignment]
   # Sharding strategy for embedding tables.
   table_sharding_strategy: str = 'MOD'
   enable_minibatching: bool = False
 
-  num_sc_per_device: int = -1  # Initialized in __post_init__.
+  # Initialized in __post_init__.
+  num_sc_per_device: int = -1
 
   def __post_init__(self):
     if not self.mesh:
-      self.mesh = jax.sharding.Mesh(jax.devices(), [self.sharding_axis])
+      axis_names = (
+          list(self.sharding_axis)
+          if isinstance(self.sharding_axis, (tuple, list))
+          else [self.sharding_axis]
+      )
+      self.mesh = jax.sharding.Mesh(jax.devices(), axis_names)
 
     self.num_sc_per_device = utils.num_sparsecores_per_device(
         self.mesh.devices.item(0)
@@ -104,6 +110,8 @@ class SparseCoreEmbed(nn.Module):
 
   @property
   def num_shards(self) -> int:
+    if isinstance(self.sharding_axis, (tuple, list)):
+      return math.prod(self.mesh.shape[ax] for ax in self.sharding_axis)
     return self.mesh.shape[self.sharding_axis]
 
   @property
@@ -113,7 +121,9 @@ class SparseCoreEmbed(nn.Module):
     return None
 
   def setup(self):
-
+    bypass_mesh_check = len(
+        self.mesh.devices
+    ) != jax.device_count() or isinstance(self.sharding_axis, (tuple, list))
     initializer = functools.partial(
         embedding.init_embedding_variables,
         table_specs=embedding.get_table_specs(self.feature_specs),
@@ -121,9 +131,7 @@ class SparseCoreEmbed(nn.Module):
             self.mesh, self.embedding_table_partition
         ),
         num_sparsecore_per_device=self.num_sc_per_device,
-        # We need to by-pass the mesh check if not using all
-        # JAX devices (build-in assumption to the check).
-        bypass_mesh_check=len(self.mesh.devices) != jax.device_count(),
+        bypass_mesh_check=bypass_mesh_check,
     )
     self.param(
         EMBEDDING_PARAM_NAME,
@@ -138,7 +146,7 @@ class SparseCoreEmbed(nn.Module):
   ):
     return with_sparsecore_layout(
         fn=initializer,
-        names=(self.sharding_axis, None),
+        names=(self.sharding_axis, None),  # pyrefly: ignore[bad-argument-type]
         mesh=self.mesh,
     )
 
@@ -194,11 +202,44 @@ class SparseCoreEmbed(nn.Module):
       The activations structure with the same structure as feature_specs.
     """
     assert self.embedding_table is not None
-    return _emb_lookup(
+    activations = _emb_lookup(
         self,
         embedding_lookup_inputs,
         self._ensure_float32(self.embedding_table),
     )
+    return self._restore_activations_dtype(activations)
+
+  def _restore_activations_dtype(
+      self, activations: embedding.Nested[jax.Array]
+  ) -> embedding.Nested[jax.Array]:
+    """Restores activations to the original dtype of corresponding tables."""
+    if self.embedding_table is None:
+      return activations
+
+    def _get_table_dtype(
+        feature_spec: embedding_spec.FeatureSpec,
+    ) -> np.dtype[Any]:
+      table_name = feature_spec.table_spec.name
+      if (
+          isinstance(self.embedding_table, dict)
+          and table_name in self.embedding_table
+      ):
+        table_vars = self.embedding_table[table_name]
+        leaves = jax.tree.leaves(table_vars)
+        if leaves:
+          return leaves[0].dtype
+      leaves = jax.tree.leaves(self.embedding_table)
+      return leaves[0].dtype if leaves else np.dtype(np.float32)
+
+    def _cast_feature(
+        activation: jax.Array, spec: embedding_spec.FeatureSpec
+    ) -> jax.Array:
+      dtype = _get_table_dtype(spec)
+      return (
+          activation.astype(dtype) if activation.dtype != dtype else activation
+      )
+
+    return jax.tree.map(_cast_feature, activations, self.feature_specs)
 
   def _ensure_float32(
       self, table: embedding.Nested[jax.Array]
@@ -240,6 +281,15 @@ class SparseCoreEmbed(nn.Module):
         self,
         (embedding_lookup_inputs, self._ensure_float32(self.embedding_table)),
         self._ensure_float32(gradients),
+    )
+    embed_table = jax.tree.map(
+        lambda updated, orig: (
+            updated.astype(orig.dtype)
+            if updated.dtype != orig.dtype
+            else updated
+        ),
+        embed_table,
+        self.embedding_table,
     )
     path = '/'.join(self.path + (EMBEDDING_PARAM_NAME,))
     return {path: embed_table}
