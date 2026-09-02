@@ -411,7 +411,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
     )
     sc_module = embed.SparseCoreEmbed(
         feature_specs=feature_specs,
-        _mesh=mesh,
+        mesh=mesh,
         sharding_axis=sharding_axis,
         enable_minibatching=enable_minibatching,
     )
@@ -751,7 +751,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
 
     sc_module = embed.SparseCoreEmbed(
         feature_specs=feature_specs,
-        _mesh=mesh,
+        mesh=mesh,
         sharding_axis=sharding_axis,
     )
 

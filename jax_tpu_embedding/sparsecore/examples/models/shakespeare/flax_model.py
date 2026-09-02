@@ -63,7 +63,7 @@ class Model(nn.Module):
     # Run the embedding layer.
     x = embed.SparseCoreEmbed(
         feature_specs=self.feature_specs,
-        _mesh=self.mesh,
+        mesh=self.mesh,
         sharding_axis=self.sharding_axis,
     )(embedding_lookup_inputs)
 
