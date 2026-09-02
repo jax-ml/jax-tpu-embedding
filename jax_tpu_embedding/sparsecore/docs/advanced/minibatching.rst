@@ -55,7 +55,7 @@ enable minibatching by passing ``enable_minibatching=True`` layer initialization
     embed_layer = flax_embed.SparseCoreEmbed(
         feature_specs=features,
         enable_minibatching=True,
-        mesh=mesh,
+        _mesh=mesh,
     )
     variables = embed_layer.init(jax.random.PRNGKey(0), ...)
 

@@ -97,7 +97,7 @@ class SparseCoreEmbed(nn.Module):
   # Axis or tuple of axes in the mesh to use for sharding.
   sharding_axis: str | tuple[str, ...] = 'sparsecore_sharding'
   # Mesh to use for the embedding layer. Initialized in __post_init__.
-  mesh: jax.sharding.Mesh = None  # pyrefly: ignore[bad-assignment]
+  _mesh: jax.sharding.Mesh | None = None
   # Sharding strategy for embedding tables.
   table_sharding_strategy: str = 'MOD'
   enable_minibatching: bool = False
@@ -106,24 +106,30 @@ class SparseCoreEmbed(nn.Module):
   num_sc_per_device: int = -1
 
   def __post_init__(self):
-    if not self.mesh:
+    if self._mesh is None:
       axis_names = (
           list(self.sharding_axis)
           if isinstance(self.sharding_axis, (tuple, list))
           else [self.sharding_axis]
       )
-      self.mesh = jax.sharding.Mesh(jax.devices(), axis_names)
+      self._mesh = jax.sharding.Mesh(jax.devices(), axis_names)
 
     self.num_sc_per_device = utils.num_sparsecores_per_device(
-        self.mesh.devices.item(0)
+        self._mesh.devices.item(0)
     )
 
     super().__post_init__()
 
+  @property
+  def mesh(self) -> jax.sharding.Mesh:
+    """Returns the resolved mesh, guaranteed non-None after __post_init__."""
+    assert self._mesh is not None
+    return self._mesh
+
   # We define these derived helper values as properties rather than dataclass
   # fields. This prevents Flax from exposing them as constructor arguments,
   # allowing them to be cleanly derived from other instance configuration
-  # parameters (like `sharding_axis` and `mesh`).
+  # parameters (like `sharding_axis` and `_mesh`).
   @property
   def embedding_table_partition(self) -> jax.sharding.PartitionSpec:
     return jax.sharding.PartitionSpec(self.sharding_axis, None)
