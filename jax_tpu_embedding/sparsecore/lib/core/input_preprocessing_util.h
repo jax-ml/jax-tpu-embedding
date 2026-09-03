@@ -128,12 +128,14 @@ struct ExtractedCooTensorsPerSparseCore {
   std::vector<float> row_gains;
   bool has_variable_weights_;
   int batch_size_per_sc_;
+  uint32_t batch_mask_;
   RowCombiner combiner_;
   int num_sc_bits_;
 
   ExtractedCooTensorsPerSparseCore()
       : has_variable_weights_(false),
         batch_size_per_sc_(0),
+        batch_mask_(0),
         combiner_(RowCombiner::kSum),
         num_sc_bits_(0) {}
   ExtractedCooTensorsPerSparseCore(int batch_size_per_sc,
@@ -141,6 +143,10 @@ struct ExtractedCooTensorsPerSparseCore {
                                    RowCombiner combiner, int num_sc_bits = 0)
       : has_variable_weights_(has_variable_weights),
         batch_size_per_sc_(batch_size_per_sc),
+        batch_mask_((batch_size_per_sc > 0 &&
+                     (batch_size_per_sc & (batch_size_per_sc - 1)) == 0)
+                        ? static_cast<uint32_t>(batch_size_per_sc - 1)
+                        : 0),
         combiner_(combiner),
         num_sc_bits_(num_sc_bits) {
     if (!has_variable_weights_) {
@@ -202,10 +208,12 @@ struct ExtractedCooTensorsPerSparseCore {
       const uint64_t key = keys[i];
       const uint32_t row_id = CooFormat::GetDataFromKey(key);
       const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits_);
+      const uint32_t offset = batch_mask_ != 0 ? (row_id & batch_mask_)
+                                               : (row_id % batch_size_per_sc_);
       if (!row_token_counts.empty()) {
-        gain = 1.0f / row_token_counts[row_id % batch_size_per_sc_];
+        gain = 1.0f / row_token_counts[offset];
       } else if (!row_gains.empty()) {
-        gain = row_gains[row_id % batch_size_per_sc_];
+        gain = row_gains[offset];
       }
       return CooFormat(row_id, col_id, gain);
     }
@@ -222,10 +230,15 @@ struct ExtractedCooTensorsPerSparseCore {
     } else {
       row_id = CooFormat::GetDataFromKey(key);
       if constexpr (Combiner == RowCombiner::kMean) {
-        gain = 1.0f / static_cast<float>(
-                          row_token_counts[row_id % batch_size_per_sc_]);
+        const uint32_t offset = batch_mask_ != 0
+                                    ? (row_id & batch_mask_)
+                                    : (row_id % batch_size_per_sc_);
+        gain = 1.0f / static_cast<float>(row_token_counts[offset]);
       } else if constexpr (Combiner == RowCombiner::kSqrtn) {
-        gain = row_gains[row_id % batch_size_per_sc_];
+        const uint32_t offset = batch_mask_ != 0
+                                    ? (row_id & batch_mask_)
+                                    : (row_id % batch_size_per_sc_);
+        gain = row_gains[offset];
       } else {
         gain = 1.0f;
       }

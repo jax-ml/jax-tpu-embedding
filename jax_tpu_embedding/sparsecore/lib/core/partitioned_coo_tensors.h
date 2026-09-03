@@ -91,7 +91,7 @@ class PartitionedCooTensors {
     capacity_ = reserve_count;
   }
 
-  inline void MergeWithLastCoo(const CooFormat& coo_tensor) {
+  void MergeWithLastCoo(const CooFormat& coo_tensor) {
     DCHECK_GT(size_, 0);
     CooFormat& last = coo_tensors_[size_ - 1];
     DCHECK_EQ(last.row_id, coo_tensor.row_id);
@@ -99,7 +99,12 @@ class PartitionedCooTensors {
     last.gain += coo_tensor.gain;
   }
 
-  inline bool MaybeMerge(const CooFormat& coo_tensor) {
+  void AddGainToLast(float gain) {
+    DCHECK_GT(size_, 0);
+    coo_tensors_[size_ - 1].gain += gain;
+  }
+
+  bool MaybeMerge(const CooFormat& coo_tensor) {
     // If col_id is the same, bucket_id must also be the same.
     // For fastest short-circuiting, check row_id first, as it's the last
     // component of the sort key and thus most likely to differ between
