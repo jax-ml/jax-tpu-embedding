@@ -120,7 +120,12 @@ enum class PadType {
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
                   internal::CsrArraysRefPerDevice& csr) {
   if (pad_type == PadType::kPadToEnd) {
-    coo_index = coo_end;
+    while (coo_index < coo_end) {
+      csr.embedding_ids[coo_index] = INT_MAX;
+      csr.sample_ids[coo_index] = INT_MAX;
+      csr.gains[coo_index] = std::nanf("");
+      ++coo_index;
+    }
     return;
   }
   while (coo_index % TPU_VECTOR_REGISTER_ALIGNMENT_SIZE != 0 &&
@@ -361,8 +366,11 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     // only a single minibatch per SC).
     std::vector<tsl::AsyncValueRef<int>> coo_begins;
     std::vector<tsl::AsyncValueRef<int>> dropped_id_counts;
+    tsl::AsyncValueRef<int> last_coo_end;
   };
   auto shared_segment_data = std::make_shared<SharedSegmentData>();
+  shared_segment_data->last_coo_end =
+      tsl::MakeUnconstructedAsyncValueRef<int>();
 
   std::vector<tsl::AsyncValueRef<int>>& coo_begins =
       shared_segment_data->coo_begins;
@@ -426,8 +434,6 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                   .enable_minibatching = options.enable_minibatching,
               },
               csr_arrays, dropped_ids_in_segment);
-          shared_segment_data->dropped_id_counts[segment_idx].emplace(
-              dropped_ids_in_segment);
           if (options.enable_minibatching) {
             // Align minibatch buffer
             PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
@@ -437,12 +443,17 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
             const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
             PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd, csr_arrays);
           }
+          if (segment_idx == total_segments - 1) {
+            shared_segment_data->last_coo_end.emplace(coo_begin);
+          }
           // We could compute per minibatch buffer size, but we serialize the
           // filling for multiple (>1) minibatches instead. Also because it lies
           // on the slow path anyways.
           if (num_minibatches_per_sc > 1 && segment_idx + 1 < total_segments) {
             coo_begins[segment_idx + 1].emplace(coo_begin);
           }
+          shared_segment_data->dropped_id_counts[segment_idx].emplace(
+              dropped_ids_in_segment);
         });
       });
       current_lhs_row_begin += row_pointers_size_per_bucket;
@@ -455,11 +466,12 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
   tsl::RunWhenReady(
       absl::MakeConstSpan(shared_segment_data->dropped_id_counts),
       [=]() mutable {
-        // Pad to end of device buffer.
-        int coo_begin =
-            shared_segment_data->coo_begins[total_segments - 1].get();
-        PadCooBuffer(coo_begin, coo_buffer_size, PadType::kPadToEnd,
-                     csr_arrays);
+        if (options.enable_minibatching) {
+          // Pad to end of device buffer.
+          int final_coo_begin = shared_segment_data->last_coo_end.get();
+          PadCooBuffer(final_coo_begin, coo_buffer_size, PadType::kPadToEnd,
+                       csr_arrays);
+        }
         // Compute total dropped ID count.
         int total_dropped_id_count = 0;
         for (int i = 0; i < total_segments; ++i) {

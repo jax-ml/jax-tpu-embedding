@@ -755,22 +755,26 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _,                                      //
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX,                                                     //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _,                                      //
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX,                                                     //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _,                                      //
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX,                                                     //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _));
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX));
   EXPECT_THAT(
       csr_array.sample_ids,
       ElementsAre(
@@ -778,22 +782,26 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _,                                      //
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX,                                                     //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _,                                      //
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX,                                                     //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _,                                      //
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX,                                                     //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
           0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,  //
-          _, _, _, _, _, _, _, _));
+          INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+          INT_MAX));
   EXPECT_THAT(
       csr_array.gains,
       ElementsAre(
@@ -801,22 +809,26 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-          _, _, _, _, _, _, _, _,                                      //
+          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+          IsNan(),                                                     //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-          _, _, _, _, _, _, _, _,                                      //
+          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+          IsNan(),                                                     //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-          _, _, _, _, _, _, _, _,                                      //
+          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+          IsNan(),                                                     //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
           1, 1, IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),  //
-          _, _, _, _, _, _, _, _));
+          IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(), IsNan(),
+          IsNan()));
 
   EXPECT_EQ(dropped_static_bound, 0);
 }
