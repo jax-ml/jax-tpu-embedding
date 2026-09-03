@@ -50,6 +50,11 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     bool has_variable_weights = false);
 }  // namespace internal
 
+// Container for preprocessed sparse input buffers in CSR-wrapped COO format.
+//
+// NOTE: Buffers are valid up to `lhs_row_pointers`. Trailing memory is
+// intentionally uninitialized for host CPU performance; consumers must bound
+// traversal via `lhs_row_pointers`.
 struct PreprocessSparseDenseMatmulOutput {
   StackedTableMap<MatrixXi> lhs_row_pointers;
   StackedTableMap<MatrixXi> lhs_embedding_ids;

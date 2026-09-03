@@ -23,7 +23,19 @@ def assert_equal_coo_buffer(
     actual: np.ndarray,
     expected: np.ndarray,
 ):
-  """Compare COO buffers ignoring end of SC/device padding."""
+  """Compares COO buffers up to active row_pointers.
+
+  Trailing COO buffer elements are intentionally left uninitialized for host CPU
+  throughput. This helper prevents test flakiness by comparing only active
+  slices delineated by `row_pointers`.
+
+  Args:
+    local_device_count: Number of local TPU devices.
+    num_sc_per_device: Number of SparseCores per device.
+    row_pointers: Row pointers tensor bounding valid entries per SparseCore.
+    actual: Actual preprocessed COO tensor buffer.
+    expected: Expected COO tensor buffer from reference implementation.
+  """
   local_sc_count = local_device_count * num_sc_per_device
 
   # Ignore leading dim

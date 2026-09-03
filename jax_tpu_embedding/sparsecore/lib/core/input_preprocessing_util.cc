@@ -104,18 +104,25 @@ void PadRowPointersBuffer(int& lhs_row_offset, int padding, int row_end,
 
 // Enum to specify the padding behavior for `PadCooBuffer`.
 enum class PadType {
-  // Pads to the next HBM alignment boundary.
+  // Pads to vector register boundary (8). Initializes padding with INT_MAX /
+  // NaN.
   kAlignOnly,
-  // Pads to the end of the provided buffer segment (`coo_end`).
+  // Advances coo_index to coo_end without writing. Trailing COO buffer
+  // memory is intentionally uninitialized for host CPU speed. Consumers must
+  // use row_pointers.
   kPadToEnd
 };
 
 // Pads the COO buffer.
 //
+// When `pad_type` is `kPadToEnd`, only advances `coo_index` to `coo_end`.
+// Trailing buffer space is intentionally left uninitialized because SparseCore
+// execution bounds data traversal using `row_pointers`.
+//
 // Args:
-//   `coo_index`: Current index into the COO buffer.
+//   `coo_index`: Current index into the COO buffer (updated in-place).
 //   `coo_end`: End index of the COO buffer segment to consider for padding.
-//   `pad_type`: Specifies the padding behavior.
+//   `pad_type`: Specifies the padding behavior (kAlignOnly or kPadToEnd).
 //   `csr`: CSR arrays to be padded.
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
                   internal::CsrArraysRefPerDevice& csr) {

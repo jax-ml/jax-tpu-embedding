@@ -70,6 +70,11 @@ final size per SparseCore is ``suggested_coo_buffer_size_per_sc`` (and
 
         max_ids_per_partition <= suggested_coo_buffer_size_per_sc
 
+    **Buffer Memory Contract:** Trailing COO buffer capacity beyond the active
+    data bounded by ``row_pointers`` is intentionally left uninitialized on host
+    for performance. Downstream operations and tests must bound traversal via
+    ``row_pointers``.
+
 Choosing a value for the parameters
 -----------------------------------
 
