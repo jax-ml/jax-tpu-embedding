@@ -16,13 +16,14 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iterator>
 #include <limits>
 #include <utility>
 #include <vector>
 
+#include "absl/base/optimization.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/log/vlog_is_on.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
@@ -224,6 +225,10 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   const bool can_drop_id = !options.enable_minibatching || kCreateBuckets;
   const bool perform_id_dropping = allow_id_dropping && can_drop_id;
 
+  uint64_t prev_key = std::numeric_limits<uint64_t>::max();
+  float prev_gain = 0.0f;
+  bool last_id_was_dropped = false;
+
   uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
   uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
   uint32_t prev_bucket_id = 0;
@@ -233,6 +238,21 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   bool dropping_current_unique_col_id = false;
   const int num_sc_bits = context.num_sc_bits;
   for (const uint64_t key : context.keys) {
+    // Fast-path: deduplicate identical consecutive 64-bit keys without
+    // unpacking. When kHasVariableWeights is false, key encodes bucket_id,
+    // rotated_col_id, and row_id. Identical keys are guaranteed to have
+    // identical coordinates.
+    if constexpr (!kHasVariableWeights) {
+      if (ABSL_PREDICT_FALSE(key == prev_key)) {
+        if (perform_id_dropping && last_id_was_dropped) {
+          ++stats.dropped_id_count;
+        } else {
+          grouped_coo_tensors.AddGainToLast(prev_gain);
+        }
+        continue;
+      }
+    }
+
     // Step 1: Unpack key to get tensor coordinates.
     const uint32_t bucket_id =
         kCreateBuckets ? CooFormat::GetBucketIdFromKey(key) : 0;
@@ -243,19 +263,23 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
         context.extracted_coo_tensors
             .GetCooFormatWithGain<kHasVariableWeights, Combiner>(key, col_id);
     const uint32_t row_id = coo_tensor.row_id;
+    prev_gain = coo_tensor.gain;
 
     // Step 2: Handle duplicates.
     // An ID that is a duplicate of a previously non-dropped ID is merged.
     // It does not count as a new ID for stats and does not go through dropping
     // logic.
-    if (grouped_coo_tensors.MaybeMerge(coo_tensor)) {
-      continue;
-    }
-    // If the ID is a duplicate of the last seen ID, it must have been dropped
-    // (otherwise it would have been merged above), so drop this one too.
-    if (perform_id_dropping && row_id == prev_row_id && col_id == prev_col_id) {
-      ++stats.dropped_id_count;
-      continue;
+    if constexpr (kHasVariableWeights) {
+      if (grouped_coo_tensors.MaybeMerge(coo_tensor)) {
+        continue;
+      }
+      // If the ID is a duplicate of the last seen ID, it must have been dropped
+      // (otherwise it would have been merged above), so drop this one too.
+      if (perform_id_dropping && row_id == prev_row_id &&
+          col_id == prev_col_id) {
+        ++stats.dropped_id_count;
+        continue;
+      }
     }
 
     // Step 3: Update observed statistics for the new ID.
@@ -276,6 +300,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     // Step 4: Add ID to result or drop it.
     if (!perform_id_dropping) {
       grouped_coo_tensors.Add(bucket_id, coo_tensor);
+      last_id_was_dropped = false;
     } else {
       // Check limits.
       const bool exceeds_ids_limit =
@@ -290,8 +315,10 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
       if (exceeds_ids_limit || dropping_current_unique_col_id) {
         // Dropped id.
         ++stats.dropped_id_count;
+        last_id_was_dropped = true;
       } else {
         grouped_coo_tensors.Add(bucket_id, coo_tensor);
+        last_id_was_dropped = false;
       }
 
       // Update kept counts.
@@ -304,6 +331,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     // Step 5: Update state for next iteration.
     // This must be done regardless of whether the ID was dropped to ensure
     // correct stats collection for subsequent IDs.
+    prev_key = key;
     prev_col_id = col_id;
     prev_row_id = row_id;
     prev_bucket_id = bucket_id;
