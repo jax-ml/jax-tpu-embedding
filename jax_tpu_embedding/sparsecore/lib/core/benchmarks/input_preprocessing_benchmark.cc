@@ -74,25 +74,84 @@ void LogStats(const Eigen::MatrixBase<Derived>& data, absl::string_view name) {
 // max_unique_ids_per_partition=792.
 constexpr int kNumScPerDevice = 4;
 constexpr int kGlobalDeviceCount = 128;
-constexpr int kVocabSize = 100000000;
 constexpr int kBatchSizePerSc = 16384;
 constexpr int kSeed = 31337;
-constexpr float kLognormalMean = 1.5f;
-constexpr float kLognormalStddev = 1.9f;
-constexpr double kZipfQ = 1.00278;
-constexpr double kSkewProbability = 0.42430;
 
-std::vector<int> GenerateEmbeddingIdsForRow(absl::BitGen& gen, int vocab_size) {
+enum class WorkloadProfile {
+  // Sparse vocabulary with large key space (100M), average valency ~27,
+  // Zipf skewed distribution. Key collision / deduplication rate is ~0%.
+  kLargeVocab = 0,
+  // High multivalency with compact vocabulary (33 keys), high valency (~300).
+  // Exhibits high duplicate rates (~85-90%), exercising combiner-specific
+  // deduplication fast paths.
+  kHighMultivalency = 1,
+  // Moderate multivalency with medium vocabulary (1,000 keys), average valency
+  // ~50. Exhibits moderate deduplication rates (~40-50%).
+  kModerateMultivalency = 2,
+};
+
+std::string WorkloadProfileToString(WorkloadProfile profile) {
+  switch (profile) {
+    case WorkloadProfile::kLargeVocab:
+      return "LargeVocab";
+    case WorkloadProfile::kHighMultivalency:
+      return "HighMultivalency";
+    case WorkloadProfile::kModerateMultivalency:
+      return "ModerateMultivalency";
+  }
+}
+
+struct WorkloadConfig {
+  int vocab_size;
+  float lognormal_mean;
+  float lognormal_stddev;
+  double zipf_q;
+  double skew_probability;
+};
+
+WorkloadConfig GetWorkloadConfig(WorkloadProfile profile) {
+  switch (profile) {
+    case WorkloadProfile::kLargeVocab:
+      return {
+          .vocab_size = 100000000,
+          .lognormal_mean = 1.5f,
+          .lognormal_stddev = 1.9f,
+          .zipf_q = 1.00278,
+          .skew_probability = 0.42430,
+      };
+    case WorkloadProfile::kHighMultivalency:
+      return {
+          .vocab_size = 33,
+          .lognormal_mean = 5.7f,
+          .lognormal_stddev = 0.2f,
+          .zipf_q = 1.00278,
+          .skew_probability = 0.5,
+      };
+    case WorkloadProfile::kModerateMultivalency:
+      return {
+          .vocab_size = 1000,
+          .lognormal_mean = 3.9f,
+          .lognormal_stddev = 0.3f,
+          .zipf_q = 1.00278,
+          .skew_probability = 0.5,
+      };
+  }
+}
+
+std::vector<int> GenerateEmbeddingIdsForRow(absl::BitGen& gen,
+                                            const WorkloadConfig& config) {
   std::vector<int> ids_out;
-  int sample_size = static_cast<int>(std::round(
-      std::exp(absl::Gaussian<float>(gen, kLognormalMean, kLognormalStddev))));
+  int sample_size = static_cast<int>(std::round(std::exp(absl::Gaussian<float>(
+      gen, config.lognormal_mean, config.lognormal_stddev))));
+  sample_size = std::max(1, sample_size);
   ids_out.reserve(sample_size);
   for (int i = 0; i < sample_size; ++i) {
     int embedding_id;
-    if (absl::Bernoulli(gen, kSkewProbability)) {
-      embedding_id = absl::Zipf<int>(gen, vocab_size - 1, kZipfQ);
+    if (config.vocab_size > 1 &&
+        absl::Bernoulli(gen, config.skew_probability)) {
+      embedding_id = absl::Zipf<int>(gen, config.vocab_size - 1, config.zipf_q);
     } else {
-      embedding_id = absl::Uniform<int>(gen, 0, vocab_size);
+      embedding_id = absl::Uniform<int>(gen, 0, config.vocab_size);
     }
     ids_out.push_back(embedding_id);
   }
@@ -101,7 +160,8 @@ std::vector<int> GenerateEmbeddingIdsForRow(absl::BitGen& gen, int vocab_size) {
 
 std::vector<std::unique_ptr<AbstractInputBatch>>
 GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
-                                       int batch_size_per_sc, int vocab_size,
+                                       int batch_size_per_sc,
+                                       const WorkloadConfig& config,
                                        int num_features) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.reserve(num_features);
@@ -115,8 +175,7 @@ GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
     row_splits.push_back(0);
 
     for (int row = 0; row < batch_size_for_device; ++row) {
-      std::vector<int> embedding_ids =
-          GenerateEmbeddingIdsForRow(gen, vocab_size);
+      std::vector<int> embedding_ids = GenerateEmbeddingIdsForRow(gen, config);
       for (int embedding_id : embedding_ids) {
         values.push_back(embedding_id);
       }
@@ -133,10 +192,13 @@ GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
 void BM_ExtractCooTensors(benchmark::State& state) {
   const int num_features = state.range(0);
   const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
-  state.SetLabel(CombinerToString(combiner));
+  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(2));
+  state.SetLabel(absl::StrCat(CombinerToString(combiner), "/",
+                              WorkloadProfileToString(profile)));
+  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
-                                             kVocabSize, num_features);
+                                             workload_config, num_features);
 
   std::vector<FeatureMetadataInStack> stacked_table_metadata;
   stacked_table_metadata.reserve(num_features);
@@ -169,20 +231,27 @@ void BM_ExtractCooTensors(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_ExtractCooTensors)
-    // Args: {num_features, combiner}
-    ->Args({20, 0})  // kSum
-    ->Args({20, 1})  // kMean
-    ->Args({20, 2})  // kSqrtn
+    // Args: {num_features, combiner, workload_profile}
+    ->Args({20, 0, 0})  // kSum, LargeVocab
+    ->Args({20, 1, 0})  // kMean, LargeVocab
+    ->Args({20, 2, 0})  // kSqrtn, LargeVocab
+    ->Args({1, 0, 1})   // kSum, HighMultivalency
+    ->Args({1, 1, 1})   // kMean, HighMultivalency
+    ->Args({1, 2, 1})   // kSqrtn, HighMultivalency
+    ->Args({5, 1, 2})   // kMean, ModerateMultivalency
     ->Threads(8)
     ->UseRealTime();
 
 void BM_SortAndGroup_Phase1(benchmark::State& state) {
   const int num_features = state.range(0);
   const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
-  state.SetLabel(CombinerToString(combiner));
+  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(2));
+  state.SetLabel(absl::StrCat(CombinerToString(combiner), "/",
+                              WorkloadProfileToString(profile)));
+  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
-                                             kVocabSize, num_features);
+                                             workload_config, num_features);
 
   std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
   stacked_table_metadata_list.reserve(num_features);
@@ -238,17 +307,25 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_SortAndGroup_Phase1)
-    ->Args({20, 0})  // kSum
-    ->Args({20, 1})  // kMean
-    ->Args({20, 2})  // kSqrtn
+    // Args: {num_features, combiner, workload_profile}
+    ->Args({20, 0, 0})  // kSum, LargeVocab
+    ->Args({20, 1, 0})  // kMean, LargeVocab
+    ->Args({20, 2, 0})  // kSqrtn, LargeVocab
+    ->Args({1, 0, 1})   // kSum, HighMultivalency
+    ->Args({1, 1, 1})   // kMean, HighMultivalency
+    ->Args({1, 2, 1})   // kSqrtn, HighMultivalency
+    ->Args({1, 1, 2})   // kMean, ModerateMultivalency
     ->Threads(8)
     ->UseRealTime();
 
 void BM_FillBuffer(benchmark::State& state) {
   const int num_features = state.range(0);
+  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(1));
+  state.SetLabel(WorkloadProfileToString(profile));
+  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
-                                             kVocabSize, num_features);
+                                             workload_config, num_features);
 
   std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
   stacked_table_metadata_list.reserve(num_features);
@@ -314,7 +391,17 @@ void BM_FillBuffer(benchmark::State& state) {
 }
 
 // Buffer filling is independent of the row combiner.
-BENCHMARK(BM_FillBuffer)->Args({20})->Threads(8)->UseRealTime();
+BENCHMARK(BM_FillBuffer)
+    // Args: {num_features, profile}
+    ->Args({20, 0})  // LargeVocab
+    ->Args({1, 1})   // HighMultivalency
+    ->UseRealTime();
+BENCHMARK(BM_FillBuffer)
+    // Args: {num_features, profile}
+    ->Args({20, 0})  // LargeVocab
+    ->Args({1, 1})   // HighMultivalency
+    ->Threads(8)
+    ->UseRealTime();
 
 }  // namespace
 }  // namespace jax_sc_embedding
