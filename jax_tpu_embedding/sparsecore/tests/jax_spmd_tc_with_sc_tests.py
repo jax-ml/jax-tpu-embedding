@@ -249,6 +249,7 @@ class ShakespeareTest(absltest.TestCase):
     ):
       # SC forward pass
       activations = self.sparse_matmul(preprocessed_inputs, embedding_variables)
+      assert isinstance(activations, (tuple, list))
       activations = jnp.reshape(
           activations[0],
           (
