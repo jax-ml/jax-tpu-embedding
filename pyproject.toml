@@ -59,16 +59,10 @@ target-version = "py312"
 ignore = [
     # Unnecessary `dict`/`list`/`tuple` collection call (rewrite as literal).
     "C408",
-    # Unnecessary `map()` usage with `lambda` (rewrite as comprehension).
-    "C417",
     # Unnecessary `dict` comprehension for iterable (rewrite using `dict.fromkeys()`).
     "C420",
     # Function or method is too complex (McCabe cyclomatic complexity).
     "C901",
-    # Using `yield` and `return {value}` in a generator function.
-    "B901",
-    # Class could be `dataclass` or `namedtuple`.
-    "B903",
     # `raise` without `from` clause inside `except` block (`raise ... from err`).
     "B904",
     # `zip()` without an explicit `strict=` parameter.
@@ -77,8 +71,6 @@ ignore = [
     "C403",
     # Unnecessary tuple/list literal within `tuple()` (rewrite as tuple literal).
     "C409",
-    # Unnecessary `list`/`set`/`dict` comprehension.
-    "C416",
     # Unnecessary comprehension in call (e.g. `all()`, `any()`, `min()`, or `max()`).
     "C419",
     # Unnecessary generator expression in `set()`.
@@ -87,8 +79,6 @@ ignore = [
     "C413",
     # Unnecessary double cast or processing call (e.g. `list(list(...))`).
     "C414",
-    # Redefinition of unused name.
-    "F811",
 ]
 select = [
     # flake8-bugbear opinionated / design checks (B9xx).
