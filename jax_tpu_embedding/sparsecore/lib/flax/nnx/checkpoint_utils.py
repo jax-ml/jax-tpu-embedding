@@ -1013,6 +1013,225 @@ def _reconstruct_feature_specs_from_proto(
   return specs
 
 
+def _source_has_full_metadata(
+    source_proto: embedding_spec_pb2.EmbeddingSpecProto,
+) -> bool:
+  """Returns whether any source table carries combiner and optimizer specs."""
+  return any(
+      any(t.combiner and t.HasField('optimizer') for t in s.table_specs)
+      for s in source_proto.stacked_table_specs
+  )
+
+
+def _source_activation_mem_bytes_limit(
+    source_proto: embedding_spec_pb2.EmbeddingSpecProto,
+) -> int:
+  """Returns the first activation memory limit declared by a source stack."""
+  for s in source_proto.stacked_table_specs:
+    if s.HasField('activation_mem_bytes_limit'):
+      return s.activation_mem_bytes_limit
+  return table_stacking.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
+
+
+def _recompute_via_auto_stack(
+    source_proto: embedding_spec_pb2.EmbeddingSpecProto,
+    num_global_devices: int,
+    num_sc_per_device: int,
+    target_batch_size: int | None,
+) -> tuple[
+    embedding_spec_pb2.EmbeddingSpecProto, dict[str, embedding_spec.TableSpec]
+]:
+  """Recomputes target specs by regrouping stacks with auto_stack_tables."""
+  reconstructed_specs = _reconstruct_feature_specs_from_proto(
+      source_proto, target_batch_size=target_batch_size
+  )
+  table_stacking.auto_stack_tables(
+      reconstructed_specs,
+      global_device_count=num_global_devices,
+      num_sc_per_device=num_sc_per_device,
+      activation_mem_bytes_limit=_source_activation_mem_bytes_limit(
+          source_proto
+      ),
+  )
+  target_proto = embedding.create_proto_from_feature_specs(
+      reconstructed_specs,
+      num_global_devices,
+      num_sc_per_device,
+  )
+  logical_table_specs = _get_table_specs(reconstructed_specs)
+  return target_proto, logical_table_specs
+
+
+def _compute_table_sample_count(
+    t_proto: embedding_spec_pb2.TableSpecProto,
+    stacked_spec_proto: embedding_spec_pb2.StackedTableSpecProto,
+    target_batch_size: int | None,
+) -> int:
+  """Computes a table's sample count, rescaled to the target batch size."""
+  if t_proto.feature_specs:
+    table_sample_count = sum(
+        int(np.prod(f.output_shape[:-1])) for f in t_proto.feature_specs
+    )
+  else:
+    table_sample_count = stacked_spec_proto.total_sample_count
+  if target_batch_size is not None and stacked_spec_proto.total_sample_count:
+    scale = target_batch_size / stacked_spec_proto.total_sample_count
+    table_sample_count = int(table_sample_count * scale)
+  return table_sample_count
+
+
+def _stack_activation_mem_bytes(
+    stacked_spec_proto: embedding_spec_pb2.StackedTableSpecProto,
+    num_shards: int,
+    target_batch_size: int | None,
+) -> int:
+  """Returns the per-SparseCore activation memory required by a stack."""
+  stack_activation_mem_bytes = 0
+  for t in stacked_spec_proto.table_specs:
+    padded_dim = _next_largest_multiple(t.embedding_dim, 8)
+    table_sample_count = _compute_table_sample_count(
+        t, stacked_spec_proto, target_batch_size
+    )
+    table_sample_count_per_sc = table_sample_count // num_shards
+    stack_activation_mem_bytes += padded_dim * table_sample_count_per_sc * 4
+  return stack_activation_mem_bytes
+
+
+def _validate_stack_activation_memory(
+    stacked_spec_proto: embedding_spec_pb2.StackedTableSpecProto,
+    num_global_devices: int,
+    num_sc_per_device: int,
+    stack_activation_mem_bytes: int,
+) -> None:
+  """Raises ValueError if a multi-table stack outgrows its memory limit.
+
+  A stack that no longer fits on the target topology would be regrouped by the
+  target model, so its checkpoint cannot be converted without explicit target
+  feature specs.
+  """
+  activation_mem_bytes_limit = (
+      stacked_spec_proto.activation_mem_bytes_limit
+      if stacked_spec_proto.HasField('activation_mem_bytes_limit')
+      else table_stacking.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
+  )
+  if (
+      len(stacked_spec_proto.table_specs) > 1
+      and stack_activation_mem_bytes > activation_mem_bytes_limit
+  ):
+    raise ValueError(
+        f"Stack '{stacked_spec_proto.stack_name}' has per-SparseCore"
+        f' activation memory of {stack_activation_mem_bytes} bytes, exceeding'
+        f' the activation memory limit ({activation_mem_bytes_limit} bytes)'
+        f' for target topology ({num_global_devices} devices,'
+        f' {num_sc_per_device} SC/device). The target model will group tables'
+        ' into different stacks. Please provide target_feature_specs to'
+        ' convert_cross_topology_checkpoint.'
+    )
+
+
+def _apply_stack_layout(
+    stacked_spec_proto: embedding_spec_pb2.StackedTableSpecProto,
+    num_shards: int,
+    num_sc_per_device: int,
+) -> collections.abc.Mapping[str, embedding_spec.TableSettingInStack]:
+  """Writes the target stack layout onto the proto and returns table settings."""
+  stack_embedding_dim = max(
+      _next_largest_multiple(t.embedding_dim, 8)
+      for t in stacked_spec_proto.table_specs
+  )
+  stacked_spec_proto.stack_embedding_dim = stack_embedding_dim
+  stacked_spec_proto.num_sparsecores = num_shards
+
+  table_names = [t.table_name for t in stacked_spec_proto.table_specs]
+  table_to_padded_vocab_size = {
+      t.table_name: _next_largest_multiple(t.vocab_size, 8 * num_shards)
+      for t in stacked_spec_proto.table_specs
+  }
+  table_to_setting = table_stacking.compute_table_to_setting_in_stack(
+      stack_name=stacked_spec_proto.stack_name,
+      table_names=table_names,
+      padded_embedding_dim=stack_embedding_dim,
+      table_to_padded_vocab_size=table_to_padded_vocab_size,
+      num_shards=num_shards,
+      rotation=num_sc_per_device,
+  )
+
+  stacked_spec_proto.stack_vocab_size = sum(table_to_padded_vocab_size.values())
+  return table_to_setting
+
+
+def _build_logical_table_spec(
+    table_spec_proto: embedding_spec_pb2.TableSpecProto,
+    stacked_spec_proto: embedding_spec_pb2.StackedTableSpecProto,
+    setting: embedding_spec.TableSettingInStack,
+) -> embedding_spec.TableSpec:
+  """Stamps the shard layout onto a table proto and mirrors it as a TableSpec."""
+  table_spec_proto.padded_vocab_size = setting.padded_vocab_size
+  table_spec_proto.padded_embedding_dim = setting.padded_embedding_dim
+  table_spec_proto.row_offset_in_shard = setting.row_offset_in_shard
+  table_spec_proto.shard_rotation = setting.shard_rotation
+
+  tspec = embedding_spec.TableSpec(
+      name=table_spec_proto.table_name,
+      vocabulary_size=table_spec_proto.vocab_size,
+      embedding_dim=table_spec_proto.embedding_dim,
+      initializer=jax.nn.initializers.constant(0.0),
+      optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.0),
+      combiner='mean',
+  )
+  tspec.setting_in_stack = setting
+
+  tspec.stacked_table_spec = embedding_spec.StackedTableSpec(
+      stack_name=stacked_spec_proto.stack_name,
+      stack_vocab_size=stacked_spec_proto.stack_vocab_size,
+      stack_embedding_dim=stacked_spec_proto.stack_embedding_dim,
+      optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.0),
+      combiner='mean',
+      total_sample_count=stacked_spec_proto.total_sample_count,
+  )
+  return tspec
+
+
+def _recompute_legacy_target_specs(
+    source_proto: embedding_spec_pb2.EmbeddingSpecProto,
+    num_global_devices: int,
+    num_sc_per_device: int,
+    target_batch_size: int | None,
+) -> tuple[
+    embedding_spec_pb2.EmbeddingSpecProto, dict[str, embedding_spec.TableSpec]
+]:
+  """Recomputes target specs in place, keeping the source stack grouping."""
+  num_shards = num_global_devices * num_sc_per_device
+  target_proto = embedding_spec_pb2.EmbeddingSpecProto()
+  target_proto.CopyFrom(source_proto)
+
+  logical_table_specs = {}
+
+  for stacked_spec_proto in target_proto.stacked_table_specs:
+    _validate_stack_activation_memory(
+        stacked_spec_proto,
+        num_global_devices,
+        num_sc_per_device,
+        _stack_activation_mem_bytes(
+            stacked_spec_proto, num_shards, target_batch_size
+        ),
+    )
+    table_to_setting = _apply_stack_layout(
+        stacked_spec_proto, num_shards, num_sc_per_device
+    )
+
+    for table_spec_proto in stacked_spec_proto.table_specs:
+      logical_table_specs[table_spec_proto.table_name] = (
+          _build_logical_table_spec(
+              table_spec_proto,
+              stacked_spec_proto,
+              table_to_setting[table_spec_proto.table_name],
+          )
+      )
+
+  return target_proto, logical_table_specs
+
+
 def _recompute_target_specs(
     source_proto: embedding_spec_pb2.EmbeddingSpecProto,
     num_global_devices: int,
@@ -1034,140 +1253,18 @@ def _recompute_target_specs(
   """
   # If source_proto contains combiner and optimizer specs, perform automatic
   # stack regrouping via auto_stack_tables.
-  has_full_metadata = False
-  for s in source_proto.stacked_table_specs:
-    if any(t.combiner and t.HasField('optimizer') for t in s.table_specs):
-      has_full_metadata = True
-      break
-
-  if has_full_metadata:
-    reconstructed_specs = _reconstruct_feature_specs_from_proto(
-        source_proto, target_batch_size=target_batch_size
+  if _source_has_full_metadata(source_proto):
+    return _recompute_via_auto_stack(
+        source_proto, num_global_devices, num_sc_per_device, target_batch_size
     )
-    activation_mem_bytes_limit = (
-        table_stacking.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
-    )
-    for s in source_proto.stacked_table_specs:
-      if s.HasField('activation_mem_bytes_limit'):
-        activation_mem_bytes_limit = s.activation_mem_bytes_limit
-        break
-    table_stacking.auto_stack_tables(
-        reconstructed_specs,
-        global_device_count=num_global_devices,
-        num_sc_per_device=num_sc_per_device,
-        activation_mem_bytes_limit=activation_mem_bytes_limit,
-    )
-    target_proto = embedding.create_proto_from_feature_specs(
-        reconstructed_specs,
-        num_global_devices,
-        num_sc_per_device,
-    )
-    logical_table_specs = _get_table_specs(reconstructed_specs)
-    return target_proto, logical_table_specs
 
   logging.info(
       'Source proto does not contain full metadata. Reconstructing target specs'
       ' without stack regrouping.'
   )
-
-  num_shards = num_global_devices * num_sc_per_device
-  target_proto = embedding_spec_pb2.EmbeddingSpecProto()
-  target_proto.CopyFrom(source_proto)
-
-  logical_table_specs = {}
-
-  for stacked_spec_proto in target_proto.stacked_table_specs:
-    stack_activation_mem_bytes = 0
-    for t in stacked_spec_proto.table_specs:
-      padded_dim = _next_largest_multiple(t.embedding_dim, 8)
-      if t.feature_specs:
-        table_sample_count = sum(
-            int(np.prod(f.output_shape[:-1])) for f in t.feature_specs
-        )
-      else:
-        table_sample_count = stacked_spec_proto.total_sample_count
-      if (
-          target_batch_size is not None
-          and stacked_spec_proto.total_sample_count
-      ):
-        scale = target_batch_size / stacked_spec_proto.total_sample_count
-        table_sample_count = int(table_sample_count * scale)
-
-      table_sample_count_per_sc = table_sample_count // num_shards
-      stack_activation_mem_bytes += padded_dim * table_sample_count_per_sc * 4
-
-    activation_mem_bytes_limit = (
-        stacked_spec_proto.activation_mem_bytes_limit
-        if stacked_spec_proto.HasField('activation_mem_bytes_limit')
-        else table_stacking.DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
-    )
-    if (
-        len(stacked_spec_proto.table_specs) > 1
-        and stack_activation_mem_bytes > activation_mem_bytes_limit
-    ):
-      raise ValueError(
-          f"Stack '{stacked_spec_proto.stack_name}' has per-SparseCore"
-          f' activation memory of {stack_activation_mem_bytes} bytes, exceeding'
-          f' the activation memory limit ({activation_mem_bytes_limit} bytes)'
-          f' for target topology ({num_global_devices} devices,'
-          f' {num_sc_per_device} SC/device). The target model will group tables'
-          ' into different stacks. Please provide target_feature_specs to'
-          ' convert_cross_topology_checkpoint.'
-      )
-
-    stack_embedding_dim = max(
-        _next_largest_multiple(t.embedding_dim, 8)
-        for t in stacked_spec_proto.table_specs
-    )
-    stacked_spec_proto.stack_embedding_dim = stack_embedding_dim
-    stacked_spec_proto.num_sparsecores = num_shards
-
-    table_names = [t.table_name for t in stacked_spec_proto.table_specs]
-    table_to_padded_vocab_size = {
-        t.table_name: _next_largest_multiple(t.vocab_size, 8 * num_shards)
-        for t in stacked_spec_proto.table_specs
-    }
-    table_to_setting = table_stacking.compute_table_to_setting_in_stack(
-        stack_name=stacked_spec_proto.stack_name,
-        table_names=table_names,
-        padded_embedding_dim=stack_embedding_dim,
-        table_to_padded_vocab_size=table_to_padded_vocab_size,
-        num_shards=num_shards,
-        rotation=num_sc_per_device,
-    )
-
-    stack_vocab_size = sum(table_to_padded_vocab_size.values())
-    stacked_spec_proto.stack_vocab_size = stack_vocab_size
-
-    for table_spec_proto in stacked_spec_proto.table_specs:
-      setting = table_to_setting[table_spec_proto.table_name]
-      table_spec_proto.padded_vocab_size = setting.padded_vocab_size
-      table_spec_proto.padded_embedding_dim = setting.padded_embedding_dim
-      table_spec_proto.row_offset_in_shard = setting.row_offset_in_shard
-      table_spec_proto.shard_rotation = setting.shard_rotation
-
-      tspec = embedding_spec.TableSpec(
-          name=table_spec_proto.table_name,
-          vocabulary_size=table_spec_proto.vocab_size,
-          embedding_dim=table_spec_proto.embedding_dim,
-          initializer=jax.nn.initializers.constant(0.0),
-          optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.0),
-          combiner='mean',
-      )
-      tspec.setting_in_stack = setting
-
-      tspec.stacked_table_spec = embedding_spec.StackedTableSpec(
-          stack_name=stacked_spec_proto.stack_name,
-          stack_vocab_size=stack_vocab_size,
-          stack_embedding_dim=stacked_spec_proto.stack_embedding_dim,
-          optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.0),
-          combiner='mean',
-          total_sample_count=stacked_spec_proto.total_sample_count,
-      )
-
-      logical_table_specs[table_spec_proto.table_name] = tspec
-
-  return target_proto, logical_table_specs
+  return _recompute_legacy_target_specs(
+      source_proto, num_global_devices, num_sc_per_device, target_batch_size
+  )
 
 
 def _find_embedding_table_in_dict(state_dict: Any) -> dict[str, Any] | None:
