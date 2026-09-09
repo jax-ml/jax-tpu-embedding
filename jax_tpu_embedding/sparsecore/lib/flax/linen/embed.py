@@ -359,7 +359,7 @@ def _emb_lookup(
       check_vma=False,
   )(
       embedding_lookup_inputs,
-      emb_table,
+      emb_table,  # pyrefly: ignore[bad-argument-type]
   )
 
 

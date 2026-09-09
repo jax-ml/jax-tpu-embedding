@@ -154,12 +154,12 @@ def _preprocess_batch_to_partitions(
   ):
     local_sc_id = row_id // batch_size_per_sc
     local_row_id = row_id % batch_size_per_sc
-    for col_id, weight in zip(sample_feat, sample_weight, strict=True):
-      global_sc_id = int(col_id) % num_scs
-      local_col_id = int(col_id) // num_scs
+    for col_id, weight in zip(sample_feat, sample_weight, strict=True):  # pyrefly: ignore[bad-argument-type]
+      global_sc_id = int(col_id) % num_scs  # pyrefly: ignore[bad-argument-type]
+      local_col_id = int(col_id) // num_scs  # pyrefly: ignore[bad-argument-type]
       # Accumulate gain for the same (col, row) in this partition.
       # fmt: off
-      partitions[(local_sc_id, global_sc_id)][(local_col_id, local_row_id)] += float(weight)
+      partitions[(local_sc_id, global_sc_id)][(local_col_id, local_row_id)] += float(weight)  # pyrefly: ignore[bad-argument-type]
       # fmt: on
 
   ##############################################################################
