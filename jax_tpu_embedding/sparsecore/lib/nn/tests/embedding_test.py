@@ -16,6 +16,7 @@
 import functools
 import logging
 import sys
+from typing import override
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -44,6 +45,7 @@ _DEVICE_ERR_STR = (
 
 class EmbeddingTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()
@@ -1378,6 +1380,7 @@ class SparseDenseMatmulInputStatsTest(parameterized.TestCase):
 
 class UpdatePreprocessingParametersTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self._num_sc_per_device = utils.num_sparsecores_per_device()

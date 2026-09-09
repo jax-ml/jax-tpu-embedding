@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+from typing import override
 from unittest import mock
 
 from absl import logging
@@ -27,6 +28,7 @@ import numpy as np
 
 class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     jax.config.update("jax_traceback_filtering", "off")

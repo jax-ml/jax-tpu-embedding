@@ -13,7 +13,7 @@
 # limitations under the License.
 from collections.abc import Callable
 import functools
-from typing import Any
+from typing import Any, override
 
 from absl import flags
 from absl import logging
@@ -105,6 +105,7 @@ class ShakespeareTest(absltest.TestCase):
 
   # TODO: b/356880228 - refactor setUp and split in to functions possibly using
   # decorators?
+  @override
   def setUp(self):
     super().setUp()
     self.devices = jax.devices()

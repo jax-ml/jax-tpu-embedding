@@ -21,7 +21,7 @@ import itertools
 import os
 import re
 import time
-from typing import Mapping
+from typing import Mapping, override
 
 from absl import logging
 from etils import epath
@@ -64,6 +64,7 @@ class CSVFileFDOClient(fdo_client.FDOClient):
         for field in _PARAM_FIELDS
     }
 
+  @override
   def record(self, data: embedding.SparseDenseMatmulInputStats) -> None:
     """Records stats per process.
 
@@ -138,6 +139,7 @@ class CSVFileFDOClient(fdo_client.FDOClient):
       latest_files.append(file_name)
     return latest_files
 
+  @override
   def publish(self) -> None:
     """Publishes locally accumulated stats to a file in the base_dir."""
     merged_stats = {}
@@ -187,6 +189,7 @@ class CSVFileFDOClient(fdo_client.FDOClient):
           stats[key] = np.max(np.vstack((stats[key], array)), axis=0)
     return stats
 
+  @override
   def load(self) -> embedding.SparseDenseMatmulInputStats:
     """Loads state of local FDO client from disk."""
     files_glob = os.fspath(

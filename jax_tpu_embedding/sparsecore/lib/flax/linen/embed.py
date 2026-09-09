@@ -15,7 +15,7 @@
 
 import functools
 import math
-from typing import Any, Callable, Mapping, TypeVar
+from typing import Any, Callable, Mapping, TypeVar, override
 
 from flax import linen as nn
 from flax import typing
@@ -48,8 +48,8 @@ class WithSparseCoreLayout(nn.Partitioned[A]):
   # SparseCore embedding tables return a Layout Format on TPU rather than
   # a standard Sharding object, intentionally overriding the return type of
   # Flax Partitioned.
-  # pyrefly: ignore[bad-override]
-  def get_sharding(
+  @override
+  def get_sharding(  # pyrefly: ignore[bad-override]
       self, mesh: jax.sharding.Mesh
   ) -> jax.sharding.Sharding | jax_layout.Format:
     assert mesh is not None
@@ -150,6 +150,7 @@ class SparseCoreEmbed(nn.Module):
       return meta.unbox(self.get_variable('params', EMBEDDING_PARAM_NAME))
     return None
 
+  @override
   def setup(self):
     bypass_mesh_check = len(
         self.mesh.devices

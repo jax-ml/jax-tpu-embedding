@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import override
 from unittest import mock
 
 from absl import logging
@@ -282,6 +283,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     parameterized.TestCase
 ):
 
+  @override
   def setUp(self):
     super().setUp()
     jax.config.update("jax_traceback_filtering", "off")

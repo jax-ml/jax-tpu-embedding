@@ -20,7 +20,7 @@ import itertools
 import os
 import re
 import time
-from typing import Mapping
+from typing import Mapping, override
 
 from absl import logging
 from etils import epath
@@ -62,6 +62,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         for field in _PARAM_FIELDS
     }
 
+  @override
   def record(self, data: embedding.SparseDenseMatmulInputStats) -> None:
     """Records stats per process.
 
@@ -142,6 +143,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     # Mapping[str, np.ndarray].
     jax.numpy.savez(file_name, **stats)  # pyrefly: ignore[bad-argument-type]
 
+  @override
   def publish(self) -> None:
     """Publishes locally accmulatedstats to a file in the base_dir.
 
@@ -171,6 +173,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
           stats[key] = np.max(np.vstack((stats[key], value)), axis=0)
     return stats
 
+  @override
   def load(self) -> embedding.SparseDenseMatmulInputStats:
     """Loads state of local FDO client from disk.
 

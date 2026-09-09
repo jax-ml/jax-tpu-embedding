@@ -13,6 +13,7 @@
 # limitations under the License.
 import dataclasses
 import logging
+from typing import override
 
 from absl.testing import absltest
 import jax
@@ -28,6 +29,7 @@ class MockDevice:
 
 class InputPreprocessingTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.input_features = np.array(
@@ -566,6 +568,7 @@ class InputPreprocessingTest(absltest.TestCase):
 
 class InputPreprocessingMinibatchingTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.global_devices = np.array([MockDevice(id=i) for i in range(4)])

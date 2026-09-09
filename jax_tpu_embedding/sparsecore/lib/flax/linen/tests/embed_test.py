@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+from typing import override
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -51,6 +52,7 @@ def count_num(arr, num):
 
 class EmbeddingLayerTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.table_spec_a = embedding_spec.TableSpec(

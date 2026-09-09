@@ -14,6 +14,7 @@
 """SparseCore embedding layer."""
 
 import functools
+from typing import override
 
 from flax import nnx
 import jax
@@ -106,6 +107,7 @@ class PartitionedOptimizer(nnx.Optimizer):
   ):
     super().__init__(model, dense_optimizer, wrt=is_non_embedding_variables)
 
+  @override
   def update(self, model: nnx.Module, grads: optax.Updates, /, **kwargs):
     """Compute and apply optimzier updates for the model."""
 
