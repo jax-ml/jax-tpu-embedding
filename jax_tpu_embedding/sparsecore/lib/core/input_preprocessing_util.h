@@ -31,6 +31,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/functional/function_ref.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -128,12 +129,14 @@ struct ExtractedCooTensorsPerSparseCore {
   std::vector<float> row_gains;
   bool has_variable_weights_;
   int batch_size_per_sc_;
+  std::optional<uint32_t> batch_mask_;
   RowCombiner combiner_;
   int num_sc_bits_;
 
   ExtractedCooTensorsPerSparseCore()
       : has_variable_weights_(false),
         batch_size_per_sc_(0),
+        batch_mask_(std::nullopt),
         combiner_(RowCombiner::kSum),
         num_sc_bits_(0) {}
   ExtractedCooTensorsPerSparseCore(int batch_size_per_sc,
@@ -141,6 +144,11 @@ struct ExtractedCooTensorsPerSparseCore {
                                    RowCombiner combiner, int num_sc_bits = 0)
       : has_variable_weights_(has_variable_weights),
         batch_size_per_sc_(batch_size_per_sc),
+        batch_mask_(
+            (batch_size_per_sc > 0 &&
+             absl::has_single_bit(static_cast<uint32_t>(batch_size_per_sc)))
+                ? std::optional<uint32_t>(batch_size_per_sc - 1)
+                : std::nullopt),
         combiner_(combiner),
         num_sc_bits_(num_sc_bits) {
     if (!has_variable_weights_) {
@@ -202,10 +210,11 @@ struct ExtractedCooTensorsPerSparseCore {
       const uint64_t key = keys[i];
       const uint32_t row_id = CooFormat::GetDataFromKey(key);
       const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits_);
+      const uint32_t offset = GetRowOffset(row_id);
       if (!row_token_counts.empty()) {
-        gain = 1.0f / row_token_counts[row_id % batch_size_per_sc_];
+        gain = 1.0f / row_token_counts[offset];
       } else if (!row_gains.empty()) {
-        gain = row_gains[row_id % batch_size_per_sc_];
+        gain = row_gains[offset];
       }
       return CooFormat(row_id, col_id, gain);
     }
@@ -222,10 +231,11 @@ struct ExtractedCooTensorsPerSparseCore {
     } else {
       row_id = CooFormat::GetDataFromKey(key);
       if constexpr (Combiner == RowCombiner::kMean) {
-        gain = 1.0f / static_cast<float>(
-                          row_token_counts[row_id % batch_size_per_sc_]);
+        const uint32_t offset = GetRowOffset(row_id);
+        gain = 1.0f / static_cast<float>(row_token_counts[offset]);
       } else if constexpr (Combiner == RowCombiner::kSqrtn) {
-        gain = row_gains[row_id % batch_size_per_sc_];
+        const uint32_t offset = GetRowOffset(row_id);
+        gain = row_gains[offset];
       } else {
         gain = 1.0f;
       }
@@ -241,6 +251,14 @@ struct ExtractedCooTensorsPerSparseCore {
       coos.push_back(get(i));
     }
     return coos;
+  }
+
+ private:
+  // Returns the row offset within the SparseCore batch. Uses fast bitwise
+  // masking if batch size is a power of 2, falling back to modulo arithmetic.
+  uint32_t GetRowOffset(uint32_t row_id) const {
+    return batch_mask_.has_value() ? (row_id & *batch_mask_)
+                                   : (row_id % batch_size_per_sc_);
   }
 };
 
