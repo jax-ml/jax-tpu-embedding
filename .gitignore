@@ -29,5 +29,10 @@ poetry.lock
 # Generated version file
 jax_tpu_embedding/sparsecore/version.py
 
+# Generated protobuf files
+jax_tpu_embedding/sparsecore/lib/proto/*_pb2.py
+jax_tpu_embedding/sparsecore/lib/proto/*_pb2.pyi
+
 # Built wheels.
 /*.whl
+

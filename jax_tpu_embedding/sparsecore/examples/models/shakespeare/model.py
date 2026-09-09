@@ -67,7 +67,8 @@ def loss(
     The loss.
   """
   logits = model.apply(params, emb_activations)
+  assert isinstance(logits, jax.Array)
   xentropy = optax.softmax_cross_entropy_with_integer_labels(
-      logits=logits, labels=labels  # pyrefly: ignore[bad-argument-type]
+      logits=logits, labels=labels
   )
-  return jnp.mean(xentropy), logits  # pyrefly: ignore[bad-return]
+  return jnp.mean(xentropy), logits

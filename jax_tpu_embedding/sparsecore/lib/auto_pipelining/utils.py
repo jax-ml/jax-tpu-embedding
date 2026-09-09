@@ -14,7 +14,6 @@
 """Utils for auto pipelining."""
 
 from collections.abc import Iterable
-import itertools
 
 import jax
 import jax.extend as jex
@@ -110,15 +109,15 @@ def inline_jaxpr(
   assert len(invars) == len(jaxpr.invars)
   assert len(outvars) == len(jaxpr.outvars)
 
-  var_mapping = {
-      var: val
-      for var, val in itertools.chain(
-          zip(jaxpr.invars, invars), zip(jaxpr.outvars, outvars)
-      )
-  }
+  var_mapping: dict[jax.core.Atom, jax.core.Atom] = dict(
+      zip(jaxpr.invars, invars)
+  )
+  var_mapping.update(zip(jaxpr.outvars, outvars))
 
   def _translate_outvar(var: jex.core.Var) -> jex.core.Var:
-    return var_mapping.setdefault(var, clone_vars([var])[0])
+    out_val = var_mapping.setdefault(var, clone_vars([var])[0])
+    assert isinstance(out_val, jex.core.Var)
+    return out_val
 
   def _translate_invar(var: jax.core.Atom) -> jax.core.Atom:
     return var if isinstance(var, jex.core.Literal) else var_mapping[var]

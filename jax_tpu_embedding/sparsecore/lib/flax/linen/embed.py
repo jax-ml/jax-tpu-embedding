@@ -330,7 +330,7 @@ class SparseCoreEmbed(nn.Module):
 def _emb_lookup(
     embedding_layer: SparseCoreEmbed,
     embedding_lookup_inputs: EmbeddingLookupInput,
-    emb_table: Mapping[str, tuple[jax.Array, ...]],
+    emb_table: Mapping[str, embedding.EmbeddingVariables],
 ):
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
@@ -366,7 +366,7 @@ def _emb_lookup(
 def _emb_lookup_fwd(
     embedding_layer: SparseCoreEmbed,
     embedding_lookup_inputs: EmbeddingLookupInput,
-    emb_table: Mapping[str, tuple[jax.Array, ...]],
+    emb_table: Mapping[str, embedding.EmbeddingVariables],
 ):
   return _emb_lookup(
       embedding_layer,

@@ -167,24 +167,23 @@ class ErrorHandlingTest(absltest.TestCase):
         num_devices=1,
         num_sc_per_device=4,
     )
-    embedding_variables = {}
-    embedding_variables["table"] = [
+    table_device_arrays = [
         jax.device_put(
-            # Pyrefly cannot statically infer tuple/list structure of sharded
-            # output.
             emb_table_a_sharded[0],
             device=first_device,
         ),
     ]
     sharding = NamedSharding(mesh, P(None, "x", None))
-    embedding_variables["table"] = embedding.EmbeddingVariables(
-        table=jax.make_array_from_single_device_arrays(
-            shape=(1000, 8),
-            sharding=sharding,
-            arrays=embedding_variables["table"],
-        ),
-        slot=(),
-    )
+    embedding_variables = {
+        "table": embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(1000, 8),
+                sharding=sharding,
+                arrays=table_device_arrays,
+            ),
+            slot=(),
+        )
+    }
     tpu_sparse_dense_matmul = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         global_device_count=1,

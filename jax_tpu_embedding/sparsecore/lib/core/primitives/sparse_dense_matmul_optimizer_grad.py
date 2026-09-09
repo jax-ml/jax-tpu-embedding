@@ -196,7 +196,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       dst_symtab=ctx.module_context.symbol_table,
   )
 
-  hyperparams = []
+  hyperparams: list[ir.Value] = []
   f32type = mlir.aval_to_ir_type(
       ctx.module_context, core.ShapedArray((), np.float32)
   )

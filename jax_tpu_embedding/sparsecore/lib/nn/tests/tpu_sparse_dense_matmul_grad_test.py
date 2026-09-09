@@ -277,8 +277,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=1,
         num_sc_per_device=4,
     )
-    embedding_variables = {}
-    embedding_variables["table_a"] = [
+    emb_table_a_devices = [
         jax.device_put(
             # Pyrefly cannot statically infer tuple/list structure of sharded
             # output.
@@ -288,11 +287,11 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     ]
 
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_a"] = tuple([
+    table_a_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_A, table_dim_a),
             sharding=sharding,
-            arrays=embedding_variables["table_a"],
+            arrays=emb_table_a_devices,
         )
     ])
 
@@ -307,17 +306,17 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=1,
         num_sc_per_device=4,
     )
-    embedding_variables["table_b"] = [
+    emb_table_b_devices = [
         jax.device_put(
             emb_table_b_sharded[0],
             device=devices[0],
         ),
     ]
-    embedding_variables["table_b"] = tuple([
+    table_b_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_B, table_dim_b),
             sharding=sharding,
-            arrays=embedding_variables["table_b"],
+            arrays=emb_table_b_devices,
         )
     ])
     table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
@@ -332,7 +331,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_sc_per_device=4,
     )
     accumulator_init = jnp.zeros(emb_table_c_sharded[0].shape, np.float32)
-    embedding_variables["table_c"] = (
+    emb_table_c_devices = (
         [
             jax.device_put(
                 emb_table_c_sharded[0],
@@ -347,16 +346,16 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ],
     )
 
-    embedding_variables["table_c"] = (
+    table_c_vars = (
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_C, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][0],
+            arrays=emb_table_c_devices[0],
         ),
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_C, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][1],
+            arrays=emb_table_c_devices[1],
         ),
     )
 
@@ -373,7 +372,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     )
     accumulator_d_init = jnp.full(emb_table_d_sharded[0].shape, 0.1, np.float32)
     local_step_d_init = jnp.zeros(emb_table_d_sharded[0].shape, np.float32)
-    embedding_variables["table_d"] = (
+    emb_table_d_devices = (
         [
             jax.device_put(
                 emb_table_d_sharded[0],
@@ -393,23 +392,29 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             )
         ],
     )
-    embedding_variables["table_d"] = (
+    table_d_vars = (
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_D, table_dim_d),
             sharding=sharding,
-            arrays=embedding_variables["table_d"][0],
+            arrays=emb_table_d_devices[0],
         ),
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_D, table_dim_d),
             sharding=sharding,
-            arrays=embedding_variables["table_d"][1],
+            arrays=emb_table_d_devices[1],
         ),
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_D, table_dim_d),
             sharding=sharding,
-            arrays=embedding_variables["table_d"][2],
+            arrays=emb_table_d_devices[2],
         ),
     )
+    embedding_variables = {
+        "table_a": table_a_vars,
+        "table_b": table_b_vars,
+        "table_c": table_c_vars,
+        "table_d": table_d_vars,
+    }
 
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
@@ -707,8 +712,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=2,
         num_sc_per_device=4,
     )
-    embedding_variables = {}
-    embedding_variables["table_a"] = [
+    emb_table_a_devices = [
         jax.device_put(
             emb_table_a_sharded[i],
             device=local_device,
@@ -716,11 +720,11 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_a"] = tuple([
+    table_a_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_A, table_dim_a),
             sharding=sharding,
-            arrays=embedding_variables["table_a"],
+            arrays=emb_table_a_devices,
         )
     ])
 
@@ -735,18 +739,18 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=2,
         num_sc_per_device=4,
     )
-    embedding_variables["table_b"] = [
+    emb_table_b_devices = [
         jax.device_put(
             emb_table_b_sharded[i],
             device=local_device,
         )
         for i, local_device in enumerate(devices)
     ]
-    embedding_variables["table_b"] = tuple([
+    table_b_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_B, table_dim_b),
             sharding=sharding,
-            arrays=embedding_variables["table_b"],
+            arrays=emb_table_b_devices,
         )
     ])
     table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
@@ -760,7 +764,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=2,
         num_sc_per_device=4,
     )
-    embedding_variables["table_c"] = (
+    emb_table_c_devices = (
         [
             jax.device_put(
                 emb_table_c_sharded[i],
@@ -777,18 +781,23 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ],
     )
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_c"] = tuple([
+    table_c_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_C, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][0],
+            arrays=emb_table_c_devices[0],
         ),
         jax.make_array_from_single_device_arrays(
             shape=(_VOC_C, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][1],
+            arrays=emb_table_c_devices[1],
         ),
     ])
+    embedding_variables = {
+        "table_a": table_a_vars,
+        "table_b": table_b_vars,
+        "table_c": table_c_vars,
+    }
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
         (_BATCH_SIZE, _DIM_A),
@@ -990,8 +999,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             rotation=0,
         )
     )
-    embedding_variables = {}
-    embedding_variables["table_a_table_b"] = [
+    emb_table_ab_devices = [
         jax.device_put(
             emb_sharded_per_device_ab[i],
             device=local_device,
@@ -999,14 +1007,14 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_a_table_b"] = tuple([
+    table_ab_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_a + padded_vocab_b, table_dim_a),
             sharding=sharding,
-            arrays=embedding_variables["table_a_table_b"],
+            arrays=emb_table_ab_devices,
         )
     ])
-    embedding_variables["table_c"] = (
+    emb_table_c_devices = (
         [
             jax.device_put(
                 emb_sharded_per_device_c[i],
@@ -1023,18 +1031,22 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ],
     )
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_c"] = tuple([
+    table_c_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_c, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][0],
+            arrays=emb_table_c_devices[0],
         ),
         jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_c, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][1],
+            arrays=emb_table_c_devices[1],
         ),
     ])
+    embedding_variables = {
+        "table_a_table_b": table_ab_vars,
+        "table_c": table_c_vars,
+    }
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
         (_BATCH_SIZE, _DIM_A),
@@ -1241,8 +1253,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         num_devices=num_devices,
         num_sc_per_device=num_sc_per_device,
     )
-    embedding_variables = {}
-    embedding_variables["table_a"] = [
+    emb_table_a_devices = [
         jax.device_put(
             emb_table_a_sharded[i],
             device=local_device,
@@ -1250,13 +1261,15 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_a"] = tuple([
-        jax.make_array_from_single_device_arrays(
-            shape=(padded_vocab_a, padded_embedding_dim_a),
-            sharding=sharding,
-            arrays=embedding_variables["table_a"],
-        )
-    ])
+    embedding_variables = {
+        "table_a": tuple([
+            jax.make_array_from_single_device_arrays(
+                shape=(padded_vocab_a, padded_embedding_dim_a),
+                sharding=sharding,
+                arrays=emb_table_a_devices,
+            )
+        ])
+    }
 
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
@@ -1584,8 +1597,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             rotation=0,
         )
     )
-    embedding_variables = {}
-    embedding_variables["table_a_table_b"] = [
+    emb_table_ab_devices = [
         jax.device_put(
             emb_sharded_per_device_ab[i],
             device=local_device,
@@ -1593,14 +1605,14 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_a_table_b"] = tuple([
+    table_ab_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_a + padded_vocab_b, table_dim_a),
             sharding=sharding,
-            arrays=embedding_variables["table_a_table_b"],
+            arrays=emb_table_ab_devices,
         )
     ])
-    embedding_variables["table_c"] = (
+    emb_table_c_devices = (
         [
             jax.device_put(
                 emb_sharded_per_device_c[i],
@@ -1617,18 +1629,22 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ],
     )
     sharding = NamedSharding(mesh, P("x", None))
-    embedding_variables["table_c"] = tuple([
+    table_c_vars = tuple([
         jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_c, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][0],
+            arrays=emb_table_c_devices[0],
         ),
         jax.make_array_from_single_device_arrays(
             shape=(padded_vocab_c, table_dim_c),
             sharding=sharding,
-            arrays=embedding_variables["table_c"][1],
+            arrays=emb_table_c_devices[1],
         ),
     ])
+    embedding_variables = {
+        "table_a_table_b": table_ab_vars,
+        "table_c": table_c_vars,
+    }
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
         (_BATCH_SIZE, _DIM_A),

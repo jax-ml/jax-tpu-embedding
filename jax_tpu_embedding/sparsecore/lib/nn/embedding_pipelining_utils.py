@@ -16,7 +16,7 @@
 internal link:jax-sc-embedding-pipelining
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import functools
 import types
 from typing import Generic, ParamSpec, Protocol, TypeAlias, TypeVar, cast
@@ -320,7 +320,7 @@ def is_output_valid(pipeline_step: int, num_steps: int) -> bool:
 
 NestedArray = embedding.Nested[jax.Array]
 NestedFeatureSpecs = embedding.Nested[embedding_spec.FeatureSpec]
-NestedEmbeddingVariables = embedding.Nested[embedding.EmbeddingVariables]
+NestedEmbeddingVariables = Mapping[str, embedding.EmbeddingVariables]
 
 # You could make these a PyTree and include more information to be passed
 # between SC and TC stagest.
@@ -429,8 +429,11 @@ def get_default_sc_bwd_function(
         out_specs=pe,
         check_vma=False,
     )
+    assert embedding_gradients is not None
     updated_embedding_variables = tpu_sparse_dense_matmul_grad(
-        embedding_gradients, sparse_inputs, embedding_variables
+        embedding_gradients,
+        sparse_inputs,
+        embedding_variables,
     )
 
     return updated_embedding_variables, None

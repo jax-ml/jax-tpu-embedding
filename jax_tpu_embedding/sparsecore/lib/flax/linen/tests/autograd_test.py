@@ -96,8 +96,9 @@ class ShakespeareTest(absltest.TestCase):
     ):
       def forward_pass(params, embedding_lookups, labels):
         logits = model.apply(params, embedding_lookups)
+        assert isinstance(logits, jax.Array)
         xentropy = optax.softmax_cross_entropy_with_integer_labels(
-            logits=logits, labels=labels  # pyrefly: ignore[bad-argument-type]
+            logits=logits, labels=labels
         )
         return jnp.mean(xentropy), logits
 

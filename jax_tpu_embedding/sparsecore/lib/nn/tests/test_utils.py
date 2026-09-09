@@ -161,7 +161,7 @@ def create_per_device_sharded_stacked_tables(
   ]
   rotations = np.arange(0, len(emb_tables)) * rotation
   rotated_tables = [
-      rotate_sharded_table(emb_table, rot)
+      rotate_sharded_table(emb_table, int(rot))
       for emb_table, rot in zip(mod_sharded_tables, rotations)
   ]
   sharded_stacked = jnp.concatenate(rotated_tables, axis=1)

@@ -13,7 +13,7 @@ permissions:
 jobs:
   lint_and_typecheck:
     runs-on: linux-x86-n4-16
-    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest@sha256:43c523372c4b7f7ce649a1ff204b908727bd338353303c0444af34cb305e5832 # ratchet:us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -28,8 +28,12 @@ jobs:
       - name: Install lint and project dependencies
         run: |
           git config --global --add safe.directory "*"
-          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel pyrefly pre-commit
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel pyrefly pre-commit grpcio-tools
           python -m pip install --root-user-action=ignore -r third_party/py/requirements_lock_3_12.txt
+
+      - name: Generate protobuf stubs
+        run: |
+          python -m grpc_tools.protoc -I. --python_out=. --pyi_out=. jax_tpu_embedding/sparsecore/lib/proto/embedding_spec.proto
 
       - name: Run pre-commit checks
         run: pre-commit run --show-diff-on-failure --color=always --all-files

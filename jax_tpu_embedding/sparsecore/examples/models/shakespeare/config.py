@@ -19,6 +19,7 @@ other files more readable.
 """
 
 # pylint: disable=g-importing-member
+from collections.abc import Mapping, Sequence
 import dataclasses
 import pprint
 
@@ -143,10 +144,13 @@ def get_config() -> Config:
   return config
 
 
-def local_slice(config: Config, x: embedding.ArrayLike) -> embedding.ArrayLike:
+Sliceable = Sequence[int] | np.ndarray | jax.Array
+
+
+def local_slice(config: Config, x: Sliceable) -> Sliceable:
   """Batch data is read for the global model. This creates a local slice."""
-  return x[  # pyrefly: ignore[bad-index]
-      config.process_id  # pyrefly: ignore[bad-index]
+  return x[
+      config.process_id
       * config.local_batch_size : (config.process_id + 1)
       * config.local_batch_size
   ]
@@ -154,9 +158,9 @@ def local_slice(config: Config, x: embedding.ArrayLike) -> embedding.ArrayLike:
 
 def device_slice(
     config: Config,
-    x: embedding.ArrayLike,
+    x: Sliceable,
     data_sharding: jax.sharding.NamedSharding,
-) -> embedding.ArrayLike:
+) -> jax.Array:
   """Like local_slice, but creates an on-device JAX array."""
   return jax.make_array_from_process_local_data(
       data_sharding, local_slice(config, x)
@@ -208,14 +212,16 @@ def process_inputs(
   return processed_inputs, stats
 
 
-def create_feature_specs(config: Config) -> Nested[embedding_spec.FeatureSpec]:
+def create_feature_specs(
+    config: Config,
+) -> Mapping[str, embedding_spec.FeatureSpec]:
   """Creates the feature specs for the Shakespeare model.
 
   Args:
     config: The configuration.
 
   Returns:
-    A Nested structure of FeatureSpecs.
+    A mapping of feature names to FeatureSpecs.
   """
   ## Embedding API: TableSpec and FeatureSpec creation
   table_spec = embedding_spec.TableSpec(

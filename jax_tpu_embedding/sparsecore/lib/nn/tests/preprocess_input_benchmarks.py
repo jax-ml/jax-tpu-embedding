@@ -167,7 +167,7 @@ def generate_sparse_coo_inputs_for_feature_spec(
 
 
 def apply_fdo_stats(
-    stats_cc: embedding.SparseDenseMatmulInputStats,
+    stats_cc: pybind_input_preprocessing.SparseDenseMatmulInputStats,
     fdo_headroom: float = 1.0,
     buffer_size_headroom: float | None = None,
 ):
@@ -212,10 +212,13 @@ def apply_fdo_stats(
 @google_benchmark.option.iterations(100)
 def preprocess_numpy(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul."""
+  assert _GLOBAL_SPECS is not None
   ragged = state.range(0)
   if ragged:
+    assert _GLOBAL_RAGGED_FEATURES is not None
     features, feature_weights = _GLOBAL_RAGGED_FEATURES, _GLOBAL_RAGGED_WEIGHTS
   else:
+    assert _GLOBAL_DENSE_FEATURES is not None
     features, feature_weights = _GLOBAL_DENSE_FEATURES, _GLOBAL_DENSE_WEIGHTS
   batch_num = 0
   while state:
@@ -244,6 +247,10 @@ def preprocess_numpy(state: google_benchmark.State):
 @google_benchmark.option.iterations(100)
 def preprocess_sparse_coo(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul."""
+  assert _GLOBAL_SPECS is not None
+  assert _GLOBAL_RAGGED_INDICES is not None
+  assert _GLOBAL_RAGGED_VALUES is not None
+  assert _GLOBAL_RAGGED_DENSE_SHAPES is not None
   batch_num = 0
   while state:
     if batch_num == 0:
@@ -294,6 +301,10 @@ def preprocess_minibatching(
     )
 
   def worker(host_id: int, batch_number: int):
+    assert _GLOBAL_SPECS is not None
+    assert _GLOBAL_RAGGED_INDICES is not None
+    assert _GLOBAL_RAGGED_VALUES is not None
+    assert _GLOBAL_RAGGED_DENSE_SHAPES is not None
     return pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
         _GLOBAL_RAGGED_INDICES,
         _GLOBAL_RAGGED_VALUES,
@@ -337,10 +348,11 @@ def preprocess_minibatching(
           apply_fdo_stats(stats_cc, fdo_headroom=1.0)
         state.resume_timing()
       else:
+        assert num_minibatches is not None
         if force_minibatching:
           # Make sure we are benchmarking multiple minibatches (guaranteed by
           # initial seed).
-          assert num_minibatches >= 5, num_minibatches  # pyrefly: ignore[unsupported-operation]
+          assert num_minibatches >= 5, num_minibatches
         else:
           # Make sure we are benchmarking only one minibatch.
           assert num_minibatches == 1, num_minibatches

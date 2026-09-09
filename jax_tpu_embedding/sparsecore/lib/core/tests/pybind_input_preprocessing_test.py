@@ -14,6 +14,7 @@
 import dataclasses
 import functools
 import math
+import typing
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -1711,7 +1712,7 @@ class InputPreprocessingTest(parameterized.TestCase):
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
-        input_shape=[4, None],  # Ragged or dense input.  # pyrefly: ignore[bad-argument-type]
+        input_shape=[4],  # Ragged or dense input.
         output_shape=[
             4,
             table_spec.embedding_dim,
@@ -1931,8 +1932,10 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           1,
           num_sc_per_device=4,
-          sharding_strategy=0,
           batch_number=batch_number,
+          sharding_strategy=typing.cast(
+              pybind_input_preprocessing.ShardingStrategy, 0
+          ),
       )
 
   def test_empty_input_batches_raises_error(self):

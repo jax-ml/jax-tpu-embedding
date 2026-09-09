@@ -23,7 +23,7 @@ follow the most performant patterns used in production.
 
 import collections
 from collections.abc import Sequence
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import jax
 from jax import numpy as jnp
@@ -57,8 +57,6 @@ MinibatchedWeights = Sequence[WeightBatch]
 
 FeatureInput = FeatureBatch | MinibatchedFeatures
 WeightInput = WeightBatch | MinibatchedWeights
-PartitionFeatureInput = FeatureInput | Sample
-PartitionWeightInput = WeightInput | SampleWeight
 
 
 ################################################################################
@@ -80,20 +78,20 @@ _T = TypeVar("_T")
 
 
 def _to_sequence_of_batches(
-    inputs: _T,
+    inputs: _T | Sequence[_T],
     enable_minibatching: bool,
     input_name: str,
 ) -> Sequence[_T]:
   """Resolves an input into a uniform sequence of batches based on enable_minibatching."""
   if not enable_minibatching:
-    return [inputs]
+    return [cast(_T, inputs)]
   assert isinstance(inputs, Sequence) and not isinstance(
       inputs, (np.ndarray, jnp.ndarray)
   ), (
       f"When enable_minibatching is True, {input_name} must be a sequence of"
       " batches."
   )
-  return inputs
+  return cast(Sequence[_T], inputs)
 
 
 def _round_up(value: int, round_to: int) -> int:
@@ -124,8 +122,8 @@ def _validate_partition_map(
 
 
 def _preprocess_batch_to_partitions(
-    features: PartitionFeatureInput,
-    features_weights: PartitionWeightInput,
+    features: FeatureBatch,
+    features_weights: WeightBatch,
     num_scs: int,
     num_sc_per_device: int,
 ) -> PartitionMap:
@@ -348,10 +346,10 @@ def preprocess_sparse_dense_matmul_input(
       else utils.num_sparsecores_per_device(mesh.devices.item(0))
   )
   num_scs = num_sc_per_device * global_device_count
-  feature_batches: Sequence[PartitionFeatureInput] = _to_sequence_of_batches(
+  feature_batches: Sequence[FeatureBatch] = _to_sequence_of_batches(
       features, enable_minibatching, "features"
   )
-  weight_batches: Sequence[PartitionWeightInput] = _to_sequence_of_batches(
+  weight_batches: Sequence[WeightBatch] = _to_sequence_of_batches(
       features_weights, enable_minibatching, "features_weights"
   )
 

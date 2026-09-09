@@ -198,7 +198,8 @@ class ShakespeareTest(absltest.TestCase):
 
     def loss_fn(params, emb_acts, labels):
       logits = self.model.apply(params, emb_acts)
-      xentropy = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # pyrefly: ignore[bad-argument-type]
+      assert isinstance(logits, jax.Array)
+      xentropy = optax.softmax_cross_entropy_with_integer_labels(logits, labels)
       return jnp.mean(xentropy)
 
     self.loss_grad_fn = jax.value_and_grad(loss_fn, argnums=(0, 1))

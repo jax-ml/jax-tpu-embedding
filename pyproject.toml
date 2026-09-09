@@ -106,7 +106,7 @@ select = [
 max-complexity = 18
 
 [tool.pyrefly]
-preset = "basic"
+preset = "default"
 python-version = "3.12"
 project-includes = [
     "**/*.py*",
@@ -122,8 +122,10 @@ ignore-missing-imports = [
     "jax.*",
     "jaxlib.*",
     "numpy.*",
+    "jax_tpu_embedding.sparsecore.version",
     "optax.*",
     "orbax.*",
+    "packaging.*",
     "portpicker.*",
     "scipy.*",
     "setuptools.*",
@@ -133,30 +135,3 @@ untyped-def-behavior = "check-and-infer-return-any"
 
 [tool.pyrefly.errors]
 unused-ignore = "warn"
-bad-return = "error"
-implicit-any-attribute = "error"
-bad-override = "error"
-bad-override-param-name = "error"
-implicitly-defined-attribute = "error"
-variance-mismatch = "error"
-unused-coroutine = "error"
-protocol-implicitly-defined-attribute = "error"
-redundant-condition = "error"
-unreachable = "error"
-bad-assignment = "error"
-unsafe-overlap = "error"
-bad-dunder-all = "error"
-bad-override-mutable-attribute = "error"
-abstract-method-call = "error"
-missing-attribute = "error"
-unsupported-operation = "error"
-unbound-name = "error"
-bad-index = "error"
-bad-argument-count = "error"
-bad-context-manager = "error"
-not-a-type = "error"
-bad-instantiation = "error"
-bad-class-definition = "error"
-bad-function-definition = "error"
-bad-param-name-override = "error"
-bad-raise = "error"

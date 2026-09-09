@@ -211,16 +211,14 @@ class EmbeddingLayerTest(parameterized.TestCase):
         num_sc_per_device=num_sc_per_device,
     )
 
-    embedding_variables = {}
-
-    embedding_variables['table_a'] = [
+    emb_table_a_devices = [
         jax.device_put(
             emb_table_a_sharded[i],
             device=local_device,
         )
         for i, local_device in enumerate(devices)
     ]
-    embedding_variables['table_b'] = [
+    emb_table_b_devices = [
         jax.device_put(
             emb_table_b_sharded[i],
             device=local_device,
@@ -228,22 +226,24 @@ class EmbeddingLayerTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(sc_module.mesh, P(sc_module.sharding_axis, None))
-    embedding_variables['table_a'] = embedding.EmbeddingVariables(
-        table=jax.make_array_from_single_device_arrays(
-            shape=(padded_vocab_a, padded_dim_a),
-            sharding=sharding,
-            arrays=embedding_variables['table_a'],
+    embedding_variables = {
+        'table_a': embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(padded_vocab_a, padded_dim_a),
+                sharding=sharding,
+                arrays=emb_table_a_devices,
+            ),
+            slot=embedding_spec.SGDSlotVariables(),
         ),
-        slot=embedding_spec.SGDSlotVariables(),
-    )
-    embedding_variables['table_b'] = embedding.EmbeddingVariables(
-        table=jax.make_array_from_single_device_arrays(
-            shape=(padded_vocab_b, padded_dim_b),
-            sharding=sharding,
-            arrays=embedding_variables['table_b'],
+        'table_b': embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(padded_vocab_b, padded_dim_b),
+                sharding=sharding,
+                arrays=emb_table_b_devices,
+            ),
+            slot=embedding_spec.SGDSlotVariables(),
         ),
-        slot=embedding_spec.SGDSlotVariables(),
-    )
+    }
 
     var_spec = jax.eval_shape(
         sc_module.init,
@@ -439,7 +439,6 @@ class EmbeddingLayerTest(parameterized.TestCase):
     emb_table_c = test_utils.row_initialize_with_padding(
         self.feature_spec_c.table_spec, offset=200, pad_value=_PAD_VALUE
     )
-    embedding_variables = {}
     sharded_stacked_tables = (
         test_utils.create_per_device_sharded_stacked_tables(
             [emb_table_a, emb_table_c],
@@ -448,7 +447,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
             rotation=num_sc_per_device,
         )
     )
-    embedding_variables['table_a_table_c'] = [
+    emb_table_ac_devices = [
         jax.device_put(
             sharded_stacked_tables[i],
             device=local_device,
@@ -456,14 +455,16 @@ class EmbeddingLayerTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(mesh, P('x', None))
-    embedding_variables['table_a_table_c'] = embedding.EmbeddingVariables(
-        table=jax.make_array_from_single_device_arrays(
-            shape=(stacked_vocab_size, padded_dim_a),
-            sharding=sharding,
-            arrays=embedding_variables['table_a_table_c'],
-        ),
-        slot=embedding_spec.SGDSlotVariables(),
-    )
+    embedding_variables = {
+        'table_a_table_c': embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(stacked_vocab_size, padded_dim_a),
+                sharding=sharding,
+                arrays=emb_table_ac_devices,
+            ),
+            slot=embedding_spec.SGDSlotVariables(),
+        )
+    }
 
     var_spec = jax.eval_shape(
         sc_module.init,
@@ -626,8 +627,7 @@ class EmbeddingLayerTest(parameterized.TestCase):
         num_devices=device_count,
         num_sc_per_device=num_sc_per_device,
     )
-    embedding_variables = {}
-    embedding_variables['table_a'] = [
+    emb_table_a_devices = [
         jax.device_put(
             emb_table_a_sharded[i],
             device=local_device,
@@ -635,14 +635,16 @@ class EmbeddingLayerTest(parameterized.TestCase):
         for i, local_device in enumerate(devices)
     ]
     sharding = NamedSharding(sc_module.mesh, P(sc_module.sharding_axis, None))
-    embedding_variables['table_a'] = embedding.EmbeddingVariables(
-        table=jax.make_array_from_single_device_arrays(
-            shape=(padded_vocab_a, padded_dim_a),
-            sharding=sharding,
-            arrays=embedding_variables['table_a'],
-        ),
-        slot=embedding_spec.SGDSlotVariables(),
-    )
+    embedding_variables = {
+        'table_a': embedding.EmbeddingVariables(
+            table=jax.make_array_from_single_device_arrays(
+                shape=(padded_vocab_a, padded_dim_a),
+                sharding=sharding,
+                arrays=emb_table_a_devices,
+            ),
+            slot=embedding_spec.SGDSlotVariables(),
+        )
+    }
 
     var_spec = jax.eval_shape(
         sc_module.init,

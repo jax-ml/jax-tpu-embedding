@@ -21,7 +21,9 @@ This is not a typical unit test, but it is a valuable tool for testing the
 integration of different components of the SparseCore embedding API.
 """
 
+from collections.abc import Mapping
 from functools import partial  # pylint: disable=g-importing-member
+import sys
 from typing import Any
 
 from absl import flags
@@ -46,9 +48,9 @@ import numpy as np
 import optax
 
 
-jnp.set_printoptions(threshold=np.inf, linewidth=np.inf)  # pyrefly: ignore[bad-argument-type]
+jnp.set_printoptions(threshold=sys.maxsize, linewidth=sys.maxsize)
 NestedFeatureSpecs = embedding.Nested[embedding_spec.FeatureSpec]
-NestedEmbeddingVariables = embedding.Nested[embedding.EmbeddingVariables]
+NestedEmbeddingVariables = Mapping[str, embedding.EmbeddingVariables]
 NestedArray = embedding.Nested[jax.Array]
 PyTree = Any
 
@@ -219,11 +221,9 @@ class EmbeddingPipelineTest(absltest.TestCase):
     # Define sharding for model input and output data
 
     self.pipeline_input_sharding = self.global_sharding
-    # pytype: disable=wrong-arg-types
     self.output_sharding = ShakespeareModelOutput(
-        metrics_update=self.replicated_sharding,
+        metrics_update=self.replicated_sharding,  # pyrefly: ignore[bad-argument-type]
     )
-    # pytype: enable=wrong-arg-types
 
     # Define sharding for pipeline state
     self.pipeline_state_sharding = ep_utils.get_pipeline_state_sharding(

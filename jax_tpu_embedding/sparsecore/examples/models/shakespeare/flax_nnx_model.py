@@ -13,6 +13,8 @@
 # limitations under the License.
 """Shakespeare model using embedding layer."""
 
+from collections.abc import Mapping
+
 from flax import nnx
 import jax
 import jax.numpy as jnp
@@ -32,7 +34,7 @@ class Model(nnx.Module):
   def __init__(
       self,
       *,
-      feature_specs: Nested[embedding_spec.FeatureSpec],
+      feature_specs: Mapping[str, embedding_spec.FeatureSpec],
       global_batch_size: int,
       vocab_size: int,
       seq_len: int,
@@ -42,8 +44,8 @@ class Model(nnx.Module):
       feature_name: str,
       sharding_axis: str,
   ):
-    assert len(feature_specs) == 1, 'Shakespeare model expects one feature.'  # pyrefly: ignore[bad-argument-type]
-    assert feature_name in feature_specs, (  # pyrefly: ignore[not-iterable]
+    assert len(feature_specs) == 1, 'Shakespeare model expects one feature.'
+    assert feature_name in feature_specs, (
         'Shakespeare model expects feature named "%s".' % feature_name
     )
 
@@ -107,7 +109,8 @@ class Model(nnx.Module):
     x = self.embedding_layer(embedding_lookup_inputs, step=step)
 
     # Unpack the activations.
-    x = x[self.feature_name]  # pyrefly: ignore[bad-index]
+    assert isinstance(x, Mapping)
+    x = x[self.feature_name]
     x = jnp.reshape(x, (self.global_batch_size, -1))
     x = self.add_sharding_constraint(x, (self.sharding_axis,))
 

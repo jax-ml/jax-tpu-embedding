@@ -138,13 +138,6 @@ def optimizer_spec_to_proto(
   if opt is None:
     return None
 
-  lr_kwargs = {}
-  lr_tag = _extract_learning_rate_tag(opt.learning_rate)
-  if lr_tag:
-    lr_kwargs["learning_rate_tag"] = lr_tag
-  elif isinstance(opt.learning_rate, (int, float)):
-    lr_kwargs["learning_rate"] = float(opt.learning_rate)
-
   opt_type: Any = get_optimizer_type(type(opt))
   float_params = (
       opt.get_float_params()
@@ -157,12 +150,18 @@ def optimizer_spec_to_proto(
       else {}
   )
 
-  return embedding_spec_pb2.OptimizerSpecProto(
+  proto = embedding_spec_pb2.OptimizerSpecProto(
       type=opt_type,
       float_params=float_params,
       bool_params=bool_params,
-      **lr_kwargs,
   )
+  lr_tag = _extract_learning_rate_tag(opt.learning_rate)
+  if lr_tag:
+    proto.learning_rate_tag = lr_tag
+  elif isinstance(opt.learning_rate, (int, float)):
+    proto.learning_rate = float(opt.learning_rate)
+
+  return proto
 
 
 def proto_to_optimizer_spec(

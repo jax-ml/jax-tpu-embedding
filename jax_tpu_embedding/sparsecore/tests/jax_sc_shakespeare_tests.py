@@ -83,8 +83,7 @@ class ShakespeareTest(absltest.TestCase):
         num_sc_per_device=config.num_sc_per_device,
     )
 
-    embedding_variables = {}
-    embedding_variables[config.table_name] = [
+    device_arrays = [
         jax.device_put(
             emb_table_sharded[i],
             device=device,
@@ -95,12 +94,14 @@ class ShakespeareTest(absltest.TestCase):
     table_arr = jax.make_array_from_single_device_arrays(
         shape=(config.vocab_size, config.embedding_size),
         sharding=sharding,
-        arrays=embedding_variables[config.table_name],
+        arrays=device_arrays,
     )
-    embedding_variables[config.table_name] = embedding.EmbeddingVariables(
-        table=table_arr,
-        slot=(jnp.zeros_like(table_arr), jnp.zeros_like(table_arr)),
-    )
+    embedding_variables = {
+        config.table_name: embedding.EmbeddingVariables(
+            table=table_arr,
+            slot=(jnp.zeros_like(table_arr), jnp.zeros_like(table_arr)),
+        )
+    }
 
     # Define the forward pass function.
     loss_grad_fn = jax.value_and_grad(

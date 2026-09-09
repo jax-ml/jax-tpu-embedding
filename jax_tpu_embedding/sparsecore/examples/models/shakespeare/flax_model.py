@@ -13,6 +13,8 @@
 # limitations under the License.
 """Shakespeare model using embedding layer."""
 
+from collections.abc import Mapping
+
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -68,7 +70,8 @@ class Model(nn.Module):
     )(embedding_lookup_inputs)
 
     # Unpack the activations.
-    x = x[self.feature_name]  # pyrefly: ignore[bad-index]
+    assert isinstance(x, Mapping)
+    x = x[self.feature_name]
     x = jnp.reshape(x, (self.global_batch_size, -1))
     x = self.add_sharding_constraint(x)
 

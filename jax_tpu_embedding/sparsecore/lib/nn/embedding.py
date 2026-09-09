@@ -600,7 +600,7 @@ def get_all_reduce_interface(
   return pybind_input_preprocessing.MinibatchingNode(
       host_id,
       host_count,
-      peer_addresses,
+      list(peer_addresses),
       minibatching_port,
   ).get_all_reduce_interface()
 
@@ -1135,7 +1135,9 @@ def tpu_sparse_dense_matmul(
   assert lhs_row_pointers.keys() == stacked_table_specs.keys()
 
   # Casting to int since primitives requires JSON serializable value.
-  sharding_strategy_val: int = int(sharding_strategy_to_enum(sharding_strategy))
+  sharding_strategy_val: int = int(
+      sharding_strategy_to_enum(sharding_strategy).value
+  )
 
   num_minibatches = _resolve_scalar_minibatches(
       preprocessed_inputs.num_minibatches
@@ -1412,7 +1414,9 @@ def tpu_sparse_dense_matmul_grad(
   assert lhs_row_pointers.keys() == gradients.keys()
 
   # Casting to int since primitives requires JSON serializable value.
-  sharding_strategy_val: int = int(sharding_strategy_to_enum(sharding_strategy))
+  sharding_strategy_val: int = int(
+      sharding_strategy_to_enum(sharding_strategy).value
+  )
 
   num_minibatches = _resolve_scalar_minibatches(
       preprocessed_inputs.num_minibatches
@@ -1493,7 +1497,7 @@ def tpu_sparse_dense_matmul_grad(
           enable_minibatching=enable_minibatching,
       )
     else:
-      extra_kwargs = {}
+      extra_kwargs: dict[str, bool | float | None] = {}
       if isinstance(
           stack_table_spec.optimizer, embedding_spec.FTRLOptimizerSpec
       ):
