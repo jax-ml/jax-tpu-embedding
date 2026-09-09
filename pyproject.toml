@@ -158,4 +158,8 @@ untyped-def-behavior = "check-and-infer-return-any"
 # (https://github.com/jax-ml/jax/pull/14688).
 unused-ignore = "warn"
 
+# Strict preset
+potential-bad-keyword-argument = "error"
+implicit-any-attribute = "error"
+
 
