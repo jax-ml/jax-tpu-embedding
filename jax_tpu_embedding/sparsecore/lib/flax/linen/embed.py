@@ -332,27 +332,31 @@ def _emb_lookup(
     embedding_lookup_inputs: EmbeddingLookupInput,
     emb_table: Mapping[str, embedding.EmbeddingVariables],
 ):
+  """Performs embedding lookup across SparseCore devices."""
+
   pt = embedding_layer.embedding_table_partition
   pd = embedding_layer.data_partition
+  # tpu_sparse_dense_matmul uses global_device_count to determine per-shard
+  # output shapes and MOD table lookups, so the value must equal the actual
+  # shard count. With a 1D mesh (the default) mesh.size == num_shards and
+  # both are correct. With a multi-axis mesh, however, mesh.size is the total
+  # device count across ALL axes while only one axis is used for sharding,
+  # causing a mismatch that produces incorrectly-shaped embedding outputs.
+  def _matmul(
+      inputs: embedding.PreprocessedInput | embedding.SparseDenseMatmulInput,
+      table: Mapping[str, embedding.EmbeddingVariables],
+  ) -> embedding.Nested[jax.Array]:
+    return embedding.tpu_sparse_dense_matmul(
+        inputs,
+        table,
+        embedding_layer.feature_specs,
+        global_device_count=embedding_layer.num_shards,
+        sharding_strategy=embedding_layer.table_sharding_strategy,
+        enable_minibatching=embedding_layer.enable_minibatching,
+    )
+
   return jax.shard_map(
-      functools.partial(
-          embedding.tpu_sparse_dense_matmul,
-          # Use num_shards (= mesh.shape[sharding_axis]) rather than
-          # mesh.size.  The shard_map below partitions data along
-          # `sharding_axis` only (via in_specs=P(sharding_axis)), so each
-          # shard receives batch/num_shards items.  tpu_sparse_dense_matmul
-          # uses global_device_count to determine per-shard output shapes
-          # and MOD table lookups, so the value must equal the actual shard
-          # count.  With a 1D mesh (the default) mesh.size == num_shards
-          # and both are correct.  With a multi-axis mesh, however,
-          # mesh.size is the total device count across ALL axes while only
-          # one axis is used for sharding, causing a mismatch that produces
-          # incorrectly-shaped embedding outputs.
-          global_device_count=embedding_layer.num_shards,
-          feature_specs=embedding_layer.feature_specs,
-          sharding_strategy=embedding_layer.table_sharding_strategy,
-          enable_minibatching=embedding_layer.enable_minibatching,
-      ),
+      _matmul,
       mesh=embedding_layer.mesh,
       in_specs=(pd, pt),
       out_specs=pd,

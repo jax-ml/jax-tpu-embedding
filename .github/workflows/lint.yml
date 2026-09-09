@@ -28,7 +28,7 @@ jobs:
       - name: Install lint and project dependencies
         run: |
           git config --global --add safe.directory "*"
-          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel pyrefly pre-commit grpcio-tools
+          python -m pip install --upgrade --root-user-action=ignore pip setuptools wheel "pyrefly>=1.2.0" pre-commit grpcio-tools
           python -m pip install --root-user-action=ignore -r third_party/py/requirements_lock_3_12.txt
 
       - name: Generate protobuf stubs

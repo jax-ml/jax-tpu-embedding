@@ -77,6 +77,13 @@ def _resolve_feature_input_ndim(features: FeatureInput) -> int:
 _T = TypeVar("_T")
 
 
+def _to_sequence(inputs: _T | ArrayLike) -> _T:
+  """Converts array-like inputs to nested Python sequences via .tolist()."""
+  if isinstance(inputs, (np.ndarray, jnp.ndarray)):
+    return cast(_T, inputs.tolist())
+  return inputs
+
+
 def _to_sequence_of_batches(
     inputs: _T | Sequence[_T],
     enable_minibatching: bool,
@@ -149,17 +156,20 @@ def _preprocess_batch_to_partitions(
   # where keys are (col, row)
   partitions = collections.defaultdict(lambda: collections.defaultdict(float))
 
+  feat_seq: Sequence[Sample] = _to_sequence(features)
+  weight_seq: Sequence[SampleWeight] = _to_sequence(features_weights)
+
   for row_id, (sample_feat, sample_weight) in enumerate(
-      zip(features, features_weights, strict=True)
+      zip(feat_seq, weight_seq, strict=True)
   ):
     local_sc_id = row_id // batch_size_per_sc
     local_row_id = row_id % batch_size_per_sc
     for col_id, weight in zip(sample_feat, sample_weight, strict=True):
-      global_sc_id = int(col_id) % num_scs
-      local_col_id = int(col_id) // num_scs
+      global_sc_id = col_id % num_scs
+      local_col_id = col_id // num_scs
       # Accumulate gain for the same (col, row) in this partition.
       # fmt: off
-      partitions[(local_sc_id, global_sc_id)][(local_col_id, local_row_id)] += float(weight)
+      partitions[(local_sc_id, global_sc_id)][(local_col_id, local_row_id)] += weight
       # fmt: on
 
   ##############################################################################
