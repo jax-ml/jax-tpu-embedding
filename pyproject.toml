@@ -57,48 +57,67 @@ target-version = "py312"
 
 [tool.ruff.lint]
 ignore = [
-    # Unnecessary collection call
+    # Unnecessary `dict`/`list`/`tuple` collection call (rewrite as literal).
     "C408",
-    # Unnecessary map usage
+    # Unnecessary `map()` usage with `lambda` (rewrite as comprehension).
     "C417",
-    # Unnecessary dict comprehension for iterable
+    # Unnecessary `dict` comprehension for iterable (rewrite using `dict.fromkeys()`).
     "C420",
-    # Object names too complex
+    # Function or method is too complex (McCabe cyclomatic complexity).
     "C901",
-    # Using `yield` and `return {value}` in a generator function can lead to confusing behavior
+    # Using `yield` and `return {value}` in a generator function.
     "B901",
-    # Class could be dataclass or namedtuple
+    # Class could be `dataclass` or `namedtuple`.
     "B903",
-    # Raise with from clause inside except block
+    # `raise` without `from` clause inside `except` block (`raise ... from err`).
     "B904",
-    # Zip without explicit strict parameter
+    # `zip()` without an explicit `strict=` parameter.
     "B905",
-    # Unnecessary set/list comprehension inside functions
+    # Unnecessary list comprehension in `set()`.
     "C403",
+    # Unnecessary tuple/list literal within `tuple()` (rewrite as tuple literal).
     "C409",
+    # Unnecessary `list`/`set`/`dict` comprehension.
     "C416",
+    # Unnecessary comprehension in call (e.g. `all()`, `any()`, `min()`, or `max()`).
     "C419",
-    # Unnecessary generator/list conversions
+    # Unnecessary generator expression in `set()`.
     "C401",
+    # Unnecessary `list()` or `reversed()` call around `sorted()`.
     "C413",
+    # Unnecessary double cast or processing call (e.g. `list(list(...))`).
     "C414",
-    # Redefinition of unused name
+    # Redefinition of unused name.
     "F811",
 ]
 select = [
+    # flake8-bugbear opinionated / design checks (B9xx).
     "B9",
+    # flake8-comprehensions (C4xx) and McCabe cyclomatic complexity (C9xx).
     "C",
+    # Pyflakes rules (undefined variables, unused imports, etc.).
     "F",
+    # pycodestyle warnings.
     "W",
+    # flake8-2020 rules for `sys.version` and `sys.version_info` misuse.
     "YTT",
+    # flake8-async rules for asyncio / coroutine best practices.
     "ASYNC",
+    # Mixed spaces and tabs in indentation.
     "E101",
+    # Expected an indented block.
     "E112",
+    # Unexpected indentation.
     "E113",
+    # Expected an indented block (comment).
     "E115",
+    # Over-indented code or comment.
     "E117",
+    # Missing whitespace around operator.
     "E225",
+    # Missing whitespace around bitwise or shift operator.
     "E227",
+    # Missing whitespace around modulo operator.
     "E228",
 ]
 
@@ -134,4 +153,9 @@ ignore-missing-imports = [
 untyped-def-behavior = "check-and-infer-return-any"
 
 [tool.pyrefly.errors]
+# Upstream blocker
+# Temporarily demoted from "error" to "warn" pending upstream JAX PR #14688
+# (https://github.com/jax-ml/jax/pull/14688).
 unused-ignore = "warn"
+
+
