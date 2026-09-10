@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import jax
@@ -24,6 +24,7 @@ from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
 from jax.interpreters import mlir
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.nn import slot_shape
 
 _call_stablehlo_p = jex.core.Primitive("call_stablehlo")
 _call_stablehlo_p.multiple_results = True
@@ -76,6 +77,39 @@ def apply_clipping(
   return val
 
 
+def _get_optimizer_avals(
+    embedding_dim: int,
+    num_slot_variables: int,
+    num_hyperparameters: int,
+    slot_shapes: Sequence[slot_shape.SlotShapeType] | None = None,
+) -> tuple[list[jax.core.ShapedArray], tuple[jax.core.ShapedArray, ...]]:
+  """Constructs input and output abstract arrays for custom optimizer lowering."""
+  table_aval = jax.core.ShapedArray((1, embedding_dim), jnp.float32)
+  if slot_shapes is not None:
+    if len(slot_shapes) != num_slot_variables:
+      raise ValueError(
+          f"Length of slot_shapes ({len(slot_shapes)}) must match"
+          f" num_slot_variables ({num_slot_variables})."
+      )
+    slot_avals = []
+    for s in slot_shapes:
+      if s in ("rowwise_1d", "1d"):
+        slot_avals.append(jax.core.ShapedArray((1,), jnp.float32))
+      elif s is None or s == "table":
+        slot_avals.append(table_aval)
+      elif isinstance(s, int):
+        slot_avals.append(jax.core.ShapedArray((1, s), jnp.float32))
+      else:
+        raise ValueError(f"Unsupported slot shape specification: {s}")
+  else:
+    slot_avals = [table_aval] * num_slot_variables
+
+  hyperparam_avals = [table_aval] * num_hyperparameters
+  in_avals = [table_aval, table_aval, *slot_avals, *hyperparam_avals]
+  out_avals = (table_aval, *slot_avals)
+  return in_avals, out_avals
+
+
 def lower_to_stablehlo(
     custom_computation_fn: Callable[..., Any],
     embedding_dim: int = 1,
@@ -83,6 +117,7 @@ def lower_to_stablehlo(
     num_hyperparameters: int = 1,
     min_value: float | None = None,
     max_value: float | None = None,
+    slot_shapes: Sequence[slot_shape.SlotShapeType] | None = None,
 ) -> str:
   """Traces and lowers a custom optimizer function into StableHLO text.
 
@@ -94,12 +129,18 @@ def lower_to_stablehlo(
     num_hyperparameters: Number of hyperparameters passed to the optimizer.
     min_value: Optional minimum value to clip the updated embedding table.
     max_value: Optional maximum value to clip the updated embedding table.
+    slot_shapes: Optional shape specification per slot variable. Defaults to
+      table-shaped slots. See `slot_shape.SlotShapeType`.
 
   Returns:
     A string containing the lowered StableHLO module text.
   """
-  aval = jax.core.ShapedArray((1, embedding_dim), jnp.float32)
-  in_avals = [aval] * (1 + 1 + num_slot_variables + num_hyperparameters)
+  in_avals, _ = _get_optimizer_avals(
+      embedding_dim=embedding_dim,
+      num_slot_variables=num_slot_variables,
+      num_hyperparameters=num_hyperparameters,
+      slot_shapes=slot_shapes,
+  )
 
   fn_to_lower = custom_computation_fn
   if min_value is not None or max_value is not None:
@@ -126,6 +167,7 @@ def wrap_stablehlo_with_limits(
     num_hyperparameters: int,
     min_value: float | None = None,
     max_value: float | None = None,
+    slot_shapes: Sequence[slot_shape.SlotShapeType] | None = None,
 ) -> str:
   """Wraps an existing StableHLO module in JAX and lowers again with limits.
 
@@ -136,6 +178,8 @@ def wrap_stablehlo_with_limits(
     num_hyperparameters: Number of hyperparameters passed to the optimizer.
     min_value: Optional minimum value to clip the updated embedding table.
     max_value: Optional maximum value to clip the updated embedding table.
+    slot_shapes: Optional shape specification per slot variable. Defaults to
+      table-shaped slots. See `slot_shape.SlotShapeType`.
 
   Returns:
     A string containing the wrapped and lowered StableHLO module text.
@@ -146,9 +190,12 @@ def wrap_stablehlo_with_limits(
   if min_value is None and max_value is None:
     return stablehlo_str
 
-  aval = jax.core.ShapedArray((1, embedding_dim), jnp.float32)
-  in_avals = [aval] * (1 + 1 + num_slot_variables + num_hyperparameters)
-  out_avals = tuple([aval] * (1 + num_slot_variables))
+  in_avals, out_avals = _get_optimizer_avals(
+      embedding_dim=embedding_dim,
+      num_slot_variables=num_slot_variables,
+      num_hyperparameters=num_hyperparameters,
+      slot_shapes=slot_shapes,
+  )
 
   def _wrapped(*args):
     out = _call_stablehlo_p.bind(

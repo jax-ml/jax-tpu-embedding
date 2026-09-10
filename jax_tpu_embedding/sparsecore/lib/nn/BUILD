@@ -21,11 +21,19 @@ package(
 )
 
 pytype_strict_library(
+    name = "slot_shape",
+    srcs = [
+        "slot_shape.py",
+    ],
+)
+
+pytype_strict_library(
     name = "custom_optimizer_lowering",
     srcs = [
         "custom_optimizer_lowering.py",
     ],
     deps = [
+        ":slot_shape",
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
         pypi_requirement("jax/extend/mlir:ir"),
@@ -40,6 +48,7 @@ pytype_strict_library(
     ],
     deps = [
         ":custom_optimizer_lowering",
+        ":slot_shape",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_momentum",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adam",
@@ -61,6 +70,7 @@ pytype_strict_library(
         ":custom_optimizer_lowering",
         ":embedding_proto_utils",
         ":embedding_spec",
+        ":slot_shape",
         ":table_stacking",
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_activation_unstack",

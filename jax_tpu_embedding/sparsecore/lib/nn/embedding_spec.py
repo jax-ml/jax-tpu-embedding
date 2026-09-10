@@ -32,6 +32,7 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_laprop
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_optimizer_grad
+from jax_tpu_embedding.sparsecore.lib.nn import slot_shape
 
 # The default activation memory limit (2 MiB) per SparseCore for table stacking.
 DEFAULT_ACTIVATION_MEM_BYTES_LIMIT: int = 2048 * 1024
@@ -187,6 +188,12 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
     """Returns the number of slot variables for the optimizer."""
     return len(self.slot_variables_initializers())
 
+  def slot_variables_shapes(
+      self, table_shape: tuple[int, ...]
+  ) -> tuple[tuple[int, ...], ...]:
+    """Returns the shapes of the slot variables given the embedding table shape."""
+    return (table_shape,) * self.slot_variables_count()
+
   @abc.abstractmethod
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     """Derived classes should implement this method to return the xla primitive for the optimizer."""
@@ -257,6 +264,8 @@ class CustomOptimizerSpec(OptimizerSpec):
     slot_variable_initializers_tuple: Tuple of initializers for the slot
       variables.
     short_name_str: Short name for the optimizer.
+    slot_shapes: Optional shape specification per slot variable. Defaults to
+      table-shaped slots. See `slot_shape.SlotShapeType`.
   """
 
   def __init__(
@@ -268,6 +277,7 @@ class CustomOptimizerSpec(OptimizerSpec):
           CallableTableInitializer, ...
       ] = (),
       short_name_str: str = "custom",
+      slot_shapes: Sequence[slot_shape.SlotShapeType] | None = None,
   ):
     """Initializes the instance."""
     super().__init__(learning_rate=learning_rate)
@@ -275,10 +285,33 @@ class CustomOptimizerSpec(OptimizerSpec):
     self.stablehlo = stablehlo
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
+    self.slot_shapes = tuple(slot_shapes) if slot_shapes is not None else None
 
   @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return self.slot_variable_initializers_tuple
+
+  @override
+  def slot_variables_shapes(
+      self, table_shape: tuple[int, ...]
+  ) -> tuple[tuple[int, ...], ...]:
+    if self.slot_shapes is None:
+      return (table_shape,) * self.slot_variables_count()
+    shapes: list[tuple[int, ...]] = []
+    for s in self.slot_shapes:
+      if s in ("rowwise_1d", "1d"):
+        shapes.append((table_shape[0],))
+      elif (
+          s is None
+          or s == "table"
+          or (len(table_shape) > 1 and s == table_shape[1])
+      ):
+        shapes.append(table_shape)
+      elif isinstance(s, int):
+        shapes.append((table_shape[0], s))
+      else:
+        raise ValueError(f"Unsupported slot shape specification: {s}")
+    return tuple(shapes)
 
   @override
   def __hash__(self) -> int:
@@ -288,6 +321,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         self.stablehlo,
         self.slot_variable_initializers_tuple,
         self.short_name_str,
+        self.slot_shapes,
     ))
 
   @override
@@ -309,6 +343,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: int = 1,
       min_value: float | None = None,
       max_value: float | None = None,
+      slot_shapes: Sequence[slot_shape.SlotShapeType] | None = None,
   ) -> str:
     """Traces and lowers a custom optimizer function into StableHLO text.
 
@@ -320,6 +355,8 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
       min_value: Optional minimum value to clip the updated embedding table.
       max_value: Optional maximum value to clip the updated embedding table.
+      slot_shapes: Optional shape specification per slot variable. Defaults to
+        table-shaped slots. See `slot_shape.SlotShapeType`.
 
     Returns:
       A string containing the lowered StableHLO module text.
@@ -337,6 +374,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         num_hyperparameters=num_hyperparameters,
         min_value=min_value,
         max_value=max_value,
+        slot_shapes=slot_shapes,
     )
 
   @classmethod
@@ -348,6 +386,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: int,
       min_value: float | None = None,
       max_value: float | None = None,
+      slot_shapes: Sequence[slot_shape.SlotShapeType] | None = None,
   ) -> str:
     """Wraps an existing StableHLO module in JAX and lowers again with limits.
 
@@ -358,6 +397,8 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
       min_value: Optional minimum value to clip the updated embedding table.
       max_value: Optional maximum value to clip the updated embedding table.
+      slot_shapes: Optional shape specification per slot variable. Defaults to
+        table-shaped slots. See `slot_shape.SlotShapeType`.
 
     Returns:
       A string containing the wrapped and lowered StableHLO module text.
@@ -375,6 +416,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         num_hyperparameters=num_hyperparameters,
         min_value=min_value,
         max_value=max_value,
+        slot_shapes=slot_shapes,
     )
 
 
@@ -433,18 +475,23 @@ class AdagradOptimizerSpec(OptimizerSpec):
     initial_accumulator_value: The initial value for the accumulator slot
       variable. This constant is used to initialize the accumulator slot
       variable.
+    row_wise: If True, the accumulator holds a single value per table row (shape
+      `(vocab_size,)`) accumulated from the sum of squared gradients across the
+      embedding dimension, rather than one value per table element.
   """
 
   def __init__(
       self,
       learning_rate: LearningRate = 0.001,
       initial_accumulator_value: float | jax.Array = 0.1,
+      row_wise: bool = False,
   ):
     """Initializes the instance."""
     super().__init__(
         learning_rate=learning_rate,
     )
     self.initial_accumulator_value = initial_accumulator_value
+    self.row_wise = row_wise
 
   @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
@@ -453,10 +500,19 @@ class AdagradOptimizerSpec(OptimizerSpec):
     )
 
   @override
+  def slot_variables_shapes(
+      self, table_shape: tuple[int, ...]
+  ) -> tuple[tuple[int, ...], ...]:
+    if self.row_wise:
+      return AdagradSlotVariables(accumulator=table_shape[:1])
+    return super().slot_variables_shapes(table_shape)
+
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
         self.initial_accumulator_value,
+        self.row_wise,
     ))
 
   @override

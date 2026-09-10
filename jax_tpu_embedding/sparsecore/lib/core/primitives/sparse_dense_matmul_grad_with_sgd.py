@@ -123,13 +123,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_type = ir.RankedTensorType(embedding_table.type)
-  is_1d = embedding_table_type.rank == 1
-  squeezed_activations_grad = (
-      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
-  )
-  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
-  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
+  row_type = utils.get_row_type(embedding_table)
 
   optimizer_update = func_dialect.FuncOp(
       optimizer_update_computation_name,
@@ -179,12 +173,12 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
     operands += [
         num_minibatches_per_physical_sparse_core,
         embedding_table,
-        squeezed_activations_grad,
+        activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        squeezed_activations_grad,
+        activations_grad,
         embedding_table,
     ]
   operands += [
