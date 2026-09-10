@@ -162,6 +162,80 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
         actual_emb_table_unsharded, expected_emb_table_unsharded, atol=1e-5
     )
 
+  @parameterized.named_parameters(
+      ("no_clipping", None, None),
+      ("clipping", 2.0, 12.0),
+  )
+  def test_sc_emb_backward_pass_dim1(self, min_value, max_value):
+    # Arrange
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
+    emb_table_sharded = self._shard_table(
+        emb_table_dim1,
+    )
+
+    z_grad = jnp.full(
+        (self.batch_size // self.num_chips,),
+        0.01,
+        np.float32,
+    )
+
+    # Act
+    # Do the embedding update.
+    updated_emb_table = self.tpu_sparse_dense_matmul_grad_with_sgd(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        1,  # num_minibatches_per_physical_sparse_core
+        emb_table_sharded[0],
+        z_grad,
+        0.01,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        computation_name="sgd_test_computation_dim1",
+        sharding_strategy=1,
+        min_value=min_value,
+        max_value=max_value,
+    )
+
+    # Assert
+    # Check the embedding activations.
+    actual_emb_table_unsharded = utils.unshard_emb_table(
+        updated_emb_table[np.newaxis, :],
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    # Compute the expected results on CPU while the primitive runs on TPU.
+    # The optimizer only applies a sparse update: only rows involved in the
+    # forward pass are updated.
+    expected_emb_table_unsharded = emb_table_dim1.copy()
+    updated_rows = np.unique(self.input_tensor.flatten())
+    expected_emb_table_unsharded[updated_rows] -= 1e-4
+
+    # Only clip updated rows!
+    expected_emb_table_unsharded[updated_rows] = np.clip(
+        expected_emb_table_unsharded[updated_rows], min_value, max_value
+    )
+
+    np.testing.assert_allclose(
+        actual_emb_table_unsharded, expected_emb_table_unsharded, atol=1e-5
+    )
+
 
 if __name__ == "__main__":
   absltest.main()
