@@ -541,17 +541,17 @@ def _verify_stack_tables(
       raise ValueError(f"Table {table} is repeated in group {stack_name}.")
 
   # All tables in a group should have same optimizer.
-  if not all([
+  if not all(
       tables[name].optimizer == tables[table_names[0]].optimizer
       for name in table_names
-  ]):
+  ):
     raise ValueError(
         f"Tables {table_names} in group {stack_name} have different optimizers."
     )
   # All tables in a group should have same combiner.
-  if not all([
+  if not all(
       tables[t].combiner == tables[table_names[0]].combiner for t in table_names
-  ]):
+  ):
     raise ValueError(
         f"Tables {table_names} in group {stack_name} have different combiners."
     )
@@ -848,7 +848,7 @@ def stack_tables(
   # All tables in a group _should_ have same embedding dimension after round up
   # to preserve memory - but this is not a hard requirement.
   if not all(
-      [table_to_padded_dim[t] == padded_embedding_dim for t in table_names]
+      table_to_padded_dim[t] == padded_embedding_dim for t in table_names
   ):
     excess_padding = 0
     for table_name in table_names:

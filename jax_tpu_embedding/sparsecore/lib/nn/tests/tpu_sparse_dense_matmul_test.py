@@ -37,7 +37,7 @@ def _create_embedding_variable_for_pmap(
   num_sc_per_device = utils.num_sparsecores_per_device(mesh.devices.item(0))
   dim = var_shapes[0].shape[1]
   assert all(v.shape[1] == dim for v in var_shapes)
-  total_vocab = sum([v.shape[0] for v in var_shapes])
+  total_vocab = sum(v.shape[0] for v in var_shapes)
   emb_tables = [
       test_utils.row_id_initializer(v.shape, offset=v.offset)
       for v in var_shapes
@@ -71,7 +71,7 @@ def _create_embedding_variable_for_jit(
   num_sc_per_device = utils.num_sparsecores_per_device(mesh.devices.item(0))
   dim = var_shapes[0].shape[1]
   assert all(v.shape[1] == dim for v in var_shapes)
-  total_vocab = sum([v.shape[0] for v in var_shapes])
+  total_vocab = sum(v.shape[0] for v in var_shapes)
   emb_tables = [
       test_utils.row_id_initializer(v.shape, offset=v.offset)
       for v in var_shapes

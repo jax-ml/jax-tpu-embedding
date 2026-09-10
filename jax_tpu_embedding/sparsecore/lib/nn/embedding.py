@@ -414,10 +414,10 @@ def prepare_feature_specs_for_training(
             num_sc_per_device * global_device_count,
         )
     )
-    total_sample_count = sum([
+    total_sample_count = sum(
         np.prod(f.output_shape[:-1])
         for f in not_stacked_tables[feature.table_spec.name]
-    ])
+    )
 
     feature.table_spec.setting_in_stack = embedding_spec.TableSettingInStack(
         stack_name=feature.table_spec.name,

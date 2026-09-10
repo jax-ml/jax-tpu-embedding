@@ -71,8 +71,7 @@ ignore = [
     "C403",
     # Unnecessary tuple/list literal within `tuple()` (rewrite as tuple literal).
     "C409",
-    # Unnecessary comprehension in call (e.g. `all()`, `any()`, `min()`, or `max()`).
-    "C419",
+
     # Unnecessary generator expression in `set()`.
     "C401",
     # Unnecessary `list()` or `reversed()` call around `sorted()`.

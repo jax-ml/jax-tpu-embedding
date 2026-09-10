@@ -1076,10 +1076,10 @@ def _recompute_target_specs(
           ' convert_cross_topology_checkpoint.'
       )
 
-    stack_embedding_dim = max([
+    stack_embedding_dim = max(
         _next_largest_multiple(t.embedding_dim, 8)
         for t in stacked_spec_proto.table_specs
-    ])
+    )
     stacked_spec_proto.stack_embedding_dim = stack_embedding_dim
     stacked_spec_proto.num_sparsecores = num_shards
 
