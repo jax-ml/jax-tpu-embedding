@@ -788,7 +788,7 @@ def _unstack_slots(
 
   first_slot = next(iter(source_slots.values()))
   if not jax.tree.leaves(first_slot):
-    return {t_name: first_slot for t_name in table_names}
+    return dict.fromkeys(table_names, first_slot)
 
   def _unstack_leaf(
       *leaves_across_source_stacks: jax.Array,
@@ -840,7 +840,7 @@ def _unstack_and_restack_slots(
         else tspec.name
         for tspec in table_specs.values()
     }
-    return {st_name: first_slot for st_name in target_stack_names}
+    return dict.fromkeys(target_stack_names, first_slot)
 
   target_stack_names = set()
   for tspec in table_specs.values():

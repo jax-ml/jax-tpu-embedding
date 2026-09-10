@@ -59,8 +59,7 @@ target-version = "py312"
 ignore = [
     # Unnecessary `dict`/`list`/`tuple` collection call (rewrite as literal).
     "C408",
-    # Unnecessary `dict` comprehension for iterable (rewrite using `dict.fromkeys()`).
-    "C420",
+
     # Function or method is too complex (McCabe cyclomatic complexity).
     "C901",
     # `raise` without `from` clause inside `except` block (`raise ... from err`).
