@@ -69,8 +69,7 @@ ignore = [
     "B905",
     # Unnecessary list comprehension in `set()`.
     "C403",
-    # Unnecessary tuple/list literal within `tuple()` (rewrite as tuple literal).
-    "C409",
+
 
     # Unnecessary generator expression in `set()`.
     "C401",
