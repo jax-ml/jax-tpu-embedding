@@ -92,12 +92,17 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
   if not embedding_variables:
     raise ValueError("At least one embedding variable must be passed.")
 
-  # Squeeze trailing dimensions of size 1 (e.g. [N, 1] -> [N]) to support 1D
-  # embedding variables.
-  activations_grad = utils.maybe_squeeze_abstract_eval(activations_grad, 1)
-  embedding_variables = tuple(
-      utils.maybe_squeeze_abstract_eval(var, 1) for var in embedding_variables
+  is_1d = len(embedding_variables[0].shape) == 1 or (
+      len(embedding_variables[0].shape) == 2
+      and embedding_variables[0].shape[1] == 1
   )
+  if is_1d:
+    # Squeeze trailing dimensions of size 1 (e.g. [N, 1] -> [N]) to support 1D
+    # embedding variables.
+    activations_grad = utils.maybe_squeeze_abstract_eval(activations_grad, 1)
+    embedding_variables = tuple(
+        utils.maybe_squeeze_abstract_eval(var, 1) for var in embedding_variables
+    )
 
   utils.validate_abstract_eval_params(
       lhs_row_pointers=lhs_row_pointers,
@@ -189,12 +194,50 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
   else:
     raise ValueError(f"Unsupported stablehlo type: {type(stablehlo)}")
 
-  optimizer_update_computation_name = mlir.merge_mlir_modules(
-      ctx.module_context.module,
-      computation_name,
-      submodule,
-      dst_symtab=ctx.module_context.symbol_table,
-  )
+  with ctx.module_context.context:
+    sym_tab = ir.SymbolTable(submodule.operation)
+    for func_op in submodule.body.operations:
+      if func_op.operation.name != "func.func":
+        continue
+      for block in func_op.regions[0].blocks:
+        for op in list(block.operations):
+          if op.operation.name == "func.call":
+            callee_name = op.attributes["callee"].value
+            callee_op = sym_tab[callee_name]
+            callee_block = callee_op.regions[0].blocks[0]
+            val_map = dict(zip(callee_block.arguments, op.operands))
+            for inner_op in callee_block.operations:
+              if inner_op.operation.name == "func.return":
+                inlined_results = [val_map.get(v, v) for v in inner_op.operands]
+                for old_res, new_res in zip(op.results, inlined_results):
+                  old_res.replace_all_uses_with(new_res)
+              else:
+                cloned_op = inner_op.operation.clone(
+                    ip=ir.InsertionPoint(op.operation)
+                )
+                for i, operand in enumerate(cloned_op.operands):
+                  if operand in val_map:
+                    cloned_op.operands[i] = val_map[operand]
+                for orig_res, cloned_res in zip(
+                    inner_op.results, cloned_op.results
+                ):
+                  val_map[orig_res] = cloned_res
+            op.operation.erase()
+    for func_op in list(submodule.body.operations):
+      if (
+          "sym_visibility" in func_op.attributes
+          and ir.StringAttr(func_op.attributes["sym_visibility"]).value
+          == "private"
+      ):
+        func_op.operation.erase()
+    for op in submodule.body.operations:
+      op.attributes["execution_thread"] = ir.StringAttr.get("sparsecore")
+    optimizer_update_computation_name = mlir.merge_mlir_modules(
+        ctx.module_context.module,
+        computation_name,
+        submodule,
+        dst_symtab=ctx.module_context.symbol_table,
+    )
 
   hyperparams: list[ir.Value] = []
   f32type = mlir.aval_to_ir_type(
@@ -207,8 +250,16 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       reshaped = hlo.reshape(f32type, param)
       hyperparams.append(reshaped)
 
-  activations_grad_sq = utils.maybe_squeeze_ir(activations_grad, 1)
-  tables_sq = [utils.maybe_squeeze_ir(table, 1) for table in tables]
+  table_0_type = ir.RankedTensorType(tables[0].type)
+  is_1d = len(table_0_type.shape) == 1 or (
+      len(table_0_type.shape) == 2 and table_0_type.shape[1] == 1
+  )
+  if is_1d:
+    activations_grad_sq = utils.maybe_squeeze_ir(activations_grad, 1)
+    tables_sq = [utils.maybe_squeeze_ir(table, 1) for table in tables]
+  else:
+    activations_grad_sq = activations_grad
+    tables_sq = tables
 
   if enable_minibatching:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
@@ -240,9 +291,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
 
   op = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[
-          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])
-      ],
+      result_types=[ir.TupleType.get_tuple([table.type for table in tables])],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
       skip_ffi_layout_processing=True,

@@ -1740,6 +1740,78 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         atol=1e-5,
     )
 
+  def test_custom_optimizer_rowwise_adagrad_1d_slot(self):
+    devices = jax.devices()[:1]
+    mesh = jax.sharding.Mesh(devices, "x")
+
+    def rowwise_adagrad_jax(grad, table, accum, lr):
+      new_accum = accum + jnp.sum(grad * grad, axis=-1)
+      new_accum_2d = jax.lax.broadcast_in_dim(
+          new_accum, shape=table.shape, broadcast_dimensions=(0,)
+      )
+      return table - lr * grad / jnp.sqrt(new_accum_2d), new_accum
+
+    custom_rowwise_adagrad_spec = embedding_spec.CustomOptimizerSpec(
+        learning_rate=0.01,
+        custom_computation_fn=rowwise_adagrad_jax,
+        slot_variable_initializers_tuple=(jax.nn.initializers.constant(0.1),),
+        slot_dims=(1,),
+        short_name_str="custom_rowwise_adagrad",
+    )
+
+    feature_spec_c = dataclasses.replace(
+        self.feature_spec_c,
+        table_spec=dataclasses.replace(
+            self.table_spec_c,
+            initializer=jax.nn.initializers.constant(1.0),
+            optimizer=custom_rowwise_adagrad_spec,
+        ),
+    )
+
+    feature_specs = {"feature_spec_c": feature_spec_c}
+
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        num_sc_per_device=4,
+        global_device_count=len(devices),
+    )
+
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {"feature_spec_c": self.input_tensor_table_c},
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
+
+    sharding = NamedSharding(mesh, P("x", None))
+    rng = jax.random.PRNGKey(0)
+    embedding_variables = embedding.init_embedding_variables(
+        rng,
+        {"table_c": feature_specs["feature_spec_c"].table_spec},
+        sharding,
+        num_sparsecore_per_device=4,
+        bypass_mesh_check=True,
+    )
+    # Verify 1D slot was initialized with 1D shape (_VOC_C,)
+    self.assertEqual(embedding_variables["table_c"].slot[0].shape, (_VOC_C,))
+
+    activations_grad = {
+        "feature_spec_c": jnp.ones((_BATCH_SIZE, _DIM_C), dtype=jnp.float32)
+    }
+
+    grad_update = jax.jit(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul_grad,
+            feature_specs=feature_specs,
+            sharding_strategy="MOD",
+        )
+    )(activations_grad, preprocessed_inputs, embedding_variables)
+
+    self.assertEqual(grad_update["table_c"].slot[0].shape, (_VOC_C,))
+
 
 if __name__ == "__main__":
   absltest.main()
