@@ -402,7 +402,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
         self.global_sharding,
     )
     return ShakesperaeModelPipelineCurrentStepInput(
-        dense_inputs=ShakespeareModelDenseInput(labels=labels),  # pyrefly: ignore[bad-argument-type]
+        dense_inputs=ShakespeareModelDenseInput(labels=labels),
         sparse_inputs=preprocessed_inputs,
     )
 

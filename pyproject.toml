@@ -141,10 +141,7 @@ ignore-missing-imports = [
 untyped-def-behavior = "check-and-infer-return-any"
 
 [tool.pyrefly.errors]
-# Upstream blocker
-# Temporarily demoted from "error" to "warn" pending upstream JAX PR #14688
-# (https://github.com/jax-ml/jax/pull/14688).
-unused-ignore = "warn"
+unused-ignore = "error"
 
 # Strict preset
 potential-bad-keyword-argument = "error"

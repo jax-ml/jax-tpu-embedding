@@ -108,7 +108,7 @@ import dataclasses
 import functools
 import logging
 import os
-from typing import Any, Callable, Concatenate, Generic, NamedTuple, ParamSpec, TypeVar
+from typing import Any, Callable, Concatenate, Generic, NamedTuple, ParamSpec, TypeVar, cast
 
 from etils import epath
 import jax
@@ -142,13 +142,16 @@ FunctionArgs = ParamSpec('FunctionArgs')
 FunctionResults = TypeVar('FunctionResults')
 
 
+TrainStepFunc = Callable[
+    Concatenate[EmbeddingPipeliningState, FunctionArgs],
+    tuple[EmbeddingPipeliningState, FunctionResults],
+]
+
+
 @dataclasses.dataclass
 class PipeliningFunction(Generic[FunctionArgs, FunctionResults]):
   """Wrapper class that encapsulates the pipelined train step and finalize call."""
-  train_step_func: Callable[
-      Concatenate[EmbeddingPipeliningState, FunctionArgs],
-      tuple[EmbeddingPipeliningState, FunctionResults],
-  ]
+  train_step_func: TrainStepFunc[FunctionArgs, FunctionResults]
   finalize: Callable[..., Any]
 
   def __call__(
@@ -268,13 +271,16 @@ def auto_pipelining(
     runner = _build_runner(carry, state.args_1)
     return _run(runner, state, carry, None)
 
-  train_pipeline = jax.jit(
-      train_pipeline,
-      out_shardings=out_shardings,
-      donate_argnames=('carry',),
+  train_step_func = cast(
+      TrainStepFunc[FunctionArgs, FunctionResults],
+      jax.jit(
+          train_pipeline,
+          out_shardings=out_shardings,
+          donate_argnames=('carry',),
+      ),
   )
   finalize_pipeline = jax.jit(
       finalize_pipeline, out_shardings=out_shardings, donate_argnames=('carry',)
   )
 
-  return PipeliningFunction(train_pipeline, finalize_pipeline)  # pyrefly: ignore[bad-return]
+  return PipeliningFunction(train_step_func, finalize_pipeline)
