@@ -15,6 +15,7 @@ import logging
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
@@ -23,7 +24,7 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
+class SparseDenseMatmulCsrWithMiniBatchingValidationTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -589,6 +590,66 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
 
     logging.debug("emb_activations: %s", emb_activations)
     np.testing.assert_equal(emb_activations, expected_emb_activations)
+
+  @parameterized.named_parameters(
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_7", emb_size=7),
+      dict(testcase_name="dim_21", emb_size=21),
+      dict(testcase_name="dim_50", emb_size=50),
+  )
+  def test_sc_emb_forward_pass_non_hbmwordsize(self, emb_size: int):
+    batch_size = 16
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        embedding_ids,
+        sample_ids,
+        gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        [self.input_tensor],
+        [self.input_weights],
+        mesh,
+        num_sc_per_device=self.num_sc_per_device,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        enable_minibatching=True,
+    )
+
+    num_minibatches_per_physical_sparse_core = 1
+    emb_table = (
+        np.array([[float(i)] * emb_size for i in range(self.vocab_size)])
+        .astype(np.float32)
+    )
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    # Do the embedding lookup.
+    emb_activations = self.tpu_sparse_dense_matmul_csr_with_mini_batching(
+        lhs_row_pointers,
+        embedding_ids,
+        sample_ids,
+        gains,
+        num_minibatches_per_physical_sparse_core,
+        emb_table_sharded[0],
+        device_batch_size=batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        enable_minibatching=True,
+    )
+
+    logging.debug("emb_activations: %s", emb_activations)
+
+    # Check the embedding activations.
+    expected_emb_activations = np.tile(
+        self.input_tensor.astype(np.float32), (1, emb_size)
+    )
+    np.testing.assert_allclose(
+        emb_activations, expected_emb_activations, rtol=1e-5, atol=1e-5
+    )
 
 
 if __name__ == "__main__":

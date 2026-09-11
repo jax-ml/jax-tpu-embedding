@@ -274,6 +274,99 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         actual_updated_unsharded, expected_unsharded, atol=1e-5
     )
 
+  @parameterized.named_parameters(
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_7", emb_size=7),
+      dict(testcase_name="dim_21", emb_size=21),
+      dict(testcase_name="dim_50", emb_size=50),
+  )
+  def test_sc_emb_backward_pass_non_hbmwordsize(self, emb_size: int):
+    # Arrange
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.ones_like(input_tensor, dtype=np.float32)
+
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        [input_tensor],
+        [input_weights],
+        mesh,
+        num_sc_per_device=self.num_sc_per_device,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        enable_minibatching=True,
+    )
+
+    emb_table = np.tile(
+        np.arange(self.vocab_size, dtype=np.float32)[:, np.newaxis],
+        (1, emb_size),
+    )
+    emb_table_sharded = self._shard_table(emb_table)
+
+    z_grad = jnp.full(
+        (self.max_device_batch_size, emb_size),
+        1.0,
+        dtype=np.float32,
+    )
+
+    num_minibatches_per_physical_sparse_core = 1
+
+    # Act
+    updated_emb_table = (
+        self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            num_minibatches_per_physical_sparse_core,
+            emb_table_sharded[0],
+            z_grad,
+            0.1,  # learning_rate
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="sgd_test_computation_non_hbmwordsize",
+            sharding_strategy=1,
+            enable_minibatching=True,
+        )
+    )
+
+    # Assert
+    actual_updated_unsharded = utils.unshard_emb_table(
+        updated_emb_table[np.newaxis, :, :],
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    expected_unsharded = emb_table.copy()
+    updated_rows = np.unique(input_tensor.flatten())
+    expected_unsharded[updated_rows, :] -= 0.1
+
+    np.testing.assert_allclose(
+        actual_updated_unsharded, expected_unsharded, atol=1e-5
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

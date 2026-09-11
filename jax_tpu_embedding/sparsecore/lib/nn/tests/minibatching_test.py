@@ -16,11 +16,13 @@ import concurrent
 import dataclasses
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
 import jax.sharding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
+from jax_tpu_embedding.sparsecore.lib.nn import table_stacking
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
@@ -127,7 +129,7 @@ def _init_embedding_vars(
   return {"table_a": embedding.EmbeddingVariables(table=emb_var, slot=())}
 
 
-class SingleHostMinibatchingTest(absltest.TestCase):
+class SingleHostMinibatchingTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -401,6 +403,104 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
     np.testing.assert_allclose(
         updated_vars["table_a"].table, expected_table_np, rtol=1e-6
+    )
+
+  @parameterized.named_parameters(
+      dict(testcase_name="dim_5", emb_dim=5),
+      dict(testcase_name="dim_7", emb_dim=7),
+      dict(testcase_name="dim_21", emb_dim=21),
+      dict(testcase_name="dim_50", emb_dim=50),
+  )
+  def test_single_host_minibatching_non_hbmwordsize_forward_pass(
+      self, emb_dim: int
+  ):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=2048,
+        embedding_dim=emb_dim,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_a",
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=[16, 1],
+        output_shape=[16, emb_dim],
+        name="feature_a",
+    )
+    num_devices = len(self.devices)
+    num_sc = self.num_sc_per_device * num_devices
+    padded_vocab_size = table_stacking._next_largest_multiple(2048, 8 * num_sc)
+    table_spec.setting_in_stack = embedding_spec.TableSettingInStack(
+        stack_name=table_spec.name,
+        padded_embedding_dim=emb_dim,
+        padded_vocab_size=padded_vocab_size,
+        row_offset_in_shard=0,
+        shard_rotation=0,
+    )
+    table_spec.stacked_table_spec = embedding_spec.StackedTableSpec(
+        stack_name=table_spec.name,
+        stack_vocab_size=padded_vocab_size,
+        stack_embedding_dim=emb_dim,
+        optimizer=table_spec.optimizer,
+        combiner=table_spec.combiner,
+        total_sample_count=16,
+        max_ids_per_partition=2,
+        max_unique_ids_per_partition=2,
+    )
+    feature_spec.id_transformation = embedding_spec.FeatureIdTransformation(
+        row_offset=0,
+        col_offset=0,
+    )
+    embedding_vars = _init_embedding_vars(
+        table_spec,
+        self.num_sc_per_device,
+        self.devices,
+        self.embedding_var_sharding,
+    )
+
+    def _lookup_fn(preprocessed_input, evars):
+      return embedding.tpu_sparse_dense_matmul(
+          preprocessed_input,
+          evars,
+          {"feature_a": feature_spec},
+          global_device_count=self.mesh.size,
+          enable_minibatching=True,
+      )
+
+    sharded_lookup = jax.jit(
+        jax.shard_map(
+            _lookup_fn,
+            mesh=self.mesh,
+            in_specs=(self.pd, self.pe),
+            out_specs=(self.pd),
+            check_vma=False,
+        ),
+        in_shardings=(self.data_sharding, self.embedding_var_sharding),
+    )
+
+    inputs = _generate_random_inputs(
+        feature=feature_spec, max_sample_size=20, seed=2025
+    )
+    preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
+        features=[inputs],
+        features_weights=None,
+        feature_specs=[feature_spec],
+        local_device_count=jax.device_count(),
+        global_device_count=jax.device_count(),
+        batch_number=42,
+        enable_minibatching=True,
+        all_reduce_interface=self.all_reduce_interface,
+        allow_id_dropping=True,
+    )
+    self.assertGreater(preprocessed_input.num_minibatches[0], 1)
+    self.assertEqual(stats.id_drop_counters["table_a"], 0)
+
+    activations = sharded_lookup(preprocessed_input, embedding_vars)
+    expected_activations = _generate_expected_activations(feature_spec, inputs)
+    self.assertIn("feature_a", activations)
+    np.testing.assert_allclose(
+        activations["feature_a"], expected_activations, rtol=1e-6
     )
 
 

@@ -14,6 +14,7 @@
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
@@ -22,7 +23,7 @@ from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-class SparseDenseMatmulCsrTest(absltest.TestCase):
+class SparseDenseMatmulCsrTest(parameterized.TestCase):
 
   emb_table_sharded: np.ndarray
 
@@ -551,6 +552,59 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     # Each sample looks up 2 duplicate IDs: (table[id]) * 2
     single_expected = (self.input_tensor.squeeze() + 1.0) * 2.0
     expected_activations = np.concatenate([single_expected, single_expected])
+    np.testing.assert_allclose(
+        activations, expected_activations, rtol=1e-5, atol=1e-5
+    )
+
+  @parameterized.named_parameters(
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_7", emb_size=7),
+      dict(testcase_name="dim_21", emb_size=21),
+      dict(testcase_name="dim_50", emb_size=50),
+  )
+  def test_sc_emb_forward_pass_non_hbmwordsize(self, emb_size: int):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    emb_table = (
+        np.array([[float(i)] * emb_size for i in range(self.vocab_size)])
+        .astype(np.float32)
+    )
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    activations = self.tpu_sparse_dense_matmul_csr(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        1,  # num_minibatches_per_physical_sparse_core
+        emb_table_sharded[0],
+        device_batch_size=self.batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        quantization_config=None,
+        enable_minibatching=False,
+    )
+
+    expected_activations = np.tile(
+        self.input_tensor.astype(np.float32), (1, emb_size)
+    )
     np.testing.assert_allclose(
         activations, expected_activations, rtol=1e-5, atol=1e-5
     )
