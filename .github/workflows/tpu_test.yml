@@ -59,7 +59,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
-      actions: write # For cache management
+      actions: read # Restore the shared Bazel cache
     steps:
       - name: Check execution eligibility
         id: check
@@ -97,16 +97,21 @@ jobs:
           # Verify TPU hardware driver detection
           python -c "import jax; print('Detected TPU devices:', jax.devices()); assert any(d.platform == 'tpu' for d in jax.devices())"
 
+      # Warm-start from the Bazel output base produced by the `Build and test`
+      # workflow. Both jobs run the same x86-64 container and the same `-c opt`
+      # toolchain, so the compiled C++ actions are interchangeable; the TPU job
+      # only differs in which tests it executes. Sharing one namespace also
+      # keeps the repository under the 10 GB GitHub Actions cache quota, which
+      # a second ~7 GB `bazel-tpu-*` entry would otherwise exceed, evicting the
+      # CPU cache on every run.
       - name: Mount Bazel cache
         if: steps.check.outputs.skip == 'false'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache/restore@v6.1.0
         with:
           path: "/__w/.cache/bazel"
-          key: bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}-${{ github.sha }}
+          key: bazel-py3.12-${{ github.base_ref || github.ref_name }}-${{ github.event.pull_request.base.sha || github.sha }}
           restore-keys: |
-            bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}
-            bazel-tpu-${{ matrix.tpu_type }}-
-            bazel-tpu-
+            bazel-py3.12-${{ github.base_ref || github.ref_name }}
             bazel-py3.12-
 
       - name: Run Bazel TPU tests
@@ -159,9 +164,7 @@ jobs:
             python -m pytest --tb=short "$f"
           done
 
-      - name: Save Bazel cache
-        if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache/save@v6.1.0
-        with:
-          path: "/__w/.cache/bazel"
-          key: bazel-tpu-${{ matrix.tpu_type }}-${{ github.ref_name }}-${{ github.sha }}
+      # No cache is saved here on purpose. The Bazel output base is written
+      # once by the `Build and test` workflow's push-to-main job; a second copy
+      # from this workflow would double the repository's cache footprint and
+      # push it past the 10 GB quota.

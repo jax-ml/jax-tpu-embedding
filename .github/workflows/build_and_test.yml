@@ -16,7 +16,7 @@ permissions:
 jobs:
   build-and-test-cpu:
     runs-on: linux-x86-n4-16
-    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
+    container: us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest@sha256:43c523372c4b7f7ce649a1ff204b908727bd338353303c0444af34cb305e5832 # ratchet:us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -35,6 +35,12 @@ jobs:
 
       # --- FOR PULL REQUESTS ---
       # Restore the cache from the main branch's base commit.
+      #
+      # Fallback keys are deliberately confined to the `bazel-py3.12-`
+      # namespace. A broader `bazel-` prefix also matches the TPU workflow's
+      # `bazel-tpu-*` caches, and restoring one of those over a CPU output base
+      # forces a full ~2.8k action rebuild of protoc, gRPC, Abseil and the
+      # pybind11 extensions.
       - if: github.event_name == 'pull_request'
         name: Mount bazel cache (pull-request)
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -44,7 +50,6 @@ jobs:
           restore-keys: |
             bazel-py3.12-${{ github.base_ref }}
             bazel-py3.12-
-            bazel-
 
       # --- FOR MAIN PUSHES AND MERGES ---
       # Restore the cache from the previous commit.
@@ -59,7 +64,6 @@ jobs:
           restore-keys: |
             bazel-py3.12-${{ github.ref_name }}
             bazel-py3.12-
-            bazel-
 
       - name: Build all targets
         run: |
