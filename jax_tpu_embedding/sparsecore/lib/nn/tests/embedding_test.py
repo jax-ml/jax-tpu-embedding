@@ -1281,6 +1281,42 @@ class EmbeddingTest(parameterized.TestCase):
         preprocessed_inputs_ragged.lhs_gains["table_a"],
     )
 
+  @parameterized.parameters(jnp.bfloat16, jnp.float32)
+  def test_stack_embedding_gradients_with_extra_cols(self, dtype):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=32,
+        embedding_dim=4,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_a",
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=[self.num_sc_per_device, 1],
+        output_shape=[self.num_sc_per_device, 4],
+        name="feature_a",
+    )
+    embedding.prepare_feature_specs_for_training(
+        [feature_spec],
+        global_device_count=1,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    grad = jnp.ones((self.num_sc_per_device, 4), dtype=dtype)
+    stacked_grads = embedding.stack_embedding_gradients(
+        [grad],
+        [feature_spec],
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    self.assertIn("table_a", stacked_grads)
+    stacked_grad = stacked_grads["table_a"]
+    self.assertEqual(stacked_grad.dtype, dtype)
+    self.assertEqual(stacked_grad.shape, (self.num_sc_per_device, 8))
+    expected = jnp.pad(grad, [(0, 0), (0, 4)])
+    np.testing.assert_array_equal(stacked_grad, expected)
+
 
 class SparseDenseMatmulInputStatsTest(parameterized.TestCase):
 

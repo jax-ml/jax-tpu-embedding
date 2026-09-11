@@ -1210,7 +1210,11 @@ def _prepare_gradient_for_stacking(
       - feature.table_spec.embedding_dim
   )
   if extra_cols != 0:
-    gradient = jax.lax.pad(gradient, 0.0, [(0, 0, 0), (0, extra_cols, 0)])
+    gradient = jax.lax.pad(
+        gradient,
+        jnp.array(0.0, dtype=gradient.dtype),
+        [(0, 0, 0), (0, extra_cols, 0)],
+    )
   _verify_input_batch_size(gradient.shape, num_sc_per_device, name=feature.name)
   return gradient
 
