@@ -482,6 +482,7 @@ class EmbeddingPipelineTest(absltest.TestCase):
         )
 
         if step_counter == 0:
+          assert pipeline_input is not None
           pipeline_state = ep_utils.get_initial_state(
               pipeline_input=pipeline_input,
               tc_train_state=self.train_state,

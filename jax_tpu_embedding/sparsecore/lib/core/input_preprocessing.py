@@ -113,7 +113,7 @@ def _validate_partition_map(
 ) -> None:
   """Validates that the partition does not exceed the maximum number of IDs or unique IDs."""
   for partition_data in partition_map.values():
-    unique_ids = set(col_id for ((col_id, _), _) in partition_data)
+    unique_ids = {col_id for ((col_id, _), _) in partition_data}
 
     if len(partition_data) > max_ids_per_partition:
       raise ValueError(

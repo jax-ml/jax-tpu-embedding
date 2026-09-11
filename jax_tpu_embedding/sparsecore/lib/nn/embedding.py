@@ -593,13 +593,9 @@ def get_all_reduce_interface(
   Returns:
     An instance of `pybind_input_preprocessing.AllReduceInterface`.
   """
-  if host_id is None:
-    host_id = jax.process_index()
-  if host_count is None:
-    host_count = jax.process_count()
   return pybind_input_preprocessing.MinibatchingNode(
-      host_id,
-      host_count,
+      jax.process_index() if host_id is None else host_id,
+      jax.process_count() if host_count is None else host_count,
       list(peer_addresses),
       minibatching_port,
   ).get_all_reduce_interface()

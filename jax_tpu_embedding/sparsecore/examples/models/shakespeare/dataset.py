@@ -100,7 +100,7 @@ def load_shakespeare(vocab_size: int) -> list[int]:
   logging.info('Counting words')
   for w in words:
     counts[w] += 1
-  top_n = list(sorted(list(counts.items()), key=lambda v: v[1], reverse=True))
+  top_n = sorted(counts.items(), key=lambda v: v[1], reverse=True)
   top_n = top_n[: vocab_size]
   logging.info('Top 5: %s', top_n[:5])
   word_to_id = {}

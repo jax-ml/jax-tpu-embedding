@@ -188,7 +188,7 @@ def skip_if_tpu_unavailable(f):
       return f(*args, **kwargs)
     except RuntimeError as e:
       if "TPU initialization failed" in str(e):
-        raise absltest.SkipTest("TPU not available")
+        raise absltest.SkipTest("TPU not available") from e
       raise e
 
   return wrapper
