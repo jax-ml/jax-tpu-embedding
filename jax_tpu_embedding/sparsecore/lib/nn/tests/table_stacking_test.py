@@ -91,6 +91,37 @@ class TableStackingTest(parameterized.TestCase):
     self.assertEqual(table_spec.setting_in_stack.row_offset_in_shard, 0)
     self.assertEqual(table_spec.setting_in_stack.shard_rotation, 0)
 
+  @parameterized.named_parameters(
+      dict(testcase_name='padded', pad_embedding_dim=True, expected_dim=16),
+      dict(testcase_name='unpadded', pad_embedding_dim=False, expected_dim=12),
+  )
+  def test_round_up_dim_and_vocab_size(
+      self, pad_embedding_dim: bool, expected_dim: int
+  ):
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=100,
+        embedding_dim=12,
+        initializer=lambda: jnp.zeros((100, 12), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner='sum',
+        name='table_a',
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    num_sc = 4
+
+    table_to_padded_dim, table_to_padded_vocab_size = (
+        table_stacking.round_up_dim_and_vocab_size(
+            {'table_a': table_spec},
+            num_sc,
+            pad_embedding_dim=pad_embedding_dim,
+        )
+    )
+
+    self.assertEqual(table_to_padded_dim['table_a'], expected_dim)
+    # The vocab size is rounded up to a multiple of 8 * num_sc either way.
+    self.assertEqual(table_to_padded_vocab_size['table_a'], 128)
+
   @parameterized.parameters(
       dict(device_count=1),
       dict(device_count=2),
