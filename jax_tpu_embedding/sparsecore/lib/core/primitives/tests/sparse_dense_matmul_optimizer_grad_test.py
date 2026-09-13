@@ -376,6 +376,95 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
     np.testing.assert_allclose(updated_table, expected_updated_table)
     np.testing.assert_allclose(updated_accumulator, expected_updated_accum)
 
+  def test_sc_emb_backward_pass_with_adagrad_dim1(self):
+    input_tensor = np.array(
+        [[i % self.vocab_size] for i in range(32)],
+        dtype=np.int32,
+    )
+    input_weights = np.ones_like(input_tensor, dtype=np.float32)
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table_dim1,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    accumulator_init = jnp.zeros(
+        emb_table_sharded[0].shape,
+        np.float32,
+    )
+
+    z_grad = jnp.full(
+        (32 // self.num_chips,),
+        0.01,
+        np.float32,
+    )
+
+    emb_tables = [emb_table_sharded[0], accumulator_init]
+    hyperparams = [0.01]
+
+    def adagrad_jax(grad, table, accum, lr):
+      new_accum = accum + grad * grad
+      return table - lr * grad / jnp.sqrt(new_accum), new_accum
+
+    grad_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    accum_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    lr_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    stablehlo = (
+        jax.jit(adagrad_jax)
+        .lower(grad_aval, table_aval, accum_aval, lr_aval)
+        .as_text(dialect="stablehlo")
+    )
+
+    updated_table, updated_accumulator = (
+        self.tpu_sparse_dense_matmul_grad_with_optimizer(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            np.int32(1),
+            z_grad,
+            *hyperparams,
+            *emb_tables,
+            num_hyperparameters=len(hyperparams),
+            stablehlo=stablehlo,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=64,
+            computation_name="optimizer_test_computation_adagrad_dim1",
+            sharding_strategy=1,
+        )
+    )
+    global_accum_init = jnp.zeros_like(emb_table_dim1)
+    expected_updated_table, expected_updated_accum = (
+        self._get_expected_updated_table(
+            emb_table_dim1,
+            z_grad,
+            input_tensor,
+            input_weights.squeeze(),
+            adagrad_jax,
+            global_accum_init,
+            hyperparams[0],
+        )
+    )
+    np.testing.assert_allclose(updated_table, expected_updated_table)
+    np.testing.assert_allclose(updated_accumulator, expected_updated_accum)
+
   def test_sc_emb_backward_pass_with_ftrl(self):
     mesh = jax.sharding.Mesh(self.global_devices, "x")
     (
@@ -605,6 +694,125 @@ class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
             z_grad,
             self.input_tensor,
             self.input_weights,
+            adam_jax,
+            global_m_init,
+            global_v_init,
+            hyperparams[0],
+            hyperparams[1],
+            hyperparams[2],
+            hyperparams[3],
+        )
+    )
+    np.testing.assert_allclose(updated_table, expected_updated_table)
+    np.testing.assert_allclose(updated_momentum, expected_updated_m)
+    np.testing.assert_allclose(updated_velocity, expected_updated_v)
+
+  def test_sc_emb_backward_pass_with_adam_dim1(self):
+    input_tensor = np.array(
+        [[i % self.vocab_size] for i in range(32)],
+        dtype=np.int32,
+    )
+    input_weights = np.ones_like(input_tensor, dtype=np.float32)
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table_dim1,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    momentum_init = np.full_like(emb_table_sharded[0], 0.002, np.float32)
+    velocity_init = np.full_like(emb_table_sharded[0], 0.004, np.float32)
+    emb_tables = [emb_table_sharded[0], momentum_init, velocity_init]
+
+    learning_rate = 0.1
+    beta_1 = 0.9
+    beta_2 = 0.999
+    epsilon = 1e-8
+
+    c_2 = np.sqrt(1.0 - beta_2)
+    alpha_t = learning_rate * c_2 / (1.0 - beta_1)
+    epsilon_hat = epsilon * c_2
+
+    hyperparams = [alpha_t, beta_1, beta_2, epsilon_hat]
+
+    def adam_jax(grad, table, m, v, alpha_t, beta_1, beta_2, epsilon_hat):
+      new_m = beta_1 * m + (1.0 - beta_1) * grad
+      new_v = beta_2 * v + (1.0 - beta_2) * (grad * grad)
+      new_table = table - alpha_t * new_m / (jnp.sqrt(new_v) + epsilon_hat)
+      return new_table, new_m, new_v
+
+    grad_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    table_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    m_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    v_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+
+    alpha_t_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    beta_1_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    beta_2_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+    epsilon_hat_aval = jax.ShapeDtypeStruct((1,), jnp.float32)
+
+    stablehlo = (
+        jax.jit(adam_jax)
+        .lower(
+            grad_aval,
+            table_aval,
+            m_aval,
+            v_aval,
+            alpha_t_aval,
+            beta_1_aval,
+            beta_2_aval,
+            epsilon_hat_aval,
+        )
+        .as_text(dialect="stablehlo")
+    )
+
+    z_grad = jnp.full(
+        (32 // self.num_chips,),
+        0.01,
+        np.float32,
+    )
+
+    updated_table, updated_momentum, updated_velocity = (
+        self.tpu_sparse_dense_matmul_grad_with_optimizer(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            np.int32(1),
+            z_grad,
+            *hyperparams,
+            *emb_tables,
+            num_hyperparameters=len(hyperparams),
+            stablehlo=stablehlo,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=64,
+            computation_name="optimizer_test_computation_adam_dim1",
+            sharding_strategy=1,
+        )
+    )
+    global_m_init = jnp.full_like(emb_table_dim1, 0.002, np.float32)
+    global_v_init = jnp.full_like(emb_table_dim1, 0.004, np.float32)
+    expected_updated_table, expected_updated_m, expected_updated_v = (
+        self._get_expected_updated_table(
+            emb_table_dim1,
+            z_grad,
+            input_tensor,
+            input_weights.squeeze(),
             adam_jax,
             global_m_init,
             global_v_init,
