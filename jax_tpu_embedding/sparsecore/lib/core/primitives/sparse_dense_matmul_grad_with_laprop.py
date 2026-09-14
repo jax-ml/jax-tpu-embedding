@@ -205,42 +205,22 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  embedding_table_type = ir.RankedTensorType(embedding_table.type)
-  is_1d = embedding_table_type.rank == 1
-  squeezed_activations_grad = (
-      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
+  (
+      row_shape,
+      row_type,
+      squeezed_activations_grad,
+  ) = utils.get_row_type_and_squeezed_activations_grad(
+      embedding_table, activations_grad
   )
-  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
-  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
   hlo_f32 = functools.partial(_hlo_f32, row_shape=row_shape)
 
-  optimizer_update = func_dialect.FuncOp(
-      optimizer_update_computation_name,
-      (
-          [
-              row_type,  # grad
-              row_type,  # embedding_table
-              row_type,  # mu
-              row_type,  # nu
-              row_type,  # learning_rate
-              row_type,  # b1
-              row_type,  # decay_rate
-              row_type,  # eps
-          ],
-          [
-              ir.TupleType.get_tuple([
-                  row_type,  # embedding_table
-                  row_type,  # mu
-                  row_type,  # nu
-              ]),
-          ],
-      ),
+  _, entry_block = utils.create_optimizer_update_func_op(
+      computation_name=optimizer_update_computation_name,
+      row_type=row_type,
+      num_states=2,
+      num_hyperparameters=4,
       ip=ctx.module_context.ip,
-      visibility="private",
   )
-
-  # This is the row-wise implementation of the optimizer.
-  entry_block = optimizer_update.add_entry_block()
   with ir.InsertionPoint(entry_block):
     # Get parameters.
     grad_ = entry_block.arguments[0]

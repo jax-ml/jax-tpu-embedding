@@ -17,6 +17,7 @@ from typing import Any, Sequence
 
 from jax import core
 from jax.extend.mlir import ir
+from jax.extend.mlir.dialects import func as func_dialect
 from jax.extend.mlir.dialects import stablehlo as hlo
 import numpy as np
 
@@ -197,3 +198,61 @@ def maybe_squeeze_ir(val: ir.Value, expected_dim: int) -> ir.Value:
     target_type = ir.RankedTensorType.get(shape, dtype)
     return hlo.reshape(target_type, val)
   return val
+
+
+def get_row_type_and_squeezed_activations_grad(
+    embedding_table: ir.Value,
+    activations_grad: ir.Value,
+) -> tuple[list[int], ir.RankedTensorType, ir.Value]:
+  """Extracts row shape, row type, and squeezed activations gradient.
+
+  Handles 1D and 2D embedding tables uniformly across optimizer lowering passes:
+  returns the row slice shape ([1] or [1, N]), the row RankedTensorType, and the
+  activations gradient squeezed to 1D if the table is 1D.
+
+  Args:
+    embedding_table: The embedding table IR value.
+    activations_grad: The activations gradient IR value.
+
+  Returns:
+    A tuple of (row_shape, row_type, squeezed_activations_grad).
+  """
+  embedding_table_type = ir.RankedTensorType(embedding_table.type)
+  is_1d = embedding_table_type.rank == 1
+  squeezed_activations_grad = (
+      maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
+  )
+  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
+  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
+  return row_shape, row_type, squeezed_activations_grad
+
+
+def create_optimizer_update_func_op(
+    computation_name: str,
+    row_type: ir.RankedTensorType,
+    num_states: int,
+    num_hyperparameters: int,
+    ip: ir.InsertionPoint,
+) -> tuple[func_dialect.FuncOp, ir.Block]:
+  """Creates private FuncOp and entry block for row-wise optimizer update.
+
+  Args:
+    computation_name: The name of the optimizer update function.
+    row_type: The ranked tensor type representing a single table row.
+    num_states: Number of slot/state variables (e.g. 1 for Adagrad, 2 for Adam).
+    num_hyperparameters: Number of hyperparameter scalar tensors.
+    ip: The insertion point within the module context.
+
+  Returns:
+    A tuple of (optimizer_update_func_op, entry_block).
+  """
+  input_types = [row_type] * (2 + num_states + num_hyperparameters)
+  output_types = [ir.TupleType.get_tuple([row_type] * (1 + num_states))]
+  optimizer_update = func_dialect.FuncOp(
+      computation_name,
+      (input_types, output_types),
+      ip=ip,
+      visibility="private",
+  )
+  entry_block = optimizer_update.add_entry_block()
+  return optimizer_update, entry_block
