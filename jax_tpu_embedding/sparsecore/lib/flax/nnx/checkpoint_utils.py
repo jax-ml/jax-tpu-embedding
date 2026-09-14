@@ -913,6 +913,82 @@ def _next_largest_multiple(value: int, multiple: int) -> int:
   return ((value + multiple - 1) // multiple) * multiple
 
 
+def _build_feature_spec_from_proto(
+    f_proto: embedding_spec_pb2.FeatureSpecProto,
+    tspec: embedding_spec.TableSpec,
+    target_batch_size: int | None,
+) -> embedding_spec.FeatureSpec:
+  """Builds a single FeatureSpec from a feature proto and its parent TableSpec."""
+  in_shape = list(f_proto.input_shape)
+  out_shape = list(f_proto.output_shape)
+  if target_batch_size is not None and in_shape:
+    in_shape[0] = target_batch_size
+  if target_batch_size is not None and out_shape:
+    out_shape[0] = target_batch_size
+  return embedding_spec.FeatureSpec(
+      table_spec=tspec,
+      input_shape=tuple(in_shape),
+      output_shape=tuple(out_shape),
+      name=f_proto.feature_name,
+  )
+
+
+def _build_fallback_feature_spec(
+    t_proto: embedding_spec_pb2.TableSpecProto,
+    tspec: embedding_spec.TableSpec,
+    total_sample_count: int,
+    target_batch_size: int | None,
+) -> embedding_spec.FeatureSpec:
+  """Builds a fallback FeatureSpec when explicit feature protos are omitted."""
+  bs = (
+      target_batch_size if target_batch_size is not None else total_sample_count
+  )
+  return embedding_spec.FeatureSpec(
+      table_spec=tspec,
+      input_shape=(bs, 1),
+      output_shape=(bs, t_proto.embedding_dim),
+      name=f'feature_{t_proto.table_name}',
+  )
+
+
+def _build_table_spec_from_proto(
+    t_proto: embedding_spec_pb2.TableSpecProto,
+) -> embedding_spec.TableSpec:
+  """Builds a TableSpec from a table spec proto."""
+  if t_proto.HasField('optimizer'):
+    opt = embedding.proto_to_optimizer_spec(t_proto.optimizer)
+  else:
+    opt = embedding_spec.SGDOptimizerSpec(learning_rate=0.0)
+  combiner = t_proto.combiner if t_proto.combiner else 'mean'
+  return embedding_spec.TableSpec(
+      vocabulary_size=t_proto.vocab_size,
+      embedding_dim=t_proto.embedding_dim,
+      initializer=jax.nn.initializers.constant(0.0),
+      optimizer=opt,
+      combiner=combiner,
+      name=t_proto.table_name,
+  )
+
+
+def _reconstruct_specs_for_table(
+    t_proto: embedding_spec_pb2.TableSpecProto,
+    total_sample_count: int,
+    target_batch_size: int | None,
+) -> list[embedding_spec.FeatureSpec]:
+  """Reconstructs all FeatureSpecs belonging to a single table spec proto."""
+  tspec = _build_table_spec_from_proto(t_proto)
+  if t_proto.feature_specs:
+    return [
+        _build_feature_spec_from_proto(f_proto, tspec, target_batch_size)
+        for f_proto in t_proto.feature_specs
+    ]
+  return [
+      _build_fallback_feature_spec(
+          t_proto, tspec, total_sample_count, target_batch_size
+      )
+  ]
+
+
 def _reconstruct_feature_specs_from_proto(
     source_proto: embedding_spec_pb2.EmbeddingSpecProto,
     target_batch_size: int | None = None,
@@ -930,46 +1006,9 @@ def _reconstruct_feature_specs_from_proto(
   specs = collections.OrderedDict()
   for stack_proto in source_proto.stacked_table_specs:
     for t_proto in stack_proto.table_specs:
-      if t_proto.HasField('optimizer'):
-        opt = embedding.proto_to_optimizer_spec(t_proto.optimizer)
-      else:
-        opt = embedding_spec.SGDOptimizerSpec(learning_rate=0.0)
-      combiner = t_proto.combiner if t_proto.combiner else 'mean'
-      tspec = embedding_spec.TableSpec(
-          vocabulary_size=t_proto.vocab_size,
-          embedding_dim=t_proto.embedding_dim,
-          initializer=jax.nn.initializers.constant(0.0),
-          optimizer=opt,
-          combiner=combiner,
-          name=t_proto.table_name,
-      )
-      if t_proto.feature_specs:
-        for f_proto in t_proto.feature_specs:
-          in_shape = list(f_proto.input_shape)
-          out_shape = list(f_proto.output_shape)
-          if target_batch_size is not None and in_shape:
-            in_shape[0] = target_batch_size
-          if target_batch_size is not None and out_shape:
-            out_shape[0] = target_batch_size
-          fspec = embedding_spec.FeatureSpec(
-              table_spec=tspec,
-              input_shape=tuple(in_shape),
-              output_shape=tuple(out_shape),
-              name=f_proto.feature_name,
-          )
-          specs[f_proto.feature_name] = fspec
-      else:
-        bs = (
-            target_batch_size
-            if target_batch_size is not None
-            else stack_proto.total_sample_count
-        )
-        fspec = embedding_spec.FeatureSpec(
-            table_spec=tspec,
-            input_shape=(bs, 1),
-            output_shape=(bs, t_proto.embedding_dim),
-            name=f'feature_{t_proto.table_name}',
-        )
+      for fspec in _reconstruct_specs_for_table(
+          t_proto, stack_proto.total_sample_count, target_batch_size
+      ):
         specs[fspec.name] = fspec
   return specs
 
