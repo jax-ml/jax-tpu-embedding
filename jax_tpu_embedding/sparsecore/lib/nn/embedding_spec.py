@@ -187,6 +187,12 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
     """Returns the number of slot variables for the optimizer."""
     return len(self.slot_variables_initializers())
 
+  def slot_variables_shapes(
+      self, table_shape: tuple[int, ...]
+  ) -> tuple[tuple[int, ...], ...]:
+    """Returns the shapes of the slot variables given the embedding table shape."""
+    return (table_shape,) * self.slot_variables_count()
+
   @abc.abstractmethod
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     """Derived classes should implement this method to return the xla primitive for the optimizer."""
@@ -257,6 +263,8 @@ class CustomOptimizerSpec(OptimizerSpec):
     slot_variable_initializers_tuple: Tuple of initializers for the slot
       variables.
     short_name_str: Short name for the optimizer.
+    slot_dims: Optional tuple of slot variable dimensions (e.g., 1 for 1D slots
+      or None/embedding_dim for 2D slots).
   """
 
   def __init__(
@@ -268,6 +276,7 @@ class CustomOptimizerSpec(OptimizerSpec):
           CallableTableInitializer, ...
       ] = (),
       short_name_str: str = "custom",
+      slot_dims: tuple[int | None, ...] | None = None,
   ):
     """Initializes the instance."""
     super().__init__(learning_rate=learning_rate)
@@ -275,9 +284,25 @@ class CustomOptimizerSpec(OptimizerSpec):
     self.stablehlo = stablehlo
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
+    self.slot_dims = slot_dims
 
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return self.slot_variable_initializers_tuple
+
+  def slot_variables_shapes(
+      self, table_shape: tuple[int, ...]
+  ) -> tuple[tuple[int, ...], ...]:
+    if self.slot_dims is None:
+      return (table_shape,) * self.slot_variables_count()
+    shapes: list[tuple[int, ...]] = []
+    for d in self.slot_dims:
+      if d == 1:
+        shapes.append((table_shape[0],))
+      elif d is None or d == table_shape[1]:
+        shapes.append(table_shape)
+      else:
+        shapes.append((table_shape[0], d))
+    return tuple(shapes)
 
   def __hash__(self) -> int:
     return hash((
@@ -286,6 +311,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         self.stablehlo,
         self.slot_variable_initializers_tuple,
         self.short_name_str,
+        self.slot_dims,
     ))
 
   def short_name(self) -> str:
@@ -305,6 +331,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: int = 1,
       min_value: float | None = None,
       max_value: float | None = None,
+      slot_dims: tuple[int | None, ...] | None = None,
   ) -> str:
     """Traces and lowers a custom optimizer function into StableHLO text.
 
@@ -316,6 +343,8 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
       min_value: Optional minimum value to clip the updated embedding table.
       max_value: Optional maximum value to clip the updated embedding table.
+      slot_dims: Optional tuple of slot variable dimensions (e.g., 1 for 1D
+        slots or None/embedding_dim for 2D slots).
 
     Returns:
       A string containing the lowered StableHLO module text.
@@ -333,6 +362,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         num_hyperparameters=num_hyperparameters,
         min_value=min_value,
         max_value=max_value,
+        slot_dims=slot_dims,
     )
 
   @classmethod
@@ -344,6 +374,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: int,
       min_value: float | None = None,
       max_value: float | None = None,
+      slot_dims: tuple[int | None, ...] | None = None,
   ) -> str:
     """Wraps an existing StableHLO module in JAX and lowers again with limits.
 
@@ -354,6 +385,8 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
       min_value: Optional minimum value to clip the updated embedding table.
       max_value: Optional maximum value to clip the updated embedding table.
+      slot_dims: Optional tuple of slot variable dimensions (e.g., 1 for 1D
+        slots or None/embedding_dim for 2D slots).
 
     Returns:
       A string containing the wrapped and lowered StableHLO module text.
@@ -371,6 +404,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         num_hyperparameters=num_hyperparameters,
         min_value=min_value,
         max_value=max_value,
+        slot_dims=slot_dims,
     )
 
 

@@ -439,6 +439,145 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         expected_embedding_table, actual_table_unsharded, atol=1e-5
     )
 
+  @parameterized.named_parameters(
+      ("no_clipping", None, None),
+      ("clipping", 2.0, 12.0),
+  )
+  def test_sc_emb_backward_pass_with_adagrad_dim1(self, min_value, max_value):
+    # Arrange
+    input_tensor = np.array(
+        [
+            [5],
+            [3],
+            [9],
+            [1],
+            [6],
+            [12],
+            [0],
+            [4],
+            [15],
+            [13],
+            [11],
+            [7],
+            [8],
+            [14],
+            [2],
+            [10],
+        ],
+        dtype=np.int32,
+    )
+    input_weights = np.array(
+        [[1.0] for _ in range(16)],
+        dtype=np.float32,
+    )
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    emb_table_dim1 = np.arange(_VOCAB_SIZE, dtype=np.float32) + 1.0
+    embedding_table_sharded = self._shard_table(emb_table_dim1)
+
+    accumulator = jnp.full(emb_table_dim1.shape, 0.002, np.float32)
+    accumulator_sharded = self._shard_table(np.asarray(accumulator))
+
+    learning_rate = np.float32(0.1)
+
+    activations_grad = jnp.full((_BATCH_SIZE,), 0.012, np.float32)
+
+    # Compute the expected values on CPU while the primitive runs on TPU.
+    def _compute_table_grad_dim1(inputs, weights, activation_grad):
+      batch_size = activation_grad.shape[0]
+      sample_lengths = jnp.array([len(sample) for sample in inputs])
+      rows = jnp.repeat(jnp.arange(batch_size), sample_lengths)
+      cols = jnp.concatenate(np.unstack(inputs))
+      vals = jnp.concatenate(np.unstack(weights)).reshape(-1)
+
+      grad = jnp.zeros(shape=(_VOCAB_SIZE,))
+      grad = grad.at[cols].add(vals * activation_grad[rows])
+      return grad
+
+    def _compute_adagrad(theta, g, a, alpha):
+      a = a + g * g
+      theta = theta - (alpha * g) / jnp.sqrt(a)
+      return (theta, a)
+
+    table_grad = _compute_table_grad_dim1(
+        input_tensor, input_weights, activations_grad
+    )
+
+    sparse_rows = jnp.unique(input_tensor.flatten())
+    sparse_update_mask = jnp.zeros(emb_table_dim1.shape, dtype=jnp.bool)
+    sparse_update_mask = sparse_update_mask.at[sparse_rows].set(True)
+
+    expected_embedding_table, expected_accumulator = _compute_adagrad(
+        np.asarray(emb_table_dim1),
+        np.asarray(table_grad),
+        np.asarray(accumulator),
+        learning_rate,
+    )
+
+    expected_embedding_table = jnp.clip(
+        expected_embedding_table, min_value, max_value
+    )
+
+    # Restore unaffected rows.
+    expected_embedding_table = jnp.where(
+        sparse_update_mask, expected_embedding_table, emb_table_dim1
+    )
+    expected_accumulator = jnp.where(
+        sparse_update_mask, expected_accumulator, accumulator
+    )
+
+    # Act
+    # Do the embedding update.
+    updated_embedding_table, updated_accumulator = (
+        sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive.bind(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,  # num_minibatches_per_physical_sparse_core
+            embedding_table_sharded[0],
+            accumulator_sharded[0],
+            activations_grad,
+            learning_rate,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="optimizer_test_computation_dim1",
+            sharding_strategy=1,
+            min_value=min_value,
+            max_value=max_value,
+        )
+    )
+
+    # Assert
+    # Check the embedding activations.
+    actual_table_unsharded = self._unshard_table(
+        updated_embedding_table[jnp.newaxis, :]
+    )
+    actual_accumulator_unsharded = self._unshard_table(
+        updated_accumulator[jnp.newaxis, :]
+    )
+
+    # Verify the expected tables and accumulators.
+    np.testing.assert_allclose(
+        expected_accumulator, actual_accumulator_unsharded, atol=1e-5
+    )
+    np.testing.assert_allclose(
+        expected_embedding_table, actual_table_unsharded, atol=1e-5
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

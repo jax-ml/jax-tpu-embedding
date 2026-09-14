@@ -1455,6 +1455,12 @@ def tpu_sparse_dense_matmul_grad(
       ):
         min_val, max_val = embedding_var_limits[stacked_table_name]
 
+      slot_dims = stack_table_spec.optimizer.slot_dims
+      if slot_dims is None:
+        slot_dims = tuple(
+            1 if v.ndim == 1 else v.shape[1] for v in flatten_variables[1:]
+        )
+
       if stack_table_spec.optimizer.stablehlo is not None:
         stablehlo_text = custom_optimizer_lowering.wrap_stablehlo_with_limits(
             stack_table_spec.optimizer.stablehlo,
@@ -1463,6 +1469,7 @@ def tpu_sparse_dense_matmul_grad(
             num_hyperparameters=num_hyperparams,
             min_value=min_val,
             max_value=max_val,
+            slot_dims=slot_dims,
         )
       elif stack_table_spec.optimizer.custom_computation_fn is not None:
         stablehlo_text = custom_optimizer_lowering.lower_to_stablehlo(
@@ -1472,6 +1479,7 @@ def tpu_sparse_dense_matmul_grad(
             num_hyperparameters=num_hyperparams,
             min_value=min_val,
             max_value=max_val,
+            slot_dims=slot_dims,
         )
       else:
         raise ValueError(
@@ -1551,12 +1559,18 @@ def _init_embedding_variables_shard(
       tspec.setting_in_stack.padded_embedding_dim,
   )
 
-  initializers = EmbeddingVariablesInitializer(
-      table=tspec.initializer,
-      slot=tspec.optimizer.slot_variables_initializers(),
-  )
+  slot_shapes = tspec.optimizer.slot_variables_shapes(shape)
+  slot_initializers = tspec.optimizer.slot_variables_initializers()
+  slots_list = [
+      jnp.asarray(init(rng, slot_shape))
+      for init, slot_shape in zip(
+          jax.tree.leaves(slot_initializers), slot_shapes
+      )
+  ]
+  slots = jax.tree.unflatten(jax.tree.structure(slot_initializers), slots_list)
   return EmbeddingVariables(
-      *jax.tree.map(lambda init: init(rng, shape), initializers)
+      table=jnp.asarray(tspec.initializer(rng, shape)),
+      slot=slots,
   )
 
 
@@ -1629,16 +1643,32 @@ def _init_stacked_embedding_table(
   use_pmap = len(global_sharding.spec) == 3
 
   if not use_pmap:
+    sample_vars = jax.eval_shape(init_func, rng)
+
+    def _get_out_spec(v):
+      if v.ndim == 1:
+        return P(global_sharding.spec[0])
+      return global_sharding.spec
+
+    def _get_out_sharding(v):
+      if v.ndim == 1:
+        return jax.sharding.NamedSharding(
+            global_sharding.mesh, P(global_sharding.spec[0])
+        )
+      return utils.embedding_table_format(
+          global_sharding.mesh, global_sharding.spec
+      )
+
+    out_specs = jax.tree.map(_get_out_spec, sample_vars)
+    out_shardings = jax.tree.map(_get_out_sharding, sample_vars)
     embedding_table = jax.jit(
         jax.shard_map(
             init_func,
             mesh=global_sharding.mesh,
             in_specs=P(sharding_axis),
-            out_specs=global_sharding.spec,
+            out_specs=out_specs,
         ),
-        out_shardings=utils.embedding_table_format(
-            global_sharding.mesh, global_sharding.spec
-        ),
+        out_shardings=out_shardings,
     )(
         rng,
     )
