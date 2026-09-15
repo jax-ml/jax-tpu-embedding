@@ -54,25 +54,6 @@ tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive.def_impl(
 )
 
 
-def _annotate_sparse_compute_type(op: ir.OpView):
-  op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-  return op
-
-
-def _hlo_const(arr: np.ndarray) -> ir.Value:
-  """Return an HLO constant from a NumPy array (any rank)."""
-  return hlo.constant(
-      ir.DenseElementsAttr.get(arr, type=mlir.dtype_to_ir_type(arr.dtype))
-  )
-
-
-def _hlo_f32(x: float, row_shape: list[int]) -> ir.Value:
-  """Return an f32 constant filled with x matching row_shape."""
-  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
-
-
 def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_abstract_eval(
     lhs_row_pointers: core.ShapedArray,
     lhs_local_embedding_ids: core.ShapedArray,
@@ -234,8 +215,8 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
         use_nesterov_flag_,
     ) = entry_block.arguments
 
-    one_ = _hlo_f32(1.0, row_shape)
-    neg_one_ = _hlo_f32(-1.0, row_shape)
+    one_ = utils.hlo_f32(1.0, row_shape)
+    neg_one_ = utils.hlo_f32(-1.0, row_shape)
 
     # Accumulator
     grad_sq_ = hlo.multiply(grad_, grad_)
@@ -325,13 +306,13 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_momentum_lowering(
   )(ctx, *operands)
 
   assert isinstance(custom_call_op[0], ir.Value)
-  updated_table_op = _annotate_sparse_compute_type(
+  updated_table_op = utils.annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op[0], 0)
   )
-  updated_accumulator_op = _annotate_sparse_compute_type(
+  updated_accumulator_op = utils.annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op[0], 1)
   )
-  updated_momentum_op = _annotate_sparse_compute_type(
+  updated_momentum_op = utils.annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op[0], 2)
   )
 

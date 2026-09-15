@@ -53,23 +53,6 @@ tpu_sparse_dense_matmul_grad_with_laprop_primitive.def_impl(
 )
 
 
-def _annotate_sparse_compute_type(op: ir.OpView):
-  op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-  return op
-
-
-def _hlo_const(x: np.ndarray) -> ir.Value:
-  return hlo.constant(
-      ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
-  )
-
-
-def _hlo_f32(x: float, row_shape: list[int]):
-  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
-
-
 def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
     lhs_row_pointers: core.ShapedArray,
     lhs_local_embedding_ids: core.ShapedArray,
@@ -212,7 +195,7 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
   ) = utils.get_row_type_and_squeezed_activations_grad(
       embedding_table, activations_grad
   )
-  hlo_f32 = functools.partial(_hlo_f32, row_shape=row_shape)
+  hlo_f32 = functools.partial(utils.hlo_f32, row_shape=row_shape)
 
   _, entry_block = utils.create_optimizer_update_func_op(
       computation_name=optimizer_update_computation_name,
@@ -327,11 +310,11 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
 
   assert isinstance(op[0], ir.Value)
   table_tuple_op = hlo.GetTupleElementOp(op[0], 0)
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
+  table_tuple_op = utils.annotate_sparse_compute_type(table_tuple_op)
   mu_tuple_op = hlo.GetTupleElementOp(op[0], 1)
-  mu_tuple_op = _annotate_sparse_compute_type(mu_tuple_op)
+  mu_tuple_op = utils.annotate_sparse_compute_type(mu_tuple_op)
   nu_tuple_op = hlo.GetTupleElementOp(op[0], 2)
-  nu_tuple_op = _annotate_sparse_compute_type(nu_tuple_op)
+  nu_tuple_op = utils.annotate_sparse_compute_type(nu_tuple_op)
 
   return (
       table_tuple_op.results,
