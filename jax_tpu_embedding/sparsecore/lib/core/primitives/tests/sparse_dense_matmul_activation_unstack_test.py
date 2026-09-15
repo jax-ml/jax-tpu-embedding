@@ -18,6 +18,8 @@ correctness is not verified on CPU as the primitive relies on a TPU-specific
 custom call.
 """
 
+from typing import override
+
 from absl.testing import absltest
 import jax
 import jax.numpy as jnp
@@ -26,6 +28,7 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul
 
 class SparseDenseMatmulActivationUnstackTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.batch_size_1 = 128

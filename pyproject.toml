@@ -130,6 +130,7 @@ untyped-def-behavior = "check-and-infer-return-any"
 unused-ignore = "error"
 
 # Strict preset
+missing-override-decorator = "error"
 potential-bad-keyword-argument = "error"
 implicit-any-attribute = "error"
 

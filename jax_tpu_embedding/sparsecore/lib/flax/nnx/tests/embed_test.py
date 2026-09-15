@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import override
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from flax import nnx
@@ -50,6 +52,7 @@ def count_num(arr, num):
 
 class EmbeddingLayerTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.table_spec_a = embedding_spec.TableSpec(

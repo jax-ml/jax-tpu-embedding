@@ -14,6 +14,7 @@
 import collections
 import concurrent
 import dataclasses
+from typing import override
 
 from absl.testing import absltest
 import jax
@@ -129,6 +130,7 @@ def _init_embedding_vars(
 
 class SingleHostMinibatchingTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()
@@ -406,6 +408,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
 
 class MultiHostMinibatchingTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.table_spec = embedding_spec.TableSpec(

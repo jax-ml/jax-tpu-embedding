@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import override
+
 from absl.testing import absltest
 import jax
 import jax.numpy as jnp
@@ -23,6 +25,7 @@ jax.config.update("jax_enable_x64", True)
 
 class SparseDenseMatmulCsrTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_chips = 1

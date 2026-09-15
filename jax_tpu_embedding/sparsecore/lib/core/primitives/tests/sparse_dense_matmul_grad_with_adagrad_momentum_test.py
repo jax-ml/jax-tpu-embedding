@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
-from typing import Tuple
+from typing import Tuple, override
 from unittest import mock
 
 from absl.testing import absltest
@@ -35,6 +35,7 @@ _EMB_SIZE = 8
 class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
   """Unit-tests for the Adagrad-Momentum SparseCore gradient/update primitive."""
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()

@@ -14,6 +14,7 @@
 """Unit tests for CSV based FDO client."""
 
 import csv
+from typing import override
 
 from absl.testing import absltest
 from etils import epath
@@ -24,6 +25,7 @@ import numpy as np
 
 class CsvFdoClientTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.base_dir = self.create_tempdir(

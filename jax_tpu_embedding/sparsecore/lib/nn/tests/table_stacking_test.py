@@ -13,6 +13,8 @@
 # limitations under the License.
 """Tests for embeddingtable stacking."""
 
+from typing import override
+
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -27,6 +29,8 @@ from jax_tpu_embedding.sparsecore.utils import utils
 
 
 class ComputePhysicalRowIdsTest(chex.TestCase):
+
+  @override
   def setUp(self):
     super().setUp()
 
@@ -65,6 +69,7 @@ class ComputePhysicalRowIdsTest(chex.TestCase):
 
 class TableStackingTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])

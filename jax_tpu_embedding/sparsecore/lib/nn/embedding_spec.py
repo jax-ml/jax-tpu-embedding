@@ -18,7 +18,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 import inspect
-from typing import Any, Callable, Generic, NamedTuple, Sequence, TypeAlias, TypeVar
+from typing import Any, Callable, Generic, NamedTuple, Sequence, TypeAlias, TypeVar, override
 
 from flax import struct
 import jax
@@ -276,9 +276,11 @@ class CustomOptimizerSpec(OptimizerSpec):
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return self.slot_variable_initializers_tuple
 
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
@@ -288,9 +290,11 @@ class CustomOptimizerSpec(OptimizerSpec):
         self.short_name_str,
     ))
 
+  @override
   def short_name(self) -> str:
     return self.short_name_str
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_optimizer_grad.tpu_sparse_dense_matmul_optimizer_grad_primitive
@@ -395,16 +399,20 @@ class SGDOptimizerSpec(OptimizerSpec):
         learning_rate=learning_rate,
     )
 
+  @override
   def __hash__(self) -> int:
     return hash((self.learning_rate,))
 
+  @override
   def short_name(self) -> str:
     return "sgd"
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     """SGD does not have any slot variables, hence this returns an empty tuple."""
     return SGDSlotVariables()
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     """Returns the optimizer primitive for the SGD optimizer."""
     return (
@@ -438,20 +446,24 @@ class AdagradOptimizerSpec(OptimizerSpec):
     )
     self.initial_accumulator_value = initial_accumulator_value
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return AdagradSlotVariables(
         accumulator=jax.nn.initializers.constant(self.initial_accumulator_value)
     )
 
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
         self.initial_accumulator_value,
     ))
 
+  @override
   def short_name(self) -> str:
     return "adagrad"
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive
@@ -497,12 +509,14 @@ class AdamOptimizerSpec(OptimizerSpec):
     self.beta_2 = beta_2
     self.epsilon = epsilon
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return AdamSlotVariables(
         momentum=jax.nn.initializers.constant(0.0),
         velocity=jax.nn.initializers.constant(0.0),
     )
 
+  @override
   def get_hyperparameters(
       self, step: jax.Array | int | None = None
   ) -> tuple[jax.Array, ...]:
@@ -538,6 +552,7 @@ class AdamOptimizerSpec(OptimizerSpec):
         epsilon_hat,
     )
 
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
@@ -546,9 +561,11 @@ class AdamOptimizerSpec(OptimizerSpec):
         self.epsilon,
     ))
 
+  @override
   def short_name(self) -> str:
     return "adam"
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adam.tpu_sparse_dense_matmul_grad_with_adam_primitive
@@ -600,6 +617,7 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
     self.initial_accumulator_value = initial_accumulator_value
     self.initial_momentum_value = initial_momentum_value
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return AdagradMomentumSlotVariables(
         accumulator=jax.nn.initializers.constant(
@@ -608,6 +626,7 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
         momentum=jax.nn.initializers.constant(self.initial_momentum_value),
     )
 
+  @override
   def get_hyperparameters(self, step=None) -> tuple[jax.Array, ...]:
     return (
         self.get_learning_rate(step),  # λ
@@ -618,7 +637,8 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
         jnp.array(self.use_nesterov, dtype=jnp.bool_),
     )
 
-  def __hash__(self):
+  @override
+  def __hash__(self) -> int:
     return hash((
         self.learning_rate,
         self.momentum,
@@ -630,9 +650,11 @@ class AdagradMomentumOptimizerSpec(OptimizerSpec):
         self.initial_momentum_value,
     ))
 
+  @override
   def short_name(self) -> str:
     return "adagrad_momentum"
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_adagrad_momentum.tpu_sparse_dense_matmul_grad_with_adagrad_momentum_primitive
@@ -690,6 +712,7 @@ class FTRLOptimizerSpec(OptimizerSpec):
     self.initial_linear_value = initial_linear_value
     self.multiply_linear_by_learning_rate = multiply_linear_by_learning_rate
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return FTRLSlotVariables(
         accumulator=jax.nn.initializers.constant(
@@ -698,6 +721,7 @@ class FTRLOptimizerSpec(OptimizerSpec):
         linear=jax.nn.initializers.constant(self.initial_linear_value),
     )
 
+  @override
   def get_hyperparameters(
       self, step: jax.Array | int | None = None
   ) -> tuple[jax.Array, ...]:
@@ -710,6 +734,7 @@ class FTRLOptimizerSpec(OptimizerSpec):
         jnp.array(self.beta, dtype=jnp.float32),
     )
 
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
@@ -722,9 +747,11 @@ class FTRLOptimizerSpec(OptimizerSpec):
         self.multiply_linear_by_learning_rate,
     ))
 
+  @override
   def short_name(self) -> str:
     return "ftrl"
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_ftrl.tpu_sparse_dense_matmul_grad_with_ftrl_primitive
@@ -779,6 +806,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
       )
     self.initial_slot_value = initial_slot_value
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return LaPropSlotVariables(
         mu=jax.nn.initializers.constant(self.initial_slot_value),
@@ -799,6 +827,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
 
     return jnp.array(decay_rate, dtype=jnp.float32)
 
+  @override
   def get_hyperparameters(
       self, step: jax.Array | int | None = None
   ) -> tuple[jax.Array, ...]:
@@ -810,6 +839,7 @@ class LaPropOptimizerSpec(OptimizerSpec):
         jnp.array(self.eps, dtype=jnp.float32),
     )
 
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
@@ -819,9 +849,11 @@ class LaPropOptimizerSpec(OptimizerSpec):
         self.initial_slot_value,
     ))
 
+  @override
   def short_name(self) -> str:
     return "laprop"
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_laprop.tpu_sparse_dense_matmul_grad_with_laprop_primitive
@@ -863,6 +895,7 @@ class F2AOptimizerSpec(OptimizerSpec):
     self.l2_regularization_strength = l2_regularization_strength
     self.max_lr_multiplier = max_lr_multiplier
 
+  @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
     return F2ASlotVariables(
         accumulator=jax.nn.initializers.constant(
@@ -871,6 +904,7 @@ class F2AOptimizerSpec(OptimizerSpec):
         local_step=jax.nn.initializers.constant(self.initial_local_step_value),
     )
 
+  @override
   def get_hyperparameters(
       self, step: jax.Array | int | None = None
   ) -> tuple[jax.Array, ...]:
@@ -886,6 +920,7 @@ class F2AOptimizerSpec(OptimizerSpec):
         jnp.array(step, dtype=jnp.float32),
     )
 
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
@@ -897,9 +932,11 @@ class F2AOptimizerSpec(OptimizerSpec):
         self.max_lr_multiplier,
     ))
 
+  @override
   def short_name(self) -> str:
     return "f2a"
 
+  @override
   def get_optimizer_primitive(self) -> jex.core.Primitive:
     return (
         sparse_dense_matmul_grad_with_f2a.tpu_sparse_dense_matmul_grad_with_f2a_primitive

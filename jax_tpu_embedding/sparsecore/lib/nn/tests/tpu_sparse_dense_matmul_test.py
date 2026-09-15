@@ -13,6 +13,7 @@
 # limitations under the License.
 import collections
 import functools
+from typing import override
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -208,6 +209,7 @@ class ErrorHandlingTest(absltest.TestCase):
 
 class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.table_spec_a = embedding_spec.TableSpec(

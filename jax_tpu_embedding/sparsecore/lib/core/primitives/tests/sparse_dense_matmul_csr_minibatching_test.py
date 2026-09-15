@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+from typing import override
 from unittest import mock
 
 from absl.testing import absltest
@@ -25,6 +26,7 @@ import numpy as np
 
 class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     jax.config.update("jax_traceback_filtering", "off")
