@@ -64,9 +64,9 @@ def _eval_shape(
 ) -> _T:
   """Similar to jax.eval_shape, but also returns the output shardings."""
 
-  fn = jax.jit(fn)
-  out = fn.eval_shape(*args, **kwargs)
-  sharding = fn.lower(*args, **kwargs).compile().output_shardings
+  jitted_fn = jax.jit(fn)
+  out = jitted_fn.eval_shape(*args, **kwargs)
+  sharding = jitted_fn.lower(*args, **kwargs).compile().output_shardings
 
   return jax.tree.map(
       lambda x, s: _replace_shape_dtype_struct(x, sharding=s),
