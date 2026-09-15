@@ -13,6 +13,7 @@
 # limitations under the License.
 """An FDO client implementation that uses NPZ files as storage."""
 
+import abc
 import collections
 import dataclasses
 import glob
@@ -20,7 +21,7 @@ import itertools
 import os
 import re
 import time
-from typing import Mapping
+from typing import Mapping, override
 
 from absl import logging
 from etils import epath
@@ -29,31 +30,22 @@ from jax_tpu_embedding.sparsecore.lib.fdo import fdo_client
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 import numpy as np
 
-_FILE_NAME = 'fdo_stats'
-_FILE_EXTENSION = 'npz'
 _PARAM_FIELDS = dataclasses.fields(embedding.SparseDenseMatmulInputStats)
 
 
-class NPZFileFDOClient(fdo_client.FDOClient):
-  """FDO client that writes stats to a file in .npz format.
+class BaseFileFDOClient(fdo_client.FDOClient):
+  """Base FDO client for file-based storage implementations."""
 
-  Usage:
-    # Create a FDO client.
-    client = NPZFileFDOClient(base_dir='/path/to/base/dir')
+  _FILE_NAME: str = 'fdo_stats'
+  _FILE_EXTENSION: str = ''
 
-    # Record observed stats from sparse input processing
-    _, stats = embedding.preprocess_sparse_dense_matmul_input(...)
-    client.record(stats)
-
-    # Publish process local stats to a file.
-    client.publish()
-
-    # Load stats from all files in the base_dir.
-    stats = client.load()
-  """
-
-  def __init__(self, base_dir: epath.PathLike):
+  def __init__(
+      self,
+      base_dir: epath.PathLike,
+      retain_history: bool = True,
+  ):
     self._base_dir = epath.Path(base_dir)
+    self._retain_history = retain_history
     # We store the params in a dict for easy updation and as an intermediate
     # format between SparseDenseMatmulInputStats and separate files.
     # param_name -> table_name -> stats
@@ -62,6 +54,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
         for field in _PARAM_FIELDS
     }
 
+  @override
   def record(self, data: embedding.SparseDenseMatmulInputStats) -> None:
     """Records stats per process.
 
@@ -93,12 +86,30 @@ class NPZFileFDOClient(fdo_client.FDOClient):
               (self._params[param_name][table_name], stats)
           )
 
+    if not self._retain_history:
+      self._collapse_history()
+
+  def _take_axis_max(self, x: np.ndarray) -> np.ndarray:
+    if x.ndim > 1:
+      return np.max(x, axis=0)
+    return x
+
+  def _collapse_history(self) -> None:
+    """Collapses multi-row stat arrays along axis 0 to their elementwise max."""
+    for param_name, param_value in self._params.items():
+      self._params[param_name] = {
+          k: self._take_axis_max(v) for k, v in param_value.items()
+      }
+
   # LINT.IfChange(generate_file_name)
   def _generate_file_name(self) -> str:
     """Generates a file name for the stats."""
-    # File Format: `fdo_stats_<process_id>_<timestamp>.npz`
+    # File Format: `fdo_stats_<process_id>_<timestamp>.<ext>`
     filename = '{}_{}_{}.{}'.format(
-        _FILE_NAME, jax.process_index(), time.time_ns(), _FILE_EXTENSION
+        self._FILE_NAME,
+        jax.process_index(),
+        time.time_ns(),
+        self._FILE_EXTENSION,
     )
     return os.fspath(self._base_dir / filename)
 
@@ -115,7 +126,7 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     # Read files that match the file creation pattern.
     dir_path = epath.Path(files[0]).parent
     dir_prefix = len(os.fspath(dir_path)) + 1
-    pattern = rf'{_FILE_NAME}_(\d+)_(\d+)\.{_FILE_EXTENSION}'
+    pattern = rf'{self._FILE_NAME}_(\d+)_(\d+)\.{self._FILE_EXTENSION}'
     # Group files as list of (process_idx, timestamp, files)
     file_groups = []
     for file in files:
@@ -134,36 +145,25 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     return latest_files
   # LINT.ThenChange(:generate_file_name)
 
+  @abc.abstractmethod
   def _write_to_file(self, stats: Mapping[str, np.ndarray]) -> None:
-    """Writes stats to a npz file."""
-    file_name = self._generate_file_name()
-    logging.info('Write stats to %s', file_name)
-    # Typeshed stubs for savez do not accept dictionary unpacking of
-    # Mapping[str, np.ndarray].
-    jax.numpy.savez(file_name, **stats)  # pyrefly: ignore[bad-argument-type]
+    """Writes stats to a file."""
+    raise NotImplementedError
 
-  def publish(self) -> None:
-    """Publishes locally accmulatedstats to a file in the base_dir.
-
-    Publish is called by each process there by collecting stats from all
-    processes.
-    """
-    merged_stats = {}
-    for field in _PARAM_FIELDS:
-      for table_name, stats in self._params[field.name].items():
-        merged_stats[f'{table_name}{field.metadata["suffix"]}'] = stats
-    self._write_to_file(merged_stats)
+  @abc.abstractmethod
+  def _read_file(self, file_name: str) -> Mapping[str, np.ndarray]:
+    """Reads stats from a single file."""
+    raise NotImplementedError
 
   def _read_from_file(self, files_glob: str) -> Mapping[str, np.ndarray]:
-    """Reads stats from a npz file."""
+    """Reads stats from files matching files_glob."""
     files = self._get_latest_files_by_process(glob.glob(files_glob))
     if not files:
       raise FileNotFoundError('No stats files found in %s' % files_glob)
     stats = collections.defaultdict(lambda: np.zeros(0, dtype=np.int32))
     for file_name in files:
       logging.info('Reading stats from %s', file_name)
-      loaded = np.load(file_name)
-      loaded_d = {key: loaded[key] for key in loaded.files}
+      loaded_d = self._read_file(file_name)
       for key, value in loaded_d.items():
         if stats.get(key) is None:
           stats[key] = value
@@ -171,6 +171,16 @@ class NPZFileFDOClient(fdo_client.FDOClient):
           stats[key] = np.max(np.vstack((stats[key], value)), axis=0)
     return stats
 
+  @override
+  def publish(self) -> None:
+    """Publishes locally accumulated stats to a file in the base_dir."""
+    merged_stats = {}
+    for field in _PARAM_FIELDS:
+      for table_name, stats in self._params[field.name].items():
+        merged_stats[f'{table_name}{field.metadata["suffix"]}'] = stats
+    self._write_to_file(merged_stats)
+
+  @override
   def load(self) -> embedding.SparseDenseMatmulInputStats:
     """Loads state of local FDO client from disk.
 
@@ -179,13 +189,13 @@ class NPZFileFDOClient(fdo_client.FDOClient):
       A tuple of (max_ids_per_partition, max_unique_ids_per_partition)
     Raises:
       FileNotFoundError: If no stats files are found in the base_dir.
-      ValueError: If the stats files do not have expected keys fro max ids and
+      ValueError: If the stats files do not have expected keys for max ids and
       max unique ids.
     """
     # TODO(b/393435682): Fallback to default limits if no stats on disk.
     # read files from base_dir and aggregate stats.
     files_glob = os.fspath(
-        self._base_dir / '{}*.{}'.format(_FILE_NAME, _FILE_EXTENSION)
+        self._base_dir / '{}*.{}'.format(self._FILE_NAME, self._FILE_EXTENSION)
     )
     stats = self._read_from_file(files_glob)
     # We convert the files back to intermediate dict and return the
@@ -193,21 +203,63 @@ class NPZFileFDOClient(fdo_client.FDOClient):
     result: dict[str, dict[str, np.ndarray]] = {
         field.name: {} for field in _PARAM_FIELDS
     }
-    for file_name, stats in stats.items():
+    for file_name, file_stats in stats.items():
       valid_file_name = False
       for field in _PARAM_FIELDS:
         if file_name.endswith(field.metadata['suffix']):
           table_name = file_name[: -len(field.metadata['suffix'])]
-          result[field.name][table_name] = stats
+          result[field.name][table_name] = file_stats
           valid_file_name = True
           break
       if not valid_file_name:
         raise ValueError(
-            f'Unexpected file name: {file_name}, expected to'
-            ' end with'
+            f'Unexpected file name: {file_name}, expected to end with'
             f' {[field.metadata["suffix"] for field in _PARAM_FIELDS]}'
         )
     self._params = result
     # Typeshed stubs reject dictionary unpacking of dict[str, np.ndarray] into
     # kwargs expecting dict[str, int].
     return embedding.SparseDenseMatmulInputStats(**result)  # pyrefly: ignore[bad-argument-type]
+
+
+class NPZFileFDOClient(BaseFileFDOClient):
+  """FDO client that writes stats to a file in .npz format.
+
+  Usage:
+    # Create a FDO client.
+    client = NPZFileFDOClient(base_dir='/path/to/base/dir')
+
+    # Record observed stats from sparse input processing
+    _, stats = embedding.preprocess_sparse_dense_matmul_input(...)
+    client.record(stats)
+
+    # Publish process local stats to a file.
+    client.publish()
+
+    # Load stats from all files in the base_dir.
+    stats = client.load()
+  """
+
+  _FILE_EXTENSION: str = 'npz'
+
+  def __init__(
+      self,
+      base_dir: epath.PathLike,
+      retain_history: bool = True,
+  ):
+    super().__init__(base_dir, retain_history=retain_history)
+
+  @override
+  def _write_to_file(self, stats: Mapping[str, np.ndarray]) -> None:
+    """Writes stats to a npz file."""
+    file_name = self._generate_file_name()
+    logging.info('Write stats to %s', file_name)
+    # Typeshed stubs for savez do not accept dictionary unpacking of
+    # Mapping[str, np.ndarray].
+    jax.numpy.savez(file_name, **stats)  # pyrefly: ignore[bad-argument-type]
+
+  @override
+  def _read_file(self, file_name: str) -> Mapping[str, np.ndarray]:
+    """Reads stats from a single npz file."""
+    loaded = np.load(file_name)
+    return {key: loaded[key] for key in loaded.files}

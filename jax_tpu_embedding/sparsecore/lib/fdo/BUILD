@@ -56,11 +56,8 @@ pytype_strict_library(
     name = "csv_file_fdo_client",
     srcs = ["csv_file_fdo_client.py"],
     deps = [
-        ":fdo_client",
-        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        ":file_fdo_client",
         pypi_requirement("absl/logging"),
-        pypi_requirement("etils/epath"),
-        pypi_requirement("jax"),
         pypi_requirement("numpy"),
     ],
 )
