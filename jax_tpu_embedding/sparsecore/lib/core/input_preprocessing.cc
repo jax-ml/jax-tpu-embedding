@@ -495,6 +495,29 @@ void MergeStats(
   }
 }
 
+// Performs an asynchronous all-reduce operation when an AllReduceInterface is
+// available, or emplacing the locally computed value directly into the result.
+template <typename T>
+void AsyncReduceOrEmplace(
+    int sync_key, T local_value,
+    AllReduceInterface* absl_nullable all_reduce_interface,
+    tsl::AsyncValueRef<T> result_avr) {
+  if (all_reduce_interface != nullptr) {
+    auto serialized_val = internal::Serialize(local_value);
+    tsl::AsyncValueRef<decltype(serialized_val)> reduced_value_av =
+        all_reduce_interface->AsyncAllReduce(sync_key, serialized_val);
+    reduced_value_av.AndThen([result_avr, reduced_value_av]() mutable {
+      if (reduced_value_av.IsError()) {
+        result_avr.SetError(reduced_value_av.GetError());
+      } else {
+        result_avr.emplace(internal::Deserialize(reduced_value_av.get()));
+      }
+    });
+  } else {
+    result_avr.emplace(local_value);
+  }
+}
+
 // Synchronizes the `table_minibatching_required` flag across all participating
 // devices. If `options.all_reduce_interface` is provided, it performs an
 // all-reduce operation to determine if minibatching is required on any device.
@@ -516,6 +539,7 @@ void SyncMinibatchingRequired(
       device_sorting_results_av.push_back(sorting_result_av);
     }
   }
+
   tsl::RunWhenReady(absl::MakeConstSpan(device_sorting_results_av), [=]() {
     bool local_minibatching_required = false;
     std::vector<std::string> tables_requiring_minibatching;
@@ -535,20 +559,8 @@ void SyncMinibatchingRequired(
           << absl::StrJoin(tables_requiring_minibatching, ", ")
           << " at batch " << options.batch_number;
     }
-    if (options.all_reduce_interface != nullptr) {
-      tsl::AsyncValueRef<bool> reduced_value_av =
-          options.all_reduce_interface->AsyncAllReduce(
-              options.batch_number * 2, local_minibatching_required);
-      reduced_value_av.AndThen([result_avr, reduced_value_av]() mutable {
-        if (reduced_value_av.IsError()) {
-          result_avr.SetError(reduced_value_av.GetError());
-        } else {
-          result_avr.emplace(internal::Deserialize(reduced_value_av.get()));
-        }
-      });
-    } else {
-      result_avr.emplace(local_minibatching_required);
-    }
+    AsyncReduceOrEmplace(options.batch_number * 2, local_minibatching_required,
+                         options.all_reduce_interface, result_avr);
   });
 }
 
@@ -580,21 +592,9 @@ void SyncMinibatchingSplit(
             sorting_result_av.get().table_minibatching_split;
       }
     }
-    if (options.all_reduce_interface != nullptr) {
-      tsl::AsyncValueRef<uint64_t> reduced_value_av =
-          options.all_reduce_interface->AsyncAllReduce(
-              options.batch_number * 2 + 1,
-              internal::Serialize(local_minibatching_split));
-      reduced_value_av.AndThen([result_avr, reduced_value_av]() mutable {
-        if (reduced_value_av.IsError()) {
-          result_avr.SetError(reduced_value_av.GetError());
-        } else {
-          result_avr.emplace(internal::Deserialize(reduced_value_av.get()));
-        }
-      });
-    } else {
-      result_avr.emplace(local_minibatching_split);
-    }
+    AsyncReduceOrEmplace(options.batch_number * 2 + 1,
+                         local_minibatching_split,
+                         options.all_reduce_interface, result_avr);
   });
 }
 
