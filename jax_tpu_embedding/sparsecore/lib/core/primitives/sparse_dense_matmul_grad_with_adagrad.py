@@ -53,13 +53,6 @@ tpu_sparse_dense_matmul_grad_with_adagrad_primitive.def_impl(
 )
 
 
-def _annotate_sparse_compute_type(op: ir.OpView):
-  op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-  return op
-
-
 def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     lhs_row_pointers: core.ShapedArray,
     lhs_local_embedding_ids: core.ShapedArray,
@@ -254,9 +247,11 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
 
   assert isinstance(op[0], ir.Value)
   table_tuple_op = hlo.GetTupleElementOp(op[0], 0)
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
+  table_tuple_op = utils.annotate_sparse_compute_type(table_tuple_op)
   accumulator_tuple_op = hlo.GetTupleElementOp(op[0], 1)
-  accumulator_tuple_op = _annotate_sparse_compute_type(accumulator_tuple_op)
+  accumulator_tuple_op = utils.annotate_sparse_compute_type(
+      accumulator_tuple_op
+  )
 
   return (
       table_tuple_op.results,
