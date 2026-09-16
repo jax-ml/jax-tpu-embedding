@@ -33,6 +33,7 @@ import einops
 from flax import struct
 import jax
 import jax.numpy as jnp
+from jax.typing import DTypeLike
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_activation_unstack
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
@@ -856,24 +857,24 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
   )
 
   def _make_shape_dtype_struct(
-      size: int, dtype: jnp.dtype
+      size: int, dtype: DTypeLike
   ) -> jax.ShapeDtypeStruct:
     return jax.ShapeDtypeStruct((local_device_count * size,), dtype)
 
   lhs_row_pointers = {
-      stack_name: _make_shape_dtype_struct(row_pointers_size, jnp.int32)  # pyrefly: ignore[bad-argument-type]
+      stack_name: _make_shape_dtype_struct(row_pointers_size, jnp.int32)
       for stack_name in coo_buffer_sizes
   }
   lhs_embedding_ids = {
-      stack_name: _make_shape_dtype_struct(size, jnp.int32)  # pyrefly: ignore[bad-argument-type]
+      stack_name: _make_shape_dtype_struct(size, jnp.int32)
       for stack_name, size in coo_buffer_sizes.items()
   }
   lhs_sample_ids = {
-      stack_name: _make_shape_dtype_struct(size, jnp.int32)  # pyrefly: ignore[bad-argument-type]
+      stack_name: _make_shape_dtype_struct(size, jnp.int32)
       for stack_name, size in coo_buffer_sizes.items()
   }
   lhs_gains = {
-      stack_name: _make_shape_dtype_struct(size, jnp.float32)  # pyrefly: ignore[bad-argument-type]
+      stack_name: _make_shape_dtype_struct(size, jnp.float32)
       for stack_name, size in coo_buffer_sizes.items()
   }
 

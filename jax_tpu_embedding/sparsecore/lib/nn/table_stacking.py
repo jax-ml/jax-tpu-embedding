@@ -75,7 +75,7 @@ def _pad_table(
     table_spec: TableSpec,
     table_values: jax.Array,
     num_shards: int,
-    pad_value: jnp.float32 = jnp.nan,  # pyrefly: ignore[not-a-type]
+    pad_value: ArrayLike = jnp.nan,
 ) -> jax.Array:
   """Adds appropriate padding to a table to prepare for stacking.
 
@@ -112,7 +112,7 @@ def _stack_and_shard_table(
     table_spec: TableSpec,
     table: jax.Array,
     num_shards: int,
-    pad_value: jnp.float32,  # pyrefly: ignore[not-a-type]
+    pad_value: ArrayLike,
 ) -> jax.Array:
   """Stacks and shards a single table for use in sparsecore lookups."""
   padded_values = _pad_table(table_spec, table, num_shards, pad_value)
@@ -145,7 +145,7 @@ def stack_and_shard_tables(
     table_specs: Nested[TableSpec],
     tables: Nested[ArrayLike],
     num_shards: int,
-    pad_value: jnp.float32 = jnp.nan,  # pyrefly: ignore[not-a-type]
+    pad_value: ArrayLike = jnp.nan,
 ) -> dict[str, Nested[jax.Array]]:
   """Stacks and shards tables for use in sparsecore lookups.
 
