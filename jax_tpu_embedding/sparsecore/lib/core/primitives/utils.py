@@ -19,7 +19,28 @@ from jax import core
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
 from jax.extend.mlir.dialects import stablehlo as hlo
+from jax.interpreters import mlir
 import numpy as np
+
+
+def annotate_sparse_compute_type(op: ir.OpView) -> ir.OpView:
+  """Annotates an MLIR OpView with sparse compute frontend attribute."""
+  op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
+      {"_xla_compute_type": ir.StringAttr.get("sparse")}
+  )
+  return op
+
+
+def hlo_const(x: np.ndarray) -> ir.Value:
+  """Creates a StableHLO constant value from a NumPy array."""
+  return hlo.constant(
+      ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
+  )
+
+
+def hlo_f32(x: float, row_shape: Sequence[int]) -> ir.Value:
+  """Creates a StableHLO constant float32 tensor of the given shape."""
+  return hlo_const(np.full(row_shape, x, dtype=np.float32))
 
 
 def maybe_clip_params(

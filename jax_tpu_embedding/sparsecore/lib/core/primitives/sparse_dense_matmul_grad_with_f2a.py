@@ -49,23 +49,6 @@ tpu_sparse_dense_matmul_grad_with_f2a_primitive.def_impl(
 )
 
 
-def _annotate_sparse_compute_type(op):
-  op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-  return op
-
-
-def _hlo_const(x: np.ndarray) -> ir.Value:
-  return hlo.constant(
-      ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
-  )
-
-
-def _hlo_f32(x: float, row_shape: list[int]):
-  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
-
-
 def _tpu_sparse_dense_matmul_grad_with_f2a_abstract_eval(
     lhs_row_pointers: core.ShapedArray,
     lhs_local_embedding_ids: core.ShapedArray,
@@ -248,7 +231,7 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
     max_lr_multiplier_val = entry_block.arguments[8]
     g_step = entry_block.arguments[9]
 
-    one_broadcasted = _hlo_f32(1.0, row_shape)
+    one_broadcasted = utils.hlo_f32(1.0, row_shape)
 
     # fa_multiplier = (global_step / local_step) ^ rho
     new_local_step = hlo.add(l_step, one_broadcasted)
@@ -333,11 +316,13 @@ def _tpu_sparse_dense_matmul_grad_with_f2a_lowering(
 
   assert isinstance(sparse_core_custom_call_op[0], ir.Value)
   table_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 0)
-  table_tuple_op = _annotate_sparse_compute_type(table_tuple_op)
+  table_tuple_op = utils.annotate_sparse_compute_type(table_tuple_op)
   accumulator_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 1)
-  accumulator_tuple_op = _annotate_sparse_compute_type(accumulator_tuple_op)
+  accumulator_tuple_op = utils.annotate_sparse_compute_type(
+      accumulator_tuple_op
+  )
   local_step_tuple_op = hlo.GetTupleElementOp(sparse_core_custom_call_op[0], 2)
-  local_step_tuple_op = _annotate_sparse_compute_type(local_step_tuple_op)
+  local_step_tuple_op = utils.annotate_sparse_compute_type(local_step_tuple_op)
 
   return (
       utils.to_value_sequence(table_tuple_op.results),

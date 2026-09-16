@@ -55,23 +55,6 @@ tpu_sparse_dense_matmul_grad_with_ftrl_primitive.def_impl(
 )
 
 
-def _annotate_sparse_compute_type(op: ir.OpView):
-  op.attributes["mhlo.frontend_attributes"] = ir.DictAttr.get(
-      {"_xla_compute_type": ir.StringAttr.get("sparse")}
-  )
-  return op
-
-
-def _hlo_const(x: np.ndarray) -> ir.Value:
-  return hlo.constant(
-      ir.DenseElementsAttr.get(x, type=mlir.dtype_to_ir_type(x.dtype))
-  )
-
-
-def _hlo_f32(x: float, row_shape: list[int]):
-  return _hlo_const(np.full(row_shape, x, dtype=np.float32))
-
-
 def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     lhs_row_pointers: core.ShapedArray,
     lhs_local_embedding_ids: core.ShapedArray,
@@ -240,8 +223,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
         beta_param,  # βZ
     ) = entry_block.arguments
 
-    two = _hlo_f32(2.0, row_shape)
-    zero = _hlo_f32(0.0, row_shape)
+    two = utils.hlo_f32(2.0, row_shape)
+    zero = utils.hlo_f32(0.0, row_shape)
 
     # Accumulator
     accumulator_new = hlo.add(accumulator_arg, hlo.multiply(grad, grad))
@@ -268,7 +251,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     if multiply_linear_by_learning_rate:
       scale = lr_param
     else:
-      scale = _hlo_const(np.ones(row_shape, np.float32))
+      scale = utils.hlo_f32(1.0, row_shape)
 
     l1_scaled = hlo.multiply(l1_param, scale)
     numerator = hlo.select(
@@ -351,13 +334,13 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
   )(ctx, *operands)
 
   assert isinstance(custom_call_op[0], ir.Value)
-  updated_table_op = _annotate_sparse_compute_type(
+  updated_table_op = utils.annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op[0], 0)
   )
-  updated_accumulator_op = _annotate_sparse_compute_type(
+  updated_accumulator_op = utils.annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op[0], 1)
   )
-  updated_linear_op = _annotate_sparse_compute_type(
+  updated_linear_op = utils.annotate_sparse_compute_type(
       hlo.GetTupleElementOp(custom_call_op[0], 2)
   )
 
