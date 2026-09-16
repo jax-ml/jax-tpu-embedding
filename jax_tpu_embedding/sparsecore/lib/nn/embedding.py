@@ -861,19 +861,19 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
     return jax.ShapeDtypeStruct((local_device_count * size,), dtype)
 
   lhs_row_pointers = {
-      stack_name: _make_shape_dtype_struct(row_pointers_size, jnp.int32)
+      stack_name: _make_shape_dtype_struct(row_pointers_size, jnp.int32)  # pyrefly: ignore[bad-argument-type]
       for stack_name in coo_buffer_sizes
   }
   lhs_embedding_ids = {
-      stack_name: _make_shape_dtype_struct(size, jnp.int32)
+      stack_name: _make_shape_dtype_struct(size, jnp.int32)  # pyrefly: ignore[bad-argument-type]
       for stack_name, size in coo_buffer_sizes.items()
   }
   lhs_sample_ids = {
-      stack_name: _make_shape_dtype_struct(size, jnp.int32)
+      stack_name: _make_shape_dtype_struct(size, jnp.int32)  # pyrefly: ignore[bad-argument-type]
       for stack_name, size in coo_buffer_sizes.items()
   }
   lhs_gains = {
-      stack_name: _make_shape_dtype_struct(size, jnp.float32)
+      stack_name: _make_shape_dtype_struct(size, jnp.float32)  # pyrefly: ignore[bad-argument-type]
       for stack_name, size in coo_buffer_sizes.items()
   }
 

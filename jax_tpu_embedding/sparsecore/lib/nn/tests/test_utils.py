@@ -84,7 +84,7 @@ def row_col_id_initializer(
 
 def row_id_with_offset_initializer_value(
     offset_value: int, row: int
-) -> jnp.float32:
+) -> jnp.float32:  # pyrefly: ignore[not-a-type]
   """Returns the value for row_col_id_initializer."""
   return offset_value + row
 
