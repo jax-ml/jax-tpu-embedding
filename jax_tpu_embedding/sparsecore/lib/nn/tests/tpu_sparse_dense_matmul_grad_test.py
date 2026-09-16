@@ -14,7 +14,7 @@
 import dataclasses
 import functools
 import sys
-from typing import Callable
+from typing import Callable, override
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -67,6 +67,7 @@ class LinearLearningRateSchedule:
 
 class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.table_spec_a = embedding_spec.TableSpec(

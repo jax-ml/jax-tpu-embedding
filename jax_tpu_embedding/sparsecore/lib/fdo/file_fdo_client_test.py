@@ -13,6 +13,8 @@
 # limitations under the License.
 """Unit tests for file based FDO client."""
 
+from typing import override
+
 from absl.testing import absltest
 from etils import epath
 from jax_tpu_embedding.sparsecore.lib.fdo import file_fdo_client
@@ -22,6 +24,7 @@ import numpy as np
 
 class NpzFdoClientTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.base_dir = self.create_tempdir(

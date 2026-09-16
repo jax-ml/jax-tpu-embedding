@@ -13,6 +13,7 @@
 # limitations under the License.
 import dataclasses
 import functools
+from typing import override
 from unittest import mock
 
 from absl.testing import absltest
@@ -28,6 +29,7 @@ import numpy as np
 
 class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.table_spec_a = embedding_spec.TableSpec(

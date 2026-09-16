@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+from typing import override
 from unittest import mock
 
 from absl.testing import absltest
@@ -31,6 +32,7 @@ _EMB_SIZE = 8
 
 class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()

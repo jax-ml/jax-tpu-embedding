@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import override
 from unittest import mock
 
 from absl.testing import absltest
@@ -24,6 +25,7 @@ import numpy as np
 
 class SparseDenseMatmulGradWithOptimizerTest(absltest.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.num_chips = 1

@@ -15,6 +15,7 @@ import dataclasses
 import functools
 import math
 import typing
+from typing import override
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -540,6 +541,7 @@ class InputPreprocessingTest(parameterized.TestCase):
       dtype=object,
   )
 
+  @override
   def setUp(self):
     super().setUp()
     embedding.prepare_feature_specs_for_training(

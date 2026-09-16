@@ -24,7 +24,7 @@ integration of different components of the SparseCore embedding API.
 from collections.abc import Mapping
 from functools import partial  # pylint: disable=g-importing-member
 import sys
-from typing import Any
+from typing import Any, cast, override
 
 from absl import flags
 from absl import logging
@@ -162,6 +162,7 @@ def create_train_state(
 class EmbeddingPipelineTest(absltest.TestCase):
   """Embedding pipeline test."""
 
+  @override
   def setUp(self):
     super().setUp()
 
@@ -222,7 +223,8 @@ class EmbeddingPipelineTest(absltest.TestCase):
 
     self.pipeline_input_sharding = self.global_sharding
     self.output_sharding = ShakespeareModelOutput(
-        metrics_update=self.replicated_sharding,  # pyrefly: ignore[bad-argument-type]
+        # Sharding annotations intentionally reuse the output pytree.
+        metrics_update=cast(TrainMetrics, self.replicated_sharding),
     )
 
     # Define sharding for pipeline state

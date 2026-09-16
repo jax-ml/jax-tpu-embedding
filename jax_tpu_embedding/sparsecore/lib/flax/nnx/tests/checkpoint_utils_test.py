@@ -13,6 +13,8 @@
 # limitations under the License.
 """Tests for SparseCore NNX checkpoint_utils."""
 
+from typing import override
+
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -31,6 +33,7 @@ FLAGS = flags.FLAGS
 
 class CheckpointUtilsTest(parameterized.TestCase):
 
+  @override
   def setUp(self):
     super().setUp()
     self.temp_dir = epath.Path(self.create_tempdir().full_path)
