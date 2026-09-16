@@ -13,6 +13,7 @@
 # limitations under the License.
 """SparseCore embedding layer."""
 
+import collections.abc
 import functools
 from typing import override
 
@@ -27,7 +28,9 @@ import optax
 Nested = embedding.Nested
 
 
-class EmbeddingVariablesParam(nnx.Param):
+class EmbeddingVariablesParam(
+    nnx.Param[collections.abc.Mapping[str, embedding.EmbeddingVariables]]
+):
   """A Param subclass for embedding variables, used to filter model params."""
 
   pass
@@ -88,7 +91,7 @@ def get_named_sharding(
   return nnx.StateSharding(nnx.map_state(fn, nnx.state(node)))
 
 
-class PartitionedOptimizer(nnx.Optimizer):
+class PartitionedOptimizer(nnx.Optimizer[nnx.Module]):
   """A partitioned optimizer for models that use the SparseCoreEmbed layer.
 
   This is a wrapper around the nnx.Optimizer that splits the gradients into
