@@ -917,6 +917,148 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
   EXPECT_THAT(sync_keys_set, SizeIs(kBatchCount * 2));
 }
 
+TEST_F(MinibatchingCountTest,
+       DeviceMinibatchingIgnoresMaxIdsAndProducesOneMinibatch) {
+  // Arrange: reduce max_ids and max_unique_ids to smaller than input count.
+  // With enable_minibatching=true, this would produce >1 minibatches.
+  // With enable_minibatching=false and allow_id_dropping=false, this would DIE
+  // in ValidateMaxIdsOrDie. But with enable_device_minibatching=true,
+  // max_ids/unique_ids check is ignored, 1 minibatch is produced, and 0 IDs are
+  // dropped.
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .allow_id_dropping = false,
+      .enable_minibatching = true,
+      .enable_device_minibatching = true,
+  };
+
+  stacked_table_metadata_[0].max_ids_per_partition = 5;
+  stacked_table_metadata_[0].max_unique_ids_per_partition = 2;
+  stacked_table_metadata_[1].max_ids_per_partition = 5;
+  stacked_table_metadata_[1].max_unique_ids_per_partition = 6;
+
+  auto input_batches =
+      CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
+                         /*max_unique_ids_per_partitions=*/{5, 10},
+                         /*global_sc_count=*/4,
+                         /*local_sc_count=*/4);
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  // Act
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  // Assert
+  EXPECT_EQ(output.num_minibatches, 1);
+  EXPECT_EQ(output.stats.dropped_id_count.at("table_0"), 0);
+}
+
+TEST_F(MinibatchingCountTest,
+       DeviceMinibatchingDropsIdsWhenBufferSizeExceeded) {
+  // Arrange: enable_device_minibatching=true, allow_id_dropping=false,
+  // but set suggested_coo_buffer_size_per_device smaller than the number of
+  // IDs. Buffer size exceeding should still cause ID dropping!
+  const int kNumScPerDevice = 4;
+  const int kAlignment = TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * kNumScPerDevice;
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = kNumScPerDevice,
+      .allow_id_dropping = false,
+      .enable_minibatching = true,
+      .enable_device_minibatching = true,
+  };
+
+  stacked_table_metadata_[0].max_ids_per_partition = 16;
+  stacked_table_metadata_[0].max_unique_ids_per_partition = 16;
+  // Restrict COO buffer size to minimum aligned size (32).
+  stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = kAlignment;
+  stacked_table_metadata_[1].max_ids_per_partition = 16;
+  stacked_table_metadata_[1].max_unique_ids_per_partition = 16;
+  stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = kAlignment;
+
+  // Create inputs with 80 and 90 IDs, which will exceed the 32 buffer capacity.
+  auto input_batches =
+      CreateInputBatches(/*max_ids_per_partitions=*/{80, 90},
+                         /*max_unique_ids_per_partitions=*/{80, 90},
+                         /*global_sc_count=*/4,
+                         /*local_sc_count=*/4);
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  // Act
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  // Assert
+  EXPECT_EQ(output.num_minibatches, 1);
+  EXPECT_GT(output.stats.dropped_id_count.at("table_0"), 0);
+}
+
+TEST_F(MinibatchingCountTest, DeviceMinibatchingRequiresEnableMinibatching) {
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .enable_minibatching = false,
+      .enable_device_minibatching = true,
+  };
+
+  auto input_batches =
+      CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                         /*max_unique_ids_per_partitions=*/{4, 6},
+                         /*global_sc_count=*/4,
+                         /*local_sc_count=*/4);
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  EXPECT_THAT(
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr(
+                   "enable_device_minibatching requires enable_minibatching to "
+                   "be true")));
+}
+
+TEST_F(MinibatchingCountTest,
+       DeviceMinibatchingMultiHostDoesNotRequireAllReduce) {
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .enable_minibatching = true,
+      .enable_device_minibatching = true,
+      .all_reduce_interface = nullptr,
+  };
+
+  auto input_batches =
+      CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
+                         /*max_unique_ids_per_partitions=*/{4, 6},
+                         /*global_sc_count=*/8,
+                         /*local_sc_count=*/4);
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_0", stacked_table_metadata_}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  EXPECT_EQ(output.num_minibatches, 1);
+}
+
 void ValidateCooId(int embedding_id, int sample_id, int64_t total_padded_vocab,
                    int batch_size_per_sc) {
   EXPECT_GE(embedding_id, 0);

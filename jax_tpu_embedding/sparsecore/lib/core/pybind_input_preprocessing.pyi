@@ -48,6 +48,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    enable_device_minibatching: bool = False,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
 def preprocess_sparse_dense_matmul_sparse_coo_input(
@@ -64,6 +65,7 @@ def preprocess_sparse_dense_matmul_sparse_coo_input(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    enable_device_minibatching: bool = False,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
 

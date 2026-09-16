@@ -615,6 +615,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    enable_device_minibatching: bool = False,
     all_reduce_interface: (
         pybind_input_preprocessing.AllReduceInterface | None
     ) = None,
@@ -649,6 +650,7 @@ def preprocess_sparse_dense_matmul_input(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
+    enable_device_minibatching: Whether to enable device minibatching.
     all_reduce_interface: Interface to communicate between multiple hosts. This
       can be generated using the `get_all_reduce_interface` function. Not
       required for single-host minibatching.
@@ -658,6 +660,10 @@ def preprocess_sparse_dense_matmul_input(
     :class:`SparseDenseMatmulInputStats` for details on how statistics are
     computed from input samples).
   """
+  if enable_device_minibatching and not enable_minibatching:
+    raise ValueError(
+        "enable_device_minibatching requires enable_minibatching to be True."
+    )
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(features, feature_specs, "features", "feature_specs")
   if features_weights is not None:
@@ -667,6 +673,7 @@ def preprocess_sparse_dense_matmul_input(
 
   if (
       enable_minibatching
+      and not enable_device_minibatching
       and all_reduce_interface is None
       and local_device_count < global_device_count
   ):
@@ -688,6 +695,7 @@ def preprocess_sparse_dense_matmul_input(
           allow_id_dropping=allow_id_dropping,
           batch_number=batch_number,
           enable_minibatching=enable_minibatching,
+          enable_device_minibatching=enable_device_minibatching,
           all_reduce_interface=all_reduce_interface,
       )
   )
@@ -716,6 +724,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    enable_device_minibatching: bool = False,
     all_reduce_interface: (
         pybind_input_preprocessing.AllReduceInterface | None
     ) = None,
@@ -763,6 +772,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     batch_number: The batch number.
     enable_minibatching: Whether to enable minibatching.
+    enable_device_minibatching: Whether to enable device minibatching.
     all_reduce_interface: Interface to communicate between multiple hosts. This
       can be generated using the `get_all_reduce_interface` function. Not
       required for single-host minibatching.
@@ -770,7 +780,10 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   Returns:
     A tuple of PreprocessResults and SparseDenseMatmulInputStats.
   """
-
+  if enable_device_minibatching and not enable_minibatching:
+    raise ValueError(
+        "enable_device_minibatching requires enable_minibatching to be True."
+    )
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   _assert_same_structure(indices, feature_specs, "indices", "feature_specs")
   _assert_same_structure(values, feature_specs, "values", "feature_specs")
@@ -780,6 +793,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
 
   if (
       enable_minibatching
+      and not enable_device_minibatching
       and all_reduce_interface is None
       and local_device_count < global_device_count
   ):
@@ -802,6 +816,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           allow_id_dropping=allow_id_dropping,
           batch_number=batch_number,
           enable_minibatching=enable_minibatching,
+          enable_device_minibatching=enable_device_minibatching,
           all_reduce_interface=all_reduce_interface,
       )
   )
