@@ -112,6 +112,7 @@ cc_library(
     hdrs = ["input_preprocessing.h"],
     deps = [
         ":abstract_input_batch",
+        ":all_reduce_interface",
         ":coo_format",
         ":input_preprocessing_util",
         ":partitioned_coo_tensors",
