@@ -493,6 +493,11 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const bool allow_id_dropping = true;
   // Whether mini-batching is enabled.
   const bool enable_minibatching = false;
+  // Whether device mini-batching is enabled. If true, goes through the
+  // minibatching path while ignoring max_ids/unique_ids limits during
+  // grouping/deduplication, skips host all-reduce to always produce 1
+  // minibatch, but still drops IDs if the COO buffer size is exceeded.
+  const bool enable_device_minibatching = false;
 
   // The batch number should be a sequential counter that is unique for each
   // batch. It is safe to reset this counter to 0 on restart. The number should
@@ -519,7 +524,9 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
   // Returns the number of buckets for minibatching.
   int GetNumBuckets() const {
-    return enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+    return (enable_minibatching || enable_device_minibatching)
+               ? CooFormat::kMaxMinibatchingBuckets
+               : 1;
   }
 
   // Returns the size of row pointers per bucket.

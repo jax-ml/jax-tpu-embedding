@@ -655,7 +655,8 @@ void FillDeviceBuffersForTable(
           sorting_result_av.get().grouped_coo_tensors;
       // If minibatching is required by any host, merge buckets
       // according to the globally synchronized split.
-      if (options.enable_minibatching && global_minibatching_required) {
+      if (options.enable_minibatching && !options.enable_device_minibatching &&
+          global_minibatching_required) {
         grouped_coo_tensors.Merge(global_minibatching_split);
       }
 
@@ -860,7 +861,7 @@ PreprocessSparseDenseMatmulInput(
 
   tsl::AsyncValueRef<bool> global_minibatching_required_avr =
       tsl::MakeUnconstructedAsyncValueRef<bool>();
-  if (options.enable_minibatching) {
+  if (options.enable_minibatching && !options.enable_device_minibatching) {
     SyncMinibatchingRequired(options, table_states,
                              global_minibatching_required_avr);
   }
@@ -879,7 +880,7 @@ PreprocessSparseDenseMatmulInput(
   }
 
   bool global_minibatching_required = false;
-  if (options.enable_minibatching) {
+  if (options.enable_minibatching && !options.enable_device_minibatching) {
     tsl::profiler::TraceMe traceme([&] {
       return tsl::profiler::TraceMeEncode(
           "WaitForGlobalMinibatchingSync",
@@ -895,7 +896,8 @@ PreprocessSparseDenseMatmulInput(
   MinibatchingSplit global_minibatching_split = 0;
 
   // Minibatching slow path: Optional Re-Sort/Group
-  if (options.enable_minibatching && global_minibatching_required) {
+  if (options.enable_minibatching && !options.enable_device_minibatching &&
+      global_minibatching_required) {
     {
       tsl::profiler::TraceMe traceme([&] {
         return tsl::profiler::TraceMeEncode(
@@ -954,7 +956,8 @@ PreprocessSparseDenseMatmulInput(
   traceme.Stop();
 
   out.num_minibatches = global_minibatching_split.count() + 1;
-  DCHECK(options.enable_minibatching || out.num_minibatches == 1)
+  DCHECK(options.enable_minibatching || options.enable_device_minibatching ||
+         out.num_minibatches == 1)
       << "Minibatching is not enabled but num_minibatches is not 1.";
 
   return out;

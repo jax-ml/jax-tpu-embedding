@@ -126,7 +126,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,
-    bool enable_minibatching,
+    bool enable_minibatching, bool enable_device_minibatching,
     AllReduceInterface* absl_nullable all_reduce_interface) {
   CHECK_EQ(input_batches.size(), feature_specs.size());
   PreprocessSparseDenseMatmulInputOptions options = {
@@ -136,6 +136,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
       .sharding_strategy = sharding_strategy,
       .allow_id_dropping = allow_id_dropping,
       .enable_minibatching = enable_minibatching,
+      .enable_device_minibatching = enable_device_minibatching,
       .batch_number = batch_number,
       .all_reduce_interface = all_reduce_interface,
   };
@@ -192,7 +193,7 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,
-    bool enable_minibatching,
+    bool enable_minibatching, bool enable_device_minibatching,
     AllReduceInterface* absl_nullable all_reduce_interface) {
   if (feature_weights.has_value()) {
     CHECK_EQ(features.size(), feature_weights->size());
@@ -212,7 +213,7 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
       global_device_count, num_sc_per_device, sharding_strategy,
       has_leading_dimension, allow_id_dropping, batch_number,
-      enable_minibatching, all_reduce_interface);
+      enable_minibatching, enable_device_minibatching, all_reduce_interface);
 }
 
 int PyComputeRowPointersSizePerDevice(int global_device_count,
@@ -252,7 +253,7 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     py::list feature_specs, int local_device_count, int global_device_count,
     int num_sc_per_device, ShardingStrategy sharding_strategy,
     bool has_leading_dimension, bool allow_id_dropping, int batch_number,
-    bool enable_minibatching,
+    bool enable_minibatching, bool enable_device_minibatching,
     AllReduceInterface* absl_nullable all_reduce_interface) {
   CHECK(indices.size() == values.size());
   CHECK(indices.size() == dense_shapes.size());
@@ -273,7 +274,7 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
       global_device_count, num_sc_per_device, sharding_strategy,
       has_leading_dimension, allow_id_dropping, batch_number,
-      enable_minibatching, all_reduce_interface);
+      enable_minibatching, enable_device_minibatching, all_reduce_interface);
 }
 }  // namespace
 
@@ -297,6 +298,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("has_leading_dimension") = false,
         py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
         py::arg("enable_minibatching") = false,
+        py::arg("enable_device_minibatching") = false,
         py::arg("all_reduce_interface") = nullptr);
   m.def("preprocess_sparse_dense_matmul_sparse_coo_input",
         &PySparseCooPreprocessSparseDenseMatmulInput, py::arg("indices"),
@@ -307,6 +309,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("has_leading_dimension") = false,
         py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
         py::arg("enable_minibatching") = false,
+        py::arg("enable_device_minibatching") = false,
         py::arg("all_reduce_interface") = nullptr);
   m.def("compute_row_pointers_size_per_device",
         &PyComputeRowPointersSizePerDevice, py::arg("global_device_count"),

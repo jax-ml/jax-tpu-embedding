@@ -304,6 +304,85 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.assertIn("table_a", stats.id_drop_counters)
     self.assertGreater(stats.id_drop_counters["table_a"], 0)
 
+  def test_single_host_device_minibatching_ignores_max_ids(self):
+    assert self.feature_spec.table_spec.stacked_table_spec is not None
+    self.feature_spec.table_spec.stacked_table_spec = (
+        self.feature_spec.table_spec.stacked_table_spec.replace(
+            max_ids_per_partition=1, max_unique_ids_per_partition=1
+        )
+    )
+
+    inputs = _generate_random_inputs(
+        feature=self.feature_spec, max_sample_size=8
+    )
+
+    preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
+        features=[inputs],
+        features_weights=None,
+        feature_specs=[self.feature_spec],
+        local_device_count=jax.device_count(),
+        global_device_count=jax.device_count(),
+        batch_number=42,
+        enable_minibatching=True,
+        enable_device_minibatching=True,
+        allow_id_dropping=False,
+    )
+    self.assertTrue((preprocessed_input.num_minibatches == 1).all())
+    self.assertEqual(stats.id_drop_counters.get("table_a", 0), 0)
+
+  def test_single_host_device_minibatching_buffer_exceeded_drops_ids(self):
+    assert self.feature_spec.table_spec.stacked_table_spec is not None
+    alignment = 8 * self.num_sc_per_device
+    self.feature_spec.table_spec.stacked_table_spec = (
+        self.feature_spec.table_spec.stacked_table_spec.replace(
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            suggested_coo_buffer_size_per_device=alignment,
+        )
+    )
+
+    batch_size = jax.device_count() * 4 * 16
+    self.feature_spec = dataclasses.replace(
+        self.feature_spec, input_shape=[batch_size, 1]
+    )
+    inputs = _generate_random_inputs(
+        feature=self.feature_spec, max_sample_size=8
+    )
+
+    preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
+        features=[inputs],
+        features_weights=None,
+        feature_specs=[self.feature_spec],
+        local_device_count=jax.device_count(),
+        global_device_count=jax.device_count(),
+        batch_number=42,
+        enable_minibatching=True,
+        enable_device_minibatching=True,
+        allow_id_dropping=False,
+    )
+    self.assertTrue((preprocessed_input.num_minibatches == 1).all())
+    self.assertIn("table_a", stats.id_drop_counters)
+    self.assertGreater(stats.id_drop_counters["table_a"], 0)
+
+  def test_device_minibatching_requires_enable_minibatching(self):
+    inputs = _generate_random_inputs(
+        feature=self.feature_spec, max_sample_size=8
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "enable_device_minibatching requires enable_minibatching to be True",
+    ):
+      embedding.preprocess_sparse_dense_matmul_input(
+          features=[inputs],
+          features_weights=None,
+          feature_specs=[self.feature_spec],
+          local_device_count=jax.device_count(),
+          global_device_count=jax.device_count(),
+          batch_number=42,
+          enable_minibatching=False,
+          enable_device_minibatching=True,
+      )
+
   def _lookup(self, preprocessed_input, embedding_vars):
     return embedding.tpu_sparse_dense_matmul(
         preprocessed_input,
@@ -491,6 +570,23 @@ class MultiHostMinibatchingTest(absltest.TestCase):
       ]
       for future in futures:
         self.assertGreater(future.result().num_minibatches[0], 1)
+
+  def test_multi_host_device_minibatching_without_all_reduce(self):
+    inputs = _generate_random_inputs(
+        feature=self.feature_spec, max_sample_size=10, seed=2025
+    )
+    preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features=[inputs],
+        features_weights=None,
+        feature_specs=[self.feature_spec],
+        local_device_count=jax.device_count(),
+        global_device_count=jax.device_count() * 2,
+        batch_number=42,
+        enable_minibatching=True,
+        enable_device_minibatching=True,
+        all_reduce_interface=None,
+    )
+    self.assertEqual(preprocessed_input.num_minibatches[0], 1)
 
 
 if __name__ == "__main__":

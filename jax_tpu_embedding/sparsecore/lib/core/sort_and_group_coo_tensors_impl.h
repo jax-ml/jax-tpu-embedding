@@ -193,7 +193,8 @@ struct LocalSparseCoreTensorGroupingContext {
   MatrixXi& kept_unique_ids_per_partition_per_bucket;
 };
 
-template <bool kHasVariableWeights, bool kCreateBuckets, RowCombiner Combiner>
+template <bool kHasVariableWeights, bool kCreateBuckets, RowCombiner Combiner,
+          bool kEnableIdDropping = true>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContext context) {
   tsl::profiler::TraceMe group_traceme([&] {
@@ -221,7 +222,10 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   // We do NOT drop IDs when minibatching is enabled and we are in the
   // first pass (`kCreateBuckets=false`), as we need to detect limit
   // overflows to decide if minibatching is required.
-  const bool can_drop_id = !options.enable_minibatching || kCreateBuckets;
+  // When ID dropping is disabled (e.g. for device minibatching), we ignore
+  // max_ids / unique_ids checks so IDs won't be dropped during grouping.
+  const bool can_drop_id =
+      kEnableIdDropping && (!options.enable_minibatching || kCreateBuckets);
   const bool perform_id_dropping = allow_id_dropping && can_drop_id;
 
   uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
@@ -274,30 +278,34 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     }
 
     // Step 4: Add ID to result or drop it.
-    if (!perform_id_dropping) {
+    if constexpr (!kEnableIdDropping) {
       grouped_coo_tensors.Add(bucket_id, coo_tensor);
     } else {
-      // Check limits.
-      const bool exceeds_ids_limit =
-          (kept_ids(global_sc_id, bucket_id) + 1) > max_ids_per_partition;
-      if (is_new_col) {
-        dropping_current_unique_col_id =
-            (kept_unique_ids(global_sc_id, bucket_id) + 1) >
-            max_unique_ids_per_partition;
-      }
-
-      // Drop/Keep ID.
-      if (exceeds_ids_limit || dropping_current_unique_col_id) {
-        // Dropped id.
-        ++stats.dropped_id_count;
-      } else {
+      if (!perform_id_dropping) {
         grouped_coo_tensors.Add(bucket_id, coo_tensor);
-      }
+      } else {
+        // Check limits.
+        const bool exceeds_ids_limit =
+            (kept_ids(global_sc_id, bucket_id) + 1) > max_ids_per_partition;
+        if (is_new_col) {
+          dropping_current_unique_col_id =
+              (kept_unique_ids(global_sc_id, bucket_id) + 1) >
+              max_unique_ids_per_partition;
+        }
 
-      // Update kept counts.
-      kept_ids(global_sc_id, bucket_id) += 1;
-      if (is_new_col) {
-        kept_unique_ids(global_sc_id, bucket_id) += 1;
+        // Drop/Keep ID.
+        if (exceeds_ids_limit || dropping_current_unique_col_id) {
+          // Dropped id.
+          ++stats.dropped_id_count;
+        } else {
+          grouped_coo_tensors.Add(bucket_id, coo_tensor);
+        }
+
+        // Update kept counts.
+        kept_ids(global_sc_id, bucket_id) += 1;
+        if (is_new_col) {
+          kept_unique_ids(global_sc_id, bucket_id) += 1;
+        }
       }
     }
 
@@ -347,7 +355,7 @@ inline void UpdateKeysWithBucketId(
 // TODO(b/469153631): Break this function down into smaller ones. Aggregation
 // could be a separate function.
 template <bool kHasVariableWeights = false, bool kCreateBuckets,
-          typename SplitType>
+          typename SplitType, bool kEnableIdDropping = true>
 tsl::AsyncValueRef<DeviceSortingTaskResult>
 SortAndGroupCooTensorsPerLocalDeviceImpl(
     const ExtractedCooTensors& extracted_coo_tensors,
@@ -505,18 +513,18 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             switch (context.feature_metadata.row_combiner) {
               case RowCombiner::kSum:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum>(
-                    context);
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum,
+                    kEnableIdDropping>(context);
                 break;
               case RowCombiner::kMean:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean>(
-                    context);
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean,
+                    kEnableIdDropping>(context);
                 break;
               case RowCombiner::kSqrtn:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn>(
-                    context);
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn,
+                    kEnableIdDropping>(context);
                 break;
             }
 
@@ -551,22 +559,24 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             const int32_t observed_max_unique_ids_per_bucket =
                 unique_ids_per_partition_per_bucket.maxCoeff();
 
-            if (options.enable_minibatching) {
-              internal::UpdateMinibatchingSplit(
-                  ids_per_sc_partition_per_bucket,
-                  unique_ids_per_partition_per_bucket, global_sc_count,
-                  max_ids_per_partition, max_unique_ids_per_partition,
-                  task_split);
-            }
-            // Only validate if creating minibatching buckets or when
-            // minibatching is disabled, not when checking if minibatching is
-            // required.
-            if (!options.enable_minibatching || kCreateBuckets) {
-              internal::ValidateMaxIdsOrDie(
-                  observed_max_ids_per_bucket,
-                  observed_max_unique_ids_per_bucket, max_ids_per_partition,
-                  max_unique_ids_per_partition, stacked_table_name,
-                  options.allow_id_dropping);
+            if constexpr (kEnableIdDropping) {
+              if (options.enable_minibatching) {
+                internal::UpdateMinibatchingSplit(
+                    ids_per_sc_partition_per_bucket,
+                    unique_ids_per_partition_per_bucket, global_sc_count,
+                    max_ids_per_partition, max_unique_ids_per_partition,
+                    task_split);
+              }
+              // Only validate if creating minibatching buckets or when
+              // minibatching is disabled, not when checking if minibatching is
+              // required.
+              if (!options.enable_minibatching || kCreateBuckets) {
+                internal::ValidateMaxIdsOrDie(
+                    observed_max_ids_per_bucket,
+                    observed_max_unique_ids_per_bucket, max_ids_per_partition,
+                    max_unique_ids_per_partition, stacked_table_name,
+                    options.allow_id_dropping);
+              }
             }
 
             total_dropped += stats.dropped_id_count;
@@ -653,19 +663,25 @@ SortAndGroupCooTensorsPerLocalDeviceAsync(
     const FeatureMetadataInStack& feature_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice stats) {
+  if (options.enable_device_minibatching) {
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<
+        kHasVariableWeights, /*kCreateBuckets=*/false, SplitType,
+        /*kEnableIdDropping=*/false>(extracted_coo_tensors, stacked_table_name,
+                                     feature_metadata, options, stats);
+  }
   const bool create_buckets =
       options.enable_minibatching &&
       std::is_same_v<SplitType, MinibatchingSplit>;
   if (create_buckets) {
-    return SortAndGroupCooTensorsPerLocalDeviceImpl<kHasVariableWeights, true,
-                                                    SplitType>(
-        extracted_coo_tensors, stacked_table_name, feature_metadata, options,
-        stats);
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<
+        kHasVariableWeights, /*kCreateBuckets=*/true, SplitType,
+        /*kEnableIdDropping=*/true>(extracted_coo_tensors, stacked_table_name,
+                                    feature_metadata, options, stats);
   } else {
-    return SortAndGroupCooTensorsPerLocalDeviceImpl<kHasVariableWeights, false,
-                                                    SplitType>(
-        extracted_coo_tensors, stacked_table_name, feature_metadata, options,
-        stats);
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<
+        kHasVariableWeights, /*kCreateBuckets=*/false, SplitType,
+        /*kEnableIdDropping=*/true>(extracted_coo_tensors, stacked_table_name,
+                                    feature_metadata, options, stats);
   }
 }
 

@@ -247,9 +247,9 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 }
 
 int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
-                                       int global_device_count,
-                                       int num_sc_per_device,
-                                       bool enable_minibatching) {
+                                           int global_device_count,
+                                           int num_sc_per_device,
+                                           bool enable_minibatching) {
   const int num_scs = global_device_count * num_sc_per_device;
   const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
@@ -257,7 +257,7 @@ int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
   // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
   // core are packed into a single buffer.
   return max_ids_rounded_up * num_sc_per_device * num_scs *
-      (enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
+         (enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
 }
 
 int ComputeCooBufferSizePerDevice(
@@ -356,9 +356,11 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
   const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
   DCHECK_GT(batch_size_per_sc, 0);
 
+  const bool is_minibatching =
+      options.enable_minibatching || options.enable_device_minibatching;
   const int num_minibatches_per_sc = grouped_coo_tensors.GetNumMinibatches();
   // If we are not minibatching, we only have one segment per SC.
-  const int total_segments = options.enable_minibatching
+  const int total_segments = is_minibatching
                                  ? num_sc_per_device * num_minibatches_per_sc
                                  : num_sc_per_device;
 
@@ -383,7 +385,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     int current_coo_begin = 0;
     for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
       coo_begins[sc_id].emplace(current_coo_begin);
-      if (!options.enable_minibatching) {
+      if (!is_minibatching) {
         current_coo_begin = (sc_id + 1) * coo_buffer_size_per_sc;
       } else {
         current_coo_begin += required_sc_buffer_sizes[sc_id];
@@ -413,7 +415,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
               current_lhs_row_begin + row_pointers_size_per_bucket;
           int coo_begin = coo_begins[segment_idx].get();
           const int coo_end =
-              options.enable_minibatching
+              is_minibatching
                   ? coo_buffer_size                      // use whole buffer
                   : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
           // Fill Minibatch or SparseCore slice.
@@ -430,12 +432,12 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                   .num_sc_per_device = num_sc_per_device,
                   .num_scs = num_scs,
                   .coo_buffer_size = coo_buffer_size,
-                  .enable_minibatching = options.enable_minibatching,
+                  .enable_minibatching = is_minibatching,
               },
               csr_arrays, dropped_ids_in_segment);
           shared_segment_data->dropped_id_counts[segment_idx].emplace(
               dropped_ids_in_segment);
-          if (options.enable_minibatching) {
+          if (is_minibatching) {
             // Align minibatch buffer
             PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
                          csr_arrays);
@@ -524,6 +526,10 @@ absl::Status PreprocessSparseDenseMatmulInputOptions::Validate() const {
     return absl::InvalidArgumentError(
         absl::StrCat("Total number of SparseCores (", GetNumScs(),
                      ") must be a power of 2."));
+  }
+  if (enable_device_minibatching && !enable_minibatching) {
+    return absl::InvalidArgumentError(
+        "enable_device_minibatching requires enable_minibatching to be true.");
   }
   return absl::OkStatus();
 }
