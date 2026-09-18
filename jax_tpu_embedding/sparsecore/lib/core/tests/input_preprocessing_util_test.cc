@@ -18,6 +18,7 @@
 #include <climits>
 #include <cmath>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -277,29 +278,34 @@ TEST(SortAndGroupTest, TwoScs) {
               ElementsAreArray({16, 16}));
 }
 
-TEST(SortAndGroupTest, VerifyIdLimitations1) {
-  std::vector<CooFormat> coo_formats;
+struct VerifyIdLimitationsTestCase {
+  std::string test_name;
+  int num_samples = 0;
+  std::function<std::vector<int>(int row)> sample_id_generator;
+  int max_ids_per_partition = 0;
+  int max_unique_ids_per_partition = 0;
+  std::vector<int> expected_max_ids_per_partition;
+  std::vector<int> expected_max_unique_ids_per_partition;
+  std::vector<int> expected_required_buffer_size;
+};
 
-  // With 8 samples, each sample has 4 ids [0, 1, 2, 3]
-  // Each sparsecore serves 1 row of data.
-  // Each sparsecore looks up for 2 samples. For each sample, requesting
-  // one row of data from one sparsecore.
-  // [max_ids_per_partition == 2]
-  // For each sparsecore, it receives at most "2" rows of data from any one
-  // peer sparsecore.
-  // [max_unique_ids_per_partition == 1]
-  // For each sparsecore, it receives the data of at most "1" row ID from each
-  // sparsecore.
-  for (int row = 0; row < 8; ++row) {
-    coo_formats.push_back(CooFormat(row, 0, 1.0));
-    coo_formats.push_back(CooFormat(row, 1, 1.0));
-    coo_formats.push_back(CooFormat(row, 2, 1.0));
-    coo_formats.push_back(CooFormat(row, 3, 1.0));
+class VerifyIdLimitationsTest
+    : public ::testing::TestWithParam<VerifyIdLimitationsTestCase> {};
+
+TEST_P(VerifyIdLimitationsTest,
+       ValidatesPartitionIdConstraintsAndBufferSizing) {
+  const VerifyIdLimitationsTestCase& params = GetParam();
+
+  std::vector<CooFormat> coo_formats;
+  for (int row = 0; row < params.num_samples; ++row) {
+    for (int col : params.sample_id_generator(row)) {
+      coo_formats.emplace_back(row, col, 1.0);
+    }
   }
-  ExtractedCooTensors extracted_coo_tensors(4, 8, coo_formats);
+  ExtractedCooTensors extracted_coo_tensors(4, params.num_samples, coo_formats);
   FeatureMetadataInStack feature_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
-      /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
+      "stacked_table", /*feature_index=*/0, params.max_ids_per_partition,
+      params.max_unique_ids_per_partition, /*row_offset=*/0, /*col_offset=*/0,
       /*col_shift=*/0, /*batch_size=*/0);
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 4,
@@ -312,283 +318,159 @@ TEST(SortAndGroupTest, VerifyIdLimitations1) {
                               /*num_sc_per_device=*/4);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors coo_tensors_by_id =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, "stacked_table", feature_metadata, options,
-          stats_per_device, minibatching_split);
+
+  SortAndGroupCooTensorsPerLocalDevice(extracted_coo_tensors, "stacked_table",
+                                       feature_metadata, options,
+                                       stats_per_device, minibatching_split);
 
   EXPECT_EQ(minibatching_split, 0);
   EXPECT_THAT(stats_per_device.dropped_id_count, 0);
   EXPECT_THAT(stats_per_device.max_ids_per_partition,
-              ElementsAreArray({2, 2, 2, 2}));
+              ElementsAreArray(params.expected_max_ids_per_partition));
   EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
-              ElementsAreArray({1, 1, 1, 1}));
+              ElementsAreArray(params.expected_max_unique_ids_per_partition));
   EXPECT_THAT(stats_per_device.required_buffer_size,
-              ElementsAreArray({32, 32, 32, 32}));
+              ElementsAreArray(params.expected_required_buffer_size));
 }
 
-TEST(SortAndGroupTest, VerifyIdLimitations2) {
-  std::vector<CooFormat> coo_formats;
-
-  // With 16 samples, each sample has 4 ids [0, 1, 2, 3]
-  // Each sparsecore serves 1 row of data.
-  // Each sparsecore looks up for 4 samples. For each sample, requesting
-  // one row of data from one sparsecore.
-  // [max_ids_per_partition == 4]
-  // For each sparsecore, it receives at most "4" rows of data from any one
-  // peer sparsecore.
-  // [max_unique_ids_per_partition == 1]
-  // For each sparsecore, it receives the data of at most "1" row ID from each
-  // sparsecore.
-  for (int row = 0; row < 16; ++row) {
-    coo_formats.push_back(CooFormat(row, 0, 1.0));
-    coo_formats.push_back(CooFormat(row, 1, 1.0));
-    coo_formats.push_back(CooFormat(row, 2, 1.0));
-    coo_formats.push_back(CooFormat(row, 3, 1.0));
-  }
-  ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
-  FeatureMetadataInStack feature_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/4,
-      /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 4,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .allow_id_dropping = false,
-  };
-  MinibatchingSplit minibatching_split = 0;
-  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
-                              /*num_sc_per_device=*/4);
-  internal::StatsPerDevice stats_per_device =
-      stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors coo_tensors_by_id =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, "stacked_table", feature_metadata, options,
-          stats_per_device, minibatching_split);
-
-  EXPECT_EQ(minibatching_split, 0);
-  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
-  EXPECT_THAT(stats_per_device.max_ids_per_partition,
-              ElementsAreArray({4, 4, 4, 4}));
-  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
-              ElementsAreArray({1, 1, 1, 1}));
-  EXPECT_THAT(stats_per_device.required_buffer_size,
-              ElementsAreArray({32, 32, 32, 32}));
-}
-
-TEST(SortAndGroupTest, VerifyIdLimitations3) {
-  std::vector<CooFormat> coo_formats;
-
-  // With 16 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
-  // Each sparsecore serves 2 rows of data [0, 4], [1, 5], [2, 6], [3, 7]
-  // Each sparsecore looks up for 4 samples. For each sample, requesting
-  // two rows of data from one sparsecore. [0, 4] from sparsecore 0, [1, 5]
-  // from sparsecore 1, [2, 6] from sparsecore 2, [3, 7] from sparsecore 3.
-  // [max_ids_per_partition == 8]
-  // For each sparsecore, it receives at most "8" rows of data from any one
-  // peer sparsecore.
-  // [max_unique_ids_per_partition == 2]
-  // For each sparsecore, it receives the data of at most "2" row IDs from each
-  // sparsecore.
-  for (int row = 0; row < 16; ++row) {
-    coo_formats.push_back(CooFormat(row, 0, 1.0));
-    coo_formats.push_back(CooFormat(row, 1, 1.0));
-    coo_formats.push_back(CooFormat(row, 2, 1.0));
-    coo_formats.push_back(CooFormat(row, 3, 1.0));
-    coo_formats.push_back(CooFormat(row, 4, 1.0));
-    coo_formats.push_back(CooFormat(row, 5, 1.0));
-    coo_formats.push_back(CooFormat(row, 6, 1.0));
-    coo_formats.push_back(CooFormat(row, 7, 1.0));
-  }
-  ExtractedCooTensors extracted_coo_tensors(4, 16, coo_formats);
-  FeatureMetadataInStack feature_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/8,
-      /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 4,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .allow_id_dropping = false,
-  };
-  MinibatchingSplit minibatching_split = 0;
-  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
-                              /*num_sc_per_device=*/4);
-  internal::StatsPerDevice stats_per_device =
-      stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors coo_tensors_by_id =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, "stacked_table", feature_metadata, options,
-          stats_per_device, minibatching_split);
-
-  EXPECT_EQ(minibatching_split, 0);
-  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
-  EXPECT_THAT(stats_per_device.max_ids_per_partition,
-              ElementsAreArray({8, 8, 8, 8}));
-  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
-              ElementsAreArray({2, 2, 2, 2}));
-  // 4 partitions of size 8 with 2 elements each
-  EXPECT_THAT(stats_per_device.required_buffer_size,
-              ElementsAreArray({32, 32, 32, 32}));
-}
-
-TEST(SortAndGroupTest, VerifyIdLimitations4) {
-  std::vector<CooFormat> coo_formats;
-
-  // With 128 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
-  // Each sparsecore serves 2 rows of data [0, 4], [1, 5], [2, 6], [3, 7]
-  // Each sparsecore looks up for 32 samples. For each sample, requesting
-  // two rows of data from one sparsecore. [0, 4] from sparsecore 0, [1, 5]
-  // from sparsecore 1, [2, 6] from sparsecore 2, [3, 7] from sparsecore 3.
-  // [max_ids_per_partition == 64]
-  // For each sparsecore, it receives at most "64" rows of data from any one
-  // peer sparsecore.
-  // [max_unique_ids_per_partition == 2]
-  // For each sparsecore, it receives the data of at most "2" row IDs from each
-  // sparsecore.
-  for (int row = 0; row < 128; ++row) {
-    coo_formats.push_back(CooFormat(row, 0, 1.0));
-    coo_formats.push_back(CooFormat(row, 1, 1.0));
-    coo_formats.push_back(CooFormat(row, 2, 1.0));
-    coo_formats.push_back(CooFormat(row, 3, 1.0));
-    coo_formats.push_back(CooFormat(row, 4, 1.0));
-    coo_formats.push_back(CooFormat(row, 5, 1.0));
-    coo_formats.push_back(CooFormat(row, 6, 1.0));
-    coo_formats.push_back(CooFormat(row, 7, 1.0));
-  }
-  ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
-  FeatureMetadataInStack feature_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/64,
-      /*max_unique_ids_per_partition=*/2, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 4,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .allow_id_dropping = false,
-  };
-  MinibatchingSplit minibatching_split = 0;
-  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
-                              /*num_sc_per_device=*/4);
-  internal::StatsPerDevice stats_per_device =
-      stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors coo_tensors_by_id =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, "stacked_table", feature_metadata, options,
-          stats_per_device, minibatching_split);
-
-  EXPECT_EQ(minibatching_split, 0);
-  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
-  EXPECT_THAT(stats_per_device.max_ids_per_partition,
-              ElementsAreArray({64, 64, 64, 64}));
-  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
-              ElementsAreArray({2, 2, 2, 2}));
-  // 8 partitions of size 256 with 32 elements each
-  EXPECT_THAT(stats_per_device.required_buffer_size,
-              ElementsAreArray({256, 256, 256, 256}));
-}
-
-TEST(SortAndGroupTest, VerifyIdLimitations5) {
-  std::vector<CooFormat> coo_formats;
-
-  // With 128 samples, each sample has 8 ids [0, 4, 8, 16]
-  // SparseCore 0 alone serves all 4 rows of data [0, 4, 8, 16]
-  // Each sparsecore looks up for 32 samples. For each sample, requesting
-  // all 4 rows of data from sparsecore 0.
-  // [max_ids_per_partition == 128]
-  // For each sparsecore, it receives at most "128" rows of data from any one
-  // peer sparsecore. (In this case, only sparsecore 0 has the data)
-  // [max_unique_ids_per_partition == 4]
-  // For each sparsecore, it receives the data of at most "4" row IDs from each
-  // sparsecore.
-  for (int row = 0; row < 128; ++row) {
-    coo_formats.push_back(CooFormat(row, 0, 1.0));
-    coo_formats.push_back(CooFormat(row, 4, 1.0));
-    coo_formats.push_back(CooFormat(row, 8, 1.0));
-    coo_formats.push_back(CooFormat(row, 16, 1.0));
-  }
-  ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
-  FeatureMetadataInStack feature_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/128,
-      /*max_unique_ids_per_partition=*/4, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 4,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .allow_id_dropping = false,
-  };
-  MinibatchingSplit minibatching_split = 0;
-  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
-                              /*num_sc_per_device=*/4);
-  internal::StatsPerDevice stats_per_device =
-      stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors coo_tensors_by_id =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, "stacked_table", feature_metadata, options,
-          stats_per_device, minibatching_split);
-
-  EXPECT_EQ(minibatching_split, 0);
-  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
-  EXPECT_THAT(stats_per_device.max_ids_per_partition,
-              ElementsAreArray({128, 0, 0, 0}));
-  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
-              ElementsAreArray({4, 0, 0, 0}));
-  // 1 partition of size 128 with 128 elements
-  EXPECT_THAT(stats_per_device.required_buffer_size,
-              ElementsAreArray({128, 128, 128, 128}));
-}
-
-TEST(SortAndGroupTest, VerifyIdLimitations6) {
-  std::vector<CooFormat> coo_formats;
-
-  // This is one of the worst case scenarios.
-  // Every ID is unique, and all IDs come from the same sparsecore.
-  //
-  // With 128 samples, each sample has 1 id [row * 4]
-  // SparseCore 0 alone serves all 128 rows of data [0, 4, 8, ...]
-  // Each sparsecore looks up for 32 samples. For each sample, requesting
-  // the single row of data from sparsecore 0.
-  // [max_ids_per_partition == 32]
-  // For each sparsecore, it receives at most "32" rows of data from any one
-  // peer sparsecore. (In this case, only sparsecore 0 has the data)
-  // [max_unique_ids_per_partition == 32]
-  // For each sparsecore, it receives the data of at most "32" row IDs from each
-  // sparsecore.
-  for (int row = 0; row < 128; ++row) {
-    coo_formats.push_back(CooFormat(row, row * 4, 1.0));
-  }
-  ExtractedCooTensors extracted_coo_tensors(4, 128, coo_formats);
-  FeatureMetadataInStack feature_metadata(
-      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
-      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
-      /*col_shift=*/0, /*batch_size=*/0);
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 4,
-      .global_device_count = 1,
-      .num_sc_per_device = 4,
-      .allow_id_dropping = false,
-  };
-  MinibatchingSplit minibatching_split = 0;
-  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
-                              /*num_sc_per_device=*/4);
-  auto stats_per_device = stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors coo_tensors_by_id =
-      SortAndGroupCooTensorsPerLocalDevice(
-          extracted_coo_tensors, "stacked_table", feature_metadata, options,
-          stats_per_device, minibatching_split);
-
-  EXPECT_EQ(minibatching_split, 0);
-  EXPECT_THAT(stats_per_device.dropped_id_count, 0);
-  EXPECT_THAT(stats_per_device.max_ids_per_partition,
-              ElementsAreArray({32, 0, 0, 0}));
-  EXPECT_THAT(stats_per_device.max_unique_ids_per_partition,
-              ElementsAreArray({32, 0, 0, 0}));
-  // 1 partition of size 32 with 32 elements
-  EXPECT_THAT(stats_per_device.required_buffer_size,
-              ElementsAreArray({32, 32, 32, 32}));
-}
+INSTANTIATE_TEST_SUITE_P(
+    SortAndGroupTest, VerifyIdLimitationsTest,
+    ::testing::Values(
+        // With 8 samples, each sample has 4 ids [0, 1, 2, 3]
+        // Each sparsecore serves 1 row of data.
+        // Each sparsecore looks up for 2 samples. For each sample, requesting
+        // one row of data from one sparsecore.
+        // [max_ids_per_partition == 2]
+        // For each sparsecore, it receives at most "2" rows of data from any
+        // one peer sparsecore.
+        // [max_unique_ids_per_partition == 1]
+        // For each sparsecore, it receives the data of at most "1" row ID from
+        // each sparsecore.
+        VerifyIdLimitationsTestCase{
+            .test_name = "Samples8Ids4UniformDistribution",
+            .num_samples = 8,
+            .sample_id_generator =
+                [](int) { return std::vector<int>{0, 1, 2, 3}; },
+            .max_ids_per_partition = 2,
+            .max_unique_ids_per_partition = 1,
+            .expected_max_ids_per_partition = {2, 2, 2, 2},
+            .expected_max_unique_ids_per_partition = {1, 1, 1, 1},
+            .expected_required_buffer_size = {32, 32, 32, 32},
+        },
+        // With 16 samples, each sample has 4 ids [0, 1, 2, 3]
+        // Each sparsecore serves 1 row of data.
+        // Each sparsecore looks up for 4 samples. For each sample, requesting
+        // one row of data from one sparsecore.
+        // [max_ids_per_partition == 4]
+        // For each sparsecore, it receives at most "4" rows of data from any
+        // one peer sparsecore.
+        // [max_unique_ids_per_partition == 1]
+        // For each sparsecore, it receives the data of at most "1" row ID from
+        // each sparsecore.
+        VerifyIdLimitationsTestCase{
+            .test_name = "Samples16Ids4UniformDistribution",
+            .num_samples = 16,
+            .sample_id_generator =
+                [](int) { return std::vector<int>{0, 1, 2, 3}; },
+            .max_ids_per_partition = 4,
+            .max_unique_ids_per_partition = 1,
+            .expected_max_ids_per_partition = {4, 4, 4, 4},
+            .expected_max_unique_ids_per_partition = {1, 1, 1, 1},
+            .expected_required_buffer_size = {32, 32, 32, 32},
+        },
+        // With 16 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
+        // Each sparsecore serves 2 rows of data [0, 4], [1, 5], [2, 6], [3, 7]
+        // Each sparsecore looks up for 4 samples. For each sample, requesting
+        // two rows of data from one sparsecore. [0, 4] from sparsecore 0,
+        // [1, 5] from sparsecore 1, [2, 6] from sparsecore 2, [3, 7] from
+        // sparsecore 3.
+        // [max_ids_per_partition == 8]
+        // For each sparsecore, it receives at most "8" rows of data from any
+        // one peer sparsecore.
+        // [max_unique_ids_per_partition == 2]
+        // For each sparsecore, it receives the data of at most "2" row IDs from
+        // each sparsecore.
+        VerifyIdLimitationsTestCase{
+            .test_name = "Samples16Ids8TwoIdsPerSc",
+            .num_samples = 16,
+            .sample_id_generator =
+                [](int) { return std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}; },
+            .max_ids_per_partition = 8,
+            .max_unique_ids_per_partition = 2,
+            .expected_max_ids_per_partition = {8, 8, 8, 8},
+            .expected_max_unique_ids_per_partition = {2, 2, 2, 2},
+            .expected_required_buffer_size = {32, 32, 32, 32},
+        },
+        // With 128 samples, each sample has 8 ids [0, 1, 2, 3, 4, 5, 6, 7]
+        // Each sparsecore serves 2 rows of data [0, 4], [1, 5], [2, 6], [3, 7]
+        // Each sparsecore looks up for 32 samples. For each sample, requesting
+        // two rows of data from one sparsecore. [0, 4] from sparsecore 0,
+        // [1, 5] from sparsecore 1, [2, 6] from sparsecore 2, [3, 7] from
+        // sparsecore 3.
+        // [max_ids_per_partition == 64]
+        // For each sparsecore, it receives at most "64" rows of data from any
+        // one peer sparsecore.
+        // [max_unique_ids_per_partition == 2]
+        // For each sparsecore, it receives the data of at most "2" row IDs from
+        // each sparsecore.
+        VerifyIdLimitationsTestCase{
+            .test_name = "Samples128Ids8TwoIdsPerSc",
+            .num_samples = 128,
+            .sample_id_generator =
+                [](int) { return std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}; },
+            .max_ids_per_partition = 64,
+            .max_unique_ids_per_partition = 2,
+            .expected_max_ids_per_partition = {64, 64, 64, 64},
+            .expected_max_unique_ids_per_partition = {2, 2, 2, 2},
+            .expected_required_buffer_size = {256, 256, 256, 256},
+        },
+        // With 128 samples, each sample has 8 ids [0, 4, 8, 16]
+        // SparseCore 0 alone serves all 4 rows of data [0, 4, 8, 16]
+        // Each sparsecore looks up for 32 samples. For each sample, requesting
+        // all 4 rows of data from sparsecore 0.
+        // [max_ids_per_partition == 128]
+        // For each sparsecore, it receives at most "128" rows of data from any
+        // one peer sparsecore. (In this case, only sparsecore 0 has the data)
+        // [max_unique_ids_per_partition == 4]
+        // For each sparsecore, it receives the data of at most "4" row IDs from
+        // each sparsecore.
+        VerifyIdLimitationsTestCase{
+            .test_name = "Samples128Ids4SingleScSkewed",
+            .num_samples = 128,
+            .sample_id_generator =
+                [](int) { return std::vector<int>{0, 4, 8, 16}; },
+            .max_ids_per_partition = 128,
+            .max_unique_ids_per_partition = 4,
+            .expected_max_ids_per_partition = {128, 0, 0, 0},
+            .expected_max_unique_ids_per_partition = {4, 0, 0, 0},
+            .expected_required_buffer_size = {128, 128, 128, 128},
+        },
+        // This is one of the worst case scenarios.
+        // Every ID is unique, and all IDs come from the same sparsecore.
+        //
+        // With 128 samples, each sample has 1 id [row * 4]
+        // SparseCore 0 alone serves all 128 rows of data [0, 4, 8, ...]
+        // Each sparsecore looks up for 32 samples. For each sample, requesting
+        // the single row of data from sparsecore 0.
+        // [max_ids_per_partition == 32]
+        // For each sparsecore, it receives at most "32" rows of data from any
+        // one peer sparsecore. (In this case, only sparsecore 0 has the data)
+        // [max_unique_ids_per_partition == 32]
+        // For each sparsecore, it receives the data of at most "32" row IDs
+        // from each sparsecore.
+        VerifyIdLimitationsTestCase{
+            .test_name = "Samples128AllUniqueIdsOnSingleSc",
+            .num_samples = 128,
+            .sample_id_generator =
+                [](int row) { return std::vector<int>{row * 4}; },
+            .max_ids_per_partition = 32,
+            .max_unique_ids_per_partition = 32,
+            .expected_max_ids_per_partition = {32, 0, 0, 0},
+            .expected_max_unique_ids_per_partition = {32, 0, 0, 0},
+            .expected_required_buffer_size = {32, 32, 32, 32},
+        }),
+    [](const ::testing::TestParamInfo<VerifyIdLimitationsTest::ParamType>&
+           info) { return info.param.test_name; });
 
 TEST(SortAndGroupTest, IdDropping) {
   std::vector<CooFormat> coo_formats;
