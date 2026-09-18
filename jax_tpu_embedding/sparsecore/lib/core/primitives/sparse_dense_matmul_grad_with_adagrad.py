@@ -53,6 +53,22 @@ tpu_sparse_dense_matmul_grad_with_adagrad_primitive.def_impl(
 )
 
 
+def _sum_features(val: ir.Value, result_type: ir.RankedTensorType) -> ir.Value:
+  """Sums a [1, N] row across the feature axis, producing a [1] row value."""
+  f32 = ir.F32Type.get()
+  scalar_type = ir.RankedTensorType.get([], f32)
+  zero = hlo.constant(
+      ir.DenseElementsAttr.get_splat(scalar_type, ir.FloatAttr.get(f32, 0.0))
+  )
+  reduce_op = hlo.ReduceOp(
+      [result_type], [val], [zero], ir.DenseI64ArrayAttr.get([1])
+  )
+  reducer = reduce_op.regions[0].blocks.append(scalar_type, scalar_type)
+  with ir.InsertionPoint(reducer):
+    hlo.return_([hlo.add(reducer.arguments[0], reducer.arguments[1])])
+  return reduce_op.result
+
+
 def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     lhs_row_pointers: core.ShapedArray,
     lhs_local_embedding_ids: core.ShapedArray,
@@ -95,10 +111,16 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
   utils.ensure_dtype(accumulator, np.float32, "accumulator")
   utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
 
-  if embedding_table.shape != accumulator.shape:
+  # The accumulator either mirrors the table element-wise, or holds a single
+  # value per table row (row-wise Adagrad).
+  if accumulator.shape not in (
+      embedding_table.shape,
+      embedding_table.shape[:1],
+  ):
     raise ValueError(
-        "embedding_table and accumulator must have equal shapes, got"
-        f" {embedding_table.shape} and {accumulator.shape}"
+        "accumulator must have the same shape as embedding_table"
+        f" {embedding_table.shape} or be row-wise"
+        f" {embedding_table.shape[:1]}, got {accumulator.shape}"
     )
 
   return embedding_table, accumulator
@@ -145,55 +167,61 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
 
   optimizer_update_computation_name = computation_name
 
-  embedding_table_type = ir.RankedTensorType(embedding_table.type)
-  is_1d = embedding_table_type.rank == 1
-  squeezed_activations_grad = (
-      utils.maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
-  )
-  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
-  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
+  grad_row_type = utils.get_row_type(activations_grad)
+  table_row_type = utils.get_row_type(embedding_table)
+  accumulator_row_type = utils.get_row_type(accumulator)
+  row_wise = accumulator_row_type != grad_row_type
 
   optimizer_update = func_dialect.FuncOp(
       computation_name,
       (
           [
-              row_type,
-              row_type,
-              row_type,
-              row_type,
+              grad_row_type,
+              table_row_type,
+              accumulator_row_type,
+              grad_row_type,
           ],
           [
               ir.TupleType.get_tuple([
-                  row_type,
-                  row_type,
+                  table_row_type,
+                  accumulator_row_type,
               ]),
           ],
       ),
       ip=ctx.module_context.ip,
       visibility="private",
   )
+  if row_wise:
+    # The accumulator row is shaped differently from the table row. Marking the
+    # update as a SparseCore computation keeps XLA's main-thread pipeline from
+    # normalizing it to a single shape before the optimizer-update decomposer
+    # runs.
+    optimizer_update.attributes["execution_thread"] = ir.StringAttr.get(
+        "sparsecore"
+    )
 
   entry_block = optimizer_update.add_entry_block()
   with ir.InsertionPoint(entry_block):
-    # new_accumulator = accumulator + grad * grad
-    grad_squared = hlo.multiply(
-        entry_block.arguments[0],
-        entry_block.arguments[0],
-    )
-    new_accumulator = hlo.add(
-        entry_block.arguments[2],
-        grad_squared,
-    )
+    grad, table, accumulator_row, learning_rate_row = entry_block.arguments
+    grad_squared = hlo.multiply(grad, grad)
+    if row_wise:
+      # Row-wise Adagrad: a single accumulator value per table row, so the
+      # squared gradient is summed across the feature axis and the resulting
+      # scale is broadcast back over the row.
+      new_accumulator = hlo.add(
+          accumulator_row, _sum_features(grad_squared, accumulator_row_type)
+      )
+      scale = hlo.broadcast_in_dim(
+          grad_row_type, hlo.sqrt(new_accumulator), [0]
+      )
+    else:
+      # new_accumulator = accumulator + grad * grad
+      new_accumulator = hlo.add(accumulator_row, grad_squared)
+      scale = hlo.sqrt(new_accumulator)
     # updated_embedding_table = (learning_rate * grad) / sqrt(new_accumulator)
     updated_embedding_table = hlo.subtract(
-        entry_block.arguments[1],
-        hlo.divide(
-            hlo.multiply(
-                entry_block.arguments[3],
-                entry_block.arguments[0],
-            ),
-            hlo.sqrt(new_accumulator),
-        ),
+        table,
+        hlo.divide(hlo.multiply(learning_rate_row, grad), scale),
     )
     updated_embedding_table_clipped = utils.maybe_clip_params(
         updated_embedding_table, min_value, max_value
@@ -219,12 +247,12 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
         # slot variables
         accumulator,
         # activations grad
-        squeezed_activations_grad,
+        activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        squeezed_activations_grad,
+        activations_grad,
         embedding_table,
         # slot variables
         accumulator,
