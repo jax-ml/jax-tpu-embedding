@@ -204,7 +204,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interface,
     )
 
@@ -228,7 +228,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interface,
         allow_id_dropping=True,
     )
@@ -262,7 +262,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interface,
         allow_id_dropping=True,
     )
@@ -297,7 +297,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interface,
         allow_id_dropping=True,
     )
@@ -419,7 +419,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interface,
         allow_id_dropping=True,
     )
@@ -456,7 +456,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interface,
         allow_id_dropping=True,
     )

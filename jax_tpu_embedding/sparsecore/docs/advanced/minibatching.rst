@@ -78,8 +78,9 @@ enable minibatching by passing ``enable_minibatching=True`` layer initialization
 Low-level API
 ^^^^^^^^^^^^^
 
-If using the ``embedding`` module directly, pass ``enable_minibatching=True`` to
-``preprocess_sparse_dense_matmul_input`` and ``tpu_sparse_dense_matmul``:
+If using the ``embedding`` module directly, pass ``minibatching_mode`` to
+``preprocess_sparse_dense_matmul_input`` and ``enable_minibatching=True`` to
+``tpu_sparse_dense_matmul``:
 
 .. code-block:: python
 
@@ -87,7 +88,7 @@ If using the ``embedding`` module directly, pass ``enable_minibatching=True`` to
 
     preprocessed_input, _ = embedding.preprocess_sparse_dense_matmul_input(
         ...,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=all_reduce_interface,
     )
 

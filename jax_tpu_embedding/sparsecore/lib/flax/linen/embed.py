@@ -215,7 +215,11 @@ class SparseCoreEmbed(nn.Module):
         num_sc_per_device=self.num_sc_per_device,
         sharding_strategy=self.table_sharding_strategy,
         batch_number=step,
-        enable_minibatching=self.enable_minibatching,
+        minibatching_mode=(
+            embedding.MinibatchingMode.HOST
+            if self.enable_minibatching
+            else embedding.MinibatchingMode.DISABLED
+        ),
         all_reduce_interface=all_reduce_interface,
     )[0]
 

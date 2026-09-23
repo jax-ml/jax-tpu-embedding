@@ -129,14 +129,18 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
     bool enable_minibatching, MinibatchingMode minibatching_mode,
     AllReduceInterface* absl_nullable all_reduce_interface) {
   CHECK_EQ(input_batches.size(), feature_specs.size());
+  const MinibatchingMode resolved_minibatching_mode =
+      minibatching_mode != MinibatchingMode::kDisabled
+          ? minibatching_mode
+          : (enable_minibatching ? MinibatchingMode::kHost
+                                 : MinibatchingMode::kDisabled);
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = local_device_count,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .sharding_strategy = sharding_strategy,
       .allow_id_dropping = allow_id_dropping,
-      .enable_minibatching = enable_minibatching,
-      .minibatching_mode = minibatching_mode,
+      .minibatching_mode = resolved_minibatching_mode,
       .batch_number = batch_number,
       .all_reduce_interface = all_reduce_interface,
   };
@@ -218,12 +222,12 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
 
 int PyComputeRowPointersSizePerDevice(int global_device_count,
                                       int num_sc_per_device,
-                                      bool enable_minibatching) {
+                                      MinibatchingMode minibatching_mode) {
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
-      .enable_minibatching = enable_minibatching,
+      .minibatching_mode = minibatching_mode,
   };
   return options.GetRowPointersSizePerDevice();
 }
@@ -231,12 +235,12 @@ int PyComputeRowPointersSizePerDevice(int global_device_count,
 py::dict PyComputeCooBufferSizePerDevice(py::list feature_specs,
                                          int global_device_count,
                                          int num_sc_per_device,
-                                         bool enable_minibatching) {
+                                         MinibatchingMode minibatching_mode) {
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
-      .enable_minibatching = enable_minibatching,
+      .minibatching_mode = minibatching_mode,
   };
   const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables = GetStackedTableMetadata(feature_specs);
@@ -318,14 +322,16 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("all_reduce_interface") = nullptr);
   m.def("compute_row_pointers_size_per_device",
         &PyComputeRowPointersSizePerDevice, py::arg("global_device_count"),
-        py::arg("num_sc_per_device"), py::arg("enable_minibatching") = false);
+        py::arg("num_sc_per_device"),
+        py::arg("minibatching_mode") = MinibatchingMode::kDisabled);
   m.def("compute_theoretical_max_coo_buffer_size",
         &ComputeTheoreticalMaxCooBufferSize, py::arg("max_ids_per_partition"),
         py::arg("global_device_count"), py::arg("num_sc_per_device"),
-        py::arg("enable_minibatching") = false);
+        py::arg("minibatching_mode") = MinibatchingMode::kDisabled);
   m.def("compute_coo_buffer_size_per_device", &PyComputeCooBufferSizePerDevice,
         py::arg("feature_specs"), py::arg("global_device_count"),
-        py::arg("num_sc_per_device"), py::arg("enable_minibatching") = false);
+        py::arg("num_sc_per_device"),
+        py::arg("minibatching_mode") = MinibatchingMode::kDisabled);
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())
       .def_readonly("max_ids_per_partition",

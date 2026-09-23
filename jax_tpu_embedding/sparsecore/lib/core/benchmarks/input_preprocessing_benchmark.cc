@@ -219,7 +219,7 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
-      .enable_minibatching = true,
+      .minibatching_mode = MinibatchingMode::kHost,
   };
 
   for (auto s : state) {
@@ -274,7 +274,7 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
-      .enable_minibatching = true,
+      .minibatching_mode = MinibatchingMode::kHost,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -346,7 +346,7 @@ void BM_FillBuffer(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .allow_id_dropping = false,
-      .enable_minibatching = true,
+      .minibatching_mode = MinibatchingMode::kHost,
   };
 
   ExtractedCooTensors extracted_coo_tensors =

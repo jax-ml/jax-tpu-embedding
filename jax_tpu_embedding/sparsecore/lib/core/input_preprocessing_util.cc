@@ -249,7 +249,7 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
                                            int global_device_count,
                                            int num_sc_per_device,
-                                           bool enable_minibatching) {
+                                           MinibatchingMode minibatching_mode) {
   const int num_scs = global_device_count * num_sc_per_device;
   const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
@@ -257,7 +257,9 @@ int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
   // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
   // core are packed into a single buffer.
   return max_ids_rounded_up * num_sc_per_device * num_scs *
-         (enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1);
+         (minibatching_mode != MinibatchingMode::kDisabled
+              ? CooFormat::kMaxMinibatchingBuckets
+              : 1);
 }
 
 int ComputeCooBufferSizePerDevice(
@@ -275,7 +277,7 @@ int ComputeCooBufferSizePerDevice(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   const int64_t theoretical_max = ComputeTheoreticalMaxCooBufferSize(
       max_ids_per_partition, options.global_device_count,
-      options.num_sc_per_device, options.IsMinibatchingEnabled());
+      options.num_sc_per_device, options.GetMinibatchingMode());
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                          << ": " << theoretical_max

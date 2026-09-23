@@ -666,10 +666,11 @@ class MinibatchingCountTest : public ::testing::Test {
 TEST_F(MinibatchingCountTest,
        SingleHostMinibatchCountIsCorrectWhenNotRequired) {
   // Arrange
-  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
-                                                  .global_device_count = 1,
-                                                  .num_sc_per_device = 4,
-                                                  .enable_minibatching = true};
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .minibatching_mode = MinibatchingMode::kHost};
 
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       CreateInputBatches(/*max_ids_per_partitions=*/{4, 6},
@@ -692,10 +693,11 @@ TEST_F(MinibatchingCountTest,
 
 TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
   // Arrange
-  PreprocessSparseDenseMatmulInputOptions options{.local_device_count = 1,
-                                                  .global_device_count = 1,
-                                                  .num_sc_per_device = 4,
-                                                  .enable_minibatching = true};
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .minibatching_mode = MinibatchingMode::kHost};
 
   // Reduce max ids and max unique ids to trigger minibatching.
   // Also increase buffer size.
@@ -758,7 +760,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
           .local_device_count = 1,
           .global_device_count = 2,
           .num_sc_per_device = 4,
-          .enable_minibatching = true,
+          .minibatching_mode = MinibatchingMode::kHost,
           .batch_number = 100,
           .all_reduce_interface = &all_reducers[host_id]};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
@@ -808,7 +810,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
           .local_device_count = 1,
           .global_device_count = 2,
           .num_sc_per_device = 4,
-          .enable_minibatching = true,
+          .minibatching_mode = MinibatchingMode::kHost,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
                            PreprocessSparseDenseMatmulInput(
@@ -859,7 +861,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
           .local_device_count = 1,
           .global_device_count = 2,
           .num_sc_per_device = 4,
-          .enable_minibatching = true,
+          .minibatching_mode = MinibatchingMode::kHost,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
                            PreprocessSparseDenseMatmulInput(
@@ -897,7 +899,7 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
         .local_device_count = 1,
         .global_device_count = 1,
         .num_sc_per_device = 4,
-        .enable_minibatching = true,
+        .minibatching_mode = MinibatchingMode::kHost,
         .batch_number = batch_num,
         .all_reduce_interface = all_reduce.get()};
     auto input_batches =
@@ -1153,7 +1155,8 @@ void RunPreprocessingOutputIsValidTest(
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
-      .enable_minibatching = enable_minibatching,
+      .minibatching_mode = enable_minibatching ? MinibatchingMode::kHost
+                                               : MinibatchingMode::kDisabled,
       .batch_number = 42};
 
   TF_ASSERT_OK_AND_ASSIGN(
@@ -1175,7 +1178,7 @@ void RunPreprocessingOutputIsValidTest(
       kBatchSize * table_vocabs.size(), num_sc_per_device);
 
   int64_t total_present_ids = 0;
-  if (options.enable_minibatching) {
+  if (options.IsMinibatchingEnabled()) {
     const int32_t row_pointers_size =
         num_minibatches *
         std::max(kNumScs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE) *
@@ -1320,14 +1323,14 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
-      .enable_minibatching = false,
+      .minibatching_mode = MinibatchingMode::kDisabled,
       .batch_number = 1};
   PreprocessSparseDenseMatmulInputOptions options_no_dropping{
       .local_device_count = 1,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = false,
-      .enable_minibatching = false,
+      .minibatching_mode = MinibatchingMode::kDisabled,
       .batch_number = 1};
 
   // Run with large max_ids to get stats.

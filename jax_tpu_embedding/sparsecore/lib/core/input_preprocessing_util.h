@@ -497,9 +497,10 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
   const bool allow_id_dropping = true;
-  // Whether mini-batching is enabled (legacy, prefer setting
-  // minibatching_mode).
-  const bool enable_minibatching = false;
+  // Whether mini-batching is enabled.
+  [[deprecated(
+      "Use minibatching_mode instead.")]] const bool enable_minibatching =
+      false;
   // The mini-batching mode to use (kDisabled, kHost, or kDevice).
   // If kDevice, goes through the minibatching path while ignoring
   // max_ids/unique_ids limits during grouping/deduplication, skips host
@@ -639,10 +640,9 @@ inline int GetActualRowPointersSizePerDevice(
          options.num_sc_per_device;
 }
 
-int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
-                                           int global_device_count,
-                                           int num_sc_per_device,
-                                           bool enable_minibatching);
+int64_t ComputeTheoreticalMaxCooBufferSize(
+    int max_ids_per_partition, int global_device_count, int num_sc_per_device,
+    MinibatchingMode minibatching_mode = MinibatchingMode::kDisabled);
 
 int ComputeCooBufferSizePerDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,

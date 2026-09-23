@@ -723,7 +723,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .enable_minibatching = true,
+      .minibatching_mode = MinibatchingMode::kHost,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -852,7 +852,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .allow_id_dropping = false,
-      .enable_minibatching = true,
+      .minibatching_mode = MinibatchingMode::kHost,
       .minibatching_bucketing_hash_fn = hash_fn};
   MinibatchingSplit minibatching_split = 0;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
@@ -1098,7 +1098,7 @@ TEST(InputPreprocessingUtilTest,
       .global_device_count = 1,
       .num_sc_per_device = 1,
       .allow_id_dropping = false,
-      .enable_minibatching = true,
+      .minibatching_mode = MinibatchingMode::kHost,
       .minibatching_bucketing_hash_fn = hash_fn,
   };
 

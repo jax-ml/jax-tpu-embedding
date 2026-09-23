@@ -969,7 +969,7 @@ class EmbeddingTest(parameterized.TestCase):
             max_ids_per_partition=12,
             global_device_count=1,
             num_sc_per_device=4,
-            enable_minibatching=False,
+            minibatching_mode=embedding.MinibatchingMode.DISABLED,
         ),
         256,
     )
@@ -978,7 +978,7 @@ class EmbeddingTest(parameterized.TestCase):
             max_ids_per_partition=12,
             global_device_count=1,
             num_sc_per_device=4,
-            enable_minibatching=True,
+            minibatching_mode=embedding.MinibatchingMode.HOST,
         ),
         16384,
     )
@@ -988,7 +988,7 @@ class EmbeddingTest(parameterized.TestCase):
         embedding.compute_row_pointers_size_per_device(
             global_device_count=1,
             num_sc_per_device=4,
-            enable_minibatching=False,
+            minibatching_mode=embedding.MinibatchingMode.DISABLED,
         ),
         32,
     )
@@ -996,7 +996,7 @@ class EmbeddingTest(parameterized.TestCase):
         embedding.compute_row_pointers_size_per_device(
             global_device_count=1,
             num_sc_per_device=4,
-            enable_minibatching=True,
+            minibatching_mode=embedding.MinibatchingMode.HOST,
         ),
         2048,
     )
@@ -1032,7 +1032,7 @@ class EmbeddingTest(parameterized.TestCase):
         [feature_spec],
         global_device_count=1,
         num_sc_per_device=4,
-        enable_minibatching=False,
+        minibatching_mode=embedding.MinibatchingMode.DISABLED,
     )
     self.assertEqual(res["test_table"], 64)
 

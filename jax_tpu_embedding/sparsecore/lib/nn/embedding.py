@@ -499,7 +499,7 @@ def compute_row_pointers_size_per_device(
     *,
     global_device_count: int,
     num_sc_per_device: int | None = None,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
     minibatching_mode: MinibatchingMode | str | None = None,
 ) -> int:
   """Computes the required row pointers buffer size per device."""
@@ -510,7 +510,7 @@ def compute_row_pointers_size_per_device(
   return pybind_input_preprocessing.compute_row_pointers_size_per_device(
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
-      enable_minibatching=(resolved_mode != MinibatchingMode.DISABLED),
+      minibatching_mode=resolved_mode,
   )
 
 
@@ -518,7 +518,7 @@ def compute_theoretical_max_coo_buffer_size(
     max_ids_per_partition: int,
     global_device_count: int,
     num_sc_per_device: int | None = None,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
     minibatching_mode: MinibatchingMode | str | None = None,
 ) -> int:
   """Computes the theoretical max COO buffer size per device."""
@@ -530,7 +530,7 @@ def compute_theoretical_max_coo_buffer_size(
       max_ids_per_partition=max_ids_per_partition,
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
-      enable_minibatching=(resolved_mode != MinibatchingMode.DISABLED),
+      minibatching_mode=resolved_mode,
   )
 
 
@@ -538,7 +538,7 @@ def compute_coo_buffer_size_per_device(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int | None = None,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
     minibatching_mode: MinibatchingMode | str | None = None,
 ) -> dict[str, int]:
   """Computes the required COO buffer size per device.
@@ -549,7 +549,7 @@ def compute_coo_buffer_size_per_device(
       `mesh.size`.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
-    enable_minibatching: Whether to enable minibatching.
+    enable_minibatching: Deprecated; use `minibatching_mode` instead.
     minibatching_mode: The minibatching mode (`MinibatchingMode` enum or string:
       "DISABLED", "HOST", "DEVICE").
 
@@ -569,7 +569,7 @@ def compute_coo_buffer_size_per_device(
       feature_specs=jax.tree.leaves(feature_specs),
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
-      enable_minibatching=(resolved_mode != MinibatchingMode.DISABLED),
+      minibatching_mode=resolved_mode,
   )
 
 
@@ -578,9 +578,15 @@ MinibatchingMode = pybind_input_preprocessing.MinibatchingMode
 
 def minibatching_mode_to_enum(
     minibatching_mode: MinibatchingMode | str | None,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
 ) -> MinibatchingMode:
-  """Resolves minibatching mode from enum/string and legacy boolean flag."""
+  """Resolves minibatching mode from enum/string and deprecated boolean flag."""
+  if enable_minibatching is not None:
+    warnings.warn(
+        "enable_minibatching is deprecated; use minibatching_mode instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
   if minibatching_mode is None:
     return (
         MinibatchingMode.HOST
@@ -663,7 +669,7 @@ def preprocess_sparse_dense_matmul_input(
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     batch_number: int = 0,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
     minibatching_mode: MinibatchingMode | str | None = None,
     all_reduce_interface: (
         pybind_input_preprocessing.AllReduceInterface | None
@@ -698,8 +704,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     batch_number: The batch number.
-    enable_minibatching: Whether to enable minibatching (legacy flag; defaults
-      to HOST minibatching when True if minibatching_mode is None).
+    enable_minibatching: Deprecated; use `minibatching_mode` instead.
     minibatching_mode: The minibatching mode (`MinibatchingMode` enum or string:
       "DISABLED", "HOST", "DEVICE").
     all_reduce_interface: Interface to communicate between multiple hosts. This
@@ -743,7 +748,6 @@ def preprocess_sparse_dense_matmul_input(
           has_leading_dimension=has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
           batch_number=batch_number,
-          enable_minibatching=enable_minibatching,
           minibatching_mode=resolved_minibatching_mode,
           all_reduce_interface=all_reduce_interface,
       )
@@ -772,7 +776,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     batch_number: int = 0,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
     minibatching_mode: MinibatchingMode | str | None = None,
     all_reduce_interface: (
         pybind_input_preprocessing.AllReduceInterface | None
@@ -820,8 +824,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     allow_id_dropping: If set to True, then ids will be dropped if they exceed
       the max_ids_per_partition or max_unique_ids_per_partition limits.
     batch_number: The batch number.
-    enable_minibatching: Whether to enable minibatching (legacy flag; defaults
-      to HOST minibatching when True if minibatching_mode is None).
+    enable_minibatching: Deprecated; use `minibatching_mode` instead.
     minibatching_mode: The minibatching mode (`MinibatchingMode` enum or string:
       "DISABLED", "HOST", "DEVICE").
     all_reduce_interface: Interface to communicate between multiple hosts. This
@@ -864,7 +867,6 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           has_leading_dimension=has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
           batch_number=batch_number,
-          enable_minibatching=enable_minibatching,
           minibatching_mode=resolved_minibatching_mode,
           all_reduce_interface=all_reduce_interface,
       )
@@ -887,7 +889,8 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
     *,
     num_sc_per_device: int | None = None,
     has_leading_dimension: bool = False,
-    enable_minibatching: bool = False,
+    enable_minibatching: bool | None = None,
+    minibatching_mode: MinibatchingMode | str | None = None,
 ) -> PreprocessedInput:
   """Evaluates the shape and dtype of the preprocessed input.
 
@@ -902,22 +905,27 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
     num_sc_per_device: The number of sparse cores per device.
     has_leading_dimension: Whether the output has a leading dimension for local
       devices.
-    enable_minibatching: Whether to enable minibatching.
+    enable_minibatching: Deprecated; use `minibatching_mode` instead.
+    minibatching_mode: The minibatching mode (`MinibatchingMode` enum or string:
+      "DISABLED", "HOST", "DEVICE").
 
   Returns:
     A PreprocessedInput object containing jax.ShapeDtypeStructs.
   """
+  resolved_mode = minibatching_mode_to_enum(
+      minibatching_mode, enable_minibatching
+  )
   coo_buffer_sizes = compute_coo_buffer_size_per_device(
       feature_specs,
       global_device_count,
       num_sc_per_device=num_sc_per_device,
-      enable_minibatching=enable_minibatching,
+      minibatching_mode=resolved_mode,
   )
 
   row_pointers_size = compute_row_pointers_size_per_device(
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
-      enable_minibatching=enable_minibatching,
+      minibatching_mode=resolved_mode,
   )
 
   def _make_shape_dtype_struct(

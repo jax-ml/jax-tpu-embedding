@@ -1998,7 +1998,7 @@ class PybindBufferSizeTest(absltest.TestCase):
     size = pybind_input_preprocessing.compute_row_pointers_size_per_device(
         global_device_count=1,
         num_sc_per_device=4,
-        enable_minibatching=False,
+        minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
     )
     self.assertEqual(size, 32)
 
@@ -2007,7 +2007,7 @@ class PybindBufferSizeTest(absltest.TestCase):
         max_ids_per_partition=12,
         global_device_count=1,
         num_sc_per_device=4,
-        enable_minibatching=False,
+        minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
     )
     self.assertEqual(res, 256)
 
@@ -2056,7 +2056,7 @@ class PybindBufferSizeTest(absltest.TestCase):
         [feature_spec],
         global_device_count=1,
         num_sc_per_device=4,
-        enable_minibatching=False,
+        minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
     )
     self.assertEqual(res["test_table"], 64)
 

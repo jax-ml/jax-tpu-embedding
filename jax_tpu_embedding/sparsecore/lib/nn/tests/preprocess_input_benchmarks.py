@@ -313,7 +313,7 @@ def preprocess_minibatching(
         local_device_count=4,
         global_device_count=16,
         num_sc_per_device=4,
-        enable_minibatching=True,
+        minibatching_mode=pybind_input_preprocessing.MinibatchingMode.HOST,
         all_reduce_interface=all_reduce_interfaces[host_id],
         batch_number=batch_number,
         allow_id_dropping=batch_number == 0,
