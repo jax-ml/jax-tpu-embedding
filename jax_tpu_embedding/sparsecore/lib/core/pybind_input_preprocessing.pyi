@@ -7,6 +7,11 @@ class ShardingStrategy(enum.Enum):
   MOD = 1
   DIV = 2
 
+class MinibatchingMode(enum.Enum):
+  DISABLED = 0
+  HOST = 1
+  DEVICE = 2
+
 class AllReduceInterface: ...
 
 class MinibatchingNode:
@@ -48,6 +53,7 @@ def preprocess_sparse_dense_matmul_input(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
 def preprocess_sparse_dense_matmul_sparse_coo_input(
@@ -64,6 +70,7 @@ def preprocess_sparse_dense_matmul_sparse_coo_input(
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     enable_minibatching: bool = False,
+    minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
 

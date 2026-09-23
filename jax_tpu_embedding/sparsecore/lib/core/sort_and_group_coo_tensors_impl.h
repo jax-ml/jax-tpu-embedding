@@ -220,8 +220,9 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
 
   // We do NOT drop IDs when minibatching is enabled and we are in the
   // first pass (`kCreateBuckets=false`), as we need to detect limit
-  // overflows to decide if minibatching is required.
-  const bool can_drop_id = !options.enable_minibatching || kCreateBuckets;
+  // overflows to decide if minibatching is required (or for device
+  // minibatching, where ID dropping on max_ids/unique_ids is bypassed).
+  const bool can_drop_id = !options.IsMinibatchingEnabled() || kCreateBuckets;
   const bool perform_id_dropping = allow_id_dropping && can_drop_id;
 
   uint32_t prev_col_id = std::numeric_limits<uint32_t>::max();
@@ -551,7 +552,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             const int32_t observed_max_unique_ids_per_bucket =
                 unique_ids_per_partition_per_bucket.maxCoeff();
 
-            if (options.enable_minibatching) {
+            if (options.IsHostMinibatchingEnabled()) {
               internal::UpdateMinibatchingSplit(
                   ids_per_sc_partition_per_bucket,
                   unique_ids_per_partition_per_bucket, global_sc_count,
@@ -560,8 +561,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             }
             // Only validate if creating minibatching buckets or when
             // minibatching is disabled, not when checking if minibatching is
-            // required.
-            if (!options.enable_minibatching || kCreateBuckets) {
+            // required (or when device minibatching is enabled).
+            if (!options.IsMinibatchingEnabled() || kCreateBuckets) {
               internal::ValidateMaxIdsOrDie(
                   observed_max_ids_per_bucket,
                   observed_max_unique_ids_per_bucket, max_ids_per_partition,
@@ -592,7 +593,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   tsl::RunWhenReady(
       absl::MakeConstSpan(task_results),
       [task_results = std::move(task_results), device_result, stats,
-       enable_minibatching = options.enable_minibatching,
+       enable_host_minibatching = options.IsHostMinibatchingEnabled(),
        num_sc_per_device]() mutable {
         tsl::profiler::TraceMe t("MergeSortingTaskResults");
         std::vector<PartitionedCooTensors> parts;
@@ -620,7 +621,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
           stats.required_buffer_size = stats.required_buffer_size.cwiseMax(
               res_stats.required_buffer_size);
 
-          if (enable_minibatching) {
+          if (enable_host_minibatching) {
             minibatching_split_agg |= res.split_val;
           }
         }
@@ -653,17 +654,16 @@ SortAndGroupCooTensorsPerLocalDeviceAsync(
     const FeatureMetadataInStack& feature_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice stats) {
-  const bool create_buckets =
-      options.enable_minibatching &&
-      std::is_same_v<SplitType, MinibatchingSplit>;
+  const bool create_buckets = options.IsHostMinibatchingEnabled() &&
+                              std::is_same_v<SplitType, MinibatchingSplit>;
   if (create_buckets) {
-    return SortAndGroupCooTensorsPerLocalDeviceImpl<kHasVariableWeights, true,
-                                                    SplitType>(
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<
+        kHasVariableWeights, /*kCreateBuckets=*/true, SplitType>(
         extracted_coo_tensors, stacked_table_name, feature_metadata, options,
         stats);
   } else {
-    return SortAndGroupCooTensorsPerLocalDeviceImpl<kHasVariableWeights, false,
-                                                    SplitType>(
+    return SortAndGroupCooTensorsPerLocalDeviceImpl<
+        kHasVariableWeights, /*kCreateBuckets=*/false, SplitType>(
         extracted_coo_tensors, stacked_table_name, feature_metadata, options,
         stats);
   }

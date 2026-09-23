@@ -476,6 +476,12 @@ struct StatsPerHost {
 
 enum class ShardingStrategy : int { kMod = 1 };
 
+enum class MinibatchingMode : int {
+  kDisabled = 0,
+  kHost = 1,
+  kDevice = 2,
+};
+
 inline void PreprocessingThreadPoolSchedule(std::function<void()> callback) {
   PreprocessingThreadPool()->Schedule(std::move(callback));
 }
@@ -491,8 +497,15 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
   const bool allow_id_dropping = true;
-  // Whether mini-batching is enabled.
+  // Whether mini-batching is enabled (legacy, prefer setting
+  // minibatching_mode).
   const bool enable_minibatching = false;
+  // The mini-batching mode to use (kDisabled, kHost, or kDevice).
+  // If kDevice, goes through the minibatching path while ignoring
+  // max_ids/unique_ids limits during grouping/deduplication, skips host
+  // all-reduce to always produce 1 minibatch, but still drops IDs if the COO
+  // buffer size is exceeded.
+  const MinibatchingMode minibatching_mode = MinibatchingMode::kDisabled;
 
   // The batch number should be a sequential counter that is unique for each
   // batch. It is safe to reset this counter to 0 on restart. The number should
@@ -514,12 +527,36 @@ struct PreprocessSparseDenseMatmulInputOptions {
   absl::FunctionRef<void(std::function<void()>)> async_task_scheduler =
       PreprocessingThreadPoolSchedule;
 
+  // Returns the resolved minibatching mode.
+  MinibatchingMode GetMinibatchingMode() const {
+    if (minibatching_mode != MinibatchingMode::kDisabled) {
+      return minibatching_mode;
+    }
+    return enable_minibatching ? MinibatchingMode::kHost
+                               : MinibatchingMode::kDisabled;
+  }
+
+  // Returns true if any minibatching mode (host or device) is enabled.
+  bool IsMinibatchingEnabled() const {
+    return GetMinibatchingMode() != MinibatchingMode::kDisabled;
+  }
+
+  // Returns true if host minibatching is enabled.
+  bool IsHostMinibatchingEnabled() const {
+    return GetMinibatchingMode() == MinibatchingMode::kHost;
+  }
+
+  // Returns true if device minibatching is enabled.
+  bool IsDeviceMinibatchingEnabled() const {
+    return GetMinibatchingMode() == MinibatchingMode::kDevice;
+  }
+
   // Returns the total number of SparseCores across all devices and hosts.
   uint32_t GetNumScs() const { return num_sc_per_device * global_device_count; }
 
   // Returns the number of buckets for minibatching.
   int GetNumBuckets() const {
-    return enable_minibatching ? CooFormat::kMaxMinibatchingBuckets : 1;
+    return IsMinibatchingEnabled() ? CooFormat::kMaxMinibatchingBuckets : 1;
   }
 
   // Returns the size of row pointers per bucket.

@@ -98,9 +98,17 @@ If using the ``embedding`` module directly, pass ``enable_minibatching=True`` to
         enable_minibatching=True,
     )
 
-Note that for multi-host minibatching, you need to initialize and pass an
+Note that for multi-host host-side minibatching, you need to initialize and pass an
 ``all_reduce_interface`` object to ``preprocess_sparse_dense_matmul_input``. This
 can be obtained via ``embedding.get_all_reduce_interface(...)``.
+
+Alternatively, you can configure device-side minibatching by passing
+``minibatching_mode=embedding.MinibatchingMode.DEVICE`` (or ``"DEVICE"``) to
+``preprocess_sparse_dense_matmul_input``. In device-side minibatching mode, host
+preprocessing skips bucketization, cross-host AllReduce synchronization, and
+``max_ids_per_partition`` / ``max_unique_ids_per_partition`` validation, producing
+a single minibatch from the host while allocating minibatch-sized COO buffers so
+that minibatching can be performed on the device.
 
 Performance Considerations
 --------------------------

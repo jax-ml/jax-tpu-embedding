@@ -545,7 +545,7 @@ void SyncMinibatchingRequired(
     return tsl::profiler::TraceMeEncode(
         "SyncMinibatchingRequired", {{"batch_number", options.batch_number}});
   });
-  DCHECK(options.enable_minibatching);
+  DCHECK(options.IsHostMinibatchingEnabled());
 
   auto device_sorting_results_av = CollectDeviceSortingResults(table_states);
 
@@ -655,7 +655,7 @@ void FillDeviceBuffersForTable(
           sorting_result_av.get().grouped_coo_tensors;
       // If minibatching is required by any host, merge buckets
       // according to the globally synchronized split.
-      if (options.enable_minibatching && global_minibatching_required) {
+      if (options.IsHostMinibatchingEnabled() && global_minibatching_required) {
         grouped_coo_tensors.Merge(global_minibatching_split);
       }
 
@@ -860,7 +860,7 @@ PreprocessSparseDenseMatmulInput(
 
   tsl::AsyncValueRef<bool> global_minibatching_required_avr =
       tsl::MakeUnconstructedAsyncValueRef<bool>();
-  if (options.enable_minibatching) {
+  if (options.IsHostMinibatchingEnabled()) {
     SyncMinibatchingRequired(options, table_states,
                              global_minibatching_required_avr);
   }
@@ -879,7 +879,7 @@ PreprocessSparseDenseMatmulInput(
   }
 
   bool global_minibatching_required = false;
-  if (options.enable_minibatching) {
+  if (options.IsHostMinibatchingEnabled()) {
     tsl::profiler::TraceMe traceme([&] {
       return tsl::profiler::TraceMeEncode(
           "WaitForGlobalMinibatchingSync",
@@ -895,7 +895,7 @@ PreprocessSparseDenseMatmulInput(
   MinibatchingSplit global_minibatching_split = 0;
 
   // Minibatching slow path: Optional Re-Sort/Group
-  if (options.enable_minibatching && global_minibatching_required) {
+  if (options.IsHostMinibatchingEnabled() && global_minibatching_required) {
     {
       tsl::profiler::TraceMe traceme([&] {
         return tsl::profiler::TraceMeEncode(
@@ -954,7 +954,7 @@ PreprocessSparseDenseMatmulInput(
   traceme.Stop();
 
   out.num_minibatches = global_minibatching_split.count() + 1;
-  DCHECK(options.enable_minibatching || out.num_minibatches == 1)
+  DCHECK(options.IsMinibatchingEnabled() || out.num_minibatches == 1)
       << "Minibatching is not enabled but num_minibatches is not 1.";
 
   return out;
