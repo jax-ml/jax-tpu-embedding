@@ -193,59 +193,22 @@ def to_value_sequence(results: Any) -> Sequence[ir.Value]:
   return typed_results
 
 
-def maybe_squeeze_abstract_eval(
-    val: core.ShapedArray | Sequence[core.ShapedArray],
-    expected_dim: int,
-) -> Any:
-  """Squeezes trailing dimensions of size 1 until rank matches expected_dim."""
-  if isinstance(val, core.ShapedArray):
-    shape = list(val.shape)
-    while len(shape) > expected_dim and shape and shape[-1] == 1:
-      shape.pop()
-    return core.ShapedArray(tuple(shape), val.dtype)
-  return tuple(maybe_squeeze_abstract_eval(v, expected_dim) for v in val)
+def get_row_type(val: ir.Value) -> ir.RankedTensorType:
+  """Returns the type of a single row slice of a 1D or 2D operand.
 
-
-def maybe_squeeze_ir(val: ir.Value, expected_dim: int) -> ir.Value:
-  """Squeezes trailing dimensions of size 1 until rank matches expected_dim."""
-  tensor_type = ir.RankedTensorType(val.type)
-  shape = list(tensor_type.shape)
-  dtype = tensor_type.element_type
-  changed = False
-  while len(shape) > expected_dim and shape and shape[-1] == 1:
-    shape.pop()
-    changed = True
-  if changed:
-    target_type = ir.RankedTensorType.get(shape, dtype)
-    return hlo.reshape(target_type, val)
-  return val
-
-
-def get_row_type_and_squeezed_activations_grad(
-    embedding_table: ir.Value,
-    activations_grad: ir.Value,
-) -> tuple[list[int], ir.RankedTensorType, ir.Value]:
-  """Extracts row shape, row type, and squeezed activations gradient.
-
-  Handles 1D and 2D embedding tables uniformly across optimizer lowering passes:
-  returns the row slice shape ([1] or [1, N]), the row RankedTensorType, and the
-  activations gradient squeezed to 1D if the table is 1D.
+  The optimizer update computation runs on one table row at a time, so a 1D
+  operand of shape [V] contributes rows of shape [1] and a 2D operand of shape
+  [V, N] contributes rows of shape [1, N].
 
   Args:
-    embedding_table: The embedding table IR value.
-    activations_grad: The activations gradient IR value.
+    val: The 1D or 2D IR value to take a row slice type of.
 
   Returns:
-    A tuple of (row_shape, row_type, squeezed_activations_grad).
+    The RankedTensorType of a single row of `val`.
   """
-  embedding_table_type = ir.RankedTensorType(embedding_table.type)
-  is_1d = embedding_table_type.rank == 1
-  squeezed_activations_grad = (
-      maybe_squeeze_ir(activations_grad, 1) if is_1d else activations_grad
-  )
-  row_shape = [1] if is_1d else [1, embedding_table_type.get_dim_size(1)]
-  row_type = ir.RankedTensorType.get(row_shape, ir.F32Type.get())
-  return row_shape, row_type, squeezed_activations_grad
+  tensor_type = ir.RankedTensorType(val.type)
+  shape = [1] if tensor_type.rank == 1 else [1, tensor_type.get_dim_size(1)]
+  return ir.RankedTensorType.get(shape, tensor_type.element_type)
 
 
 def create_optimizer_update_func_op(

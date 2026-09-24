@@ -92,13 +92,6 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
   if not embedding_variables:
     raise ValueError("At least one embedding variable must be passed.")
 
-  # Squeeze trailing dimensions of size 1 (e.g. [N, 1] -> [N]) to support 1D
-  # embedding variables.
-  activations_grad = utils.maybe_squeeze_abstract_eval(activations_grad, 1)
-  embedding_variables = tuple(
-      utils.maybe_squeeze_abstract_eval(var, 1) for var in embedding_variables
-  )
-
   utils.validate_abstract_eval_params(
       lhs_row_pointers=lhs_row_pointers,
       lhs_local_embedding_ids=lhs_local_embedding_ids,
@@ -207,9 +200,6 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       reshaped = hlo.reshape(f32type, param)
       hyperparams.append(reshaped)
 
-  activations_grad_sq = utils.maybe_squeeze_ir(activations_grad, 1)
-  tables_sq = [utils.maybe_squeeze_ir(table, 1) for table in tables]
-
   if enable_minibatching:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
     operands = (
@@ -220,8 +210,8 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
             lhs_gains,
             num_minibatches_per_physical_sparse_core,
         ]
-        + tables_sq
-        + [activations_grad_sq]
+        + tables
+        + [activations_grad]
         + hyperparams
     )
   else:
@@ -232,9 +222,9 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
             lhs_local_embedding_ids,
             lhs_local_sample_ids,
             lhs_gains,
-            activations_grad_sq,
+            activations_grad,
         ]
-        + tables_sq
+        + tables
         + hyperparams
     )
 

@@ -189,13 +189,8 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
   # The output is a tuple containing the updated embedding tables and optimizer
   # states.
 
-  (
-      row_shape,
-      row_type,
-      squeezed_activations_grad,
-  ) = utils.get_row_type_and_squeezed_activations_grad(
-      embedding_table, activations_grad
-  )
+  row_type = utils.get_row_type(embedding_table)
+  row_shape = list(row_type.shape)
   hlo_f32 = functools.partial(utils.hlo_f32, row_shape=row_shape)
 
   _, entry_block = utils.create_optimizer_update_func_op(
@@ -277,12 +272,12 @@ def _tpu_sparse_dense_matmul_grad_with_adam_lowering(
         momentum,
         velocity,
         # activations grad
-        squeezed_activations_grad,
+        activations_grad,
     ]
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
-        squeezed_activations_grad,
+        activations_grad,
         embedding_table,
         # slot variables
         momentum,
