@@ -1165,6 +1165,42 @@ TEST(InputPreprocessingUtilTest,
               ElementsAreArray(expected_sample_ids));
 }
 
+TEST(InputPreprocessingUtilTest, GetRowPointersSizePerBucket) {
+  // TPU v5p (num_sc_per_device = 4, sc_simd_width = 8)
+  PreprocessSparseDenseMatmulInputOptions v5p_opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .minibatching_mode = MinibatchingMode::kDisabled,
+  };
+  EXPECT_EQ(v5p_opts.GetRowPointersSizePerBucket(), 8);
+
+  // TPU v7x (num_sc_per_device = 2, sc_simd_width = 16)
+  PreprocessSparseDenseMatmulInputOptions v7x_opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .minibatching_mode = MinibatchingMode::kDisabled,
+  };
+  EXPECT_EQ(v7x_opts.GetRowPointersSizePerBucket(), 16);
+
+  PreprocessSparseDenseMatmulInputOptions device_opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  EXPECT_EQ(device_opts.GetRowPointersSizePerBucket(), 16);
+
+  PreprocessSparseDenseMatmulInputOptions multi_sc_opts{
+      .local_device_count = 8,
+      .global_device_count = 8,
+      .num_sc_per_device = 4,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  EXPECT_EQ(multi_sc_opts.GetRowPointersSizePerBucket(), 32);
+}
+
 }  // namespace
 
 }  // namespace jax_sc_embedding
