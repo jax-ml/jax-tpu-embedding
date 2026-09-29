@@ -497,10 +497,6 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
   const bool allow_id_dropping = true;
-  // Whether mini-batching is enabled.
-  [[deprecated(
-      "Use minibatching_mode instead.")]] const bool enable_minibatching =
-      false;
   // The mini-batching mode to use (kDisabled, kHost, or kDevice).
   // If kDevice, goes through the minibatching path while ignoring
   // max_ids/unique_ids limits during grouping/deduplication, skips host
@@ -529,13 +525,7 @@ struct PreprocessSparseDenseMatmulInputOptions {
       PreprocessingThreadPoolSchedule;
 
   // Returns the resolved minibatching mode.
-  MinibatchingMode GetMinibatchingMode() const {
-    if (minibatching_mode != MinibatchingMode::kDisabled) {
-      return minibatching_mode;
-    }
-    return enable_minibatching ? MinibatchingMode::kHost
-                               : MinibatchingMode::kDisabled;
-  }
+  MinibatchingMode GetMinibatchingMode() const { return minibatching_mode; }
 
   // Returns true if any minibatching mode (host or device) is enabled.
   bool IsMinibatchingEnabled() const {

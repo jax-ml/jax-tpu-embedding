@@ -28,9 +28,11 @@ from typing import TypeVar, cast
 import jax
 from jax import numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import constants
+from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
+MinibatchingMode = pybind_input_preprocessing.MinibatchingMode
 
 ArrayLike = jnp.ndarray | np.ndarray
 
@@ -86,17 +88,17 @@ def _to_sequence(inputs: _T | ArrayLike) -> _T:
 
 def _to_sequence_of_batches(
     inputs: _T | Sequence[_T],
-    enable_minibatching: bool,
+    minibatching_mode: MinibatchingMode,
     input_name: str,
 ) -> Sequence[_T]:
-  """Resolves an input into a uniform sequence of batches based on enable_minibatching."""
-  if not enable_minibatching:
+  """Resolves an input into a uniform sequence of batches based on minibatching_mode."""
+  if minibatching_mode == MinibatchingMode.DISABLED:
     return [cast(_T, inputs)]
   assert isinstance(inputs, Sequence) and not isinstance(
       inputs, (np.ndarray, jnp.ndarray)
   ), (
-      f"When enable_minibatching is True, {input_name} must be a sequence of"
-      " batches."
+      f"When minibatching_mode is {minibatching_mode}, {input_name} must be a"
+      " sequence of batches."
   )
   return cast(Sequence[_T], inputs)
 
@@ -203,7 +205,7 @@ def _pack_partitions_to_csr(
     num_sc_per_device: int,
     max_ids_per_partition: int,
     *,
-    enable_minibatching: bool,
+    minibatching_mode: MinibatchingMode,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """CSR Packer: pads and flattens partitions into final CSR buffers.
 
@@ -214,7 +216,7 @@ def _pack_partitions_to_csr(
     max_ids_per_partition: Maximum number of ids per SparseCore partition. This
       value is used to determine the size of the static buffer of embedding,
       sample IDs and gains.
-    enable_minibatching: Whether or not minibatching is enabled.
+    minibatching_mode: The minibatching mode to use.
 
   Returns:
     A tuple (row_pointers, col_ids, row_ids, gains) forming the CSR wrapped COO
@@ -248,16 +250,17 @@ def _pack_partitions_to_csr(
   # Step 4: CSR Serialization and Alignment
   ##############################################################################
   coo_index = 0
+  is_minibatching = minibatching_mode != MinibatchingMode.DISABLED
 
   # Minibatching uses global index, otherwise we slice the COO buffer per SC.
   def _get_base_coo_index(local_sc_id: int) -> int:
-    if enable_minibatching:
+    if is_minibatching:
       return 0
     else:
       return local_sc_id * coo_buffer_size_per_sc
 
   def _get_coo_beginning_index(local_sc_id: int) -> int:
-    if enable_minibatching:
+    if is_minibatching:
       return _round_up(coo_index, 8)
     else:
       return _get_base_coo_index(local_sc_id)
@@ -308,7 +311,7 @@ def preprocess_sparse_dense_matmul_input(
     max_unique_ids_per_partition: int,
     num_sc_per_device: int = -1,
     sharding_strategy: str = "MOD",
-    enable_minibatching: bool = False,
+    minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Preprocesses standard input into SparseCore CSR wrapped COO format.
 
@@ -323,7 +326,7 @@ def preprocess_sparse_dense_matmul_input(
       partition.
     num_sc_per_device: Number of sparse cores per device.
     sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
-    enable_minibatching: Whether or not minibatching is enabled.
+    minibatching_mode: The minibatching mode to use. Defaults to `DISABLED`.
 
   Returns:
     A tuple (row_pointers, col_ids, row_ids, gains) forming the CSR wrapped COO
@@ -334,12 +337,17 @@ def preprocess_sparse_dense_matmul_input(
       row_ids: Sample ids for each embedding id.
       gains: The weights for each embedding id.
   """
+  if isinstance(minibatching_mode, str):
+    minibatching_mode = MinibatchingMode(minibatching_mode)
   if max_ids_per_partition <= 0:
     raise ValueError(
         f"max_ids_per_partition must be positive, got {max_ids_per_partition}."
     )
   features_ndim = _resolve_feature_input_ndim(features)
-  if not enable_minibatching and features_ndim not in (1, 2):
+  if minibatching_mode == MinibatchingMode.DISABLED and features_ndim not in (
+      1,
+      2,
+  ):
     raise ValueError(f"features must be 1D or 2D, got {features_ndim}D.")
   if len(features) != len(features_weights):
     raise ValueError("features and features_weights must have the same length.")
@@ -357,10 +365,10 @@ def preprocess_sparse_dense_matmul_input(
   )
   num_scs = num_sc_per_device * global_device_count
   feature_batches: Sequence[FeatureBatch] = _to_sequence_of_batches(
-      features, enable_minibatching, "features"
+      features, minibatching_mode, "features"
   )
   weight_batches: Sequence[WeightBatch] = _to_sequence_of_batches(
-      features_weights, enable_minibatching, "features_weights"
+      features_weights, minibatching_mode, "features_weights"
   )
 
   ##############################################################################
@@ -387,5 +395,5 @@ def preprocess_sparse_dense_matmul_input(
       num_scs,
       num_sc_per_device,
       max_ids_per_partition,
-      enable_minibatching=enable_minibatching,
+      minibatching_mode=minibatching_mode,
   )

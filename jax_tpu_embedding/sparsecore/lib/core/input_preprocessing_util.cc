@@ -66,8 +66,8 @@ struct BufferFillingOptions {
   int num_scs ABSL_REQUIRE_EXPLICIT_INIT;
   // The total size of the COO buffer for the current device.
   int coo_buffer_size ABSL_REQUIRE_EXPLICIT_INIT;
-  // Whether minibatching is enabled.
-  bool enable_minibatching ABSL_REQUIRE_EXPLICIT_INIT;
+  // The minibatching mode in effect.
+  MinibatchingMode minibatching_mode ABSL_REQUIRE_EXPLICIT_INIT;
 };
 
 // Check if the current indexes are valid within the buffer sizes.
@@ -144,7 +144,9 @@ void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
 // Otherwise, it's the `coo_index` relative to the beginning of the current
 // SparseCore's COO buffer segment.
 int GetRowPointer(int coo_index, const BufferFillingOptions& options) {
-  if (options.enable_minibatching) return coo_index;
+  if (options.minibatching_mode != MinibatchingMode::kDisabled) {
+    return coo_index;
+  }
   return coo_index - options.coo_begin;
 }
 
@@ -433,7 +435,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                   .num_sc_per_device = num_sc_per_device,
                   .num_scs = num_scs,
                   .coo_buffer_size = coo_buffer_size,
-                  .enable_minibatching = is_minibatching,
+                  .minibatching_mode = options.minibatching_mode,
               },
               csr_arrays, dropped_ids_in_segment);
           shared_segment_data->dropped_id_counts[segment_idx].emplace(

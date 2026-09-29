@@ -358,7 +358,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=8,
         max_unique_ids_per_partition=8,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
   @parameterized.named_parameters(
@@ -401,7 +401,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
     # Gradient is padded to max_device_batch_size, no matter how many rows are

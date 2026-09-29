@@ -1111,7 +1111,7 @@ void RunPreprocessingOutputIsValidTest(
     absl::Span<const std::vector<std::vector<int64_t>>> samples_per_table,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition, bool enable_minibatching) {
+    int max_unique_ids_per_partition, MinibatchingMode minibatching_mode) {
   // Max unique ids should be less than or equal to max ids.
   max_unique_ids_per_partition =
       std::min(max_unique_ids_per_partition, max_ids_per_partition);
@@ -1155,8 +1155,7 @@ void RunPreprocessingOutputIsValidTest(
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = num_sc_per_device,
       .allow_id_dropping = true,
-      .minibatching_mode = enable_minibatching ? MinibatchingMode::kHost
-                                               : MinibatchingMode::kDisabled,
+      .minibatching_mode = minibatching_mode,
       .batch_number = 42};
 
   TF_ASSERT_OK_AND_ASSIGN(
@@ -1218,7 +1217,7 @@ void PreprocessingOutputIsValidComplex(
         samples_tuple,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
     int global_device_count, int max_ids_per_partition,
-    int max_unique_ids_per_partition, bool enable_minibatching) {
+    int max_unique_ids_per_partition, MinibatchingMode minibatching_mode) {
   std::vector<std::vector<std::vector<int64_t>>> samples_vector;
   std::apply(
       [&](const auto&... table_samples) {
@@ -1227,7 +1226,7 @@ void PreprocessingOutputIsValidComplex(
       samples_tuple);
   RunPreprocessingOutputIsValidTest(
       samples_vector, table_vocabs, num_sc_per_device, global_device_count,
-      max_ids_per_partition, max_unique_ids_per_partition, enable_minibatching);
+      max_ids_per_partition, max_unique_ids_per_partition, minibatching_mode);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
@@ -1270,8 +1269,11 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
         fuzztest::InRange(1, 1024),
         // Domain for max_unique_ids_per_partition
         fuzztest::InRange(1, 1024),
-        // Domain for enable_minibatching
-        fuzztest::Arbitrary<bool>());
+        // Domain for minibatching_mode
+        fuzztest::ElementOf({
+            MinibatchingMode::kDisabled,
+            MinibatchingMode::kHost,
+        }));
 
 void PreprocessingOutputIsValidSimple(std::vector<std::vector<int64_t>> samples,
                                       absl::Span<const int> table_vocabs,
@@ -1279,10 +1281,10 @@ void PreprocessingOutputIsValidSimple(std::vector<std::vector<int64_t>> samples,
                                       int global_device_count,
                                       int max_ids_per_partition,
                                       int max_unique_ids_per_partition,
-                                      bool enable_minibatching) {
+                                      MinibatchingMode minibatching_mode) {
   RunPreprocessingOutputIsValidTest(
       {samples}, table_vocabs, num_sc_per_device, global_device_count,
-      max_ids_per_partition, max_unique_ids_per_partition, enable_minibatching);
+      max_ids_per_partition, max_unique_ids_per_partition, minibatching_mode);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
@@ -1302,8 +1304,11 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
         fuzztest::InRange(1, 128),
         // Domain for max_unique_ids_per_partition
         fuzztest::InRange(1, 128),
-        // Domain for enable_minibatching
-        fuzztest::Arbitrary<bool>());
+        // Domain for minibatching_mode
+        fuzztest::ElementOf({
+            MinibatchingMode::kDisabled,
+            MinibatchingMode::kHost,
+        }));
 
 void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
                          int num_sc_per_device, int global_device_count) {

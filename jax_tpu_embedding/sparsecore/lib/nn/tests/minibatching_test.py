@@ -362,25 +362,6 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.assertIn("table_a", stats.id_drop_counters)
     self.assertGreater(stats.id_drop_counters["table_a"], 0)
 
-  def test_conflicting_minibatching_mode_raises_error(self):
-    inputs = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=8
-    )
-    with self.assertRaisesRegex(
-        ValueError,
-        "minibatching_mode cannot be DISABLED when enable_minibatching is True",
-    ):
-      embedding.preprocess_sparse_dense_matmul_input(
-          features=[inputs],
-          features_weights=None,
-          feature_specs=[self.feature_spec],
-          local_device_count=jax.device_count(),
-          global_device_count=jax.device_count(),
-          batch_number=42,
-          enable_minibatching=True,
-          minibatching_mode=embedding.MinibatchingMode.DISABLED,
-      )
-
   def _lookup(self, preprocessed_input, embedding_vars):
     return embedding.tpu_sparse_dense_matmul(
         preprocessed_input,
@@ -535,7 +516,7 @@ class MultiHostMinibatchingTest(absltest.TestCase):
         local_device_count=jax.device_count(),
         global_device_count=jax.device_count(),
         batch_number=42,
-        enable_minibatching=True,
+        minibatching_mode=embedding.MinibatchingMode.HOST,
         all_reduce_interface=self.all_reduce_interfaces[host_id],
     )
     return preprocessed_input

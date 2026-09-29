@@ -167,6 +167,7 @@ pytype_strict_library(
     ],
     deps = [
         ":constants",
+        ":pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/utils",
         pypi_requirement("jax"),
         pypi_requirement("numpy"),

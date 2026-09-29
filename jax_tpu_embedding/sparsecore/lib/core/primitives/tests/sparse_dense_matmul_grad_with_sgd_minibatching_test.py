@@ -103,7 +103,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
     z_grad = jnp.full(
@@ -208,7 +208,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
     z_grad = jnp.full(

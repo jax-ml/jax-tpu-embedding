@@ -347,7 +347,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -436,7 +436,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
     expected_emb_activations = np.array(
         [
@@ -534,7 +534,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
     expected_emb_activations = np.array(
         [

@@ -609,7 +609,7 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
         num_sc_per_device=2,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
     row_pointers, col_ids, row_ids, gains = out
@@ -707,7 +707,7 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
         num_sc_per_device=1,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
-        enable_minibatching=True,
+        minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
     row_pointers, col_ids, row_ids, gains = out
 

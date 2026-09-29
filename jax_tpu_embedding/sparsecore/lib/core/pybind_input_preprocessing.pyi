@@ -52,7 +52,6 @@ def preprocess_sparse_dense_matmul_input(
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     batch_number: int = 0,
-    enable_minibatching: bool = False,
     minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
@@ -69,7 +68,6 @@ def preprocess_sparse_dense_matmul_sparse_coo_input(
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     batch_number: int = 0,
-    enable_minibatching: bool = False,
     minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
