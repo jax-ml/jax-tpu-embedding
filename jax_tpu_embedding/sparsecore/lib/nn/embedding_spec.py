@@ -309,6 +309,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: int = 1,
       min_value: float | None = None,
       max_value: float | None = None,
+      slot_variable_avals: Sequence[Any] | None = None,
   ) -> str:
     """Traces and lowers a custom optimizer function into StableHLO text.
 
@@ -320,6 +321,9 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
       min_value: Optional minimum value to clip the updated embedding table.
       max_value: Optional maximum value to clip the updated embedding table.
+      slot_variable_avals: Optional per-row shapes and dtypes of the slot
+        variables (`(1, slot_dim)` or `(1,)`), e.g. to use uint8 or per-row slot
+        variables. Defaults to `(1, embedding_dim)` float32 for all slots.
 
     Returns:
       A string containing the lowered StableHLO module text.
@@ -337,6 +341,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         num_hyperparameters=num_hyperparameters,
         min_value=min_value,
         max_value=max_value,
+        slot_variable_avals=slot_variable_avals,
     )
 
   @classmethod
@@ -348,6 +353,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: int,
       min_value: float | None = None,
       max_value: float | None = None,
+      slot_variable_avals: Sequence[Any] | None = None,
   ) -> str:
     """Wraps an existing StableHLO module in JAX and lowers again with limits.
 
@@ -358,6 +364,8 @@ class CustomOptimizerSpec(OptimizerSpec):
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
       min_value: Optional minimum value to clip the updated embedding table.
       max_value: Optional maximum value to clip the updated embedding table.
+      slot_variable_avals: Optional per-row shapes and dtypes of the slot
+        variables. See `lower_to_stablehlo`.
 
     Returns:
       A string containing the wrapped and lowered StableHLO module text.
@@ -375,6 +383,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         num_hyperparameters=num_hyperparameters,
         min_value=min_value,
         max_value=max_value,
+        slot_variable_avals=slot_variable_avals,
     )
 
 

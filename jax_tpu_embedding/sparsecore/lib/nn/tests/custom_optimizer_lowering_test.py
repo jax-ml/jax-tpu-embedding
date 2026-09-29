@@ -13,10 +13,27 @@
 # limitations under the License.
 """Tests for StableHLO lowering utilities for custom SparseCore optimizers."""
 
+import re
+
 from absl.testing import absltest
 from absl.testing import parameterized
+import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import custom_optimizer_lowering
+
+
+def _main_signature_types(stablehlo_text: str) -> tuple[list[str], list[str]]:
+  """Returns the argument and result tensor types of the public main function."""
+  signature = next(
+      line
+      for line in stablehlo_text.splitlines()
+      if "func.func public @main(" in line
+  )
+  args, results = signature.split("->", 1)
+  return (
+      re.findall(r"%arg\d+: (tensor<[^>]+>)", args),
+      re.findall(r"tensor<[^>]+>", results),
+  )
 
 
 class CustomOptimizerLoweringTest(parameterized.TestCase):
@@ -113,6 +130,81 @@ class CustomOptimizerLoweringTest(parameterized.TestCase):
     )
     self.assertIsInstance(with_limits, str)
     self.assertIn("module", with_limits)
+
+  def test_lower_to_stablehlo_with_heterogeneous_slots(self):
+    def quantized_adagrad(grad, param, q_accum, scale, lr):
+      accum = q_accum.astype(jnp.float32) * scale[:, None] + grad * grad
+      new_param = param - lr * grad / jnp.sqrt(accum + 0.1)
+      new_scale = jnp.max(accum, axis=-1) / 255.0
+      new_q_accum = jnp.clip(
+          jnp.floor(accum / new_scale[:, None] + 0.5), 0.0, 255.0
+      ).astype(jnp.uint8)
+      return new_param, new_q_accum, new_scale
+
+    slot_variable_avals = (
+        jax.ShapeDtypeStruct((1, 8), jnp.uint8),
+        jax.ShapeDtypeStruct((1,), jnp.float32),
+    )
+    raw_stablehlo = custom_optimizer_lowering.lower_to_stablehlo(
+        quantized_adagrad,
+        embedding_dim=8,
+        num_slot_variables=2,
+        num_hyperparameters=1,
+        slot_variable_avals=slot_variable_avals,
+    )
+    with_limits = custom_optimizer_lowering.wrap_stablehlo_with_limits(
+        raw_stablehlo,
+        embedding_dim=8,
+        num_slot_variables=2,
+        num_hyperparameters=1,
+        min_value=-1.0,
+        max_value=1.0,
+        slot_variable_avals=slot_variable_avals,
+    )
+
+    f32_row = "tensor<1x8xf32>"
+    for stablehlo_text in (raw_stablehlo, with_limits):
+      input_types, output_types = _main_signature_types(stablehlo_text)
+      self.assertEqual(
+          input_types,
+          [f32_row, f32_row, "tensor<1x8xui8>", "tensor<1xf32>", f32_row],
+      )
+      self.assertEqual(
+          output_types, [f32_row, "tensor<1x8xui8>", "tensor<1xf32>"]
+      )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="wrong_count",
+          slot_variable_avals=(jax.ShapeDtypeStruct((1, 8), jnp.uint8),),
+      ),
+      dict(
+          testcase_name="not_a_row",
+          slot_variable_avals=(
+              jax.ShapeDtypeStruct((2, 8), jnp.uint8),
+              jax.ShapeDtypeStruct((1,), jnp.float32),
+          ),
+      ),
+      dict(
+          testcase_name="rank_3",
+          slot_variable_avals=(
+              jax.ShapeDtypeStruct((1, 8, 1), jnp.uint8),
+              jax.ShapeDtypeStruct((1,), jnp.float32),
+          ),
+      ),
+  )
+  def test_lower_to_stablehlo_invalid_slot_avals(self, slot_variable_avals):
+    def two_slot_sgd(grad, param, slot_a, slot_b, lr):
+      return param - lr * grad, slot_a, slot_b
+
+    with self.assertRaises(ValueError):
+      custom_optimizer_lowering.lower_to_stablehlo(
+          two_slot_sgd,
+          embedding_dim=8,
+          num_slot_variables=2,
+          num_hyperparameters=1,
+          slot_variable_avals=slot_variable_avals,
+      )
 
 
 if __name__ == "__main__":

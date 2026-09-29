@@ -65,6 +65,103 @@ class LinearLearningRateSchedule:
     return self.initial_learning_rate / (step + 1)
 
 
+_UINT8_MAX = 255.0
+
+
+def _uint8_quantized_adagrad(
+    grad: jax.Array,
+    table: jax.Array,
+    quantized_accumulator: jax.Array,
+    row_scale: jax.Array,
+    learning_rate: jax.Array,
+    initial_accumulator_value: jax.Array,
+    epsilon: jax.Array,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+  """Per-row Adagrad storing its accumulator as uint8 + an f32 row scale."""
+  # Dequantize the (1, dim) uint8 accumulator with its (1,) f32 row scale.
+  accumulator = (
+      quantized_accumulator.astype(jnp.float32) * row_scale[:, None]
+      + grad * grad
+  )
+  updated_table = table - learning_rate * grad / (
+      jnp.sqrt(initial_accumulator_value + accumulator) + epsilon
+  )
+  # Requantize with a new per-row scale. Round half up: not every SparseCore
+  # generation supports a vector round-half-to-even (`jnp.round`).
+  updated_row_scale = jnp.max(accumulator, axis=-1) / _UINT8_MAX
+  safe_row_scale = jnp.where(updated_row_scale > 0.0, updated_row_scale, 1.0)
+  rounded = jnp.floor(accumulator / safe_row_scale[:, None] + 0.5)
+  updated_quantized_accumulator = jnp.clip(rounded, 0.0, _UINT8_MAX).astype(
+      jnp.uint8
+  )
+  return updated_table, updated_quantized_accumulator, updated_row_scale
+
+
+class _Uint8QuantizedAdagradSpec(embedding_spec.CustomOptimizerSpec):
+  """Custom Adagrad with a uint8 accumulator slot and an f32 row scale slot."""
+
+  def __init__(
+      self,
+      learning_rate: float,
+      initial_accumulator_value: float,
+      epsilon: float,
+  ):
+    super().__init__(
+        learning_rate=learning_rate,
+        custom_computation_fn=_uint8_quantized_adagrad,
+        slot_variable_initializers_tuple=(
+            jax.nn.initializers.constant(0, dtype=jnp.uint8),
+            lambda _, shape, dtype=jnp.float32: jnp.zeros(shape[:-1], dtype),
+        ),
+        short_name_str="uint8_quantized_adagrad",
+    )
+    self.initial_accumulator_value = initial_accumulator_value
+    self.epsilon = epsilon
+
+  @override
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    return (
+        self.get_learning_rate(step),
+        jnp.array(self.initial_accumulator_value, dtype=jnp.float32),
+        jnp.array(self.epsilon, dtype=jnp.float32),
+    )
+
+
+def _np_uint8_quantized_adagrad(
+    table: np.ndarray,
+    quantized_accumulator: np.ndarray,
+    row_scale: np.ndarray,
+    ids: np.ndarray,
+    grads: np.ndarray,
+    learning_rate: float,
+    initial_accumulator_value: float,
+    epsilon: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+  """NumPy reference of `_uint8_quantized_adagrad` for unique `ids`."""
+  table = table.copy()
+  quantized_accumulator = quantized_accumulator.copy()
+  row_scale = row_scale.copy()
+  accumulator = (
+      quantized_accumulator[ids].astype(np.float32) * row_scale[ids, None]
+      + grads * grads
+  )
+  table[ids] -= (
+      learning_rate
+      * grads
+      / (np.sqrt(initial_accumulator_value + accumulator) + epsilon)
+  )
+  updated_row_scale = np.max(accumulator, axis=-1) / np.float32(_UINT8_MAX)
+  safe_row_scale = np.where(updated_row_scale > 0.0, updated_row_scale, 1.0)
+  rounded = np.floor(accumulator / safe_row_scale[:, None] + 0.5)
+  quantized_accumulator[ids] = np.clip(rounded, 0.0, _UINT8_MAX).astype(
+      np.uint8
+  )
+  row_scale[ids] = updated_row_scale
+  return table, quantized_accumulator, row_scale
+
+
 class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
   @override
@@ -1498,6 +1595,147 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     np.testing.assert_allclose(
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
     )
+
+  def test_custom_optimizer_uint8_quantized_adagrad(self):
+    devices = jax.devices()[:1]
+    mesh = jax.sharding.Mesh(devices, "x")
+    num_sc_per_device = 4
+    # `jax.device_put` into the SparseCore format relayouts the uint8 slot on
+    # the TensorCore, which XLA currently lowers incorrectly for uint8 arrays
+    # whose default layout is row major (e.g. u8[32,32] or u8[128,128]), but
+    # not for u8[64,32].
+    vocab_size, dim = 64, 32
+    learning_rate, initial_accumulator_value, epsilon = 0.1, 0.1, 1e-8
+
+    feature_specs = {
+        "feature_q": embedding_spec.FeatureSpec(
+            table_spec=embedding_spec.TableSpec(
+                vocabulary_size=vocab_size,
+                embedding_dim=dim,
+                initializer=jax.nn.initializers.zeros,
+                optimizer=_Uint8QuantizedAdagradSpec(
+                    learning_rate=learning_rate,
+                    initial_accumulator_value=initial_accumulator_value,
+                    epsilon=epsilon,
+                ),
+                combiner="sum",
+                name="table_q",
+            ),
+            input_shape=(_BATCH_SIZE, 1),
+            output_shape=(_BATCH_SIZE, dim),
+            name="feature_q",
+        )
+    }
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        num_sc_per_device=num_sc_per_device,
+        global_device_count=len(devices),
+    )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {"feature_q": self.input_tensor_table_c},
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+    )
+
+    rng = np.random.default_rng(1234)
+    table = rng.normal(size=(vocab_size, dim)).astype(np.float32)
+    quantized_accumulator = rng.integers(
+        0, 256, size=(vocab_size, dim), dtype=np.uint8
+    )
+    row_scale = rng.uniform(1e-3, 1e-2, size=(vocab_size,)).astype(np.float32)
+    activation_gradients = {
+        "feature_q": (
+            rng.uniform(-1.0, 1.0, size=(_BATCH_SIZE, dim)).astype(np.float32)
+        )
+    }
+
+    # Keep every embedding variable in its SparseCore format, as
+    # `init_embedding_variables` does, so that no TensorCore relayout touches
+    # the uint8 slot.
+    def sc_format(unsharded: np.ndarray):
+      spec = P("x", None) if unsharded.ndim == 2 else P("x")
+      return utils.embedding_table_format_with_sharding(
+          NamedSharding(mesh, spec),
+          dtype=unsharded.dtype,
+          ndim=unsharded.ndim,
+      )
+
+    def to_device(unsharded: np.ndarray) -> jax.Array:
+      sharded = utils.shard_emb_table(
+          unsharded, num_devices=1, num_sc_per_device=num_sc_per_device
+      )
+      return jax.device_put(sharded[0], sc_format(unsharded))
+
+    def to_host(sharded: jax.Array) -> np.ndarray:
+      return utils.unshard_emb_table(
+          np.asarray(sharded)[np.newaxis], num_sc_per_device=num_sc_per_device
+      )
+
+    embedding_variables = {
+        "table_q": embedding.EmbeddingVariables(
+            table=to_device(table),
+            slot=(to_device(quantized_accumulator), to_device(row_scale)),
+        )
+    }
+    accumulator_format = sc_format(quantized_accumulator)
+    row_scale_format = sc_format(row_scale)
+    grad_fn = jax.jit(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul_grad,
+            feature_specs=feature_specs,
+            sharding_strategy="MOD",
+        ),
+        out_shardings={
+            "table_q": embedding.EmbeddingVariables(
+                table=sc_format(table),
+                slot=(accumulator_format, row_scale_format),
+            )
+        },
+    )
+
+    # Each id is looked up exactly once, so its gradient is its activation
+    # gradient row.
+    ids = self.input_tensor_table_c[:, 0]
+    for _ in range(2):
+      expected_table, expected_quantized_accumulator, expected_row_scale = (
+          _np_uint8_quantized_adagrad(
+              table,
+              quantized_accumulator,
+              row_scale,
+              ids=ids,
+              grads=activation_gradients["feature_q"],
+              learning_rate=learning_rate,
+              initial_accumulator_value=initial_accumulator_value,
+              epsilon=epsilon,
+          )
+      )
+      embedding_variables = grad_fn(
+          activation_gradients, preprocessed_inputs, embedding_variables
+      )
+
+      updated = embedding_variables["table_q"]
+      self.assertEqual(updated.table.dtype, jnp.float32)
+      self.assertEqual(updated.slot[0].dtype, jnp.uint8)
+      self.assertEqual(updated.slot[0].shape, (vocab_size, dim))
+      self.assertEqual(updated.slot[1].dtype, jnp.float32)
+      self.assertEqual(updated.slot[1].shape, (vocab_size,))
+      self.assertEqual(updated.slot[0].format, accumulator_format)
+      self.assertEqual(updated.slot[1].format, row_scale_format)
+      table = to_host(updated.table)
+      quantized_accumulator = to_host(updated.slot[0])
+      row_scale = to_host(updated.slot[1])
+      np.testing.assert_allclose(table, expected_table, rtol=1e-5, atol=1e-6)
+      np.testing.assert_allclose(row_scale, expected_row_scale, rtol=1e-5)
+      # Allow off-by-one codes for values that land on a rounding boundary.
+      np.testing.assert_allclose(
+          quantized_accumulator.astype(np.int32),
+          expected_quantized_accumulator.astype(np.int32),
+          atol=1,
+      )
 
   def test_custom_optimizer_stacked(self):
     devices = jax.devices()[:2]

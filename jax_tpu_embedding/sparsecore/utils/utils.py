@@ -19,6 +19,7 @@ import typing
 import einops
 import jax
 from jax.experimental import layout
+import jax.numpy as jnp
 
 Layout = layout.Layout
 
@@ -139,8 +140,18 @@ def unshard_emb_table(
 
 def embedding_table_format_with_sharding(
     sharding: jax.sharding.Sharding,
+    *,
+    dtype: jax.typing.DTypeLike = jnp.float32,
+    ndim: int = 2,
 ) -> jax.sharding.Sharding | layout.Format:
-  """Returns the layout format of the embedding table."""
+  """Returns the layout format of the embedding table.
+
+  Args:
+    sharding: The sharding of the embedding variable.
+    dtype: The dtype of the embedding variable. Slot variables may have a
+      different dtype than the table, e.g. a quantized accumulator.
+    ndim: The rank of the embedding variable, e.g. 1 for per-row slot variables.
+  """
   if hasattr(sharding, 'mesh') and isinstance(
       sharding.mesh, jax.sharding.AbstractMesh
   ):
@@ -151,10 +162,13 @@ def embedding_table_format_with_sharding(
 
   if device_kind == 'cpu':
     return sharding
+  # SparseCore tiles the minor-most dimension by one 32-byte HBM granule, i.e.
+  # 8 32-bit, 16 16-bit or 32 8-bit elements.
+  tile_size = 32 // jnp.dtype(dtype).itemsize
   return layout.Format(
       Layout(
-          major_to_minor=(0, 1),
-          tiling=((8,),),
+          major_to_minor=tuple(range(ndim)),
+          tiling=((tile_size,),),
       ),
       sharding,
   )

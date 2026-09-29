@@ -60,10 +60,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     lhs_gains: core.ShapedArray,
     num_minibatches_per_physical_sparse_core: core.ShapedArray,
     embedding_table: core.ShapedArray,
-    accumulator: core.ShapedArray,
-    activations_grad: core.ShapedArray,
-    learning_rate: np.float32,
-    *_,
+    *rest: core.ShapedArray,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "adagrad_optimizer_update",
@@ -72,9 +69,15 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[core.ShapedArray, core.ShapedArray]:
+) -> Tuple[core.ShapedArray, ...]:
   """Abstract eval for sparse_dense_matmul_adagrad."""
   del enable_minibatching
+
+  if len(rest) == 4 and embedding_table.dtype == np.int16:
+    row_scale, accumulator, activations_grad, learning_rate = rest
+  else:
+    row_scale = None
+    accumulator, activations_grad, learning_rate = rest[:3]
 
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
@@ -101,6 +104,21 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_abstract_eval(
         f" {embedding_table.shape} and {accumulator.shape}"
     )
 
+  if row_scale is not None:
+    utils.ensure_dtype(embedding_table, np.int16, "embedding_table")
+    utils.ensure_dtype(row_scale, np.float32, "row_scale")
+    utils.ensure_dim(row_scale, 1, "row_scale")
+    if row_scale.shape[0] != embedding_table.shape[0]:
+      raise ValueError(
+          "row_scale and embedding_table must have equal row counts, got"
+          f" {row_scale.shape} and {embedding_table.shape}"
+      )
+    return embedding_table, row_scale, accumulator
+  elif embedding_table.dtype == np.int16:
+    raise ValueError(
+        "row_scale must be provided when embedding_table has dtype int16"
+    )
+
   return embedding_table, accumulator
 
 
@@ -117,10 +135,7 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     lhs_gains: ir.BlockArgument,
     num_minibatches_per_physical_sparse_core: ir.BlockArgument,
     embedding_table: ir.BlockArgument,
-    accumulator: ir.BlockArgument,
-    activations_grad: ir.BlockArgument,
-    learning_rate: ir.BlockArgument,
-    *,
+    *rest: ir.BlockArgument,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     computation_name: str = "adgrad_optimizer_update",
@@ -128,16 +143,30 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
-) -> Tuple[Sequence[ir.Value], Sequence[ir.Value]]:
+) -> Tuple[Sequence[ir.Value], ...]:
   """Lowering for sparse_dense_matmul_grad_with_adagrad."""
-  sdmm_sgd_config = {
+  if len(rest) == 4:
+    row_scale, accumulator, activations_grad, learning_rate = rest
+  else:
+    row_scale = None
+    accumulator, activations_grad, learning_rate = rest[:3]
+
+  sdmm_sgd_config: dict[str, object] = {
       "max_ids_per_partition": max_ids_per_partition,
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "pad_value": constants.PADDING_VALUE,
       "sharding_strategy": sharding_strategy,
-      "num_slot_variables": 1,
+      "num_slot_variables": 2 if row_scale is not None else 1,
       "num_hyperparameters": 1,
   }
+  if row_scale is not None:
+    sdmm_sgd_config["storage_format"] = {
+        "element_type": "S16",
+        "scale_mode": "SCALE_MODE_ROW",
+        "scale_policy": "SCALE_UPDATE_DYNAMIC_ABSMAX",
+        "min_rowmax": 1e-12,
+        "scale_slot_index": 2,
+    }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",
@@ -204,35 +233,38 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
       lhs_gains,
   ]
 
+  slot_vars = [accumulator] + ([row_scale] if row_scale is not None else [])
   # b/436897459 - Unify argument order.
   if enable_minibatching:
     call_target = "SparseDenseMatmulGradOptimizerUpdateWithMinibatchingOp"
-    operands += [
-        num_minibatches_per_physical_sparse_core,
-        embedding_table,
-        # slot variables
-        accumulator,
-        # activations grad
-        activations_grad,
-    ]
+    operands += (
+        [
+            num_minibatches_per_physical_sparse_core,
+            embedding_table,
+        ]
+        + slot_vars
+        + [
+            # activations grad
+            activations_grad,
+        ]
+    )
   else:
     call_target = "SparseDenseMatmulGradOpWithOptimizerUpdate"
     operands += [
         activations_grad,
         embedding_table,
-        # slot variables
-        accumulator,
-    ]
+    ] + slot_vars
   operands += [
       # hyperparameters
       learning_rate,
   ]
 
+  tuple_types = [embedding_table.type, accumulator.type] + (
+      [row_scale.type] if row_scale is not None else []
+  )
   op = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[
-          ir.TupleType.get_tuple([embedding_table.type, accumulator.type])
-      ],
+      result_types=[ir.TupleType.get_tuple(tuple_types)],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
       skip_ffi_layout_processing=True,
@@ -246,6 +278,15 @@ def _tpu_sparse_dense_matmul_grad_with_adagrad_lowering(
   accumulator_tuple_op = utils.annotate_sparse_compute_type(
       accumulator_tuple_op
   )
+
+  if row_scale is not None:
+    row_scale_tuple_op = hlo.GetTupleElementOp(op[0], 2)
+    row_scale_tuple_op = utils.annotate_sparse_compute_type(row_scale_tuple_op)
+    return (
+        table_tuple_op.results,
+        row_scale_tuple_op.results,
+        accumulator_tuple_op.results,
+    )
 
   return (
       table_tuple_op.results,

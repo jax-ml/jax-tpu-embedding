@@ -82,6 +82,13 @@ def maybe_clip_params(
 
 
 def ensure_dtype(check: Any, expected_type: Any, object_name: str):
+  if isinstance(expected_type, tuple):
+    if check.dtype not in expected_type:
+      raise ValueError(
+          f"{object_name} must have type in {expected_type!r}, got"
+          f" {check.dtype!r}"
+      )
+    return
   if check.dtype != expected_type:
     raise ValueError(
         f"{object_name} must have type {expected_type!r}, got {check.dtype!r}"
@@ -123,7 +130,7 @@ def validate_abstract_eval_params(
       np.int32,
       "num_minibatches_per_physical_sparse_core",
   )
-  ensure_dtype(embedding_table, np.float32, "embedding_table")
+  ensure_dtype(embedding_table, (np.float32, np.int16), "embedding_table")
   ensure_dtype(activations_grad, np.float32, "activations_grad")
   ensure_dim(lhs_row_pointers, 1, "lhs_row_pointers")
   ensure_dim(embedding_table, (1, 2), "embedding_table")
@@ -208,7 +215,7 @@ def get_row_type(val: ir.Value) -> ir.RankedTensorType:
   """
   tensor_type = ir.RankedTensorType(val.type)
   shape = [1] if tensor_type.rank == 1 else [1, tensor_type.get_dim_size(1)]
-  return ir.RankedTensorType.get(shape, tensor_type.element_type)
+  return ir.RankedTensorType.get(shape, ir.F32Type.get())
 
 
 def create_optimizer_update_func_op(

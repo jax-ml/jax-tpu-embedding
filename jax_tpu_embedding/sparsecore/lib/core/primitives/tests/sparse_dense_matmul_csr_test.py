@@ -557,6 +557,66 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         activations, expected_activations, rtol=1e-5, atol=1e-5
     )
 
+  def test_sc_emb_forward_pass_s16_row_scale(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    emb_size = 16
+    emb_table_f32 = (
+        np.array([[i for _ in range(emb_size)] for i in range(self.vocab_size)])
+        .reshape(self.vocab_size, emb_size)
+        .astype(np.float32)
+    )
+    row_max = np.max(np.abs(emb_table_f32), axis=-1, keepdims=True)
+    scale = (row_max + 1e-12) / 32767.0
+    q_weight = np.clip(
+        np.round(emb_table_f32 / scale), -32767.0, 32767.0
+    ).astype(np.int16)
+    row_scale = np.squeeze(scale, axis=-1).astype(np.float32)
+
+    q_weight_sharded = utils.shard_emb_table(
+        q_weight,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    row_scale_sharded = utils.shard_emb_table(
+        row_scale,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    emb_activations = self.tpu_sparse_dense_matmul_csr(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        1,  # num_minibatches_per_physical_sparse_core
+        q_weight_sharded[0],
+        row_scale_sharded[0],
+        device_batch_size=self.batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        quantization_config=None,
+        enable_minibatching=False,
+    )
+
+    expected_emb_activations = emb_table_f32[self.input_tensor.squeeze()]
+    np.testing.assert_allclose(
+        emb_activations, expected_emb_activations, rtol=1e-4, atol=1e-4
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

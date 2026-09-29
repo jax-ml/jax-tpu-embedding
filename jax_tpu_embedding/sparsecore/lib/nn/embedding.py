@@ -32,6 +32,7 @@ from absl import logging
 import einops
 from flax import struct
 import jax
+from jax.experimental import layout
 import jax.numpy as jnp
 from jax.typing import DTypeLike
 from jax_tpu_embedding.sparsecore.lib.core import pybind_input_preprocessing
@@ -1192,7 +1193,7 @@ def tpu_sparse_dense_matmul(
             sample_id,
             gain,
             num_minibatches,
-            embedding_variable.table,
+            *jax.tree.leaves(embedding_variable.table),
             device_batch_size=stacked_table.total_sample_count
             // global_device_count,
             max_ids_per_partition=stacked_table.max_ids_per_partition,
@@ -1482,6 +1483,13 @@ def tpu_sparse_dense_matmul_grad(
       dim_size = stack_table_spec.stack_embedding_dim
       num_slots = len(stack_table_spec.optimizer.slot_variables_initializers())
       num_hyperparams = len(hyper_params)
+      # The custom optimizer is applied per row, so each slot variable is seen
+      # as a single row with its own dtype, e.g. (1, dim) uint8 for a quantized
+      # slot or (1,) for a rank 1 (one value per row) slot.
+      slot_variable_avals = [
+          jax.ShapeDtypeStruct((1, *var.shape[1:]), var.dtype)
+          for var in flatten_variables[1:]
+      ]
       min_val, max_val = None, None
       if (
           embedding_var_limits is not None
@@ -1497,6 +1505,7 @@ def tpu_sparse_dense_matmul_grad(
             num_hyperparameters=num_hyperparams,
             min_value=min_val,
             max_value=max_val,
+            slot_variable_avals=slot_variable_avals,
         )
       elif stack_table_spec.optimizer.custom_computation_fn is not None:
         stablehlo_text = custom_optimizer_lowering.lower_to_stablehlo(
@@ -1506,6 +1515,7 @@ def tpu_sparse_dense_matmul_grad(
             num_hyperparameters=num_hyperparams,
             min_value=min_val,
             max_value=max_val,
+            slot_variable_avals=slot_variable_avals,
         )
       else:
         raise ValueError(
@@ -1663,16 +1673,40 @@ def _init_stacked_embedding_table(
   use_pmap = len(global_sharding.spec) == 3
 
   if not use_pmap:
+    # Slot variables may differ from the table in dtype (e.g. a quantized
+    # accumulator) and rank (e.g. a 1D per-row scale), so the partition spec and
+    # layout of each variable are derived from the shape of its shard.
+    rng_shard = jax.ShapeDtypeStruct(
+        (rng.shape[0] // num_global_shards, *rng.shape[1:]), rng.dtype
+    )
+    variable_shards = jax.eval_shape(init_func, rng_shard)
+
+    def _variable_spec(
+        variable_shard: jax.ShapeDtypeStruct,
+    ) -> jax.sharding.PartitionSpec:
+      if variable_shard.ndim == len(global_sharding.spec):
+        return global_sharding.spec
+      return P(sharding_axis)
+
+    def _variable_format(
+        variable_shard: jax.ShapeDtypeStruct,
+    ) -> jax.sharding.Sharding | layout.Format:
+      return utils.embedding_table_format_with_sharding(
+          jax.sharding.NamedSharding(
+              global_sharding.mesh, _variable_spec(variable_shard)
+          ),
+          dtype=variable_shard.dtype,
+          ndim=variable_shard.ndim,
+      )
+
     embedding_table = jax.jit(
         jax.shard_map(
             init_func,
             mesh=global_sharding.mesh,
             in_specs=P(sharding_axis),
-            out_specs=global_sharding.spec,
+            out_specs=jax.tree.map(_variable_spec, variable_shards),
         ),
-        out_shardings=utils.embedding_table_format(
-            global_sharding.mesh, global_sharding.spec
-        ),
+        out_shardings=jax.tree.map(_variable_format, variable_shards),
     )(
         rng,
     )

@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import jax
@@ -76,6 +76,51 @@ def apply_clipping(
   return val
 
 
+def _get_per_row_avals(
+    embedding_dim: int,
+    num_slot_variables: int,
+    num_hyperparameters: int,
+    slot_variable_avals: Sequence[Any] | None,
+) -> tuple[list[jax.core.ShapedArray], list[jax.core.ShapedArray]]:
+  """Returns the per-row input and output avals of a custom optimizer.
+
+  Args:
+    embedding_dim: Dimension of the embedding table.
+    num_slot_variables: Number of slot variables in the optimizer state.
+    num_hyperparameters: Number of hyperparameters passed to the optimizer.
+    slot_variable_avals: Optional per-row shapes and dtypes of the slot
+      variables. See `lower_to_stablehlo`.
+
+  Returns:
+    A tuple `(in_avals, out_avals)`, where `in_avals` are the avals of
+    `(gradient, table, *slot_variables, *hyperparameters)` and `out_avals` are
+    the avals of `(table, *slot_variables)`.
+  """
+  row_aval = jax.core.ShapedArray((1, embedding_dim), jnp.float32)
+  if slot_variable_avals is None:
+    slot_avals = [row_aval] * num_slot_variables
+  else:
+    if len(slot_variable_avals) != num_slot_variables:
+      raise ValueError(
+          f"Expected {num_slot_variables} slot variable avals, got"
+          f" {len(slot_variable_avals)}."
+      )
+    slot_avals = []
+    for i, slot_aval in enumerate(slot_variable_avals):
+      shape = tuple(slot_aval.shape)
+      if len(shape) not in (1, 2) or shape[0] != 1:
+        raise ValueError(
+            f"slot_variable_avals[{i}] must have shape (1,) or (1, dim), got"
+            f" {shape}."
+        )
+      slot_avals.append(jax.core.ShapedArray(shape, slot_aval.dtype))
+  in_avals = (
+      [row_aval, row_aval] + slot_avals + [row_aval] * num_hyperparameters
+  )
+  out_avals = [row_aval] + slot_avals
+  return in_avals, out_avals
+
+
 def lower_to_stablehlo(
     custom_computation_fn: Callable[..., Any],
     embedding_dim: int = 1,
@@ -83,6 +128,7 @@ def lower_to_stablehlo(
     num_hyperparameters: int = 1,
     min_value: float | None = None,
     max_value: float | None = None,
+    slot_variable_avals: Sequence[Any] | None = None,
 ) -> str:
   """Traces and lowers a custom optimizer function into StableHLO text.
 
@@ -94,12 +140,23 @@ def lower_to_stablehlo(
     num_hyperparameters: Number of hyperparameters passed to the optimizer.
     min_value: Optional minimum value to clip the updated embedding table.
     max_value: Optional maximum value to clip the updated embedding table.
+    slot_variable_avals: Optional per-row shapes and dtypes (e.g.
+      `jax.ShapeDtypeStruct`s) of the slot variables, i.e. the shape of a single
+      row as seen by `custom_computation_fn`: `(1, slot_dim)` for 2D slot
+      variables and `(1,)` for 1D (one value per row) slot variables. If None,
+      every slot variable is traced as `(1, embedding_dim)` float32. The
+      gradient, embedding table and hyperparameters are always traced as `(1,
+      embedding_dim)` float32.
 
   Returns:
     A string containing the lowered StableHLO module text.
   """
-  aval = jax.core.ShapedArray((1, embedding_dim), jnp.float32)
-  in_avals = [aval] * (1 + 1 + num_slot_variables + num_hyperparameters)
+  in_avals, _ = _get_per_row_avals(
+      embedding_dim=embedding_dim,
+      num_slot_variables=num_slot_variables,
+      num_hyperparameters=num_hyperparameters,
+      slot_variable_avals=slot_variable_avals,
+  )
 
   fn_to_lower = custom_computation_fn
   if min_value is not None or max_value is not None:
@@ -126,6 +183,7 @@ def wrap_stablehlo_with_limits(
     num_hyperparameters: int,
     min_value: float | None = None,
     max_value: float | None = None,
+    slot_variable_avals: Sequence[Any] | None = None,
 ) -> str:
   """Wraps an existing StableHLO module in JAX and lowers again with limits.
 
@@ -136,6 +194,8 @@ def wrap_stablehlo_with_limits(
     num_hyperparameters: Number of hyperparameters passed to the optimizer.
     min_value: Optional minimum value to clip the updated embedding table.
     max_value: Optional maximum value to clip the updated embedding table.
+    slot_variable_avals: Optional per-row shapes and dtypes of the slot
+      variables. See `lower_to_stablehlo`.
 
   Returns:
     A string containing the wrapped and lowered StableHLO module text.
@@ -146,15 +206,18 @@ def wrap_stablehlo_with_limits(
   if min_value is None and max_value is None:
     return stablehlo_str
 
-  aval = jax.core.ShapedArray((1, embedding_dim), jnp.float32)
-  in_avals = [aval] * (1 + 1 + num_slot_variables + num_hyperparameters)
-  out_avals = tuple([aval] * (1 + num_slot_variables))
+  in_avals, out_avals = _get_per_row_avals(
+      embedding_dim=embedding_dim,
+      num_slot_variables=num_slot_variables,
+      num_hyperparameters=num_hyperparameters,
+      slot_variable_avals=slot_variable_avals,
+  )
 
   def _wrapped(*args):
     out = _call_stablehlo_p.bind(
         *args,
         stablehlo_str=stablehlo_str,
-        out_avals=out_avals,
+        out_avals=tuple(out_avals),
     )
     clipped_table = apply_clipping(out[0], min_value, max_value)
     return (clipped_table, *out[1:])

@@ -449,6 +449,93 @@ class EmbeddingTest(parameterized.TestCase):
             expected_len=len(devices),
         )
 
+  @parameterized.parameters(32, 128)
+  def test_init_embedding_variables_with_uint8_and_per_row_slots(
+      self, embedding_dim
+  ):
+    devices = jax.devices()
+    mesh = jax.sharding.Mesh(devices, "x")
+    global_sharding = sharding.NamedSharding(
+        mesh, sharding.PartitionSpec("x", None)
+    )
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    num_sparsecores = num_sc_per_device * len(devices)
+    rows_per_sparsecore = 16
+    vocab_size = rows_per_sparsecore * num_sparsecores
+
+    # Slot values depend on their position, so that a variable which is not
+    # laid out as its format says is caught.
+    def accumulator_initializer(key, shape, dtype=jnp.uint8):
+      del key
+      rows = jax.lax.broadcasted_iota(jnp.int32, shape, 0)
+      cols = jax.lax.broadcasted_iota(jnp.int32, shape, 1)
+      return ((rows * 7 + cols) % 251).astype(dtype)
+
+    def row_scale_initializer(key, shape, dtype=jnp.float32):
+      del key
+      return jnp.arange(1, shape[0] + 1, dtype=dtype)
+
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size,
+        embedding_dim=embedding_dim,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.CustomOptimizerSpec(
+            slot_variable_initializers_tuple=(
+                accumulator_initializer,
+                row_scale_initializer,
+            ),
+        ),
+        combiner="sum",
+        name="table_q",
+    )
+
+    embedding_variables = embedding.init_embedding_variables(
+        jax.random.PRNGKey(0),
+        [table_spec],
+        global_sharding=global_sharding,
+        num_sparsecore_per_device=num_sc_per_device,
+    )
+
+    table = embedding_variables["table_q"].table
+    accumulator, row_scale = embedding_variables["table_q"].slot
+    row_sharding = sharding.NamedSharding(mesh, sharding.PartitionSpec("x"))
+    self.assertEqual(table.dtype, jnp.float32)
+    self.assertEqual(table.shape, (vocab_size, embedding_dim))
+    # `format` is only defined on concrete arrays, not on `jax.Array`.
+    self.assertEqual(
+        table.format,  # pyrefly: ignore[missing-attribute]
+        utils.embedding_table_format_with_sharding(global_sharding),
+    )
+    self.assertEqual(accumulator.dtype, jnp.uint8)
+    self.assertEqual(accumulator.shape, (vocab_size, embedding_dim))
+    self.assertEqual(
+        accumulator.format,  # pyrefly: ignore[missing-attribute]
+        utils.embedding_table_format_with_sharding(
+            global_sharding, dtype=jnp.uint8
+        ),
+    )
+    self.assertEqual(row_scale.dtype, jnp.float32)
+    self.assertEqual(row_scale.shape, (vocab_size,))
+    self.assertEqual(
+        row_scale.format,  # pyrefly: ignore[missing-attribute]
+        utils.embedding_table_format_with_sharding(row_sharding, ndim=1),
+    )
+    # Every SparseCore shard of a slot is initialized with the same values.
+    np.testing.assert_array_equal(
+        accumulator,
+        np.tile(
+            accumulator_initializer(None, (rows_per_sparsecore, embedding_dim)),
+            (num_sparsecores, 1),
+        ),
+    )
+    np.testing.assert_array_equal(
+        row_scale,
+        np.tile(
+            row_scale_initializer(None, (rows_per_sparsecore, embedding_dim)),
+            num_sparsecores,
+        ),
+    )
+
   @parameterized.parameters(
       (embedding_spec.SGDOptimizerSpec()),
       (embedding_spec.AdagradOptimizerSpec(initial_accumulator_value=0.0)),

@@ -47,7 +47,6 @@ from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import stablehlo as hlo
 from jax.interpreters import mlir
 from jax.interpreters import xla
-import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
@@ -114,10 +113,17 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
           f"hyperparameters must be scalars or 1D of size 1, got {param.shape}"
       )
 
+  embedding_table = embedding_variables[0]
   for var in embedding_variables:
     if len(var.shape) not in (1, 2):
       raise ValueError(
           f"embedding variables must have rank 1 or 2, got {var.shape}"
+      )
+    if var.shape[0] != embedding_table.shape[0]:
+      raise ValueError(
+          "embedding variables must have the same leading (vocabulary)"
+          f" dimension as the embedding table, got {var.shape} and"
+          f" {embedding_table.shape}"
       )
   if not isinstance(stablehlo, (str, bytes, ir.Module)):
     raise ValueError(
@@ -125,11 +131,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
         f" {type(stablehlo)}"
     )
 
+  # Every embedding variable (the table and each slot variable) keeps its own
+  # shape and dtype, e.g. a quantized (uint8) slot or a per-row (rank 1) slot.
   return tuple(
-      core.ShapedArray(
-          var.shape,
-          dtype=jnp.float32,
-      )
+      core.ShapedArray(var.shape, dtype=var.dtype)
       for var in embedding_variables
   )
 
@@ -230,9 +235,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
 
   op = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[
-          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])
-      ],
+      result_types=[ir.TupleType.get_tuple([table.type for table in tables])],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
       skip_ffi_layout_processing=True,

@@ -580,6 +580,95 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         expected_embedding_table, actual_table_unsharded, atol=1e-5
     )
 
+  def test_sc_emb_backward_pass_with_adagrad_s16_row_scale(self):
+    emb_size = 16
+    input_tensor = np.array([[i] for i in range(16)], dtype=np.int32)
+    input_weights = np.array([[1.0] for _ in range(16)], dtype=np.float32)
+    global_devices = np.array([mock.create_autospec(jax.Device)])
+    mesh = jax.sharding.Mesh(global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        input_tensor,
+        input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    embedding_table = (
+        np.array(
+            [[(i + 1) for _ in range(emb_size)] for i in range(_VOCAB_SIZE)]
+        )
+        .reshape(_VOCAB_SIZE, emb_size)
+        .astype(np.float32)
+    )
+    row_max = np.max(np.abs(embedding_table), axis=-1, keepdims=True)
+    scale = (row_max + 1e-12) / 32767.0
+    q_weight = np.clip(
+        np.round(embedding_table / scale), -32767.0, 32767.0
+    ).astype(np.int16)
+    row_scale = np.squeeze(scale, axis=-1).astype(np.float32)
+
+    q_weight_sharded = self._shard_table(q_weight)
+    row_scale_sharded = self._shard_table(row_scale)
+
+    accumulator = jnp.full(embedding_table.shape, 0.002, np.float32)
+    accumulator_sharded = self._shard_table(np.asarray(accumulator))
+
+    learning_rate = np.float32(0.1)
+    activations_grad = jnp.full((_BATCH_SIZE, emb_size), 0.012, np.float32)
+
+    updated_q_weight, updated_row_scale, updated_accumulator = (
+        sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive.bind(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,  # num_minibatches_per_physical_sparse_core
+            q_weight_sharded[0],
+            row_scale_sharded[0],
+            accumulator_sharded[0],
+            activations_grad,
+            learning_rate,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            computation_name="optimizer_test_computation_s16",
+            sharding_strategy=1,
+        )
+    )
+
+    actual_q_weight_unsharded = self._unshard_table(
+        updated_q_weight[jnp.newaxis, :, :]
+    )
+    actual_row_scale_unsharded = self._unshard_table(
+        updated_row_scale[jnp.newaxis, :]
+    )
+    actual_accumulator_unsharded = self._unshard_table(
+        updated_accumulator[jnp.newaxis, :, :]
+    )
+    actual_table_f32 = (
+        actual_q_weight_unsharded.astype(np.float32)
+        * actual_row_scale_unsharded[:, np.newaxis]
+    )
+
+    dequant_init = q_weight.astype(np.float32) * row_scale[:, np.newaxis]
+    sparse_rows = np.unique(input_tensor.flatten())
+    expected_accumulator = np.array(accumulator, copy=True)
+    expected_table = np.array(dequant_init, copy=True)
+    expected_accumulator[sparse_rows, :] += 0.012 * 0.012
+    expected_table[sparse_rows, :] -= (learning_rate * 0.012) / np.sqrt(
+        expected_accumulator[sparse_rows, :]
+    )
+
+    np.testing.assert_allclose(
+        expected_accumulator, actual_accumulator_unsharded, atol=1e-5
+    )
+    np.testing.assert_allclose(expected_table, actual_table_f32, atol=1e-3)
+
 
 if __name__ == "__main__":
   absltest.main()

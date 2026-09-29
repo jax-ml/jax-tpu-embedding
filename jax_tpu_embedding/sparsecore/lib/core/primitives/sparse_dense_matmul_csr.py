@@ -51,7 +51,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
     lhs_gains: core.ShapedArray,
     num_minibatches_per_physical_sparse_core: core.ShapedArray,
     embedding_table: core.ShapedArray,
-    *,
+    *row_scales: core.ShapedArray,
     device_batch_size: int,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -80,6 +80,25 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       computation_name="fwd-pass",  # Not used in the forward pass.
       sharding_strategy=sharding_strategy,
   )
+
+  if row_scales:
+    if len(row_scales) > 1:
+      raise ValueError(
+          f"At most one row_scale tensor is supported, got {len(row_scales)}"
+      )
+    row_scale = row_scales[0]
+    utils.ensure_dtype(embedding_table, np.int16, "embedding_table")
+    utils.ensure_dtype(row_scale, np.float32, "row_scale")
+    utils.ensure_dim(row_scale, 1, "row_scale")
+    if row_scale.shape[0] != embedding_table.shape[0]:
+      raise ValueError(
+          "row_scale and embedding_table must have equal row counts, got"
+          f" {row_scale.shape} and {embedding_table.shape}"
+      )
+  elif embedding_table.dtype == np.int16:
+    raise ValueError(
+        "row_scale must be provided when embedding_table has dtype int16"
+    )
 
   if quantization_config is not None:
     quantization_min_value, quantization_max_value, quantization_num_buckets = (
@@ -119,7 +138,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     lhs_gains: ir.BlockArgument,
     num_minibatches_per_physical_sparse_core: ir.BlockArgument,
     embedding_table: ir.BlockArgument,
-    *,
+    *row_scales: ir.BlockArgument,
     device_batch_size: int,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
@@ -148,12 +167,17 @@ def _tpu_sparse_dense_matmul_csr_lowering(
         ]),
     )
 
-  sdmm_csr_config = {
+  sdmm_csr_config: dict[str, object] = {
       "max_ids_per_partition": max_ids_per_partition,
       "max_unique_ids_per_partition": max_unique_ids_per_partition,
       "sharding_strategy": sharding_strategy,
       "pad_value": constants.PADDING_VALUE,
   }
+  if row_scales:
+    sdmm_csr_config["storage_format"] = {
+        "element_type": "S16",
+        "scale_mode": "SCALE_MODE_ROW",
+    }
   # Add quantization params only when enabled
   if quantization_config is not None:
     q_min, q_max, q_buckets = quantization_config
@@ -185,6 +209,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
           embedding_table,
           activation_init,
       ]
+      + list(row_scales)
   )
 
   if enable_minibatching:  # Buffer contains minibatches
