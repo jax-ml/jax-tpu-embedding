@@ -14,7 +14,7 @@
 """Methods for table stacking."""
 
 import collections
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
 import hashlib
 import typing
 from typing import Callable, Sequence, TypeAlias, TypeVar
@@ -31,6 +31,7 @@ StackedTableSpec = embedding_spec.StackedTableSpec
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = Callable[[str, int], int]
+GroupKeyCallable: TypeAlias = Callable[[TableSpec], Hashable]
 ArrayLike: TypeAlias = jax.typing.ArrayLike
 _RowIdT = TypeVar("_RowIdT", int, jax.Array, np.ndarray)
 Shape: TypeAlias = tuple[int, ...]
@@ -146,6 +147,7 @@ def stack_and_shard_tables(
     tables: Nested[ArrayLike],
     num_shards: int,
     pad_value: ArrayLike = jnp.nan,
+    dtype: jax.typing.DTypeLike = jnp.float32,
 ) -> dict[str, Nested[jax.Array]]:
   """Stacks and shards tables for use in sparsecore lookups.
 
@@ -155,6 +157,7 @@ def stack_and_shard_tables(
       num_shards: Number of shards in the table (typically `global_device_count
         * num_sc_per_device`).
       pad_value: Value to use for padding.
+      dtype: Data type of the stacked tables (e.g. `jnp.bfloat16` for serving).
 
   Returns:
       A mapping of stacked table names to stacked table values.
@@ -197,7 +200,7 @@ def stack_and_shard_tables(
     stacked_table_tree = jax.tree.map(
         lambda _, sharded_vocab_size=sharded_vocab_size, stack_embedding_dim=stack_embedding_dim: jnp.zeros(
             shape=(num_shards, sharded_vocab_size, stack_embedding_dim),
-            dtype=jnp.float32,
+            dtype=dtype,
         ),
         table_map[table_specs[0].name],
     )
@@ -381,6 +384,7 @@ def round_up_dim_and_vocab_size(
 def _group_tables_for_stacking(
     num_sc: int,
     flatten_tables: Mapping[str, embedding_spec.TableSpec],
+    group_key_fn: GroupKeyCallable | None = None,
 ) -> list[list[str]]:
   """Groups table names by padded dimension, optimizer, combiner, and quantization_config."""
   table_to_padded_dim, _ = round_up_dim_and_vocab_size(flatten_tables, num_sc)
@@ -391,6 +395,7 @@ def _group_tables_for_stacking(
         flatten_tables[table_name].optimizer,
         flatten_tables[table_name].combiner,
         flatten_tables[table_name].quantization_config,
+        group_key_fn(flatten_tables[table_name]) if group_key_fn else None,
     )
     table_name_map[key].append(table_name)
   return list(table_name_map.values())
@@ -423,11 +428,12 @@ def _get_stack_table_names(
     flatten_tables: Mapping[str, embedding_spec.TableSpec],
     flatten_features: Sequence[embedding_spec.FeatureSpec],
     activation_mem_bytes_limit: int,
+    group_key_fn: GroupKeyCallable | None = None,
 ) -> Sequence[Sequence[str]]:
   """Returns the stack groups for the tables based on their specs."""
   original_table_names = set(flatten_tables.keys())
 
-  groups = _group_tables_for_stacking(num_sc, flatten_tables)
+  groups = _group_tables_for_stacking(num_sc, flatten_tables, group_key_fn)
 
   _, table_to_activation_mem_bytes = _calculate_activation_memory_metrics(
       num_sc, flatten_tables, flatten_features
@@ -904,6 +910,7 @@ def auto_stack_tables(
     *,
     use_short_stack_names: bool = True,
     activation_mem_bytes_limit: int | None = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT,
+    group_key_fn: GroupKeyCallable | None = None,
 ) -> None:
   """Creates new feature specs based on auto stacking logic.
 
@@ -928,6 +935,9 @@ def auto_stack_tables(
       of the table names.
     activation_mem_bytes_limit: If the activation memory usage is larger than
       this limit, the table will not be stacked. Default is 2 MiB.
+    group_key_fn: Optional function returning an additional grouping key for a
+      table. Tables with different keys are not stacked together (e.g. to keep
+      gather-only or bfloat16 serving tables apart).
   """
   if activation_mem_bytes_limit is None:
     activation_mem_bytes_limit = DEFAULT_ACTIVATION_MEM_BYTES_LIMIT
@@ -941,6 +951,7 @@ def auto_stack_tables(
       flatten_tables=flatten_tables,
       flatten_features=flatten_features,
       activation_mem_bytes_limit=activation_mem_bytes_limit,
+      group_key_fn=group_key_fn,
   )
 
   updated_features = features
@@ -1253,6 +1264,79 @@ def compute_physical_row_ids(
   shard_id = (row_ids % num_sparse_cores + shard_rotation) % num_sparse_cores
   sharded_row_id = row_ids // num_sparse_cores + row_offset_in_shard
   return shard_id * stack_shard_size + sharded_row_id
+
+
+def _keep_pad_value(
+    ids: jax.Array, transformed_ids: jax.Array, pad_value: int | None
+) -> jax.Array:
+  """Restores `pad_value` entries of `ids` in `transformed_ids`."""
+  if pad_value is None:
+    return transformed_ids
+  return jnp.where(ids == pad_value, ids, transformed_ids)
+
+
+def stack_coo_ids(
+    feature_specs: Nested[embedding_spec.FeatureSpec],
+    embedding_ids: Mapping[str, ArrayLike],
+    sample_ids: Mapping[str, ArrayLike] | None = None,
+    *,
+    num_sparse_cores: int = 1,
+    pad_value: int | None = None,
+) -> tuple[dict[str, jax.Array], dict[str, jax.Array] | None]:
+  """Maps per-feature COO ids to the ids of their stacked tables.
+
+  Unlike `preprocess_sparse_dense_matmul_input`, the ids are not partitioned
+  per SparseCore; this is meant for lookups on a whole (e.g. replicated
+  serving) stacked table. Features of a stack are concatenated in `row_offset`
+  order, so the stacked activations can be split with
+  `unstack_embedding_activations(..., global_device_count=1,
+  num_sc_per_device=1)`.
+
+  Args:
+    feature_specs: Stacked feature specs, e.g. after `auto_stack_tables`.
+    embedding_ids: Flat embedding ids of each feature, keyed by feature name.
+      Ids must be in `[0, vocabulary_size)`; out-of-range ids map into other
+      tables of the stack.
+    sample_ids: Flat sample ids of each feature, keyed by feature name. Omit for
+      gather-only lookups.
+    num_sparse_cores: The number of SparseCores the stacked tables were sharded
+      for. Use 1 for unsharded stacked tables.
+    pad_value: Optional padding id, left unchanged in embedding and sample ids.
+      Must not be a valid embedding or sample id.
+
+  Returns:
+    A tuple of mappings of stacked table names to stacked embedding ids and to
+    stacked sample ids (`None` if `sample_ids` is not given).
+  """
+  stacks = collections.defaultdict(list)
+  for feature in jax.tree.leaves(feature_specs):
+    stacks[feature.table_spec.stacked_table_spec.stack_name].append(feature)
+
+  stacked_embedding_ids = {}
+  stacked_sample_ids = {} if sample_ids is not None else None
+  for stack_name, features in stacks.items():
+    features.sort(key=lambda f: f.id_transformation.row_offset)
+    stack_embedding_ids = []
+    stack_sample_ids = []
+    for feature in features:
+      table_spec = feature.table_spec
+      ids = jnp.ravel(jnp.asarray(embedding_ids[feature.name]))
+      physical_ids = compute_physical_row_ids(
+          num_sparse_cores,
+          table_spec.stacked_table_spec.stack_vocab_size,
+          table_spec.setting_in_stack.shard_rotation,
+          table_spec.setting_in_stack.row_offset_in_shard,
+          ids,
+      )
+      stack_embedding_ids.append(_keep_pad_value(ids, physical_ids, pad_value))
+      if sample_ids is not None:
+        ids = jnp.ravel(jnp.asarray(sample_ids[feature.name]))
+        offset_ids = ids + feature.id_transformation.row_offset
+        stack_sample_ids.append(_keep_pad_value(ids, offset_ids, pad_value))
+    stacked_embedding_ids[stack_name] = jnp.concatenate(stack_embedding_ids)
+    if stacked_sample_ids is not None:
+      stacked_sample_ids[stack_name] = jnp.concatenate(stack_sample_ids)
+  return stacked_embedding_ids, stacked_sample_ids
 
 
 def get_row_ids_in_stacked_table(

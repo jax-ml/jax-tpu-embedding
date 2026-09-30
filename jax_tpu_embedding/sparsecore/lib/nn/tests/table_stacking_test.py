@@ -1837,5 +1837,123 @@ class TableStackingTest(parameterized.TestCase):
       )
 
 
+class ServingStackingTest(parameterized.TestCase):
+
+  def _feature_specs(self, vocab_sizes, batch_size=2, embedding_dim=4):
+    return [
+        embedding_spec.FeatureSpec(
+            table_spec=embedding_spec.TableSpec(
+                vocabulary_size=vocab_size,
+                embedding_dim=embedding_dim,
+                initializer=jax.nn.initializers.zeros,
+                optimizer=embedding_spec.SGDOptimizerSpec(),
+                combiner='sum',
+                name=name,
+            ),
+            input_shape=(batch_size, 1),
+            output_shape=(batch_size, embedding_dim),
+            name=name,
+        )
+        for name, vocab_size in vocab_sizes.items()
+    ]
+
+  def test_auto_stack_tables_with_group_key_fn(self):
+    feature_specs = self._feature_specs(
+        {'table_a': 5, 'table_b': 10, 'table_c': 6}
+    )
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=1,
+        num_sc_per_device=1,
+        group_key_fn=lambda table_spec: table_spec.name == 'table_c',
+    )
+    self.assertEqual(
+        [f.table_spec.setting_in_stack.stack_name for f in feature_specs],
+        ['table_a_table_b', 'table_a_table_b', 'table_c'],
+    )
+
+  def test_stack_coo_ids(self):
+    pad = 2**31 - 1
+    feature_specs = self._feature_specs({'table_a': 5, 'table_b': 10})
+    table_stacking.auto_stack_tables(
+        feature_specs, global_device_count=1, num_sc_per_device=1
+    )
+    # Unsharded stack: table_b starts at row 8 and at sample 2.
+    embedding_ids, sample_ids = table_stacking.stack_coo_ids(
+        feature_specs,
+        {'table_a': jnp.array([1, 2, pad]), 'table_b': jnp.array([3, 4, 5])},
+        {'table_a': jnp.array([0, 1, pad]), 'table_b': jnp.array([1, 1, 0])},
+        pad_value=pad,
+    )
+    chex.assert_trees_all_equal(
+        embedding_ids, {'table_a_table_b': jnp.array([1, 2, pad, 11, 12, 13])}
+    )
+    chex.assert_trees_all_equal(
+        sample_ids, {'table_a_table_b': jnp.array([0, 1, pad, 3, 3, 2])}
+    )
+
+  @parameterized.parameters(1, 4)
+  def test_stack_coo_ids_matches_stacked_table(self, num_sc):
+    feature_specs = self._feature_specs({'table_a': 5, 'table_b': 10})
+    table_stacking.auto_stack_tables(
+        feature_specs, global_device_count=1, num_sc_per_device=num_sc
+    )
+    table_specs = {f.name: f.table_spec for f in feature_specs}
+    tables = {
+        'table_a': jnp.arange(20, dtype=jnp.float32).reshape(5, 4),
+        'table_b': jnp.arange(100, 140, dtype=jnp.float32).reshape(10, 4),
+    }
+    stacked = jnp.asarray(
+        table_stacking.stack_and_shard_tables(
+            table_specs, tables, num_shards=num_sc, pad_value=0
+        )['table_a_table_b']
+    ).reshape(-1, 8)
+    embedding_ids, _ = jax.jit(
+        lambda ids: table_stacking.stack_coo_ids(
+            feature_specs, ids, num_sparse_cores=num_sc
+        )
+    )({'table_a': jnp.arange(5), 'table_b': jnp.arange(10)})
+    chex.assert_trees_all_equal(
+        stacked[embedding_ids['table_a_table_b'], :4],
+        jnp.concatenate([tables['table_a'], tables['table_b']]),
+    )
+
+  def test_stack_coo_ids_gather_only(self):
+    feature_specs = self._feature_specs({'table_a': 5, 'table_b': 10})
+    table_stacking.auto_stack_tables(
+        feature_specs, global_device_count=1, num_sc_per_device=1
+    )
+    embedding_ids, sample_ids = table_stacking.stack_coo_ids(
+        feature_specs,
+        {'table_a': jnp.array([[4], [0]]), 'table_b': jnp.array([[9], [1]])},
+    )
+    chex.assert_trees_all_equal(
+        embedding_ids, {'table_a_table_b': jnp.array([4, 0, 17, 9])}
+    )
+    self.assertIsNone(sample_ids)
+
+  def test_stack_and_shard_tables_dtype(self):
+    feature_specs = self._feature_specs({'table_a': 5, 'table_b': 10})
+    table_stacking.auto_stack_tables(
+        feature_specs, global_device_count=1, num_sc_per_device=1
+    )
+    table_specs = {f.name: f.table_spec for f in feature_specs}
+    tables = {
+        'table_a': jnp.ones((5, 4), dtype=jnp.bfloat16),
+        'table_b': jnp.full((10, 4), 2, dtype=jnp.bfloat16),
+    }
+    stacked = jnp.asarray(
+        table_stacking.stack_and_shard_tables(
+            table_specs, tables, num_shards=1, pad_value=0, dtype=jnp.bfloat16
+        )['table_a_table_b']
+    )
+    self.assertEqual(stacked.dtype, jnp.bfloat16)
+    expected = jnp.concatenate([
+        jnp.pad(tables['table_a'], ((0, 3), (0, 4))),
+        jnp.pad(tables['table_b'], ((0, 6), (0, 4))),
+    ])
+    chex.assert_trees_all_equal(stacked.reshape(-1, 8), expected)
+
+
 if __name__ == '__main__':
   absltest.main()
