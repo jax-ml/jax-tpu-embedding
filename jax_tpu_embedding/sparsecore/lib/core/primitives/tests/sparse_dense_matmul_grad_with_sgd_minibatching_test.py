@@ -35,19 +35,12 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     self.num_chips = 1
     self.vocab_size = 32
-    self.emb_size = 8
 
     # This is to shape the gradient tensor for backward pass.
     # The dimension needs to be the same for all test cases to avoid
     # recompilation.
     self.max_device_batch_size = 32
 
-    # Define the embedding table.
-    # Embedding table where row i is initialized to i.
-    self.emb_table = np.tile(
-        np.arange(self.vocab_size, dtype=np.float32)[:, np.newaxis],
-        (1, self.emb_size),
-    )
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
     self.num_sc_per_device = utils.num_sparsecores_per_device()
@@ -56,16 +49,27 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         num_devices=len(self.global_devices),
         num_sc_per_device=self.num_sc_per_device,
     )
-    # Shard the embedding table.
-    self.emb_table_sharded = self._shard_table(self.emb_table)
-    logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
 
     self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching = jax.named_call(
         sparse_dense_matmul_grad_with_sgd.tpu_sparse_dense_matmul_grad_with_sgd_primitive.bind,
         name="tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching",
     )
 
-  def test_sc_emb_backward_pass(self):
+  def _make_emb_table(self, emb_size: int) -> np.ndarray:
+    """Returns a [vocab_size, emb_size] table where row i is initialized to i."""
+    return np.tile(
+        np.arange(self.vocab_size, dtype=np.float32)[:, np.newaxis],
+        (1, emb_size),
+    )
+
+  @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="dim_8", emb_size=8),
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_21", emb_size=21),
+  )
+  def test_sc_emb_backward_pass(self, emb_size: int):
     # Arrange
     input_tensor = np.array(
         [
@@ -106,14 +110,17 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
+    emb_table = self._make_emb_table(emb_size)
+    emb_table_sharded = self._shard_table(emb_table)
+
     z_grad = jnp.full(
         (
             # The gradient is padded to max_device_batch_size, no matter how
             # many rows are actually used.
-            # This is to make sure we don't have different gradient dimensions
+            # This is to make sure we don't have different batch dimensions
             # among test cases to avoid recompilation.
             self.max_device_batch_size,
-            self.emb_size,
+            emb_size,
         ),
         1.0,
         np.float32,
@@ -123,22 +130,22 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     # Act
     # Do the embedding update.
-    updated_emb_table = (
-        self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
-            lhs_row_pointers,
-            lhs_local_embedding_ids,
-            lhs_local_sample_ids,
-            lhs_gains,
-            num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
-            z_grad,
-            0.1,  # learning_rate
-            max_ids_per_partition=16,
-            max_unique_ids_per_partition=16,
-            computation_name="sgd_test_computation",
-            sharding_strategy=1,
-            enable_minibatching=True,
-        )
+    updated_emb_table = self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        num_minibatches_per_physical_sparse_core,
+        emb_table_sharded[0],
+        z_grad,
+        0.1,  # learning_rate
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        # The name must be unique per embedding dimension: the shapes of
+        # the computation differ between test cases.
+        computation_name=f"sgd_test_computation_dim_{emb_size}",
+        sharding_strategy=1,
+        enable_minibatching=True,
     )
 
     logging.debug("updated_emb_table: %s", updated_emb_table)
@@ -152,7 +159,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
     # Compute the expected results on CPU while the primitive runs on TPU.
     # The optimizer only applies a sparse update: only rows involved in the
     # forward pass are updated.
-    expected_unsharded = self.emb_table.copy()
+    expected_unsharded = emb_table.copy()
     updated_rows = np.unique(input_tensor.flatten())
     expected_unsharded[updated_rows, :] -= 0.1
 
@@ -161,18 +168,48 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
     )
 
   @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
       dict(
-          testcase_name="no_clipping",
+          testcase_name="no_clipping_dim_8",
           min_value=None,
           max_value=None,
+          emb_size=8,
       ),
       dict(
-          testcase_name="clipping",
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
           min_value=2.0,
           max_value=12.0,
+          emb_size=8,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=21,
       ),
   )
-  def test_sc_emb_backward_pass_2_batches_per_core(self, min_value, max_value):
+  def test_sc_emb_backward_pass_2_batches_per_core(
+      self, min_value, max_value, emb_size: int
+  ):
     # Arrange
     # fmt: off
     mb0_feat = [
@@ -211,6 +248,9 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
+    emb_table = self._make_emb_table(emb_size)
+    emb_table_sharded = self._shard_table(emb_table)
+
     z_grad = jnp.full(
         (
             # The gradient is padded to max_device_batch_size, no matter how
@@ -218,7 +258,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
             # This is to make sure we don't have different gradient dimensions
             # among test cases to avoid recompilation.
             self.max_device_batch_size,
-            self.emb_size,
+            emb_size,
         ),
         1.0,
         np.float32,
@@ -228,24 +268,24 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     # Act
     # Do the embedding update.
-    updated_emb_table = (
-        self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
-            lhs_row_pointers,
-            lhs_local_embedding_ids,
-            lhs_local_sample_ids,
-            lhs_gains,
-            num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
-            z_grad,
-            0.1,  # learning_rate
-            max_ids_per_partition=16,
-            max_unique_ids_per_partition=16,
-            computation_name="sgd_test_computation",
-            sharding_strategy=1,
-            enable_minibatching=True,
-            min_value=min_value,
-            max_value=max_value,
-        )
+    updated_emb_table = self.tpu_sparse_dense_matmul_grad_with_sgd_with_mini_batching(
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+        num_minibatches_per_physical_sparse_core,
+        emb_table_sharded[0],
+        z_grad,
+        0.1,  # learning_rate
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        # The name must be unique per embedding dimension: the shapes of
+        # the computation differ between test cases.
+        computation_name=f"sgd_test_computation_dim_{emb_size}",
+        sharding_strategy=1,
+        enable_minibatching=True,
+        min_value=min_value,
+        max_value=max_value,
     )
 
     logging.debug("updated_emb_table: %s", updated_emb_table)
@@ -259,7 +299,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
     # Compute the expected results on CPU while the primitive runs on TPU.
     # The optimizer only applies a sparse update: only rows involved in the
     # forward pass are updated.
-    expected_unsharded = self.emb_table.copy()
+    expected_unsharded = emb_table.copy()
     # Note that the expected updates are twice as large as the 1 batch case, for
     # we have 2 input samples for each embedding id.
     # For embedding id 0-15,

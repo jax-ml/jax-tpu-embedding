@@ -57,14 +57,6 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     )
     self.input_weights = np.ones_like(self.input_tensor, np.float32)
 
-    # Define the embedding table.
-    self.emb_table = (
-        np.array(
-            [[i for _ in range(self.emb_size)] for i in range(self.vocab_size)]
-        )
-        .reshape(self.vocab_size, self.emb_size)
-        .astype(np.float32)
-    )
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
     self.z_init = jnp.full(
@@ -79,6 +71,13 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     self.tpu_sparse_dense_matmul_grad_with_optimizer = jax.named_call(
         sparse_dense_matmul_optimizer_grad.tpu_sparse_dense_matmul_optimizer_grad_primitive.bind,
         name="tpu_sparse_dense_matmul_grad_with_optimizer",
+    )
+
+  def _make_emb_table(self, emb_size: int) -> np.ndarray:
+    """Returns a [vocab_size, emb_size] table where row i is filled with i."""
+    return np.tile(
+        np.arange(self.vocab_size, dtype=np.float32)[:, np.newaxis],
+        (1, emb_size),
     )
 
   def _get_expected_updated_table(
@@ -143,10 +142,14 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
       return updated_table_sharded[0]
 
   @parameterized.named_parameters(
-      dict(testcase_name="2d", is_dim1=False),
-      dict(testcase_name="dim1", is_dim1=True),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="2d_dim_8", is_dim1=False, emb_size=8),
+      dict(testcase_name="2d_dim_5", is_dim1=False, emb_size=5),
+      dict(testcase_name="2d_dim_21", is_dim1=False, emb_size=21),
+      dict(testcase_name="dim1", is_dim1=True, emb_size=1),
   )
-  def test_sc_emb_backward_pass_with_sgd(self, is_dim1: bool):
+  def test_sc_emb_backward_pass_with_sgd(self, is_dim1: bool, emb_size: int):
     if is_dim1:
       input_tensor = np.array(
           [[i % self.vocab_size] for i in range(32)],
@@ -163,15 +166,15 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     else:
       input_tensor = self.input_tensor
       input_weights = self.input_weights
-      emb_table = self.emb_table
+      emb_table = self._make_emb_table(emb_size)
       z_grad = jnp.full(
-          (self.batch_size // self.num_chips, self.emb_size),
+          (self.batch_size // self.num_chips, emb_size),
           0.01,
           np.float32,
       )
-      grad_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      table_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      lr_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
+      grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
       max_unique_ids = 16
       expected_input_weights = input_weights
 
@@ -223,7 +226,7 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
         stablehlo=stablehlo,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=max_unique_ids,
-        computation_name="optimizer_test_computation",
+        computation_name=f"optimizer_test_computation_dim_{emb_size}",
         sharding_strategy=1,
     )
 
@@ -238,10 +241,16 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     np.testing.assert_allclose(updated_emb_table, expected_updated_emb_table)
 
   @parameterized.named_parameters(
-      dict(testcase_name="2d", is_dim1=False),
-      dict(testcase_name="dim1", is_dim1=True),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="2d_dim_8", is_dim1=False, emb_size=8),
+      dict(testcase_name="2d_dim_5", is_dim1=False, emb_size=5),
+      dict(testcase_name="2d_dim_21", is_dim1=False, emb_size=21),
+      dict(testcase_name="dim1", is_dim1=True, emb_size=1),
   )
-  def test_sc_emb_backward_pass_with_adagrad(self, is_dim1: bool):
+  def test_sc_emb_backward_pass_with_adagrad(
+      self, is_dim1: bool, emb_size: int
+  ):
     if is_dim1:
       input_tensor = np.array(
           [[i % self.vocab_size] for i in range(32)],
@@ -259,16 +268,16 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     else:
       input_tensor = self.input_tensor
       input_weights = self.input_weights
-      emb_table = self.emb_table
+      emb_table = self._make_emb_table(emb_size)
       z_grad = jnp.full(
-          (self.batch_size // self.num_chips, self.emb_size),
+          (self.batch_size // self.num_chips, emb_size),
           0.01,
           np.float32,
       )
-      grad_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      table_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      accum_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      lr_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
+      grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      accum_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
       max_unique_ids = 16
       expected_input_weights = input_weights
 
@@ -325,7 +334,7 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
             stablehlo=stablehlo,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=max_unique_ids,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
         )
     )
@@ -344,7 +353,14 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     np.testing.assert_allclose(updated_table, expected_updated_table)
     np.testing.assert_allclose(updated_accumulator, expected_updated_accum)
 
-  def test_sc_emb_backward_pass_with_ftrl(self):
+  @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="dim_8", emb_size=8),
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_21", emb_size=21),
+  )
+  def test_sc_emb_backward_pass_with_ftrl(self, emb_size: int):
     mesh = jax.sharding.Mesh(self.global_devices, "x")
     (
         lhs_row_pointers,
@@ -360,8 +376,9 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
 
+    emb_table = self._make_emb_table(emb_size)
     emb_table_sharded = utils.shard_emb_table(
-        self.emb_table,
+        emb_table,
         num_devices=len(self.global_devices),
         num_sc_per_device=self.num_sc_per_device,
     )
@@ -369,7 +386,7 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     z_grad = jnp.full(
         (
             self.batch_size // self.num_chips,
-            self.emb_size,
+            emb_size,
         ),
         0.01,
         np.float32,
@@ -400,7 +417,6 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
 
       return w_new, a_new, new_linear
 
-    emb_size = self.emb_size
     grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     accum_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
@@ -442,16 +458,16 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
             stablehlo=stablehlo,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
         )
     )
 
-    global_accum_init = jnp.full_like(self.emb_table, 0.1, np.float32)
-    global_linear_init = jnp.full_like(self.emb_table, 0.01, np.float32)
+    global_accum_init = jnp.full_like(emb_table, 0.1, np.float32)
+    global_linear_init = jnp.full_like(emb_table, 0.01, np.float32)
     expected_updated_table, expected_updated_accum, expected_updated_linear = (
         self._get_expected_updated_table(
-            self.emb_table,
+            emb_table,
             z_grad,
             self.input_tensor,
             self.input_weights,
@@ -466,10 +482,14 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     np.testing.assert_allclose(updated_linear, expected_updated_linear)
 
   @parameterized.named_parameters(
-      dict(testcase_name="2d", is_dim1=False),
-      dict(testcase_name="dim1", is_dim1=True),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="2d_dim_8", is_dim1=False, emb_size=8),
+      dict(testcase_name="2d_dim_5", is_dim1=False, emb_size=5),
+      dict(testcase_name="2d_dim_21", is_dim1=False, emb_size=21),
+      dict(testcase_name="dim1", is_dim1=True, emb_size=1),
   )
-  def test_sc_emb_backward_pass_with_adam(self, is_dim1: bool):
+  def test_sc_emb_backward_pass_with_adam(self, is_dim1: bool, emb_size: int):
     if is_dim1:
       input_tensor = np.array(
           [[i % self.vocab_size] for i in range(32)],
@@ -491,20 +511,20 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     else:
       input_tensor = self.input_tensor
       input_weights = self.input_weights
-      emb_table = self.emb_table
+      emb_table = self._make_emb_table(emb_size)
       z_grad = jnp.full(
-          (self.batch_size // self.num_chips, self.emb_size),
+          (self.batch_size // self.num_chips, emb_size),
           0.01,
           np.float32,
       )
-      grad_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      table_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      m_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      v_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      alpha_t_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      beta_1_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      beta_2_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
-      epsilon_hat_aval = jax.ShapeDtypeStruct((1, self.emb_size), jnp.float32)
+      grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      m_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      v_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      alpha_t_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      beta_1_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      beta_2_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
+      epsilon_hat_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
       max_unique_ids = 16
       expected_input_weights = input_weights
 
@@ -579,7 +599,7 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
             stablehlo=stablehlo,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=max_unique_ids,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
         )
     )
@@ -601,7 +621,14 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     np.testing.assert_allclose(updated_momentum, expected_updated_m)
     np.testing.assert_allclose(updated_velocity, expected_updated_v)
 
-  def test_sc_emb_backward_pass_with_clipping(self):
+  @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="dim_8", emb_size=8),
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_21", emb_size=21),
+  )
+  def test_sc_emb_backward_pass_with_clipping(self, emb_size: int):
     mesh = jax.sharding.Mesh(self.global_devices, "x")
     (
         lhs_row_pointers,
@@ -617,8 +644,9 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
 
+    emb_table = self._make_emb_table(emb_size)
     emb_table_sharded = utils.shard_emb_table(
-        self.emb_table,
+        emb_table,
         num_devices=len(self.global_devices),
         num_sc_per_device=self.num_sc_per_device,
     )
@@ -626,7 +654,7 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     z_grad = jnp.full(
         (
             self.batch_size // self.num_chips,
-            self.emb_size,
+            emb_size,
         ),
         10.0,
         np.float32,
@@ -637,7 +665,6 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
     def sgd_jax(grad, table, lr):
       return table - lr * grad
 
-    emb_size = self.emb_size
     grad_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     table_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
     lr_aval = jax.ShapeDtypeStruct((1, emb_size), jnp.float32)
@@ -667,12 +694,12 @@ class SparseDenseMatmulGradWithOptimizerTest(parameterized.TestCase):
         stablehlo=stablehlo,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        computation_name="optimizer_test_computation",
+        computation_name=f"optimizer_test_computation_dim_{emb_size}",
         sharding_strategy=1,
     )
 
     expected_updated_emb_table = self._get_expected_updated_table(
-        self.emb_table,
+        emb_table,
         z_grad,
         self.input_tensor,
         self.input_weights,

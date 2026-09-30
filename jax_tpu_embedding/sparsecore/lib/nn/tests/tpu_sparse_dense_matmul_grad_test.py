@@ -67,37 +67,45 @@ class LinearLearningRateSchedule:
 
 class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
-  @override
-  def setUp(self):
-    super().setUp()
+  def _init_specs(self, emb_dim: int | None = None) -> None:
+    """(Re)initializes the table and feature specs.
+
+    Args:
+      emb_dim: If set, the embedding dim of all the tables. Otherwise, each
+        table uses its default embedding dim (`_DIM_A`, ..., `_DIM_D`).
+    """
+    if emb_dim is None:
+      dim_a, dim_b, dim_c, dim_d = _DIM_A, _DIM_B, _DIM_C, _DIM_D
+    else:
+      dim_a = dim_b = dim_c = dim_d = emb_dim
     self.table_spec_a = embedding_spec.TableSpec(
         vocabulary_size=_VOC_A,
-        embedding_dim=_DIM_A,
-        initializer=lambda *_: jnp.zeros((_VOC_A, _DIM_A), dtype=jnp.float32),
+        embedding_dim=dim_a,
+        initializer=lambda *_: jnp.zeros((_VOC_A, dim_a), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_a",
     )
     self.table_spec_b = embedding_spec.TableSpec(
         vocabulary_size=_VOC_B,
-        embedding_dim=_DIM_B,
-        initializer=lambda *_: jnp.zeros((_VOC_B, _DIM_B), dtype=jnp.float32),
+        embedding_dim=dim_b,
+        initializer=lambda *_: jnp.zeros((_VOC_B, dim_b), dtype=jnp.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_b",
     )
     self.table_spec_c = embedding_spec.TableSpec(
         vocabulary_size=_VOC_C,
-        embedding_dim=_DIM_C,
-        initializer=lambda *_: jnp.zeros((_VOC_C, _DIM_C), dtype=jnp.float32),
+        embedding_dim=dim_c,
+        initializer=lambda *_: jnp.zeros((_VOC_C, dim_c), dtype=jnp.float32),
         optimizer=embedding_spec.AdagradOptimizerSpec(learning_rate=0.01),
         combiner="sum",
         name="table_c",
     )
     self.table_spec_d = embedding_spec.TableSpec(
         vocabulary_size=_VOC_D,
-        embedding_dim=_DIM_D,
-        initializer=lambda *_: jnp.zeros((_VOC_D, _DIM_D), dtype=jnp.float32),
+        embedding_dim=dim_d,
+        initializer=lambda *_: jnp.zeros((_VOC_D, dim_d), dtype=jnp.float32),
         optimizer=embedding_spec.F2AOptimizerSpec(
             learning_rate=0.01,
             rho=0.5,
@@ -146,6 +154,11 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ),
         name="feature_spec_d",
     )
+
+  @override
+  def setUp(self):
+    super().setUp()
+    self._init_specs()
     self.input_tensor = np.array(
         [
             np.array([5, 4, 2], dtype=np.int32),
@@ -231,12 +244,43 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         dtype=np.int32,
     )
 
-  @parameterized.product(
-      use_gradient_stacking_primitive=[False, True],
+  @parameterized.named_parameters(
+      # The default dims are padded up to a multiple of 8 floats, whereas the
+      # dims below are left unpadded so that the SparseCore kernel sees them.
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="default_dims",
+          use_gradient_stacking_primitive=False,
+          emb_dim=None,
+      ),
+      dict(
+          testcase_name="dim_5",
+          use_gradient_stacking_primitive=False,
+          emb_dim=5,
+      ),
+      dict(
+          testcase_name="dim_21",
+          use_gradient_stacking_primitive=False,
+          emb_dim=21,
+      ),
+      dict(
+          testcase_name="gradient_stacking_default_dims",
+          use_gradient_stacking_primitive=True,
+          emb_dim=None,
+      ),
+      # TODO: b/435182316 - Add gradient stacking cases with dims 5 and 21 once
+      # EmbeddingDataFormattingDecomposer supports embedding dims that are not
+      # a multiple of the HBM word size.
   )
   def test_sparse_dense_matmul_one_chip_unsharded(
-      self, use_gradient_stacking_primitive
+      self, use_gradient_stacking_primitive, emb_dim: int | None
   ):
+    self._init_specs(emb_dim)
+    dim_a = self.table_spec_a.embedding_dim
+    dim_b = self.table_spec_b.embedding_dim
+    dim_c = self.table_spec_c.embedding_dim
+    dim_d = self.table_spec_d.embedding_dim
     devices = jax.devices()[:1]
     mesh = jax.sharding.Mesh(devices, "x")
     feature_specs = {
@@ -249,6 +293,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs,
         num_sc_per_device=4,
         global_device_count=len(devices),
+        pad_embedding_dim=emb_dim is None,
     )
     batch_number = 42
     preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
@@ -267,7 +312,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         batch_number=batch_number,
     )
 
-    table_dim_a = table_stacking._next_largest_multiple(_DIM_A, 8)
+    table_dim_a = self.table_spec_a.setting_in_stack.padded_embedding_dim
     emb_table_a = (
         np.array([[i for _ in range(table_dim_a)] for i in range(_VOC_A)])
         .reshape(_VOC_A, table_dim_a)
@@ -296,7 +341,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ),
     )
 
-    table_dim_b = table_stacking._next_largest_multiple(_DIM_B, 8)
+    table_dim_b = self.table_spec_b.setting_in_stack.padded_embedding_dim
     emb_table_b = (
         np.array([[i for _ in range(table_dim_b)] for i in range(_VOC_B)])
         .reshape(_VOC_B, table_dim_b)
@@ -320,7 +365,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             arrays=emb_table_b_devices,
         ),
     )
-    table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
+    table_dim_c = self.table_spec_c.setting_in_stack.padded_embedding_dim
     emb_table_c = (
         np.array([[i for _ in range(table_dim_c)] for i in range(_VOC_C)])
         .reshape(_VOC_C, table_dim_c)
@@ -360,7 +405,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ),
     )
 
-    table_dim_d = table_stacking._next_largest_multiple(_DIM_D, 8)
+    table_dim_d = self.table_spec_d.setting_in_stack.padded_embedding_dim
     emb_table_d = (
         np.array([[i for _ in range(table_dim_d)] for i in range(_VOC_D)])
         .reshape(_VOC_D, table_dim_d)
@@ -419,19 +464,19 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_A),
+        (_BATCH_SIZE, dim_a),
         dtype=jnp.float32,
     )
     activations_grad["feature_spec_b"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_B),
+        (_BATCH_SIZE, dim_b),
         dtype=jnp.float32,
     )
     activations_grad["feature_spec_c"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_C),
+        (_BATCH_SIZE, dim_c),
         dtype=jnp.float32,
     )
     activations_grad["feature_spec_d"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_D),
+        (_BATCH_SIZE, dim_d),
         dtype=jnp.float32,
     )
     kwargs = {}
@@ -451,8 +496,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         preprocessed_inputs,
         embedding_variables,
     )
-    expected_grad_table_a = np.zeros((_VOC_A, _DIM_A), dtype=np.float32)
-    expected_grad_table_b = np.zeros((_VOC_B, _DIM_B), dtype=np.float32)
+    expected_grad_table_a = np.zeros((_VOC_A, dim_a), dtype=np.float32)
+    expected_grad_table_b = np.zeros((_VOC_B, dim_b), dtype=np.float32)
 
     # Generate the expected updates.
     # For each col ID, we subtract 0.01 (the learning rate) times the number of
@@ -461,7 +506,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       col_id = array[0]
       new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
       expected_grad_table_a[i] = np.full(
-          (1, _DIM_A), new_col_id, dtype=np.float32
+          (1, dim_a), new_col_id, dtype=np.float32
       )
 
     for i, array in enumerate(embedding_variables["table_b"][0]):
@@ -470,176 +515,176 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
           count_num(self.input_tensor_table_b, col_id) * 0.01
       )
       expected_grad_table_b[i] = np.full(
-          (1, _DIM_B), new_col_id, dtype=np.float32
+          (1, dim_b), new_col_id, dtype=np.float32
       )
     expected_table_c = np.array(
         [
-            [-1.000e-02] * _DIM_C,
-            [3.990e00] * _DIM_C,
-            [7.990e00] * _DIM_C,
-            [1.199e01] * _DIM_C,
-            [1.600e01] * _DIM_C,
-            [2.000e01] * _DIM_C,
-            [2.400e01] * _DIM_C,
-            [2.800e01] * _DIM_C,
-            [9.900e-01] * _DIM_C,
-            [4.990e00] * _DIM_C,
-            [8.990e00] * _DIM_C,
-            [1.299e01] * _DIM_C,
-            [1.700e01] * _DIM_C,
-            [2.100e01] * _DIM_C,
-            [2.500e01] * _DIM_C,
-            [2.900e01] * _DIM_C,
-            [1.990e00] * _DIM_C,
-            [5.990e00] * _DIM_C,
-            [9.990e00] * _DIM_C,
-            [1.399e01] * _DIM_C,
-            [1.800e01] * _DIM_C,
-            [2.200e01] * _DIM_C,
-            [2.600e01] * _DIM_C,
-            [3.000e01] * _DIM_C,
-            [2.990e00] * _DIM_C,
-            [6.990e00] * _DIM_C,
-            [1.099e01] * _DIM_C,
-            [1.499e01] * _DIM_C,
-            [1.900e01] * _DIM_C,
-            [2.300e01] * _DIM_C,
-            [2.700e01] * _DIM_C,
-            [3.100e01] * _DIM_C,
+            [-1.000e-02] * dim_c,
+            [3.990e00] * dim_c,
+            [7.990e00] * dim_c,
+            [1.199e01] * dim_c,
+            [1.600e01] * dim_c,
+            [2.000e01] * dim_c,
+            [2.400e01] * dim_c,
+            [2.800e01] * dim_c,
+            [9.900e-01] * dim_c,
+            [4.990e00] * dim_c,
+            [8.990e00] * dim_c,
+            [1.299e01] * dim_c,
+            [1.700e01] * dim_c,
+            [2.100e01] * dim_c,
+            [2.500e01] * dim_c,
+            [2.900e01] * dim_c,
+            [1.990e00] * dim_c,
+            [5.990e00] * dim_c,
+            [9.990e00] * dim_c,
+            [1.399e01] * dim_c,
+            [1.800e01] * dim_c,
+            [2.200e01] * dim_c,
+            [2.600e01] * dim_c,
+            [3.000e01] * dim_c,
+            [2.990e00] * dim_c,
+            [6.990e00] * dim_c,
+            [1.099e01] * dim_c,
+            [1.499e01] * dim_c,
+            [1.900e01] * dim_c,
+            [2.300e01] * dim_c,
+            [2.700e01] * dim_c,
+            [3.100e01] * dim_c,
         ],
         dtype=np.float32,
     )
 
     expected_accumulator_c = np.array(
         [
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
         ],
         dtype=np.float32,
     )
 
     expected_table_d = np.array(
         [
-            [-9.534626e-03] * _DIM_D,
-            [9.904354e-01] * _DIM_D,
-            [1.990415e00] * _DIM_D,
-            [2.990395e00] * _DIM_D,
-            [3.990375e00] * _DIM_D,
-            [4.990355e00] * _DIM_D,
-            [5.990335e00] * _DIM_D,
-            [6.990315e00] * _DIM_D,
-            [7.990295e00] * _DIM_D,
-            [8.990275e00] * _DIM_D,
-            [9.990255e00] * _DIM_D,
-            [1.099024e01] * _DIM_D,
-            [1.199022e01] * _DIM_D,
-            [1.299020e01] * _DIM_D,
-            [1.399018e01] * _DIM_D,
-            [1.499016e01] * _DIM_D,
-            [1.600000e01] * _DIM_D,
-            [1.700000e01] * _DIM_D,
-            [1.800000e01] * _DIM_D,
-            [1.900000e01] * _DIM_D,
-            [2.000000e01] * _DIM_D,
-            [2.100000e01] * _DIM_D,
-            [2.200000e01] * _DIM_D,
-            [2.300000e01] * _DIM_D,
-            [2.400000e01] * _DIM_D,
-            [2.500000e01] * _DIM_D,
-            [2.600000e01] * _DIM_D,
-            [2.700000e01] * _DIM_D,
-            [2.800000e01] * _DIM_D,
-            [2.900000e01] * _DIM_D,
-            [3.000000e01] * _DIM_D,
-            [3.100000e01] * _DIM_D,
+            [-9.534626e-03] * dim_d,
+            [9.904354e-01] * dim_d,
+            [1.990415e00] * dim_d,
+            [2.990395e00] * dim_d,
+            [3.990375e00] * dim_d,
+            [4.990355e00] * dim_d,
+            [5.990335e00] * dim_d,
+            [6.990315e00] * dim_d,
+            [7.990295e00] * dim_d,
+            [8.990275e00] * dim_d,
+            [9.990255e00] * dim_d,
+            [1.099024e01] * dim_d,
+            [1.199022e01] * dim_d,
+            [1.299020e01] * dim_d,
+            [1.399018e01] * dim_d,
+            [1.499016e01] * dim_d,
+            [1.600000e01] * dim_d,
+            [1.700000e01] * dim_d,
+            [1.800000e01] * dim_d,
+            [1.900000e01] * dim_d,
+            [2.000000e01] * dim_d,
+            [2.100000e01] * dim_d,
+            [2.200000e01] * dim_d,
+            [2.300000e01] * dim_d,
+            [2.400000e01] * dim_d,
+            [2.500000e01] * dim_d,
+            [2.600000e01] * dim_d,
+            [2.700000e01] * dim_d,
+            [2.800000e01] * dim_d,
+            [2.900000e01] * dim_d,
+            [3.000000e01] * dim_d,
+            [3.100000e01] * dim_d,
         ],
         dtype=np.float32,
     )
 
     expected_accumulator_d = np.array(
         [
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.100000e00] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
-            [1.000000e-01] * _DIM_D,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.100000e00] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
+            [1.000000e-01] * dim_d,
         ],
         dtype=np.float32,
     )
 
     expected_local_step_d = np.array(
-        [[1.0] * 8] * 16 + [[0.0] * 8] * 16,
+        [[1.0] * dim_d] * 16 + [[0.0] * dim_d] * 16,
         dtype=np.float32,
     )
 
     np.testing.assert_equal(
-        expected_grad_table_a, grad_update["table_a"][0][:, :_DIM_A]
+        expected_grad_table_a, grad_update["table_a"][0][:, :dim_a]
     )
     np.testing.assert_equal(
-        expected_grad_table_b, grad_update["table_b"][0][:, :_DIM_B]
+        expected_grad_table_b, grad_update["table_b"][0][:, :dim_b]
     )
     np.testing.assert_equal(
-        expected_table_c, grad_update["table_c"][0][:, :_DIM_C]
+        expected_table_c, grad_update["table_c"][0][:, :dim_c]
     )
     np.testing.assert_equal(
-        expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
+        expected_accumulator_c, grad_update["table_c"][1][:, :dim_c]
     )
 
     expected_table_d = utils.shard_emb_table(
@@ -654,24 +699,39 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
     np.testing.assert_allclose(
         expected_table_d,
-        grad_update["table_d"][0][:, :_DIM_D],
+        grad_update["table_d"][0][:, :dim_d],
         rtol=1e-5,
         atol=1e-5,
     )
     np.testing.assert_allclose(
         expected_accumulator_d,
-        grad_update["table_d"][1][:, :_DIM_D],
+        grad_update["table_d"][1][:, :dim_d],
         rtol=1e-5,
         atol=1e-5,
     )
     np.testing.assert_allclose(
         expected_local_step_d,
-        grad_update["table_d"][2][:, :_DIM_D],
+        grad_update["table_d"][2][:, :dim_d],
         rtol=1e-5,
         atol=1e-5,
     )
 
-  def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(self):
+  @parameterized.named_parameters(
+      # The default dims are padded up to a multiple of 8 floats, whereas the
+      # dims below are left unpadded so that the SparseCore kernel sees them.
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="default_dims", emb_dim=None),
+      dict(testcase_name="dim_5", emb_dim=5),
+      dict(testcase_name="dim_21", emb_dim=21),
+  )
+  def test_tpu_sparse_dense_matmul_grad_sharded_two_tables(
+      self, emb_dim: int | None
+  ):
+    self._init_specs(emb_dim)
+    dim_a = self.table_spec_a.embedding_dim
+    dim_b = self.table_spec_b.embedding_dim
+    dim_c = self.table_spec_c.embedding_dim
     devices = jax.devices()[:2]
     num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
     num_devices = len(devices)
@@ -685,6 +745,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs,
         global_device_count=len(devices),
         num_sc_per_device=num_sc_per_device,
+        pad_embedding_dim=emb_dim is None,
     )
     # Add another table.
     batch_number = 42
@@ -702,7 +763,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         sharding_strategy="MOD",
         batch_number=batch_number,
     )
-    table_dim_a = table_stacking._next_largest_multiple(_DIM_A, 8)
+    table_dim_a = self.table_spec_a.setting_in_stack.padded_embedding_dim
     emb_table_a = (
         np.array([[i for _ in range(table_dim_a)] for i in range(_VOC_A)])
         .reshape(_VOC_A, table_dim_a)
@@ -729,7 +790,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         ),
     )
 
-    table_dim_b = table_stacking._next_largest_multiple(_DIM_B, 8)
+    table_dim_b = self.table_spec_b.setting_in_stack.padded_embedding_dim
     emb_table_b = (
         np.array([[i for _ in range(table_dim_b)] for i in range(_VOC_B)])
         .reshape(_VOC_B, table_dim_b)
@@ -754,7 +815,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
             arrays=emb_table_b_devices,
         ),
     )
-    table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
+    table_dim_c = self.table_spec_c.setting_in_stack.padded_embedding_dim
     emb_table_c = (
         np.array([[i for _ in range(table_dim_c)] for i in range(_VOC_C)])
         .reshape(_VOC_C, table_dim_c)
@@ -801,15 +862,15 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     }
     activations_grad = {}
     activations_grad["feature_spec_a"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_A),
+        (_BATCH_SIZE, dim_a),
         dtype=jnp.float32,
     )
     activations_grad["feature_spec_b"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_B),
+        (_BATCH_SIZE, dim_b),
         dtype=jnp.float32,
     )
     activations_grad["feature_spec_c"] = jnp.ones(
-        (_BATCH_SIZE, _DIM_C), dtype=jnp.float32
+        (_BATCH_SIZE, dim_c), dtype=jnp.float32
     )
     sharded_grad_update = functools.partial(
         embedding.tpu_sparse_dense_matmul_grad,
@@ -833,8 +894,8 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         preprocessed_inputs,
         embedding_variables,
     )
-    expected_grad_table_a = np.zeros((_VOC_A, _DIM_A), dtype=np.float32)
-    expected_grad_table_b = np.zeros((_VOC_B, _DIM_B), dtype=np.float32)
+    expected_grad_table_a = np.zeros((_VOC_A, dim_a), dtype=np.float32)
+    expected_grad_table_b = np.zeros((_VOC_B, dim_b), dtype=np.float32)
 
     # Generate the expected updates.
     # For each col ID, we subtract 0.01 (the learning rate) times the number of
@@ -843,7 +904,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
       col_id = array[0]
       new_col_id = col_id - (count_num(self.input_tensor, col_id) * 0.01)
       expected_grad_table_a[i] = np.full(
-          (1, _DIM_A), new_col_id, dtype=np.float32
+          (1, dim_a), new_col_id, dtype=np.float32
       )
 
     for i, array in enumerate(embedding_variables["table_b"][0]):
@@ -852,94 +913,94 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
           count_num(self.input_tensor_table_b, col_id) * 0.01
       )
       expected_grad_table_b[i] = np.full(
-          (1, _DIM_B), new_col_id, dtype=np.float32
+          (1, dim_b), new_col_id, dtype=np.float32
       )
     expected_table_c = np.array(
         [
-            [-1.000e-02] * _DIM_C,
-            [7.990e00] * _DIM_C,
-            [1.600e01] * _DIM_C,
-            [2.400e01] * _DIM_C,
-            [9.900e-01] * _DIM_C,
-            [8.990e00] * _DIM_C,
-            [1.700e01] * _DIM_C,
-            [2.500e01] * _DIM_C,
-            [1.990e00] * _DIM_C,
-            [9.990e00] * _DIM_C,
-            [1.800e01] * _DIM_C,
-            [2.600e01] * _DIM_C,
-            [2.990e00] * _DIM_C,
-            [1.099e01] * _DIM_C,
-            [1.900e01] * _DIM_C,
-            [2.700e01] * _DIM_C,
-            [3.990e00] * _DIM_C,
-            [1.199e01] * _DIM_C,
-            [2.000e01] * _DIM_C,
-            [2.800e01] * _DIM_C,
-            [4.990e00] * _DIM_C,
-            [1.299e01] * _DIM_C,
-            [2.100e01] * _DIM_C,
-            [2.900e01] * _DIM_C,
-            [5.990e00] * _DIM_C,
-            [1.399e01] * _DIM_C,
-            [2.200e01] * _DIM_C,
-            [3.000e01] * _DIM_C,
-            [6.990e00] * _DIM_C,
-            [1.499e01] * _DIM_C,
-            [2.300e01] * _DIM_C,
-            [3.100e01] * _DIM_C,
+            [-1.000e-02] * dim_c,
+            [7.990e00] * dim_c,
+            [1.600e01] * dim_c,
+            [2.400e01] * dim_c,
+            [9.900e-01] * dim_c,
+            [8.990e00] * dim_c,
+            [1.700e01] * dim_c,
+            [2.500e01] * dim_c,
+            [1.990e00] * dim_c,
+            [9.990e00] * dim_c,
+            [1.800e01] * dim_c,
+            [2.600e01] * dim_c,
+            [2.990e00] * dim_c,
+            [1.099e01] * dim_c,
+            [1.900e01] * dim_c,
+            [2.700e01] * dim_c,
+            [3.990e00] * dim_c,
+            [1.199e01] * dim_c,
+            [2.000e01] * dim_c,
+            [2.800e01] * dim_c,
+            [4.990e00] * dim_c,
+            [1.299e01] * dim_c,
+            [2.100e01] * dim_c,
+            [2.900e01] * dim_c,
+            [5.990e00] * dim_c,
+            [1.399e01] * dim_c,
+            [2.200e01] * dim_c,
+            [3.000e01] * dim_c,
+            [6.990e00] * dim_c,
+            [1.499e01] * dim_c,
+            [2.300e01] * dim_c,
+            [3.100e01] * dim_c,
         ],
         dtype=np.float32,
     )
 
     expected_accumulator_c = np.array(
         [
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
         ],
         dtype=np.float32,
     )
     np.testing.assert_equal(
-        expected_grad_table_a, grad_update["table_a"][0][:, :_DIM_A]
+        expected_grad_table_a, grad_update["table_a"][0][:, :dim_a]
     )
     np.testing.assert_equal(
-        expected_grad_table_b, grad_update["table_b"][0][:, :_DIM_B]
+        expected_grad_table_b, grad_update["table_b"][0][:, :dim_b]
     )
     np.testing.assert_equal(
-        expected_table_c, grad_update["table_c"][0][:, :_DIM_C]
+        expected_table_c, grad_update["table_c"][0][:, :dim_c]
     )
     np.testing.assert_equal(
-        expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
+        expected_accumulator_c, grad_update["table_c"][1][:, :dim_c]
     )
 
   def test_tpu_sparse_dense_matmul_grad_sharded_two_tables_stacked(self):
@@ -1335,7 +1396,18 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
           expected_grad_table_a, grad_update["table_a"][0][:, :_DIM_A]
       )
 
-  def test_custom_optimizer_adagrad(self):
+  @parameterized.named_parameters(
+      # The default dim is padded up to a multiple of 8 floats, whereas the
+      # dims below are left unpadded so that the SparseCore kernel sees them.
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="default_dim", emb_dim=None),
+      dict(testcase_name="dim_5", emb_dim=5),
+      dict(testcase_name="dim_21", emb_dim=21),
+  )
+  def test_custom_optimizer_adagrad(self, emb_dim: int | None):
+    self._init_specs(emb_dim)
+    dim_c = self.table_spec_c.embedding_dim
     devices = jax.devices()[:1]
     mesh = jax.sharding.Mesh(devices, "x")
 
@@ -1363,6 +1435,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         feature_specs,
         num_sc_per_device=4,
         global_device_count=len(devices),
+        pad_embedding_dim=emb_dim is None,
     )
 
     preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
@@ -1375,7 +1448,9 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         sharding_strategy="MOD",
     )
 
-    table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
+    table_dim_c = (
+        feature_spec_c.table_spec.setting_in_stack.padded_embedding_dim
+    )
     emb_table_c = (
         np.array([[i for _ in range(table_dim_c)] for i in range(_VOC_C)])
         .reshape(_VOC_C, table_dim_c)
@@ -1405,7 +1480,7 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
     }
 
     activations_grad = {
-        "feature_spec_c": jnp.ones((_BATCH_SIZE, _DIM_C), dtype=jnp.float32)
+        "feature_spec_c": jnp.ones((_BATCH_SIZE, dim_c), dtype=jnp.float32)
     }
 
     grad_update = jax.jit(
@@ -1418,85 +1493,85 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
 
     expected_table_c = np.array(
         [
-            [-1.000e-02] * _DIM_C,
-            [3.990e00] * _DIM_C,
-            [7.990e00] * _DIM_C,
-            [1.199e01] * _DIM_C,
-            [1.600e01] * _DIM_C,
-            [2.000e01] * _DIM_C,
-            [2.400e01] * _DIM_C,
-            [2.800e01] * _DIM_C,
-            [9.900e-01] * _DIM_C,
-            [4.990e00] * _DIM_C,
-            [8.990e00] * _DIM_C,
-            [1.299e01] * _DIM_C,
-            [1.700e01] * _DIM_C,
-            [2.100e01] * _DIM_C,
-            [2.500e01] * _DIM_C,
-            [2.900e01] * _DIM_C,
-            [1.990e00] * _DIM_C,
-            [5.990e00] * _DIM_C,
-            [9.990e00] * _DIM_C,
-            [1.399e01] * _DIM_C,
-            [1.800e01] * _DIM_C,
-            [2.200e01] * _DIM_C,
-            [2.600e01] * _DIM_C,
-            [3.000e01] * _DIM_C,
-            [2.990e00] * _DIM_C,
-            [6.990e00] * _DIM_C,
-            [1.099e01] * _DIM_C,
-            [1.499e01] * _DIM_C,
-            [1.900e01] * _DIM_C,
-            [2.300e01] * _DIM_C,
-            [2.700e01] * _DIM_C,
-            [3.100e01] * _DIM_C,
+            [-1.000e-02] * dim_c,
+            [3.990e00] * dim_c,
+            [7.990e00] * dim_c,
+            [1.199e01] * dim_c,
+            [1.600e01] * dim_c,
+            [2.000e01] * dim_c,
+            [2.400e01] * dim_c,
+            [2.800e01] * dim_c,
+            [9.900e-01] * dim_c,
+            [4.990e00] * dim_c,
+            [8.990e00] * dim_c,
+            [1.299e01] * dim_c,
+            [1.700e01] * dim_c,
+            [2.100e01] * dim_c,
+            [2.500e01] * dim_c,
+            [2.900e01] * dim_c,
+            [1.990e00] * dim_c,
+            [5.990e00] * dim_c,
+            [9.990e00] * dim_c,
+            [1.399e01] * dim_c,
+            [1.800e01] * dim_c,
+            [2.200e01] * dim_c,
+            [2.600e01] * dim_c,
+            [3.000e01] * dim_c,
+            [2.990e00] * dim_c,
+            [6.990e00] * dim_c,
+            [1.099e01] * dim_c,
+            [1.499e01] * dim_c,
+            [1.900e01] * dim_c,
+            [2.300e01] * dim_c,
+            [2.700e01] * dim_c,
+            [3.100e01] * dim_c,
         ],
         dtype=np.float32,
     )
 
     expected_accumulator_c = np.array(
         [
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [1.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
-            [0.0] * _DIM_C,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [1.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
+            [0.0] * dim_c,
         ],
         dtype=np.float32,
     )
 
     np.testing.assert_allclose(
-        expected_table_c, grad_update["table_c"][0][:, :_DIM_C]
+        expected_table_c, grad_update["table_c"][0][:, :dim_c]
     )
     np.testing.assert_allclose(
-        expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
+        expected_accumulator_c, grad_update["table_c"][1][:, :dim_c]
     )
 
   def test_custom_optimizer_stacked(self):

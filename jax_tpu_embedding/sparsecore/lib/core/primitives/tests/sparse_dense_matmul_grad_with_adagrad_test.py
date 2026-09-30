@@ -292,10 +292,48 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
       )
 
   @parameterized.named_parameters(
-      ("no_clipping", None, None),
-      ("clipping", 2.0, 12.0),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="no_clipping_dim_8",
+          min_value=None,
+          max_value=None,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=21,
+      ),
   )
-  def test_sc_emb_backward_pass_with_adagrad(self, min_value, max_value):
+  def test_sc_emb_backward_pass_with_adagrad(
+      self, min_value, max_value, emb_size: int
+  ):
     # Arrange
     input_tensor = np.array(
         [
@@ -337,12 +375,10 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    embedding_table = (
-        np.array(
-            [[(i + 1) for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)]
-        )
-        .reshape(_VOCAB_SIZE, _EMB_SIZE)
-        .astype(np.float32)
+    # Embedding table where row i is initialized to i + 1.
+    embedding_table = np.tile(
+        np.arange(1, _VOCAB_SIZE + 1, dtype=np.float32)[:, np.newaxis],
+        (1, emb_size),
     )
 
     embedding_table_sharded = self._shard_table(embedding_table)
@@ -352,7 +388,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
 
     learning_rate = np.float32(0.1)
 
-    activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.012, np.float32)
+    activations_grad = jnp.full((_BATCH_SIZE, emb_size), 0.012, np.float32)
 
     # Compute the expected values on CPU while the primitive runs on TPU.
     def _compute_table_grad(inputs, weights, activation_grad):
@@ -362,7 +398,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
       cols = jnp.concatenate(np.unstack(inputs))
       vals = jnp.concatenate(np.unstack(weights)).reshape(-1, 1)
 
-      grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE))
+      grad = jnp.zeros(shape=(_VOCAB_SIZE, emb_size))
       grad = grad.at[cols, :].add(vals * activation_grad[rows, :])
       return grad
 
@@ -416,7 +452,7 @@ class SparseDenseMatmulGradWithAdagradTest(parameterized.TestCase):
             learning_rate,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
             min_value=min_value,
             max_value=max_value,

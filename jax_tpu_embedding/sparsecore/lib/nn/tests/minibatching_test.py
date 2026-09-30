@@ -17,6 +17,7 @@ import dataclasses
 from typing import override
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
 import jax.sharding
@@ -26,6 +27,10 @@ from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 import portpicker
+
+
+# A multiple of the HBM word size (8 floats), so the table needs no padding.
+_DEFAULT_EMBEDDING_DIM = 16
 
 
 def _generate_random_inputs(
@@ -128,30 +133,12 @@ def _init_embedding_vars(
   return {"table_a": embedding.EmbeddingVariables(table=emb_var, slot=())}
 
 
-class SingleHostMinibatchingTest(absltest.TestCase):
+class SingleHostMinibatchingTest(parameterized.TestCase):
 
   @override
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()
-    self.table_spec = embedding_spec.TableSpec(
-        vocabulary_size=2048,
-        embedding_dim=16,
-        initializer=jax.nn.initializers.truncated_normal(),
-        optimizer=embedding_spec.SGDOptimizerSpec(),
-        combiner="sum",
-        name="table_a",
-    )
-    self.feature_spec = embedding_spec.FeatureSpec(
-        table_spec=self.table_spec,
-        input_shape=[16, 1],
-        output_shape=[16, 16],
-        name="feature_a",
-    )
-    embedding.prepare_feature_specs_for_training(
-        [self.feature_spec],
-        global_device_count=jax.device_count(),
-    )
     self.port = portpicker.pick_unused_port()
     self.all_reduce_interface = embedding.get_all_reduce_interface(
         peer_addresses=[], minibatching_port=self.port
@@ -162,12 +149,8 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.pe = jax.sharding.PartitionSpec("device", None)
     self.embedding_var_sharding = jax.sharding.NamedSharding(self.mesh, self.pe)
     self.data_sharding = jax.sharding.NamedSharding(self.mesh, self.pd)
-    self.embedding_vars = _init_embedding_vars(
-        self.table_spec,
-        self.num_sc_per_device,
-        self.devices,
-        self.embedding_var_sharding,
-    )
+    self._init_specs(_DEFAULT_EMBEDDING_DIM)
+
     self.sharded_lookup = jax.jit(
         jax.shard_map(
             self._lookup,
@@ -191,6 +174,42 @@ class SingleHostMinibatchingTest(absltest.TestCase):
             self.data_sharding,
             self.embedding_var_sharding,
         ),
+    )
+
+  def _init_specs(self, emb_dim: int) -> None:
+    """(Re)initializes the specs and embedding variables for `emb_dim`.
+
+    The table is deliberately left unpadded (`pad_embedding_dim=False`), so
+    that embedding dimensions which are not a multiple of the HBM word size are
+    what the SparseCore kernel actually sees.
+
+    Args:
+      emb_dim: The embedding dimension of the table.
+    """
+    self.table_spec = embedding_spec.TableSpec(
+        vocabulary_size=2048,
+        embedding_dim=emb_dim,
+        initializer=jax.nn.initializers.truncated_normal(),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name="table_a",
+    )
+    self.feature_spec = embedding_spec.FeatureSpec(
+        table_spec=self.table_spec,
+        input_shape=[16, 1],
+        output_shape=[16, emb_dim],
+        name="feature_a",
+    )
+    embedding.prepare_feature_specs_for_training(
+        [self.feature_spec],
+        global_device_count=jax.device_count(),
+        pad_embedding_dim=False,
+    )
+    self.embedding_vars = _init_embedding_vars(
+        self.table_spec,
+        self.num_sc_per_device,
+        self.devices,
+        self.embedding_var_sharding,
     )
 
   def test_single_host_minibatching_not_required(self):
@@ -380,8 +399,16 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         enable_minibatching=True,
     )
 
-  def test_single_host_minibatching_forward_pass(self):
+  @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="dim_16", emb_dim=_DEFAULT_EMBEDDING_DIM),
+      dict(testcase_name="dim_5", emb_dim=5),
+      dict(testcase_name="dim_21", emb_dim=21),
+  )
+  def test_single_host_minibatching_forward_pass(self, emb_dim: int):
     # Test forward pass with minibatching
+    self._init_specs(emb_dim)
     assert self.feature_spec.table_spec.stacked_table_spec is not None
     self.feature_spec.table_spec.stacked_table_spec = (
         self.feature_spec.table_spec.stacked_table_spec.replace(
@@ -417,8 +444,16 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         activations["feature_a"], expected_activations, rtol=1e-6
     )
 
-  def test_single_host_minibatching_backward_pass(self):
+  @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="dim_16", emb_dim=_DEFAULT_EMBEDDING_DIM),
+      dict(testcase_name="dim_5", emb_dim=5),
+      dict(testcase_name="dim_21", emb_dim=21),
+  )
+  def test_single_host_minibatching_backward_pass(self, emb_dim: int):
     # Test backward pass with minibatching
+    self._init_specs(emb_dim)
     assert self.feature_spec.table_spec.stacked_table_spec is not None
     self.feature_spec.table_spec.stacked_table_spec = (
         self.feature_spec.table_spec.stacked_table_spec.replace(
