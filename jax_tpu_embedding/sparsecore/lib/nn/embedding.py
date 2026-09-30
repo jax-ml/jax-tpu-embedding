@@ -344,6 +344,8 @@ def prepare_feature_specs_for_training(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int | None = None,
+    *,
+    pad_embedding_dim: bool = True,
 ) -> None:
   """Prepares the feature specs for training by populating missing fields.
 
@@ -358,6 +360,10 @@ def prepare_feature_specs_for_training(
       `mesh.size`.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
+    pad_embedding_dim: Whether to round the embedding dim up to a multiple of 8,
+      the HBM word size. Padding is the right default for performance and should
+      only be disabled deliberately, e.g. to exercise unaligned embedding
+      dimensions on the SparseCore.
 
   Raises:
     ValueError: If there is duplicate table/feature name or if there is
@@ -413,6 +419,7 @@ def prepare_feature_specs_for_training(
         table_stacking.round_up_dim_and_vocab_size(
             {feature.table_spec.name: feature.table_spec},
             num_sc_per_device * global_device_count,
+            pad_embedding_dim=pad_embedding_dim,
         )
     )
     total_sample_count = sum(

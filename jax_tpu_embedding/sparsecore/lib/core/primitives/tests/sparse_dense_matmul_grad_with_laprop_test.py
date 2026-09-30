@@ -414,10 +414,46 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
       )
 
   @parameterized.named_parameters(
-      ("no_clipping", None, None),
-      ("clipping", 2.0, 12.0),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="no_clipping_dim_8",
+          min_value=None,
+          max_value=None,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=21,
+      ),
   )
-  def test_laprop_optimizer_update(self, min_value, max_value):
+  def test_laprop_optimizer_update(self, min_value, max_value, emb_size: int):
     # Arrange
     input_tensor = np.array(
         [
@@ -459,10 +495,9 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
     )
-    emb_table = (
-        np.array([[i for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)])
-        .reshape(_VOCAB_SIZE, _EMB_SIZE)
-        .astype(np.float32)
+    emb_table = np.tile(
+        np.arange(_VOCAB_SIZE, dtype=np.float32)[:, np.newaxis],
+        (1, emb_size),
     )
     emb_table_sharded = self._shard_table(emb_table)
     mu_init = jnp.full_like(emb_table_sharded[0], 0.002)
@@ -476,7 +511,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
     z_grad = jnp.full(
         (
             _BATCH_SIZE,
-            _EMB_SIZE,
+            emb_size,
         ),
         0.01,
         np.float32,
@@ -493,7 +528,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
     # Compute the expected results on CPU while the primitive runs on TPU.
     # The optimizer only applies a sparse update: only rows involved in the
     # forward pass are updated.
-    table_grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE))
+    table_grad = jnp.zeros(shape=(_VOCAB_SIZE, emb_size))
     sparse_rows = jnp.unique(input_tensor.flatten())
     sparse_update_mask = jnp.zeros(emb_table.shape, dtype=jnp.bool)
     sparse_update_mask = sparse_update_mask.at[sparse_rows, :].set(True)
@@ -544,7 +579,7 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
             eps,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
             min_value=min_value,
             max_value=max_value,
