@@ -353,24 +353,39 @@ def get_default_limits(name: str, batch_size: int) -> int:
 
 
 def round_up_dim_and_vocab_size(
-    tables: Mapping[str, embedding_spec.TableSpec], num_sc: int
+    tables: Mapping[str, embedding_spec.TableSpec],
+    num_sc: int,
+    *,
+    pad_embedding_dim: bool = True,
 ) -> tuple[Mapping[str, int], Mapping[str, int]]:
   """Rounds up the embedding dim and vocab size of the tables.
 
   The embedding dim is rounded up to the next largest multiple of 8.
   The vocab size is rounded up to the next largest multiple of 8 * num_sc.
+
   Args:
     tables: The tables to round up.
     num_sc: The number of sparsecores.
+    pad_embedding_dim: Whether to round the embedding dim up to a multiple of 8.
+      When `False`, the embedding dim is passed through unchanged, so a
+      dimension that is not a multiple of the HBM word size reaches the
+      SparseCore kernel as-is. Padding is the right default for performance and
+      should only be disabled deliberately. The vocab size is rounded up
+      regardless, as sharding requires it.
 
   Returns:
     A tuple of mappings from table name to the rounded up embedding dim and to
     vocab size.
   """
-  table_to_padded_dim = {
-      n: _next_largest_multiple(spec.embedding_dim, 8)
-      for (n, spec) in tables.items()
-  }
+  if pad_embedding_dim:
+    table_to_padded_dim = {
+        n: _next_largest_multiple(spec.embedding_dim, 8)
+        for (n, spec) in tables.items()
+    }
+  else:
+    table_to_padded_dim = {
+        n: spec.embedding_dim for (n, spec) in tables.items()
+    }
   table_to_padded_vocab_size = {
       n: _next_largest_multiple(spec.vocabulary_size, 8 * num_sc)
       for (n, spec) in tables.items()
