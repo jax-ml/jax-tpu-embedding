@@ -14,13 +14,13 @@
 from typing import override
 from unittest import mock
 
-from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
@@ -290,38 +290,16 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
 
     self.num_chips = 1
     self.vocab_size = 32
-    self.emb_size = 8
 
     # This is to shape the gradient tensor for backward pass.
     # The dimension needs to be the same for all test cases to avoid
     # recompilation.
     self.max_device_batch_size = 32
 
-    # Define the embedding table.
-    self.emb_table = (
-        np.array(
-            [[i for _ in range(self.emb_size)] for i in range(self.vocab_size)]
-        )
-        .reshape(self.vocab_size, self.emb_size)
-        .astype(np.float32)
-    )
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
     self.num_sc_per_device = utils.num_sparsecores_per_device()
     self.sc_simd_width = utils.sparsecore_simd_width()
-    # Shard the embedding table.
-    self.emb_table_sharded = utils.shard_emb_table(
-        self.emb_table,
-        num_devices=len(self.global_devices),
-        num_sc_per_device=self.num_sc_per_device,
-    )
-    logging.debug("self.emb_table_sharded: %s", self.emb_table_sharded)
-
-    self.accumulator_init = jnp.full(
-        self.emb_table_sharded[0].shape,
-        0.00,
-        np.float32,
-    )
 
     self.sparse_dense_matmul_grad_with_adagrad_with_mini_batching = jax.named_call(
         sparse_dense_matmul_grad_with_adagrad.tpu_sparse_dense_matmul_grad_with_adagrad_primitive.bind,
@@ -364,10 +342,48 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     )
 
   @parameterized.named_parameters(
-      ("no_clipping", None, None),
-      ("clipping", 2.0, 10.0),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="no_clipping_dim_8",
+          min_value=None,
+          max_value=None,
+          emb_size=8,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
+          min_value=2.0,
+          max_value=10.0,
+          emb_size=8,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=10.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=10.0,
+          emb_size=21,
+      ),
   )
-  def test_sc_emb_backward_pass_with_adagrad(self, min_value, max_value):
+  def test_sc_emb_backward_pass_with_adagrad(
+      self, min_value, max_value, emb_size: int
+  ):
     # Arrange
     # fmt: off
     mb0_feat = [
@@ -407,6 +423,14 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
     )
 
+    emb_table = test_utils.row_id_initializer((self.vocab_size, emb_size))
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    accumulator_init = jnp.full(emb_table_sharded[0].shape, 0.00, np.float32)
+
     # Gradient is padded to max_device_batch_size, no matter how many rows are
     # actually used.
     # This is to make sure we don't have different gradient dimensions among
@@ -414,7 +438,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     z_grad = jnp.full(
         (
             self.max_device_batch_size,
-            self.emb_size,
+            emb_size,
         ),
         0.01,
         np.float32,
@@ -430,13 +454,15 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
             lhs_local_sample_ids,
             lhs_gains,
             num_minibatches_per_physical_sparse_core,
-            self.emb_table_sharded[0],
-            self.accumulator_init,
+            emb_table_sharded[0],
+            accumulator_init,
             z_grad,
             learning_rate,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
+            # The name must be unique per embedding dimension: the shapes of
+            # the computation differ between test cases.
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
             enable_minibatching=True,
             min_value=min_value,
@@ -456,7 +482,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
     )
 
     # Compute the expected results on CPU while the primitive runs on TPU.
-    expected_table_unsharded = self.emb_table.copy()
+    expected_table_unsharded = np.array(emb_table)
     updated_rows = np.unique(jax.tree_util.tree_flatten(features)[0])
     # Adagrad update: weight = weight - lr * 1.0 = weight - 0.01
     expected_table_unsharded[updated_rows, :] -= 0.01
@@ -465,7 +491,7 @@ class SparseDenseMatmulGradWithAdagradWithMiniBatchingTest(
         expected_table_unsharded[updated_rows, :], min_value, max_value
     )
 
-    expected_accumulator_unsharded = np.zeros_like(self.emb_table)
+    expected_accumulator_unsharded = np.zeros_like(emb_table)
     # Accumulator update: accum = 0 + (0.01)^2 = 1e-4
     expected_accumulator_unsharded[updated_rows, :] = 1e-4
 

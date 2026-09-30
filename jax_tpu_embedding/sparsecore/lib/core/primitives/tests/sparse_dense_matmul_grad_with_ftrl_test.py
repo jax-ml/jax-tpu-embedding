@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_ftrl
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
@@ -338,7 +339,8 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
     cols = inputs_ids_jnp.flatten()
     vals = inputs_weights_jnp.flatten().reshape(-1, 1)
 
-    table_grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE), dtype=jnp.float32)
+    emb_size = activations_grad_samples_jnp.shape[1]
+    table_grad = jnp.zeros(shape=(_VOCAB_SIZE, emb_size), dtype=jnp.float32)
     table_grad = table_grad.at[cols, :].add(
         vals * activations_grad_samples_jnp[rows, :]
     )
@@ -365,10 +367,46 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
     return np.asarray(table_grad)
 
   @parameterized.named_parameters(
-      ("no_clipping", None, None),
-      ("clipping", 2.0, 12.0),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="no_clipping_dim_8",
+          min_value=None,
+          max_value=None,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=21,
+      ),
   )
-  def test_ftrl_optimizer_update(self, min_value, max_value):
+  def test_ftrl_optimizer_update(self, min_value, max_value, emb_size: int):
     # Arrange
     input_tensor = np.array(
         [
@@ -413,12 +451,9 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
         sc_simd_width=utils.sparsecore_simd_width(),
     )
 
-    embedding_table = (
-        np.array(
-            [[(i + 1) for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)]
-        )
-        .reshape(_VOCAB_SIZE, _EMB_SIZE)
-        .astype(np.float32)
+    # Row i of the table is filled with i + 1.
+    embedding_table = test_utils.row_id_initializer(
+        (_VOCAB_SIZE, emb_size), offset=1
     )
     embedding_table_sharded = self._shard_table(embedding_table)
 
@@ -435,7 +470,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
     beta = np.float32(0.5)
     multiply_linear_by_learning_rate = np.bool_(False)
 
-    activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.012, np.float32)
+    activations_grad = jnp.full((_BATCH_SIZE, emb_size), 0.012, np.float32)
 
     table_grad = self._compute_table_grad(
         input_tensor, input_weights, activations_grad
@@ -496,7 +531,7 @@ class SparseDenseMatmulGradWithFtrlTest(parameterized.TestCase):
             multiply_linear_by_learning_rate=multiply_linear_by_learning_rate,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
             min_value=min_value,
             max_value=max_value,

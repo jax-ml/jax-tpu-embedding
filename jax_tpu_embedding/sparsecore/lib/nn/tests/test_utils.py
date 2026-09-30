@@ -13,6 +13,7 @@
 # limitations under the License.
 """Test utils for JAX SparseCore."""
 
+import math
 from typing import Sequence
 
 from absl.testing import absltest
@@ -47,6 +48,29 @@ def row_id_initializer(
   """
   return jnp.broadcast_to(
       jnp.arange(offset, offset + shape[0], dtype=dtype)[:, None], shape
+  )
+
+
+def element_id_initializer(
+    shape: Sequence[int],
+    dtype: jax.typing.DTypeLike = jnp.float32,
+    offset: int = 0,
+) -> jax.Array:
+  """An initializer for an array where each value is its row-major index.
+
+  Unlike `row_id_initializer`, every element gets a distinct value, so tests
+  can also catch values that are misplaced within a row. Used for testing.
+
+  Args:
+   shape: Shape of a jax.Array to be initialized.
+   dtype: type of jax.Array.
+   offset: An int offset added to all values in the jax.Array.
+
+  Returns:
+   A jax.Array for testing.
+  """
+  return jnp.arange(offset, offset + math.prod(shape), dtype=dtype).reshape(
+      shape
   )
 
 

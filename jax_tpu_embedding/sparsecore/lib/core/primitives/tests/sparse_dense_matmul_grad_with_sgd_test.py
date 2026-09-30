@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
@@ -64,14 +65,6 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
     )
     self.input_weights = np.ones_like(self.input_tensor, np.float32)
 
-    # Define the embedding table.
-    self.emb_table = (
-        np.array(
-            [[i for _ in range(self.emb_size)] for i in range(self.vocab_size)]
-        )
-        .reshape(self.vocab_size, self.emb_size)
-        .astype(np.float32)
-    )
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
     self.z_init = jnp.full(
@@ -89,10 +82,46 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
     )
 
   @parameterized.named_parameters(
-      ("no_clipping", None, None),
-      ("clipping", 2.0, 12.0),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="no_clipping_dim_8",
+          min_value=None,
+          max_value=None,
+          emb_size=8,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=8,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=21,
+      ),
   )
-  def test_sc_emb_backward_pass(self, min_value, max_value):
+  def test_sc_emb_backward_pass(self, min_value, max_value, emb_size: int):
     # Arrange
     mesh = jax.sharding.Mesh(self.global_devices, "x")
     (
@@ -110,14 +139,15 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
         sc_simd_width=self.sc_simd_width,
     )
 
+    emb_table = test_utils.row_id_initializer((self.vocab_size, emb_size))
     emb_table_sharded = self._shard_table(
-        self.emb_table,
+        emb_table,
     )
 
     z_grad = jnp.full(
         (
             self.batch_size // self.num_chips,
-            self.emb_size,
+            emb_size,
         ),
         0.01,
         np.float32,
@@ -137,7 +167,7 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
         0.01,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        computation_name="sgd_test_computation",
+        computation_name=f"sgd_test_computation_dim_{emb_size}",
         sharding_strategy=1,
         min_value=min_value,
         max_value=max_value,
@@ -153,7 +183,7 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
     # Compute the expected results on CPU while the primitive runs on TPU.
     # The optimizer only applies a sparse update: only rows involved in the
     # forward pass are updated.
-    expected_emb_table_unsharded = self.emb_table.copy()
+    expected_emb_table_unsharded = np.array(emb_table)
     updated_rows = np.unique(self.input_tensor.flatten())
     expected_emb_table_unsharded[updated_rows, :] -= 1e-4
 
