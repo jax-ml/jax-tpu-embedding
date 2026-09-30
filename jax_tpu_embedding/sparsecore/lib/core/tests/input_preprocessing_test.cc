@@ -1179,8 +1179,7 @@ void RunPreprocessingOutputIsValidTest(
   int64_t total_present_ids = 0;
   if (options.IsMinibatchingEnabled()) {
     const int32_t row_pointers_size =
-        num_minibatches *
-        std::max(kNumScs, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE) *
+        num_minibatches * options.GetRowPointersSizePerBucket() *
         num_sc_per_device;
     ValidateMinibatchOrSparseCoreSlice(
         row_pointers.row(0).head(row_pointers_size), embedding_ids.row(0),
