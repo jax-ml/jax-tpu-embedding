@@ -34,6 +34,8 @@ def _has_permitive(eqn: jex.core.JaxprEqn, primitive_name_prefix: str) -> bool:
   if eqn.primitive.name.startswith(primitive_name_prefix):
     return True
   for param in eqn.params.values():
+    if hasattr(param, 'traced') and hasattr(param.traced, 'jaxpr'):
+      param = param.traced.jaxpr
     if isinstance(param, jex.core.ClosedJaxpr) or isinstance(
         param, jex.core.Jaxpr
     ):
@@ -62,6 +64,16 @@ def _inline_custom_vjp(jaxpr: jex.core.Jaxpr) -> jex.core.Jaxpr:
       eqns.extend(
           utils.inline_jaxpr(
               eqn.params['call_jaxpr'].jaxpr, eqn.invars, eqn.outvars
+          )
+      )
+    elif (
+        eqn.primitive.name == 'call_hi_primitive'
+        and hasattr(eqn.params.get('_prim'), 'traced')
+        and _has_embedding_lookup(eqn)
+    ):
+      eqns.extend(
+          utils.inline_jaxpr(
+              eqn.params['_prim'].traced.jaxpr.jaxpr, eqn.invars, eqn.outvars
           )
       )
     else:
