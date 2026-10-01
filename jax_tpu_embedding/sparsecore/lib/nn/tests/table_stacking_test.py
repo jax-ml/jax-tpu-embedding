@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for embeddingtable stacking."""
 
+from collections.abc import Sequence
 from typing import override
 
 from absl import logging
@@ -1828,6 +1829,88 @@ class TableStackingTest(parameterized.TestCase):
             name='feature_spec_b',
         ),
     ]
+    with self.assertRaisesRegex(ValueError, 'different quantization configs'):
+      table_stacking.stack_tables(
+          feature_specs,
+          ['table_a', 'table_b'],
+          global_device_count=1,
+          num_sc_per_device=self.num_sc_per_device,
+      )
+
+  def _make_quantized_feature_specs(
+      self,
+      quantization_configs: Sequence[
+          embedding_spec.FixedQuantizationConfig
+          | embedding_spec.AbsmaxQuantizationConfig
+          | None
+      ],
+  ) -> list[embedding_spec.FeatureSpec]:
+    """Returns one feature per config, on tables named table_a, table_b, ..."""
+    feature_specs = []
+    for i, q_cfg in enumerate(quantization_configs):
+      suffix = chr(ord('a') + i)
+      table_spec = embedding_spec.TableSpec(
+          vocabulary_size=64 if i == 0 else 120,
+          embedding_dim=12 if i == 0 else 10,
+          initializer=lambda: jnp.zeros((128, 16), dtype=jnp.float32),
+          optimizer=embedding_spec.SGDOptimizerSpec(),
+          combiner='sum',
+          name=f'table_{suffix}',
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=16,
+          quantization_config=q_cfg,
+      )
+      feature_specs.append(
+          embedding_spec.FeatureSpec(
+              table_spec=table_spec,
+              input_shape=(16, 1),
+              output_shape=(16, table_spec.embedding_dim),
+              name=f'feature_spec_{suffix}',
+          )
+      )
+    return feature_specs
+
+  def test_auto_stack_tables_fixed_and_absmax_quantization_configs_split(self):
+    fixed_cfg = embedding_spec.FixedQuantizationConfig(
+        min_value=-5.0, max_value=5.0, num_buckets=256
+    )
+    absmax_cfg = embedding_spec.AbsmaxQuantizationConfig(num_buckets=256)
+    feature_specs = self._make_quantized_feature_specs(
+        [fixed_cfg, absmax_cfg, None]
+    )
+    table_stacking.auto_stack_tables(
+        feature_specs,
+        global_device_count=1,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    self.assertEqual(
+        feature_specs[0].table_spec.setting_in_stack.stack_name, 'table_a'
+    )
+    self.assertEqual(
+        feature_specs[1].table_spec.setting_in_stack.stack_name, 'table_b'
+    )
+    self.assertEqual(
+        feature_specs[2].table_spec.setting_in_stack.stack_name, 'table_c'
+    )
+    self.assertEqual(
+        feature_specs[0].table_spec.stacked_table_spec.quantization_config,
+        fixed_cfg,
+    )
+    self.assertEqual(
+        feature_specs[1].table_spec.stacked_table_spec.quantization_config,
+        absmax_cfg,
+    )
+    self.assertIsNone(
+        feature_specs[2].table_spec.stacked_table_spec.quantization_config
+    )
+
+  def test_manual_stacking_fixed_and_absmax_quantization_configs_raises(self):
+    feature_specs = self._make_quantized_feature_specs([
+        embedding_spec.FixedQuantizationConfig(
+            min_value=-5.0, max_value=5.0, num_buckets=256
+        ),
+        embedding_spec.AbsmaxQuantizationConfig(num_buckets=256),
+    ])
     with self.assertRaisesRegex(ValueError, 'different quantization configs'):
       table_stacking.stack_tables(
           feature_specs,

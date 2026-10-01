@@ -15,7 +15,7 @@
 
 import functools
 import json
-from typing import Sequence
+from typing import Any, Protocol, Sequence, runtime_checkable
 
 import jax
 from jax import core
@@ -28,6 +28,20 @@ import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
+
+
+@runtime_checkable
+class QuantizationConfigProtocol(Protocol):
+  """Protocol for SparseCore embedding quantization configurations."""
+
+  def validate_table(
+      self, embedding_dim: int, table_name: str | None = None
+  ) -> None:
+    ...
+
+  def to_backend_config(self) -> dict[str, Any]:
+    ...
+
 
 # Define the sparse dense matmul primitive.
 tpu_sparse_dense_matmul_csr_primitive = jex.core.Primitive(
@@ -56,7 +70,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
-    quantization_config: tuple[float, float, int] | None = None,
+    quantization_config: QuantizationConfigProtocol | None = None,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
 ) -> core.ShapedArray:
@@ -82,20 +96,11 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
   )
 
   if quantization_config is not None:
-    quantization_min_value, quantization_max_value, quantization_num_buckets = (
-        quantization_config
-    )
-    if quantization_num_buckets < 2:
+    if not isinstance(quantization_config, QuantizationConfigProtocol):
       raise ValueError(
-          "quantization_num_buckets must be at least 2, got"
-          f" {quantization_num_buckets}"
+          f"Unsupported quantization_config: {quantization_config!r}"
       )
-
-    if quantization_min_value >= quantization_max_value:
-      raise ValueError(
-          "quantization_min_valuemust be less than quantization_max_value,"
-          f" got {quantization_min_value} and {quantization_max_value}"
-      )
+    quantization_config.validate_table(embedding_dim)
 
   shape = (
       (device_batch_size, embedding_dim)
@@ -124,7 +129,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     sharding_strategy: int = 1,
-    quantization_config: tuple[float, float, int] | None = None,
+    quantization_config: QuantizationConfigProtocol | None = None,
     enable_minibatching: bool = False,
 ) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_csr."""
@@ -156,14 +161,9 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   }
   # Add quantization params only when enabled
   if quantization_config is not None:
-    q_min, q_max, q_buckets = quantization_config
     sdmm_csr_config = {
         **sdmm_csr_config,
-        "quantization_config": {
-            "min_value": q_min,
-            "max_value": q_max,
-            "num_buckets": q_buckets,
-        },
+        "quantization_config": quantization_config.to_backend_config(),
     }
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_csr_config,

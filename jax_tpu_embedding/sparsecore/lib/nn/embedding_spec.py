@@ -1052,9 +1052,10 @@ class TableSpec:
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create."""
-  quantization_config: QuantizationConfig | None = None
-  """Quantization config (min, max, num_buckets) which represent the float
-  range and number of discrete integer buckets to use for quantization."""
+  quantization_config: (
+      FixedQuantizationConfig | AbsmaxQuantizationConfig | None
+  ) = None
+  """Optional quantization config for this table. None disables quantization."""
 
   _initialized: bool = dataclasses.field(
       init=False, default=False, compare=False
@@ -1142,6 +1143,11 @@ class TableSpec:
   def __post_init__(
       self,
   ):
+    if self.quantization_config is not None:
+      self.quantization_config.validate_table(
+          self.embedding_dim, table_name=self.name
+      )
+
     # Populate the settings to default(no table stacking) if it is None.
     if self._setting_in_stack is None:
       self._setting_in_stack = TableSettingInStack(
@@ -1235,26 +1241,86 @@ class StackedTableSpec(struct.PyTreeNode, eq=True, frozen=True, kw_only=True):
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create for this stack."""
-  quantization_config: QuantizationConfig | None = None
-  """Quantization config (min, max, num_buckets) which represent the float
-  range and number of discrete integer buckets to use for quantization for this
-  stack."""
+  quantization_config: (
+      FixedQuantizationConfig | AbsmaxQuantizationConfig | None
+  ) = None
+  """Optional quantization config for this stack. None disables quantization."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
-class QuantizationConfig:
-  """Per-table quantization parameters (None means disabled)."""
+class FixedQuantizationConfig:
+  """Fixed-range (static) quantization configuration."""
 
   min_value: float
   max_value: float
-  num_buckets: int
+  num_buckets: int = 256
 
   def __post_init__(self):
     if self.num_buckets < 2:
-      raise ValueError("num_buckets must be ≥ 2.")
+      raise ValueError(f"num_buckets must be >= 2, got {self.num_buckets}.")
     if self.min_value >= self.max_value:
-      raise ValueError("min_value must be < max_value.")
+      raise ValueError(
+          "Fixed quantization requires min_value < max_value, got "
+          f"{self.min_value} and {self.max_value}."
+      )
 
-  def as_tuple(self) -> tuple[float, float, int]:
-    """Returns the quantization config parameters as a tuple."""
-    return (self.min_value, self.max_value, self.num_buckets)
+  @property
+  def supports_scalar_embeddings(self) -> bool:
+    return True
+
+  def validate_table(
+      self, embedding_dim: int, table_name: str | None = None
+  ) -> None:
+    """Validates that this quantization config is compatible with the table."""
+    del embedding_dim, table_name
+
+  def to_backend_config(self) -> dict[str, Any]:
+    return {
+        "fixed": {
+            "min_value": self.min_value,
+            "max_value": self.max_value,
+            "num_buckets": self.num_buckets,
+        }
+    }
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class AbsmaxQuantizationConfig:
+  """Dynamic-range (absmax) quantization configuration."""
+
+  num_buckets: int = 256
+
+  def __post_init__(self):
+    # The symmetric integer bound is floor((num_buckets - 1) / 2), which must be
+    # positive for the scale to be well-defined.
+    if self.num_buckets < 3:
+      raise ValueError(f"num_buckets must be >= 3, got {self.num_buckets}.")
+
+  @property
+  def supports_scalar_embeddings(self) -> bool:
+    return False
+
+  def validate_table(
+      self, embedding_dim: int, table_name: str | None = None
+  ) -> None:
+    """Validates that this quantization config is compatible with the table."""
+    if embedding_dim == 1:
+      table_suffix = (
+          f" (table '{table_name}' has embedding_dim=1)" if table_name else ""
+      )
+      raise ValueError(
+          "Dynamic quantization (absmax) is not supported for 1D scalar"
+          f" embeddings{table_suffix}."
+      )
+
+  def to_backend_config(self) -> dict[str, Any]:
+    return {
+        "absmax": {
+            "num_buckets": self.num_buckets,
+        }
+    }
+
+
+# TODO(b/567708562): Remove this backward-compatible alias once callers migrate
+# to FixedQuantizationConfig.
+QuantizationConfig = FixedQuantizationConfig

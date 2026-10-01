@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
+from collections.abc import Sequence
 import functools
 from typing import override
 
@@ -68,15 +69,29 @@ def _create_embedding_variable_for_jit(
     var_shapes: list[VariableInfo],
     devices: list[jax.Device],
     mesh: jax.sharding.Mesh,
+    emb_tables: Sequence[jax.Array] | None = None,
 ):
+  """Creates a sharded embedding variable.
+
+  Args:
+    var_shapes: Shape and row-id offset of each table in the stack.
+    devices: Devices to shard the variable across.
+    mesh: Mesh containing `devices`.
+    emb_tables: Optional table values, one per entry in `var_shapes`. If None,
+      each table is filled by `test_utils.row_id_initializer`.
+
+  Returns:
+    The sharded embedding variable.
+  """
   num_sc_per_device = utils.num_sparsecores_per_device(mesh.devices.item(0))
   dim = var_shapes[0].shape[1]
   assert all(v.shape[1] == dim for v in var_shapes)
   total_vocab = sum(v.shape[0] for v in var_shapes)
-  emb_tables = [
-      test_utils.row_id_initializer(v.shape, offset=v.offset)
-      for v in var_shapes
-  ]
+  if emb_tables is None:
+    emb_tables = [
+        test_utils.row_id_initializer(v.shape, offset=v.offset)
+        for v in var_shapes
+    ]
   emb_table_sharded = test_utils.create_per_device_sharded_stacked_tables(
       emb_tables,
       num_devices=len(devices),
@@ -96,6 +111,48 @@ def _create_embedding_variable_for_jit(
       sharding=sharding,
       arrays=embedding_variable_shards,
   )
+
+
+def _absmax_fake_quant(table: np.ndarray, num_buckets: int = 256) -> np.ndarray:
+  """NumPy reference of SparseCore absmax simulated quantization (per row).
+
+  Follows the op order of the SparseCore decomposer so results match in f32:
+  scale by `bound / m`, round with `floor(x + 0.5)`, and dequantize by
+  `m * (1 / bound)`.
+
+  Args:
+    table: A [vocab, dim] float32 table.
+    num_buckets: Number of quantization buckets.
+
+  Returns:
+    The quantized-then-dequantized table.
+  """
+  table = np.asarray(table, dtype=np.float32)
+  bound = np.float32(np.floor((num_buckets - 1) / 2))
+  m = np.maximum(
+      np.max(np.abs(table), axis=-1, keepdims=True), np.float32(1e-7)
+  )
+  q = np.floor(table * (bound / m) + np.float32(0.5))
+  return (q * (m * (np.float32(1.0) / bound))).astype(np.float32)
+
+
+def _absmax_test_table(vocab_size: int, dim: int) -> np.ndarray:
+  """Returns a [vocab_size, dim] table whose rows absmax quantization changes.
+
+  Row r is `(r + 1) * [1, 2, ..., 7, 1, 2, ...] / 7`, so its absmax is `r + 1`
+  (for dim >= 7) and each element scales to `bound * k / 7` before rounding.
+  For 64 or 256 buckets (bound 31 or 127), none of those values is within 0.07
+  of a rounding boundary, so the device and NumPy round them the same way.
+
+  Args:
+    vocab_size: Number of rows.
+    dim: Number of columns. Must be at least 7.
+  """
+  if dim < 7:
+    raise ValueError(f"dim must be >= 7, got {dim}.")
+  rows = np.arange(1, vocab_size + 1, dtype=np.float32)[:, None]
+  cols = (np.arange(dim) % 7 + 1).astype(np.float32)[None, :]
+  return rows * cols / np.float32(7.0)
 
 
 class ErrorHandlingTest(absltest.TestCase):
@@ -1331,7 +1388,7 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
         name="quantized_table",
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        quantization_config=embedding_spec.QuantizationConfig(
+        quantization_config=embedding_spec.FixedQuantizationConfig(
             min_value=0.0, max_value=15.0, num_buckets=256
         ),
     )
@@ -1372,25 +1429,23 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     tpu_sparse_dense_matmul_fn = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         sharding_strategy="MOD",
-        global_device_count=mesh.size,
+        feature_specs=feature_specs,
+        global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
     )
-    sparse_matmul = jax.jit(tpu_sparse_dense_matmul_fn, static_argnums=[2])
+    sparse_matmul = jax.jit(tpu_sparse_dense_matmul_fn)
 
-    # Grab HLO to verify u8 types are used for real quantization.
-    compiled = sparse_matmul.lower(
-        preprocessed_inputs,
-        embedding_variables,
-        tuple(jax.tree.leaves(feature_specs)),
-    ).compile()
-    hlo = compiled.as_text()
-    self.assertIsNotNone(hlo)
-    self.assertIn("u8", hlo)
+    lowered = sparse_matmul.lower(preprocessed_inputs, embedding_variables)
+    lowered_text = lowered.as_text()
+    self.assertIn("quantization_config", lowered_text)
+    self.assertIn("fixed", lowered_text)
 
-    activations = sparse_matmul(
-        preprocessed_inputs,
-        embedding_variables,
-        tuple(jax.tree.leaves(feature_specs)),
-    )
+    # Grab compiled HLO to verify u8 types are used for real quantization.
+    compiled_hlo = lowered.compile().as_text()
+    self.assertIsNotNone(compiled_hlo)
+    self.assertIn("u8", compiled_hlo)
+
+    activations = sparse_matmul(preprocessed_inputs, embedding_variables)
 
     q_min, q_max = 0.0, 15.0
     expected_activations_flat = [
@@ -1403,7 +1458,126 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     self.assertLen(activations, 1)
     # The quantization and dequantization can introduce small errors.
     np.testing.assert_allclose(
-        activations[0], expected_emb_activations, atol=0.5
+        activations["quantized_feature"], expected_emb_activations, atol=0.5
+    )
+
+  def _jit_single_table_matmul(
+      self,
+      table: np.ndarray,
+      quantization_config: (
+          embedding_spec.FixedQuantizationConfig
+          | embedding_spec.AbsmaxQuantizationConfig
+          | None
+      ),
+      table_name: str,
+      feature_name: str,
+  ):
+    """Builds a jitted sum-combiner matmul of `self.input_tensor` on `table`.
+
+    Args:
+      table: The [vocab, dim] embedding table values.
+      quantization_config: The table's quantization config.
+      table_name: Name of the table.
+      feature_name: Name of the feature (and of the output activation).
+
+    Returns:
+      A tuple `(jitted_matmul, preprocessed_inputs, embedding_variables)`.
+    """
+    devices = jax.devices()[:1]
+    mesh = jax.sharding.Mesh(devices, "x")
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    vocab_size, dim = table.shape
+
+    table_spec = embedding_spec.TableSpec(
+        vocabulary_size=vocab_size,
+        embedding_dim=dim,
+        initializer=lambda *_: jnp.zeros((vocab_size, dim), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(),
+        combiner="sum",
+        name=table_name,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        quantization_config=quantization_config,
+    )
+    feature_spec = embedding_spec.FeatureSpec(
+        table_spec=table_spec,
+        input_shape=(16, 1),
+        output_shape=(16, dim),
+        name=feature_name,
+    )
+    feature_specs = {feature_name: feature_spec}
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
+    )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {feature_name: self.input_tensor},
+        features_weights=None,  # uniform weights
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        batch_number=42,
+    )
+    embedding_variables = {
+        table_name: embedding.EmbeddingVariables(
+            table=_create_embedding_variable_for_jit(
+                [VariableInfo((vocab_size, dim), 0)],
+                devices,
+                mesh,
+                emb_tables=[jnp.asarray(table)],
+            ),
+            slot=(),
+        )
+    }
+    sparse_matmul = jax.jit(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul,
+            sharding_strategy="MOD",
+            feature_specs=feature_specs,
+            global_device_count=len(devices),
+            num_sc_per_device=num_sc_per_device,
+        )
+    )
+    return sparse_matmul, preprocessed_inputs, embedding_variables
+
+  def _sum_combine(self, table: np.ndarray) -> np.ndarray:
+    """Returns the sum-combiner activations of `self.input_tensor` on `table`."""
+    return np.stack(
+        [table[sample].sum(axis=0) for sample in self.input_tensor]
+    ).astype(np.float32)
+
+  def test_sparse_dense_matmul_dynamic_quantized(self):
+    table = _absmax_test_table(32, 32)
+    feature_name = "quantized_dynamic_feature"
+    sparse_matmul, preprocessed_inputs, embedding_variables = (
+        self._jit_single_table_matmul(
+            table,
+            embedding_spec.AbsmaxQuantizationConfig(num_buckets=256),
+            table_name="quantized_dynamic_table",
+            feature_name=feature_name,
+        )
+    )
+
+    lowered = sparse_matmul.lower(preprocessed_inputs, embedding_variables)
+    lowered_hlo = lowered.as_text()
+    self.assertIn("quantization_config", lowered_hlo)
+    self.assertIn("absmax", lowered_hlo)
+
+    activations = sparse_matmul(preprocessed_inputs, embedding_variables)
+    self.assertLen(activations, 1)
+    self.assertEqual(activations[feature_name].shape, (16, 32))
+    self.assertEqual(activations[feature_name].dtype, jnp.float32)
+
+    expected_activations = self._sum_combine(_absmax_fake_quant(table))
+    # Fails if the test table stops being changed by absmax quantization.
+    self.assertFalse(
+        np.allclose(expected_activations, self._sum_combine(table), atol=1e-3)
+    )
+    np.testing.assert_allclose(
+        activations[feature_name], expected_activations, rtol=1e-5, atol=1e-5
     )
 
 

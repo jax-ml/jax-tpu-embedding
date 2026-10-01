@@ -565,7 +565,7 @@ class OptimizerSpecTest(absltest.TestCase):
 
   def test_table_spec_quantization_config_equality(self):
     """Tables should compare equal only when the quantization config matches."""
-    q_cfg = embedding_spec.QuantizationConfig(
+    q_cfg = embedding_spec.FixedQuantizationConfig(
         min_value=0.0, max_value=10.0, num_buckets=128
     )
     initializer = jax.nn.initializers.normal()
@@ -598,6 +598,37 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(ts1, ts2)
     self.assertNotEqual(ts1, ts3)
+
+  def test_table_spec_absmax_quantization_config_equality(self):
+    """Absmax tables compare equal only to tables with the same absmax config."""
+    initializer = jax.nn.initializers.normal()
+
+    def make_table_spec(quantization_config):
+      return embedding_spec.TableSpec(
+          vocabulary_size=8,
+          embedding_dim=4,
+          name="t",
+          optimizer=embedding_spec.SGDOptimizerSpec(),
+          combiner="sum",
+          initializer=initializer,
+          quantization_config=quantization_config,
+      )
+
+    absmax_1 = make_table_spec(
+        embedding_spec.AbsmaxQuantizationConfig(num_buckets=256)
+    )
+    absmax_2 = make_table_spec(
+        embedding_spec.AbsmaxQuantizationConfig(num_buckets=256)
+    )
+    unquantized = make_table_spec(None)
+    fixed = make_table_spec(
+        embedding_spec.FixedQuantizationConfig(
+            min_value=-1.0, max_value=1.0, num_buckets=256
+        )
+    )
+    self.assertEqual(absmax_1, absmax_2)
+    self.assertNotEqual(absmax_1, unquantized)
+    self.assertNotEqual(absmax_1, fixed)
 
   def test_callable_placeholder_and_proto_tag(self):
     def schedule_a(step):
@@ -693,6 +724,69 @@ class OptimizerSpecTest(absltest.TestCase):
         embedding.get_optimizer_type(embedding_spec.AdamOptimizerSpec),
         embedding_spec_pb2.OptimizerSpecProto.ADAM,
     )
+
+  def test_dynamic_quantization_config_spec(self):
+    qconfig = embedding_spec.AbsmaxQuantizationConfig(num_buckets=256)
+    self.assertEqual(qconfig.num_buckets, 256)
+    self.assertFalse(qconfig.supports_scalar_embeddings)
+    self.assertEqual(
+        qconfig.to_backend_config(), {"absmax": {"num_buckets": 256}}
+    )
+
+  def test_fixed_quantization_config_spec(self):
+    qconfig = embedding_spec.FixedQuantizationConfig(
+        min_value=0.0, max_value=1.0, num_buckets=256
+    )
+    self.assertEqual(qconfig.min_value, 0.0)
+    self.assertEqual(qconfig.max_value, 1.0)
+    self.assertEqual(qconfig.num_buckets, 256)
+    self.assertTrue(qconfig.supports_scalar_embeddings)
+    self.assertEqual(
+        qconfig.to_backend_config(),
+        {"fixed": {"min_value": 0.0, "max_value": 1.0, "num_buckets": 256}},
+    )
+
+  def test_quantization_config_alias(self):
+    self.assertIs(
+        embedding_spec.QuantizationConfig,
+        embedding_spec.FixedQuantizationConfig,
+    )
+
+  def test_fixed_quantization_config_spec_validation(self):
+    with self.assertRaises(ValueError):
+      embedding_spec.FixedQuantizationConfig(
+          min_value=5.0, max_value=5.0, num_buckets=256
+      )
+    with self.assertRaises(ValueError):
+      embedding_spec.FixedQuantizationConfig(
+          min_value=0.0, max_value=1.0, num_buckets=1
+      )
+
+  def test_absmax_quantization_config_spec_validation(self):
+    for num_buckets in (1, 2):
+      with self.subTest(num_buckets=num_buckets):
+        with self.assertRaisesRegex(ValueError, "num_buckets must be >= 3"):
+          embedding_spec.AbsmaxQuantizationConfig(num_buckets=num_buckets)
+    config = embedding_spec.AbsmaxQuantizationConfig(num_buckets=3)
+    self.assertEqual(config.num_buckets, 3)
+
+  def test_dynamic_quantization_1d_unsupported(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        "Dynamic quantization.*not supported for 1D scalar embeddings"
+        r" \(table 'table_1d' has embedding_dim=1\)",
+    ):
+      embedding_spec.TableSpec(
+          vocabulary_size=32,
+          embedding_dim=1,
+          initializer=lambda *_: jnp.zeros((32, 1), dtype=jnp.float32),
+          optimizer=embedding_spec.SGDOptimizerSpec(),
+          combiner="sum",
+          name="table_1d",
+          quantization_config=embedding_spec.AbsmaxQuantizationConfig(
+              num_buckets=256
+          ),
+      )
 
 
 if __name__ == "__main__":

@@ -1181,10 +1181,6 @@ def tpu_sparse_dense_matmul(
     gain = lhs_gains[stacked_table_name]
     embedding_variable = embedding_variables[stacked_table_name]
     stacked_table = stacked_table_specs[stacked_table_name]
-    quantization_config = stacked_table.quantization_config
-    quantization_config_tuple = (
-        quantization_config.as_tuple() if quantization_config else None
-    )
     activations[stacked_table.stack_name] = (
         sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_primitive.bind(
             row_pointer,
@@ -1198,7 +1194,7 @@ def tpu_sparse_dense_matmul(
             max_ids_per_partition=stacked_table.max_ids_per_partition,
             max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
             sharding_strategy=sharding_strategy_val,
-            quantization_config=quantization_config_tuple,
+            quantization_config=stacked_table.quantization_config,
             enable_minibatching=enable_minibatching,
         )
     )

@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import importlib.metadata
+import re
 from typing import override
 from unittest import mock
 
@@ -19,8 +21,45 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
+
+
+def _is_libtpu_at_least(min_version: tuple[int, int, int]) -> bool:
+  """Returns True if libtpu is not installed or is at least min_version."""
+  try:
+    version_str = importlib.metadata.version("libtpu")
+  except importlib.metadata.PackageNotFoundError:
+    return True
+  match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_str)
+  if match is None:
+    return True
+  version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+  return version >= min_version
+
+
+def _absmax_fake_quant(table: np.ndarray, num_buckets: int = 256) -> np.ndarray:
+  """NumPy reference of SparseCore absmax simulated quantization (per row).
+
+  Follows the op order of the SparseCore decomposer so results match in f32:
+  scale by `bound / m`, round with `floor(x + 0.5)`, and dequantize by
+  `m * (1 / bound)`.
+
+  Args:
+    table: A [vocab, dim] float32 table.
+    num_buckets: Number of quantization buckets.
+
+  Returns:
+    The quantized-then-dequantized table.
+  """
+  table = np.asarray(table, dtype=np.float32)
+  bound = np.float32(np.floor((num_buckets - 1) / 2))
+  m = np.maximum(
+      np.max(np.abs(table), axis=-1, keepdims=True), np.float32(1e-7)
+  )
+  q = np.floor(table * (bound / m) + np.float32(0.5))
+  return (q * (m * (np.float32(1.0) / bound))).astype(np.float32)
 
 
 class SparseDenseMatmulCsrTest(absltest.TestCase):
@@ -423,42 +462,47 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         num_sc_per_device=self.num_sc_per_device,
     )
 
-    # num_buckets must be >= 2
+    # Fixed quantization requires num_buckets >= 2.
     with self.assertRaises(ValueError):
-      self.tpu_sparse_dense_matmul_csr(
-          lhs_row_pointers,
-          lhs_ids,
-          lhs_sids,
-          lhs_gains,
-          1,  # num_minibatches_per_physical_sparse_core
-          emb_table_sharded[0],
-          device_batch_size=self.batch_size // self.num_chips,
-          max_ids_per_partition=16,
-          max_unique_ids_per_partition=16,
-          sharding_strategy=1,
-          # num_buckets < 2
-          quantization_config=(0.0, 1.0, 1),
-          enable_minibatching=False,
+      embedding_spec.FixedQuantizationConfig(
+          min_value=0.0, max_value=1.0, num_buckets=1
       )
+
+    # Absmax quantization requires num_buckets >= 3.
+    with self.assertRaises(ValueError):
+      embedding_spec.AbsmaxQuantizationConfig(num_buckets=1)
 
     # min must be < max
     with self.assertRaises(ValueError):
-      self.tpu_sparse_dense_matmul_csr(
-          lhs_row_pointers,
-          lhs_ids,
-          lhs_sids,
-          lhs_gains,
-          1,  # num_minibatches_per_physical_sparse_core
-          emb_table_sharded[0],
-          device_batch_size=self.batch_size // self.num_chips,
-          max_ids_per_partition=16,
-          max_unique_ids_per_partition=16,
-          sharding_strategy=1,
-          # min < max
-          quantization_config=(5.0, 5.0, 4),
-          enable_minibatching=False,
+      embedding_spec.FixedQuantizationConfig(
+          min_value=5.0, max_value=5.0, num_buckets=4
       )
 
+    # Unsupported quantization configs, including the legacy
+    # (min_value, max_value, num_buckets) tuple.
+    for bad_config in ("unsupported", (0.0, 15.0, 256)):
+      with self.subTest(bad_config=bad_config):
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported quantization_config"
+        ):
+          self.tpu_sparse_dense_matmul_csr(
+              lhs_row_pointers,
+              lhs_ids,
+              lhs_sids,
+              lhs_gains,
+              1,
+              emb_table_sharded[0],
+              device_batch_size=self.batch_size // self.num_chips,
+              max_ids_per_partition=16,
+              max_unique_ids_per_partition=16,
+              sharding_strategy=1,
+              quantization_config=bad_config,
+              enable_minibatching=False,
+          )
+
+  @absltest.skipIf(
+      not _is_libtpu_at_least((0, 0, 49)), "Requires libtpu >= 0.0.49"
+  )
   def test_sc_emb_forward_pass_with_quantization_enabled(self):
     mesh = jax.sharding.Mesh(self.global_devices, "x")
     lhs_row_pointers, lhs_ids, lhs_sids, lhs_gains = (
@@ -489,7 +533,9 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_unique_ids_per_partition=16,
         sharding_strategy=1,
         # valid config
-        quantization_config=(0.0, 15.0, 256),
+        quantization_config=embedding_spec.FixedQuantizationConfig(
+            min_value=0.0, max_value=15.0, num_buckets=256
+        ),
         enable_minibatching=False,
     )
 
@@ -556,6 +602,187 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     np.testing.assert_allclose(
         activations, expected_activations, rtol=1e-5, atol=1e-5
     )
+
+  def test_sc_emb_forward_pass_dim1_dynamic_quantization_unsupported(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table_dim1,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "Dynamic quantization.*not supported for 1D scalar embeddings",
+    ):
+      self.tpu_sparse_dense_matmul_csr(
+          lhs_row_pointers,
+          lhs_local_embedding_ids,
+          lhs_local_sample_ids,
+          lhs_gains,
+          1,  # num_minibatches_per_physical_sparse_core
+          emb_table_sharded[0],
+          device_batch_size=self.batch_size // self.num_chips,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=16,
+          sharding_strategy=1,
+          quantization_config=embedding_spec.AbsmaxQuantizationConfig(
+              num_buckets=256
+          ),
+          enable_minibatching=False,
+      )
+
+  @absltest.skipIf(
+      not _is_libtpu_at_least((0, 0, 49)), "Requires libtpu >= 0.0.49"
+  )
+  def test_sc_emb_forward_pass_dynamic_quantization_feature_widths(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_ids,
+        lhs_sids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    for feature_width in (8, 16, 32, 64, 128):
+      with self.subTest(feature_width=feature_width):
+        # Non-uniform rows (see the numerical parity test) so quantization
+        # changes the values.
+        rows = np.arange(1, self.vocab_size + 1, dtype=np.float32)[:, None]
+        cols = (np.arange(feature_width) % 7 + 1).astype(np.float32)[None, :]
+        table = rows * cols / np.float32(7.0)
+        table_sharded = utils.shard_emb_table(
+            table,
+            num_devices=len(self.global_devices),
+            num_sc_per_device=self.num_sc_per_device,
+        )
+        activations = self.tpu_sparse_dense_matmul_csr(
+            lhs_row_pointers,
+            lhs_ids,
+            lhs_sids,
+            lhs_gains,
+            1,
+            table_sharded[0],
+            device_batch_size=self.batch_size // self.num_chips,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            sharding_strategy=1,
+            quantization_config=embedding_spec.AbsmaxQuantizationConfig(
+                num_buckets=256
+            ),
+            enable_minibatching=False,
+        )
+        self.assertEqual(
+            activations.shape,
+            (self.batch_size // self.num_chips, feature_width),
+        )
+        self.assertEqual(activations.dtype, jnp.float32)
+        np.testing.assert_allclose(
+            activations,
+            _absmax_fake_quant(table)[self.input_tensor.squeeze(axis=1)],
+            rtol=1e-5,
+            atol=1e-5,
+        )
+
+  @absltest.skipIf(
+      not _is_libtpu_at_least((0, 0, 49)), "Requires libtpu >= 0.0.49"
+  )
+  def test_sc_emb_forward_pass_dynamic_quantization_numerical_parity(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_ids,
+        lhs_sids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    # Row r is (r + 1) * [1, 2, ..., 7, 1] / 7, so absmax quantization changes
+    # it: its absmax is r + 1 and each element scales to bound * k / 7 (bound is
+    # 31 or 127 here), which is never within 0.07 of a rounding boundary.
+    rows = np.arange(1, self.vocab_size + 1, dtype=np.float32)[:, None]
+    cols = (np.arange(self.emb_size) % 7 + 1).astype(np.float32)[None, :]
+    table = rows * cols / np.float32(7.0)
+    table_sharded = utils.shard_emb_table(
+        table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
+    activations_unquant = self.tpu_sparse_dense_matmul_csr(
+        lhs_row_pointers,
+        lhs_ids,
+        lhs_sids,
+        lhs_gains,
+        1,
+        table_sharded[0],
+        device_batch_size=self.batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        quantization_config=None,
+        enable_minibatching=False,
+    )
+
+    for num_buckets in (64, 256):
+      with self.subTest(num_buckets=num_buckets):
+        activations_dynamic = self.tpu_sparse_dense_matmul_csr(
+            lhs_row_pointers,
+            lhs_ids,
+            lhs_sids,
+            lhs_gains,
+            1,
+            table_sharded[0],
+            device_batch_size=self.batch_size // self.num_chips,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            sharding_strategy=1,
+            quantization_config=embedding_spec.AbsmaxQuantizationConfig(
+                num_buckets=num_buckets
+            ),
+            enable_minibatching=False,
+        )
+
+        self.assertEqual(
+            activations_dynamic.shape,
+            (self.batch_size // self.num_chips, self.emb_size),
+        )
+        # Each sample looks up a single ID with weight 1.
+        expected_activations = _absmax_fake_quant(table, num_buckets)[
+            self.input_tensor.squeeze(axis=1)
+        ]
+        np.testing.assert_allclose(
+            activations_dynamic, expected_activations, rtol=1e-5, atol=1e-5
+        )
+        # Fails if absmax quantization isn't applied.
+        self.assertFalse(
+            np.allclose(activations_dynamic, activations_unquant, atol=1e-3)
+        )
 
 
 if __name__ == "__main__":
