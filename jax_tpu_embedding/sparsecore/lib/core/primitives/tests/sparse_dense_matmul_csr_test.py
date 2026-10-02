@@ -74,6 +74,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
     self.vocab_size = 32
     self.emb_size = 8
     self.num_sc_per_device = utils.num_sparsecores_per_device(jax.devices()[0])
+    self.sc_simd_width = utils.sparsecore_simd_width(jax.devices()[0])
     self.input_tensor = np.array(
         [
             [5],
@@ -146,6 +147,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
@@ -264,6 +266,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
@@ -305,6 +308,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
@@ -358,6 +362,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     self.emb_table_sharded = utils.shard_emb_table(
         self.emb_table,
@@ -396,6 +401,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     # Shared the embedding table.
     self.emb_table_sharded = utils.shard_emb_table(
@@ -454,6 +460,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
             max_ids_per_partition=16,
             max_unique_ids_per_partition=64,
             num_sc_per_device=self.num_sc_per_device,
+            sc_simd_width=self.sc_simd_width,
         )
     )
     emb_table_sharded = utils.shard_emb_table(
@@ -513,6 +520,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
             max_ids_per_partition=16,
             max_unique_ids_per_partition=64,
             num_sc_per_device=self.num_sc_per_device,
+            sc_simd_width=self.sc_simd_width,
         )
     )
     emb_table_sharded = utils.shard_emb_table(
@@ -572,6 +580,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     # Define embedding table with dim=1 (1D array) and non-trivial values
     emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
@@ -617,6 +626,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
     emb_table_sharded = utils.shard_emb_table(
@@ -663,6 +673,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     for feature_width in (8, 16, 32, 64, 128):
       with self.subTest(feature_width=feature_width):
@@ -721,6 +732,7 @@ class SparseDenseMatmulCsrTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
     # Row r is (r + 1) * [1, 2, ..., 7, 1] / 7, so absmax quantization changes
     # it: its absmax is r + 1 and each element scales to bound * k / 7 (bound is

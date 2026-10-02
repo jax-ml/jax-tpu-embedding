@@ -48,12 +48,13 @@ def preprocess_sparse_dense_matmul_input(
     global_device_count: int,
     *,
     num_sc_per_device: int,
+    sc_simd_width: int,
     sharding_strategy: ShardingStrategy = ShardingStrategy.MOD,
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
-    all_reduce_interface: AllReduceInterface | None = None
+    all_reduce_interface: AllReduceInterface | None = None,
 ) -> PreprocessOutput: ...
 def preprocess_sparse_dense_matmul_sparse_coo_input(
     indices: Sequence[np.ndarray],
@@ -64,17 +65,19 @@ def preprocess_sparse_dense_matmul_sparse_coo_input(
     global_device_count: int,
     *,
     num_sc_per_device: int,
+    sc_simd_width: int,
     sharding_strategy: ShardingStrategy = ShardingStrategy.MOD,
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
     batch_number: int = 0,
     minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
-    all_reduce_interface: AllReduceInterface | None = None
+    all_reduce_interface: AllReduceInterface | None = None,
 ) -> PreprocessOutput: ...
 
 def compute_row_pointers_size_per_device(
     global_device_count: int,
     num_sc_per_device: int,
+    sc_simd_width: int,
     minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
 ) -> int: ...
 def compute_theoretical_max_coo_buffer_size(

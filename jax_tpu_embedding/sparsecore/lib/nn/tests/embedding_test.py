@@ -988,6 +988,7 @@ class EmbeddingTest(parameterized.TestCase):
         embedding.compute_row_pointers_size_per_device(
             global_device_count=1,
             num_sc_per_device=4,
+            sc_simd_width=8,
             minibatching_mode=embedding.MinibatchingMode.DISABLED,
         ),
         32,
@@ -996,9 +997,28 @@ class EmbeddingTest(parameterized.TestCase):
         embedding.compute_row_pointers_size_per_device(
             global_device_count=1,
             num_sc_per_device=4,
+            sc_simd_width=8,
             minibatching_mode=embedding.MinibatchingMode.HOST,
         ),
         2048,
+    )
+    self.assertEqual(
+        embedding.compute_row_pointers_size_per_device(
+            global_device_count=1,
+            num_sc_per_device=2,
+            sc_simd_width=8,
+            minibatching_mode=embedding.MinibatchingMode.DISABLED,
+        ),
+        16,
+    )
+    self.assertEqual(
+        embedding.compute_row_pointers_size_per_device(
+            global_device_count=1,
+            num_sc_per_device=2,
+            sc_simd_width=16,
+            minibatching_mode=embedding.MinibatchingMode.DISABLED,
+        ),
+        32,
     )
 
   def test_compute_coo_buffer_size_per_device(self):
@@ -1260,6 +1280,13 @@ class EmbeddingTest(parameterized.TestCase):
     )
 
     # Assert
+    expected_row_pointers_size = num_sc_per_device * max(
+        num_sc_per_device, 8, utils.sparsecore_simd_width(devices[0])
+    )
+    self.assertLen(
+        preprocessed_inputs.lhs_row_pointers["table_a"],
+        expected_row_pointers_size,
+    )
     np.testing.assert_array_equal(
         preprocessed_inputs.lhs_row_pointers["table_a"],
         preprocessed_inputs_ragged.lhs_row_pointers["table_a"],

@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax.numpy as jnp
@@ -172,6 +173,22 @@ class UtilsTest(parameterized.TestCase):
           num_sc_per_device=num_sc_per_device,
           valency=valency,
       )
+
+  @parameterized.parameters(
+      ('TPU v5', 8),
+      ('TPU v5p', 8),
+      ('TPU v6e', 8),
+      ('TPU v6 lite', 8),
+      ('TPU7x', 16),
+  )
+  def test_sparsecore_simd_width(self, device_kind: str, expected_width: int):
+    device = mock.Mock(device_kind=device_kind)
+    self.assertEqual(utils.sparsecore_simd_width(device), expected_width)
+
+  def test_sparsecore_simd_width_unknown_device_raises(self):
+    device = mock.Mock(device_kind='cpu')
+    with self.assertRaises(ValueError):
+      utils.sparsecore_simd_width(device)
 
 
 if __name__ == '__main__':
