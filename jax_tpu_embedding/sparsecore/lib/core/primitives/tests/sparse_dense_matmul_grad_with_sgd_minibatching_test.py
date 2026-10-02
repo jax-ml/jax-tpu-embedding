@@ -51,6 +51,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
 
     self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.sc_simd_width = utils.sparsecore_simd_width()
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=len(self.global_devices),
@@ -101,6 +102,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         [input_weights],
         mesh,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
@@ -206,6 +208,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         weights,
         mesh,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,

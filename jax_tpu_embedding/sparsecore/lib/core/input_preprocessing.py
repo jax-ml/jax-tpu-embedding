@@ -203,6 +203,7 @@ def _pack_partitions_to_csr(
     all_minibatch_partitions: Sequence[PartitionMap],
     num_scs: int,
     num_sc_per_device: int,
+    sc_simd_width: int,
     max_ids_per_partition: int,
     *,
     minibatching_mode: MinibatchingMode,
@@ -213,6 +214,7 @@ def _pack_partitions_to_csr(
     all_minibatch_partitions: List of partition mappings for each minibatch.
     num_scs: Total number of global SparseCores.
     num_sc_per_device: Number of SparseCores per device.
+    sc_simd_width: The SparseCore SIMD width.
     max_ids_per_partition: Maximum number of ids per SparseCore partition. This
       value is used to determine the size of the static buffer of embedding,
       sample IDs and gains.
@@ -286,8 +288,11 @@ def _pack_partitions_to_csr(
         # Align for next partition.
         coo_index = _round_up(coo_index, 8)
 
-      # Pad row pointers to max(num_scs, 8) per minibatch.
-      row_pointers.extend([coo_index - base_coo_index] * max(0, 8 - num_scs))
+      # Pad row pointers to max(num_scs, 8, sc_simd_width) per minibatch.
+      padded_row_pointers_size = max(num_scs, 8, sc_simd_width)
+      row_pointers.extend(
+          [coo_index - base_coo_index] * (padded_row_pointers_size - num_scs)
+      )
 
   return (
       jnp.asarray(row_pointers, dtype=jnp.int32),
@@ -310,6 +315,7 @@ def preprocess_sparse_dense_matmul_input(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     num_sc_per_device: int = -1,
+    sc_simd_width: int = -1,
     sharding_strategy: str = "MOD",
     minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -325,6 +331,7 @@ def preprocess_sparse_dense_matmul_input(
     max_unique_ids_per_partition: Maximum number of unique ids per SparseCore
       partition.
     num_sc_per_device: Number of sparse cores per device.
+    sc_simd_width: The SparseCore SIMD width.
     sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
     minibatching_mode: The minibatching mode to use. Defaults to `DISABLED`.
 
@@ -363,6 +370,11 @@ def preprocess_sparse_dense_matmul_input(
       if num_sc_per_device > 0
       else utils.num_sparsecores_per_device(mesh.devices.item(0))
   )
+  sc_simd_width = (
+      sc_simd_width
+      if sc_simd_width > 0
+      else utils.sparsecore_simd_width(mesh.devices.item(0))
+  )
   num_scs = num_sc_per_device * global_device_count
   feature_batches: Sequence[FeatureBatch] = _to_sequence_of_batches(
       features, minibatching_mode, "features"
@@ -394,6 +406,7 @@ def preprocess_sparse_dense_matmul_input(
       all_partitions,
       num_scs,
       num_sc_per_device,
+      sc_simd_width,
       max_ids_per_partition,
       minibatching_mode=minibatching_mode,
   )

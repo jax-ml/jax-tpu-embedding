@@ -493,6 +493,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=utils.num_sparsecores_per_device(),
+        sc_simd_width=utils.sparsecore_simd_width(),
     )
     embedding_table = (
         np.array(
@@ -620,6 +621,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=utils.num_sparsecores_per_device(),
+        sc_simd_width=utils.sparsecore_simd_width(),
     )
     embedding_table = np.arange(1, _VOCAB_SIZE + 1, dtype=np.float32)
     embedding_table_sharded = self._shard_table(embedding_table)

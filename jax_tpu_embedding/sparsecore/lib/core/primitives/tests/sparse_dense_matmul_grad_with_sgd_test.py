@@ -35,6 +35,7 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
     self.vocab_size = 32
     self.emb_size = 8
     self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.sc_simd_width = utils.sparsecore_simd_width()
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=self.num_chips,
@@ -106,6 +107,7 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
 
     emb_table_sharded = self._shard_table(
@@ -183,6 +185,7 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
 
     emb_table_dim1 = np.arange(self.vocab_size, dtype=np.float32) + 1.0
