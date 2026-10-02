@@ -552,17 +552,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
   // Returns the size of row pointers per bucket.
   int GetRowPointersSizePerBucket() const {
-    // This calculation should be aligned with the corresponding XLA
-    // calculation. Chips with 2 SparseCores per device (TPU v7x) have a
-    // SparseCore SIMD width of 16, whereas 4-SparseCore-per-device chips (TPU
-    // v5p) have a SIMD width of 8.
-    static constexpr int kTpuV5pSparseCoreSimdWidth = 8;
-    static constexpr int kTpuV7xSparseCoreSimdWidth = 16;
-    const int sc_simd_width = (num_sc_per_device == 2)
-                                  ? kTpuV7xSparseCoreSimdWidth
-                                  : kTpuV5pSparseCoreSimdWidth;
-    return std::max({static_cast<int>(GetNumScs()),
-                     TPU_VECTOR_REGISTER_ALIGNMENT_SIZE, sc_simd_width});
+    return std::max(static_cast<int>(GetNumScs()),
+                    TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   }
 
   // Returns the size of row pointers per device.
