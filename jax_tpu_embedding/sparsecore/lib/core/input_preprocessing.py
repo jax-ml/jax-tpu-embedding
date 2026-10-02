@@ -184,7 +184,10 @@ def _preprocess_batch_to_partitions(
 
 
 def _coo_buffer_tensor_size(
-    max_ids_per_partition: int, num_scs: int, num_scs_per_device: int
+    max_ids_per_partition: int,
+    num_scs: int,
+    num_scs_per_device: int,
+    hbm_word_size_in_4b: int,
 ) -> int:
   """Returns the size of the COO buffer tensor.
 
@@ -192,17 +195,24 @@ def _coo_buffer_tensor_size(
     max_ids_per_partition: The maximum number of ids per SparseCore partition.
     num_scs: The number of global SparseCores.
     num_scs_per_device: The number of SparseCores per chip.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words.
 
   Returns:
     The size of the COO buffer tensor.
   """
-  return _round_up(max_ids_per_partition, 8) * num_scs_per_device * num_scs
+  return (
+      _round_up(max_ids_per_partition, hbm_word_size_in_4b)
+      * num_scs_per_device
+      * num_scs
+  )
 
 
 def _pack_partitions_to_csr(
     all_minibatch_partitions: Sequence[PartitionMap],
     num_scs: int,
     num_sc_per_device: int,
+    sc_simd_width: int,
+    hbm_word_size_in_4b: int,
     max_ids_per_partition: int,
     *,
     minibatching_mode: MinibatchingMode,
@@ -213,6 +223,8 @@ def _pack_partitions_to_csr(
     all_minibatch_partitions: List of partition mappings for each minibatch.
     num_scs: Total number of global SparseCores.
     num_sc_per_device: Number of SparseCores per device.
+    sc_simd_width: The SparseCore SIMD width.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words.
     max_ids_per_partition: Maximum number of ids per SparseCore partition. This
       value is used to determine the size of the static buffer of embedding,
       sample IDs and gains.
@@ -233,7 +245,9 @@ def _pack_partitions_to_csr(
   num_minibatches = len(all_minibatch_partitions)
 
   coo_buffer_size = (
-      _coo_buffer_tensor_size(max_ids_per_partition, num_scs, num_sc_per_device)
+      _coo_buffer_tensor_size(
+          max_ids_per_partition, num_scs, num_sc_per_device, hbm_word_size_in_4b
+      )
       * num_minibatches
   )
 
@@ -284,10 +298,15 @@ def _pack_partitions_to_csr(
         row_pointers.append(coo_index - base_coo_index)
 
         # Align for next partition.
-        coo_index = _round_up(coo_index, 8)
+        coo_index = _round_up(coo_index, hbm_word_size_in_4b)
 
-      # Pad row pointers to max(num_scs, 8) per minibatch.
-      row_pointers.extend([coo_index - base_coo_index] * max(0, 8 - num_scs))
+      # Pad row pointers to max(num_scs, hbm_word_size_in_4b, sc_simd_width) per minibatch.
+      padded_row_pointers_size = max(
+          num_scs, hbm_word_size_in_4b, sc_simd_width
+      )
+      row_pointers.extend(
+          [coo_index - base_coo_index] * (padded_row_pointers_size - num_scs)
+      )
 
   return (
       jnp.asarray(row_pointers, dtype=jnp.int32),
@@ -310,6 +329,8 @@ def preprocess_sparse_dense_matmul_input(
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
     num_sc_per_device: int = -1,
+    sc_simd_width: int = -1,
+    hbm_word_size_in_4b: int = -1,
     sharding_strategy: str = "MOD",
     minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -325,6 +346,8 @@ def preprocess_sparse_dense_matmul_input(
     max_unique_ids_per_partition: Maximum number of unique ids per SparseCore
       partition.
     num_sc_per_device: Number of sparse cores per device.
+    sc_simd_width: The SparseCore SIMD width.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words.
     sharding_strategy: Embedding table sharding strategy (only "MOD" supported).
     minibatching_mode: The minibatching mode to use. Defaults to `DISABLED`.
 
@@ -363,6 +386,16 @@ def preprocess_sparse_dense_matmul_input(
       if num_sc_per_device > 0
       else utils.num_sparsecores_per_device(mesh.devices.item(0))
   )
+  sc_simd_width = (
+      sc_simd_width
+      if sc_simd_width > 0
+      else utils.sparsecore_simd_width(mesh.devices.item(0))
+  )
+  hbm_word_size_in_4b = (
+      hbm_word_size_in_4b
+      if hbm_word_size_in_4b > 0
+      else utils.hbm_word_size_in_4b(mesh.devices.item(0))
+  )
   num_scs = num_sc_per_device * global_device_count
   feature_batches: Sequence[FeatureBatch] = _to_sequence_of_batches(
       features, minibatching_mode, "features"
@@ -394,6 +427,8 @@ def preprocess_sparse_dense_matmul_input(
       all_partitions,
       num_scs,
       num_sc_per_device,
+      sc_simd_width,
+      hbm_word_size_in_4b,
       max_ids_per_partition,
       minibatching_mode=minibatching_mode,
   )

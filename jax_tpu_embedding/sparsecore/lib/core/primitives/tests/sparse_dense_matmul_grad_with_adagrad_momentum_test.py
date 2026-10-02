@@ -39,6 +39,8 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.sc_simd_width = utils.sparsecore_simd_width()
+    self.hbm_word_size_in_4b = utils.hbm_word_size_in_4b()
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=1,
@@ -365,6 +367,8 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
     )
 
     embedding_table = (
@@ -529,6 +533,8 @@ class SparseDenseMatmulGradWithAdagradMomentumTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
     )
     emb_table_dim1 = np.arange(_VOCAB_SIZE, dtype=np.float32) + 1.0
     embedding_table_sharded = self._shard_table(emb_table_dim1)

@@ -66,6 +66,8 @@ struct BufferFillingOptions {
   int num_scs ABSL_REQUIRE_EXPLICIT_INIT;
   // The total size of the COO buffer for the current device.
   int coo_buffer_size ABSL_REQUIRE_EXPLICIT_INIT;
+  // The HBM word size in 4-byte words.
+  int hbm_word_size_in_4b ABSL_REQUIRE_EXPLICIT_INIT;
   // The minibatching mode in effect.
   MinibatchingMode minibatching_mode ABSL_REQUIRE_EXPLICIT_INIT;
 };
@@ -125,13 +127,13 @@ enum class PadType {
 //   `pad_type`: Specifies the padding behavior (kAlignOnly or kPadToEnd).
 //   `csr`: CSR arrays to be padded.
 void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
+                  int hbm_word_size_in_4b,
                   internal::CsrArraysRefPerDevice& csr) {
   if (pad_type == PadType::kPadToEnd) {
     coo_index = coo_end;
     return;
   }
-  while (coo_index % TPU_VECTOR_REGISTER_ALIGNMENT_SIZE != 0 &&
-         coo_index < coo_end) {
+  while (coo_index % hbm_word_size_in_4b != 0 && coo_index < coo_end) {
     csr.embedding_ids[coo_index] = INT_MAX;
     csr.sample_ids[coo_index] = INT_MAX;
     csr.gains[coo_index] = std::nanf("");
@@ -165,7 +167,8 @@ void AdvanceAndPadPartitions(int& current_partition_id,
     csr_arrays.row_pointers[lhs_row_index++] =
         GetRowPointer(coo_index, options);
     // Align partition.
-    PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly, csr_arrays);
+    PadCooBuffer(coo_index, options.coo_end, PadType::kAlignOnly,
+                 options.hbm_word_size_in_4b, csr_arrays);
     ++current_partition_id;
   }
 }
@@ -231,14 +234,14 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
 
 int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
                               int64_t suggested_coo_buffer_size_per_device,
-                              int num_scs_per_device,
+                              int num_scs_per_device, int hbm_word_size_in_4b,
                               absl::string_view stacked_table_name) {
   // Since the suggested size corresponds to only current device (local SCs),
   // Buffer for each SC should be properly aligned, hence ALIGNMENT *
   // num_scs_per_device
-  int64_t suggested_value = xla::RoundUpTo<int64_t>(
-      suggested_coo_buffer_size_per_device,
-      TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_scs_per_device);
+  int64_t suggested_value =
+      xla::RoundUpTo<int64_t>(suggested_coo_buffer_size_per_device,
+                              hbm_word_size_in_4b * num_scs_per_device);
   CHECK(suggested_value <= theoretical_max)
       << "Suggested Coo Buffer Size is larger than the theoretical "
          "max for table "
@@ -251,10 +254,11 @@ int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
 int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
                                            int global_device_count,
                                            int num_sc_per_device,
+                                           int hbm_word_size_in_4b,
                                            MinibatchingMode minibatching_mode) {
   const int num_scs = global_device_count * num_sc_per_device;
-  const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
-      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  const int64_t max_ids_rounded_up =
+      xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size_in_4b);
   // If minibatching is enabled, `theoretical_max` is multiplied by
   // `kMaxMinibatchingBuckets` because all minibatches for a given SparseCore
   // core are packed into a single buffer.
@@ -265,21 +269,21 @@ int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
 }
 
 int ComputeCooBufferSizePerDevice(
-    const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+    int global_device_count, int num_sc_per_device, int hbm_word_size_in_4b,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    int batch_number, MinibatchingMode minibatching_mode) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
   const std::optional<int> suggested_coo_buffer_size_per_device =
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
-  const int num_scs = options.GetNumScs();
-  const int num_scs_per_device = options.num_sc_per_device;
-  const int batch_number = options.batch_number;
+  const int num_scs = global_device_count * num_sc_per_device;
+  const int num_scs_per_device = num_sc_per_device;
 
-  const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
-      max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  const int64_t max_ids_rounded_up =
+      xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size_in_4b);
   const int64_t theoretical_max = ComputeTheoreticalMaxCooBufferSize(
-      max_ids_per_partition, options.global_device_count,
-      options.num_sc_per_device, options.GetMinibatchingMode());
+      max_ids_per_partition, global_device_count, num_sc_per_device,
+      hbm_word_size_in_4b, minibatching_mode);
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                          << ": " << theoretical_max
@@ -299,7 +303,7 @@ int ComputeCooBufferSizePerDevice(
                            << suggested_coo_buffer_size_per_device.value();
     computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
         theoretical_max, suggested_coo_buffer_size_per_device.value(),
-        num_scs_per_device, stacked_table_name);
+        num_scs_per_device, hbm_word_size_in_4b, stacked_table_name);
   } else {
     LOG_IF(WARNING, batch_number % 10000 == 0)
         << "No Coo Buffer Size provided for table " << stacked_table_name
@@ -320,6 +324,15 @@ int ComputeCooBufferSizePerDevice(
       << ") for table " << stacked_table_name
       << " is out of the valid range (0, INT_MAX).";
   return static_cast<int>(computed_coo_buffer_size_per_device);
+}
+
+int ComputeCooBufferSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  return ComputeCooBufferSizePerDevice(
+      options.global_device_count, options.num_sc_per_device,
+      options.hbm_word_size_in_4b, stacked_table_metadata, options.batch_number,
+      options.GetMinibatchingMode());
 }
 
 int MaxIdsPerPartitionForStackedTables(
@@ -435,6 +448,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                   .num_sc_per_device = num_sc_per_device,
                   .num_scs = num_scs,
                   .coo_buffer_size = coo_buffer_size,
+                  .hbm_word_size_in_4b = options.hbm_word_size_in_4b,
                   .minibatching_mode = options.minibatching_mode,
               },
               csr_arrays, dropped_ids_in_segment);
@@ -443,11 +457,12 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
           if (is_minibatching) {
             // Align minibatch buffer
             PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
-                         csr_arrays);
+                         options.hbm_word_size_in_4b, csr_arrays);
           } else {
             // Align SparseCore buffer (since each SC has only 1 minibatch).
             const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
-            PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd, csr_arrays);
+            PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd,
+                         options.hbm_word_size_in_4b, csr_arrays);
           }
           // We could compute per minibatch buffer size, but we serialize the
           // filling for multiple (>1) minibatches instead. Also because it lies
@@ -471,7 +486,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
         int coo_begin =
             shared_segment_data->coo_begins[total_segments - 1].get();
         PadCooBuffer(coo_begin, coo_buffer_size, PadType::kPadToEnd,
-                     csr_arrays);
+                     options.hbm_word_size_in_4b, csr_arrays);
         // Compute total dropped ID count.
         int total_dropped_id_count = 0;
         for (int i = 0; i < total_segments; ++i) {
@@ -529,6 +544,17 @@ absl::Status PreprocessSparseDenseMatmulInputOptions::Validate() const {
     return absl::InvalidArgumentError(
         absl::StrCat("Total number of SparseCores (", GetNumScs(),
                      ") must be a power of 2."));
+  }
+  if (sc_simd_width <= 0 ||
+      !absl::has_single_bit(static_cast<uint32_t>(sc_simd_width))) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "sc_simd_width (", sc_simd_width, ") must be a positive power of 2."));
+  }
+  if (hbm_word_size_in_4b <= 0 ||
+      !absl::has_single_bit(static_cast<uint32_t>(hbm_word_size_in_4b))) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("hbm_word_size_in_4b (", hbm_word_size_in_4b,
+                     ") must be a positive power of 2."));
   }
   if (minibatching_mode != MinibatchingMode::kDisabled &&
       minibatching_mode != MinibatchingMode::kHost &&

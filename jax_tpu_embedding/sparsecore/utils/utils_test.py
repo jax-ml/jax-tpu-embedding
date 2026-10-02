@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax.numpy as jnp
@@ -172,6 +173,16 @@ class UtilsTest(parameterized.TestCase):
           num_sc_per_device=num_sc_per_device,
           valency=valency,
       )
+
+  def test_sparsecore_simd_width_unknown_device_raises(self):
+    device = mock.Mock(device_kind='cpu')
+    with self.assertRaises(ValueError):
+      utils.sparsecore_simd_width(device)
+
+  def test_hbm_word_size_in_4b_unknown_device_raises(self):
+    device = mock.Mock(device_kind='cpu')
+    with self.assertRaises(ValueError):
+      utils.hbm_word_size_in_4b(device)
 
 
 if __name__ == '__main__':

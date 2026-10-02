@@ -104,6 +104,8 @@ class SparseCoreEmbed(nn.Module):
 
   # Initialized in __post_init__.
   num_sc_per_device: int = -1
+  sc_simd_width: int = -1
+  hbm_word_size_in_4b: int = -1
 
   def __post_init__(self):
     if self._mesh is None:
@@ -115,6 +117,10 @@ class SparseCoreEmbed(nn.Module):
       self._mesh = jax.sharding.Mesh(jax.devices(), axis_names)
 
     self.num_sc_per_device = utils.num_sparsecores_per_device(
+        self._mesh.devices.item(0)
+    )
+    self.sc_simd_width = utils.sparsecore_simd_width(self._mesh.devices.item(0))
+    self.hbm_word_size_in_4b = utils.hbm_word_size_in_4b(
         self._mesh.devices.item(0)
     )
 
@@ -221,6 +227,8 @@ class SparseCoreEmbed(nn.Module):
             else embedding.MinibatchingMode.DISABLED
         ),
         all_reduce_interface=all_reduce_interface,
+        sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
     )[0]
 
   def __call__(

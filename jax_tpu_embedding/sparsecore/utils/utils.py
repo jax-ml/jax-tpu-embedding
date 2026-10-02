@@ -36,6 +36,22 @@ NUM_SC_PER_DEVICE_MAP = {
     'TPU7x': 2,  # Ironwood. Megacore is disabled.
 }
 
+SC_SIMD_WIDTH_MAP = {
+    'TPU v5': 8,
+    'TPU v5p': 8,  # Alias for 'TPU v5'.
+    'TPU v6e': 8,  # Trillium.
+    'TPU v6 lite': 8,  # Alias for 'TPU v6e'.
+    'TPU7x': 16,  # Ironwood.
+}
+
+HBM_WORD_SIZE_IN_4B_MAP = {
+    'TPU v5': 8,
+    'TPU v5p': 8,  # Alias for 'TPU v5'.
+    'TPU v6e': 8,  # Trillium.
+    'TPU v6 lite': 8,  # Alias for 'TPU v6e'.
+    'TPU7x': 8,  # Ironwood.
+}
+
 
 class DeviceLike(typing.Protocol):
   @property
@@ -76,6 +92,73 @@ def num_sparsecores_per_device(
     )
 
   return NUM_SC_PER_DEVICE_MAP[device_kind]
+
+
+def sparsecore_simd_width(
+    device: DeviceLike | None = None,
+) -> int:
+  """Determine the SparseCore SIMD width available on a device.
+
+  Args:
+    device: JAX device to check.  If None, queries the first device in
+      jax.devices().
+
+  Returns:
+    SparseCore SIMD width.
+
+  Raises:
+    ValueError: if the SparseCore SIMD width cannot be determined.
+  """
+  target_device = device or jax.devices()[0]
+
+  if not hasattr(target_device, 'device_kind'):
+    raise ValueError(
+        f'Cannot determine device kind for device: {target_device}'
+    )
+
+  device_kind = target_device.device_kind
+  if device_kind not in SC_SIMD_WIDTH_MAP:
+    raise ValueError(
+        f'Unknown sparsecore SIMD width for device kind: {device_kind}. Known'
+        f' device kinds: {SC_SIMD_WIDTH_MAP.keys()}'
+    )
+
+  return SC_SIMD_WIDTH_MAP[device_kind]
+
+
+def hbm_word_size_in_4b(
+    device: DeviceLike | None = None,
+) -> int:
+  """Determine the HBM word size in 4-byte words for a device.
+
+  Args:
+    device: JAX device to check. If None, queries the first device in
+      jax.devices().
+
+  Returns:
+    HBM word size in 4-byte words.
+
+  Raises:
+    ValueError: if the HBM word size in 4-byte words cannot be determined.
+  """
+  target_device = device or jax.devices()[0]
+
+  if not hasattr(target_device, 'device_kind'):
+    raise ValueError(
+        f'Cannot determine device kind for device: {target_device}'
+    )
+
+  device_kind = target_device.device_kind
+  if device_kind not in HBM_WORD_SIZE_IN_4B_MAP:
+    raise ValueError(
+        f'Unknown HBM word size in 4b for device kind: {device_kind}. Known'
+        f' device kinds: {HBM_WORD_SIZE_IN_4B_MAP.keys()}'
+    )
+
+  return HBM_WORD_SIZE_IN_4B_MAP[device_kind]
+
+
+sparsecore_hbm_word_size_in_4b = hbm_word_size_in_4b
 
 
 def embedding_table_format(
