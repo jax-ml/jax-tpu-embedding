@@ -27,10 +27,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "fuzztest/fuzztest.h"
+#include "absl/base/log_severity.h"  // from @com_google_absl
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/scoped_mock_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -949,11 +951,29 @@ TEST_F(MinibatchingCountTest,
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
+  absl::ScopedMockLog mock_log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(
+      mock_log,
+      Log(absl::LogSeverity::kWarning, testing::_,
+          testing::HasSubstr(
+              "Device minibatching required for table: table_0 observed max "
+              "ids per partition:")))
+      .Times(testing::AtLeast(1));
+  EXPECT_CALL(
+      mock_log,
+      Log(absl::LogSeverity::kWarning, testing::_,
+          testing::HasSubstr(
+              "Device minibatching required for table: table_0 observed max "
+              "unique ids per partition:")))
+      .Times(testing::AtLeast(1));
+  mock_log.StartCapturingLogs();
+
   // Act
   TF_ASSERT_OK_AND_ASSIGN(
       PreprocessSparseDenseMatmulOutput output,
       PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                        stacked_tables, options));
+  mock_log.StopCapturingLogs();
 
   // Assert
   EXPECT_EQ(output.num_minibatches, 1);

@@ -88,6 +88,29 @@ inline void ValidateMaxIdsOrDie(
   }
 }
 
+inline void LogIfDeviceMinibatchingRequired(
+    const int32_t observed_max_ids_per_partition,
+    const int32_t observed_max_unique_ids_per_partition,
+    const int32_t max_ids_per_partition,
+    const int32_t max_unique_ids_per_partition,
+    const absl::string_view stacked_table_name) {
+  if (observed_max_ids_per_partition > max_ids_per_partition) {
+    LOG_EVERY_N_SEC(WARNING, 300) << "Device minibatching required for table: "
+                 << stacked_table_name << " observed max ids per partition: "
+                 << observed_max_ids_per_partition
+                 << " is greater than the set max ids per partition: "
+                 << max_ids_per_partition;
+  }
+  if (observed_max_unique_ids_per_partition > max_unique_ids_per_partition) {
+    LOG_EVERY_N_SEC(WARNING, 300) << "Device minibatching required for table: "
+                 << stacked_table_name
+                 << " observed max unique ids per partition: "
+                 << observed_max_unique_ids_per_partition
+                 << " is greater than the set max unique ids per partition: "
+                 << max_unique_ids_per_partition;
+  }
+}
+
 inline void ValidateKeyCapacity(const int local_sc_id, const int key_count) {
   // Index = 0 to kDataMask giving us a count of kDataMask + 1.
   if (key_count > 1 + CooFormat::kDataMask) {
@@ -568,6 +591,11 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                   observed_max_unique_ids_per_bucket, max_ids_per_partition,
                   max_unique_ids_per_partition, stacked_table_name,
                   options.allow_id_dropping);
+            } else if (options.IsDeviceMinibatchingEnabled()) {
+              internal::LogIfDeviceMinibatchingRequired(
+                  observed_max_ids_per_bucket,
+                  observed_max_unique_ids_per_bucket, max_ids_per_partition,
+                  max_unique_ids_per_partition, stacked_table_name);
             }
 
             total_dropped += stats.dropped_id_count;
