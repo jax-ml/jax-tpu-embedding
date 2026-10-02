@@ -37,6 +37,8 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
   def setUp(self):
     super().setUp()
     self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.sc_simd_width = utils.sparsecore_simd_width()
+    self.hbm_word_size_in_4b = utils.hbm_word_size_in_4b()
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=1,
@@ -458,6 +460,8 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
     )
     emb_table = (
         np.array([[i for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)])
@@ -586,6 +590,8 @@ class SparseDenseMatmulGradWithLapropTest(parameterized.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=utils.num_sparsecores_per_device(),
+        sc_simd_width=utils.sparsecore_simd_width(),
+        hbm_word_size_in_4b=utils.hbm_word_size_in_4b(),
     )
 
     def _shard_table(table):

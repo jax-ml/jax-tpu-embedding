@@ -86,6 +86,8 @@ class InputPreprocessingTest(absltest.TestCase):
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
         num_sc_per_device=2,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
   def test_error_on_bad_input_dimensions(self):
@@ -117,6 +119,8 @@ class InputPreprocessingTest(absltest.TestCase):
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
         num_sc_per_device=2,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
   def test_error_on_bad_weights(self):
@@ -142,6 +146,9 @@ class InputPreprocessingTest(absltest.TestCase):
         mesh,
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
+        num_sc_per_device=4,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
     # Note that the first array is shorter.
     bad_input_weights_2 = np.array(
@@ -161,6 +168,9 @@ class InputPreprocessingTest(absltest.TestCase):
         mesh,
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
+        num_sc_per_device=4,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
   def test_error_bad_mesh(self):
@@ -186,6 +196,8 @@ class InputPreprocessingTest(absltest.TestCase):
         max_ids_per_partition=64,
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy="DIV",
     )
 
@@ -243,6 +255,8 @@ class InputPreprocessingTest(absltest.TestCase):
         input_weights,
         mesh,
         num_sc_per_device=4,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         max_ids_per_partition=12,
         max_unique_ids_per_partition=64,
     )
@@ -373,6 +387,8 @@ class InputPreprocessingTest(absltest.TestCase):
         self.input_weights,
         mesh,
         num_sc_per_device=4,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         max_ids_per_partition=32,
         max_unique_ids_per_partition=64,
     )
@@ -607,6 +623,8 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
         weights,
         mesh,
         num_sc_per_device=2,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
@@ -705,6 +723,8 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
         weights,
         mesh,
         num_sc_per_device=1,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
