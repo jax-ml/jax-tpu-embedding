@@ -56,6 +56,10 @@ def preprocess_sparse_dense_matmul_input(
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
 def preprocess_sparse_dense_matmul_sparse_coo_input(
+    # Per-feature sparse structure descriptor:
+    # - 2D (N, 2) int32/int64 COO coordinate pairs,
+    # - 1D (batch_size + 1,) int32/int64 CSR row_splits, or
+    # - 0D () int32 scalar valency V for fixed-valency features.
     indices: Sequence[np.ndarray],
     values: Sequence[np.ndarray],
     dense_shapes: Sequence[np.ndarray],

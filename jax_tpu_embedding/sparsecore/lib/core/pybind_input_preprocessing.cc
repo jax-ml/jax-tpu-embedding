@@ -35,6 +35,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/numpy_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sparse_coo_input_batch.h"
 #include "pybind11/attr.h"  // from @pybind11
 #include "pybind11/cast.h"  // from @pybind11
@@ -258,14 +259,96 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
   CHECK(indices.size() == dense_shapes.size());
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches(
       indices.size());
+  // Hold references to temporary or C-contiguous casted py::array objects for
+  // the duration of PyPreprocessSparseDenseMatmulInput, since
+  // RaggedTensorInputBatch wraps non-owning absl::Span pointers.
+  std::vector<py::object> keepalive;
+  keepalive.reserve(indices.size() * 2);
 
   for (int i = 0; i < indices.size(); ++i) {
     const int64_t max_vocab_id =
         feature_specs[i].attr("table_spec").attr("vocabulary_size").cast<int>();
     const std::string table_name =
         feature_specs[i].attr("table_spec").attr("name").cast<std::string>();
+    const py::object& idx_obj = indices[i];
+    // Dispatch per-feature sparse representation based on `indices[i]` rank:
+    // - 1D array (ndim == 1): CSR `row_splits` of length `batch_size + 1` for
+    //   left-packed variable-length rows; wraps directly in
+    //   `RaggedTensorInputBatch<Span<const int32_t>, Span<const RowSplitT>>`
+    //   without running `ConstructRowPointers()`.
+    // - 0D scalar (ndim == 0): Fixed valency `V` where every sample in the
+    //   batch has `V` tokens (`row_splits[r] == r * V`); wraps in
+    //   `RaggedTensorInputBatch<Span<const int32_t>, FixedValencyRowOffsets>`
+    //   using O(1) strided arithmetic (`FixedValencyRowOffsets::operator[]`).
+    // - 2D array (ndim == 2): Standard `(N, 2)` row-major COO `(row, col)`
+    //   coordinate pairs (`int32` or `int64`).
+    if (py::isinstance<py::array>(idx_obj)) {
+      py::array idx_arr = py::reinterpret_borrow<py::array>(idx_obj);
+      if (idx_arr.ndim() == 1 && idx_arr.dtype().kind() == 'i') {
+        auto val_arr =
+            values[i]
+                .cast<py::array_t<int32_t,
+                                  py::array::c_style | py::array::forcecast>>();
+        keepalive.push_back(val_arr);
+        absl::Span<const int32_t> val_span(val_arr.data(),
+                                           static_cast<size_t>(val_arr.size()));
+        if (idx_arr.itemsize() == sizeof(int64_t)) {
+          auto split_arr =
+              idx_obj.cast<py::array_t<int64_t, py::array::c_style |
+                                                    py::array::forcecast>>();
+          keepalive.push_back(split_arr);
+          absl::Span<const int64_t> split_span(
+              split_arr.data(), static_cast<size_t>(split_arr.size()));
+          input_batches[i] = std::make_unique<RaggedTensorInputBatch<
+              absl::Span<const int32_t>, absl::Span<const int64_t>>>(
+              val_span, split_span, table_name, max_vocab_id);
+          continue;
+        } else {
+          auto split_arr =
+              idx_obj.cast<py::array_t<int32_t, py::array::c_style |
+                                                    py::array::forcecast>>();
+          keepalive.push_back(split_arr);
+          absl::Span<const int32_t> split_span(
+              split_arr.data(), static_cast<size_t>(split_arr.size()));
+          input_batches[i] = std::make_unique<RaggedTensorInputBatch<
+              absl::Span<const int32_t>, absl::Span<const int32_t>>>(
+              val_span, split_span, table_name, max_vocab_id);
+          continue;
+        }
+      } else if (idx_arr.ndim() == 0 && idx_arr.dtype().kind() == 'i') {
+        auto val_arr =
+            values[i]
+                .cast<py::array_t<int32_t,
+                                  py::array::c_style | py::array::forcecast>>();
+        auto shp_arr = dense_shapes[i].cast<py::array_t<int64_t>>();
+        CHECK_EQ(shp_arr.size(), 2);
+        const int batch_size = static_cast<int>(shp_arr.at(0));
+        const int valency = idx_arr.cast<int>();
+        CHECK_GT(batch_size, 0);
+        CHECK_GE(valency, 0);
+        CHECK_EQ(val_arr.size(), static_cast<ssize_t>(batch_size) * valency);
+        keepalive.push_back(val_arr);
+        absl::Span<const int32_t> val_span(val_arr.data(),
+                                           static_cast<size_t>(val_arr.size()));
+        input_batches[i] =
+            std::make_unique<RaggedTensorInputBatch<absl::Span<const int32_t>,
+                                                    FixedValencyRowOffsets>>(
+                val_span, FixedValencyRowOffsets(batch_size, valency),
+                table_name, max_vocab_id);
+        continue;
+      } else if (idx_arr.ndim() == 2 && idx_arr.dtype().kind() == 'i' &&
+                 idx_arr.itemsize() <= sizeof(int32_t)) {
+        input_batches[i] = std::make_unique<PySparseCooInputBatchInt32>(
+            idx_obj.cast<py::array_t<int32_t, py::array::c_style |
+                                                  py::array::forcecast>>(),
+            values[i].cast<py::array_t<int32_t>>(),
+            dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id,
+            table_name);
+        continue;
+      }
+    }
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
-        indices[i].cast<py::array_t<int64_t>>(),
+        idx_obj.cast<py::array_t<int64_t>>(),
         values[i].cast<py::array_t<int32_t>>(),
         dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id, table_name);
   }

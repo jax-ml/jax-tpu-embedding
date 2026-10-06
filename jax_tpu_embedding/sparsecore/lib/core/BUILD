@@ -145,6 +145,7 @@ pybind_extension(
         ":input_preprocessing_core",
         ":input_preprocessing_util",
         ":numpy_input_batch",
+        ":ragged_tensor_input_batch",
         ":sparse_coo_input_batch",
         "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
         "@com_google_absl//absl/base:nullability",

@@ -41,13 +41,14 @@ namespace py = ::pybind11;
 //   It is assumed that `indices` is sorted in row-major order.
 // - `values` is a 1D array where each element represents the value associated
 //   with the corresponding (row_id, col_id) pair in `indices`.
-class PySparseCooInputBatch : public AbstractInputBatch {
+template <typename IndexT = int64_t>
+class PySparseCooInputBatchImpl : public AbstractInputBatch {
  public:
-  PySparseCooInputBatch(const py::array_t<int64_t>& indices,
-                        const py::array_t<int32_t>& values,
-                        const py::array_t<int64_t>& dense_shape,
-                        const int64_t max_vocab_id,
-                        const std::string table_name)
+  PySparseCooInputBatchImpl(const py::array_t<IndexT>& indices,
+                            const py::array_t<int32_t>& values,
+                            const py::array_t<int64_t>& dense_shape,
+                            const int64_t max_vocab_id,
+                            const std::string table_name)
       : indices_(indices),
         values_(values),
         max_vocab_id_(max_vocab_id),
@@ -78,7 +79,7 @@ class PySparseCooInputBatch : public AbstractInputBatch {
 
  private:
   // (N,2) array, sorted by row_id.
-  const py::array_t<int64_t> indices_;
+  const py::array_t<IndexT> indices_;
   const py::array_t<int32_t> values_;
   const int64_t max_vocab_id_;
   const int64_t batch_size_;
@@ -95,6 +96,13 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   // Internal function called by `ConstructRowPointersIfRequired`.
   void ConstructRowPointers() const;
 };
+
+using PySparseCooInputBatch = PySparseCooInputBatchImpl<int64_t>;
+using PySparseCooInputBatchInt32 = PySparseCooInputBatchImpl<int32_t>;
+
+extern template class PySparseCooInputBatchImpl<int64_t>;
+extern template class PySparseCooInputBatchImpl<int32_t>;
+
 }  // namespace jax_sc_embedding
 
 #endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_SPARSE_COO_INPUT_BATCH_H_
