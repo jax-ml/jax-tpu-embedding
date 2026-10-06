@@ -1457,6 +1457,58 @@ class MeanCombinerTest(parameterized.TestCase):
         gains_raw[self.stacked_name],
     )
 
+  @parameterized.parameters(False, True)
+  def test_sparse_tensor_input_int32_indices(self, has_leading_dimension):
+    indices_i64 = np.indices((16, 16), dtype=np.int64).reshape(2, -1).T.copy()
+    indices_i32 = indices_i64.astype(np.int32)
+    values = np.arange(16 * 16, dtype=np.int32)
+    dense_shape = np.array([16, 512], dtype=np.int64)
+
+    sparse_tensor_input_preprocessing = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input
+    )
+    out_i64 = sparse_tensor_input_preprocessing(
+        [indices_i64],
+        [values],
+        [dense_shape],
+        [self.feature_spec],
+        local_device_count=4,
+        global_device_count=4,
+        num_sc_per_device=4,
+        sharding_strategy=ShardingStrategy.MOD,
+        has_leading_dimension=has_leading_dimension,
+        allow_id_dropping=False,
+        batch_number=42,
+    )
+    out_i32 = sparse_tensor_input_preprocessing(
+        [indices_i32],
+        [values],
+        [dense_shape],
+        [self.feature_spec],
+        local_device_count=4,
+        global_device_count=4,
+        num_sc_per_device=4,
+        sharding_strategy=ShardingStrategy.MOD,
+        has_leading_dimension=has_leading_dimension,
+        allow_id_dropping=False,
+        batch_number=42,
+    )
+    np.testing.assert_equal(
+        out_i64[0][self.stacked_name],
+        out_i32[0][self.stacked_name],
+    )
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        4,
+        4,
+        out_i64[0][self.stacked_name],
+    )
+    for d64, d32 in zip(out_i64[1:4], out_i32[1:4]):
+      assert_equal_coo_buffer(
+          d32[self.stacked_name],
+          d64[self.stacked_name],
+      )
+
 
 if __name__ == "__main__":
   absltest.main()
