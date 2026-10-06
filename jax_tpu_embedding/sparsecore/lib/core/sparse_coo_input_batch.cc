@@ -32,12 +32,13 @@
 
 namespace jax_sc_embedding {
 
-void PySparseCooInputBatch::ConstructRowPointers() const {
+template <typename IndexT>
+void PySparseCooInputBatchImpl<IndexT>::ConstructRowPointers() const {
   if (!row_pointers_.empty()) {
     return;
   }
-  auto indices_array = indices_.unchecked<2>();
-  auto values_array = values_.unchecked<1>();
+  auto indices_array = indices_.template unchecked<2>();
+  auto values_array = values_.template unchecked<1>();
   // Precompute indexes for row starts. Add a sentinel node for last row.
   row_pointers_.reserve(batch_size_ + 1);
   int row_pointers_index = 0;
@@ -75,12 +76,15 @@ void PySparseCooInputBatch::ConstructRowPointers() const {
   DCHECK_EQ(row_pointers_.size(), batch_size_ + 1);
 }
 
-void PySparseCooInputBatch::ConstructRowPointersIfRequired() const {
+template <typename IndexT>
+void PySparseCooInputBatchImpl<IndexT>::ConstructRowPointersIfRequired() const {
   absl::call_once(row_pointer_construction_flag_,
-                  &PySparseCooInputBatch::ConstructRowPointers, this);
+                  &PySparseCooInputBatchImpl<IndexT>::ConstructRowPointers,
+                  this);
 }
 
-void PySparseCooInputBatch::ExtractCooTensors(
+template <typename IndexT>
+void PySparseCooInputBatchImpl<IndexT>::ExtractCooTensors(
     const ExtractCooTensorsOptions& options,
     ExtractedCooTensorsPerSparseCore& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL.
@@ -92,11 +96,15 @@ void PySparseCooInputBatch::ExtractCooTensors(
   SparseCsrInputBatchStream<int32_t,
                             pybind11::detail::unchecked_reference<int, 1>,
                             absl::Span<const int64_t>>
-      values_stream(values_.unchecked<1>(), absl::MakeConstSpan(row_pointers_),
-                    options.slice_start, options.slice_end, table_name_,
-                    max_vocab_id_);
+      values_stream(values_.template unchecked<1>(),
+                    absl::MakeConstSpan(row_pointers_), options.slice_start,
+                    options.slice_end, table_name_, max_vocab_id_);
   UnityWeightsStream weights_stream(values_stream);
 
   ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
 }
+
+template class PySparseCooInputBatchImpl<int64_t>;
+template class PySparseCooInputBatchImpl<int32_t>;
+
 }  // namespace jax_sc_embedding

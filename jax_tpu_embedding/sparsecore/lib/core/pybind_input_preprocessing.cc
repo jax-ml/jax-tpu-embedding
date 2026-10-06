@@ -264,8 +264,24 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
         feature_specs[i].attr("table_spec").attr("vocabulary_size").cast<int>();
     const std::string table_name =
         feature_specs[i].attr("table_spec").attr("name").cast<std::string>();
+    const py::object& idx_obj = indices[i];
+    // Dispatch 32-bit (or narrower) 2D signed integer coordinate arrays to
+    // PySparseCooInputBatchInt32 to avoid an int32 -> int64 conversion copy.
+    if (py::isinstance<py::array>(idx_obj)) {
+      py::array idx_arr = py::reinterpret_borrow<py::array>(idx_obj);
+      if (idx_arr.ndim() == 2 && idx_arr.dtype().kind() == 'i' &&
+          idx_arr.itemsize() <= sizeof(int32_t)) {
+        input_batches[i] = std::make_unique<PySparseCooInputBatchInt32>(
+            idx_obj.cast<py::array_t<int32_t, py::array::c_style |
+                                                  py::array::forcecast>>(),
+            values[i].cast<py::array_t<int32_t>>(),
+            dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id,
+            table_name);
+        continue;
+      }
+    }
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
-        indices[i].cast<py::array_t<int64_t>>(),
+        idx_obj.cast<py::array_t<int64_t>>(),
         values[i].cast<py::array_t<int32_t>>(),
         dense_shapes[i].cast<py::array_t<int64_t>>(), max_vocab_id, table_name);
   }

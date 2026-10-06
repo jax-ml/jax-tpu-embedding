@@ -56,6 +56,7 @@ def preprocess_sparse_dense_matmul_input(
     all_reduce_interface: AllReduceInterface | None = None
 ) -> PreprocessOutput: ...
 def preprocess_sparse_dense_matmul_sparse_coo_input(
+    # Per-feature 2D (N, 2) int32 or int64 COO index arrays.
     indices: Sequence[np.ndarray],
     values: Sequence[np.ndarray],
     dense_shapes: Sequence[np.ndarray],
