@@ -584,7 +584,8 @@ struct FeatureMetadataInStack {
       int col_shift, int64_t batch_size,
       std::optional<int> suggested_coo_buffer_size_per_device = std::nullopt,
       RowCombiner row_combiner = RowCombiner::kSum,
-      int max_col_id = std::numeric_limits<int>::max())
+      int max_col_id = std::numeric_limits<int>::max(),
+      bool enable_megacore_csr = false)
       : name(name),
         feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
@@ -596,7 +597,8 @@ struct FeatureMetadataInStack {
         col_shift(col_shift),
         batch_size(batch_size),
         row_combiner(row_combiner),
-        max_col_id(max_col_id) {}
+        max_col_id(max_col_id),
+        enable_megacore_csr(enable_megacore_csr) {}
 
   std::string name;
 
@@ -622,6 +624,10 @@ struct FeatureMetadataInStack {
   // shard.
   int max_col_id;
 
+  // Whether to produce Megacore (chip-level) CSR buffers instead of per-SC
+  // CSR buffers for this stacked table.
+  bool enable_megacore_csr = false;
+
   bool operator==(const FeatureMetadataInStack& other) const = default;
 };
 
@@ -633,6 +639,13 @@ inline int GetActualRowPointersSizePerDevice(
   return options.GetRowPointersSizePerBucket() * num_minibatches *
          options.num_sc_per_device;
 }
+
+bool EnableMegacoreCsrForStackedTables(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
+
+int ComputeRowPointersSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
 int64_t ComputeTheoreticalMaxCooBufferSize(
     int max_ids_per_partition, int global_device_count, int num_sc_per_device,
@@ -660,7 +673,8 @@ void FillLocalDeviceBuffer(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound);
+    int& dropped_id_count_static_bound, bool enable_megacore_csr = false,
+    int rows_per_sc = 0);
 
 // Returns the number of dropped IDs.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
@@ -668,7 +682,8 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
-    internal::CsrArraysRefPerDevice csr_arrays);
+    internal::CsrArraysRefPerDevice csr_arrays,
+    bool enable_megacore_csr = false, int rows_per_sc = 0);
 
 }  // namespace jax_sc_embedding
 

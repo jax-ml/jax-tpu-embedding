@@ -668,9 +668,24 @@ void FillDeviceBuffersForTable(
           state.stats_per_host.GetStatsPerDevice(local_device)
               .required_buffer_size;
 
+      const bool enable_megacore_csr =
+          EnableMegacoreCsrForStackedTables(state.stacked_table_metadata);
+      const int rows_per_sc =
+          (!state.stacked_table_metadata.empty() &&
+           state.stacked_table_metadata[0].max_col_id <
+               std::numeric_limits<int>::max())
+              ? state.stacked_table_metadata[0].max_col_id + 1
+              : 0;
+      if (enable_megacore_csr && options.num_sc_per_device > 1) {
+        CHECK_GT(rows_per_sc, 0)
+            << "max_col_id must be set on FeatureMetadataInStack when "
+               "enable_megacore_csr is true and num_sc_per_device > 1 (table: "
+            << state.stacked_table_name << ").";
+      }
       tsl::AsyncValueRef<int> dropped_id_count_av = FillLocalDeviceBufferAsync(
           grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes,
-          options, state.stacked_table_name, csr_arrays_per_device);
+          options, state.stacked_table_name, csr_arrays_per_device,
+          enable_megacore_csr, rows_per_sc);
 
       dropped_id_count_av.AndThen(
           [sorting_result_av, &counter, dropped_id_count_av]() {
@@ -825,15 +840,14 @@ PreprocessSparseDenseMatmulInput(
 
   PreprocessSparseDenseMatmulOutput out;
 
-  const int row_pointers_size_per_device =
-      options.GetRowPointersSizePerDevice();
-
   std::vector<TableState> table_states;
   table_states.reserve(stacked_tables.size());
   for (const auto& [stacked_table_name, stacked_table_metadata] :
        stacked_tables) {
     const bool stack_has_weights =
         StackHasVariableWeights(input_batches, stacked_table_metadata);
+    const int row_pointers_size_per_device =
+        ComputeRowPointersSizePerDevice(options, stacked_table_metadata);
     const int coo_buffer_size_per_device =
         ComputeCooBufferSizePerDevice(options, stacked_table_metadata);
 
@@ -942,12 +956,16 @@ PreprocessSparseDenseMatmulInput(
           result_av.get().total_dropped_id_count;
     }
     // NOMUTANTS -- Informational.
-    CheckBufferUsage(
-        /* max_required_buffer_size_per_device= */
-        state.stats_per_host.required_buffer_size.maxCoeff() *
-            options.num_sc_per_device,
-        state.coo_buffer_size_per_device, state.stacked_table_name,
-        options.batch_number);
+    const int max_required_buffer_size_per_device =
+        EnableMegacoreCsrForStackedTables(state.stacked_table_metadata)
+            ? state.stats_per_host.required_buffer_size.rowwise()
+                  .sum()
+                  .maxCoeff()
+            : state.stats_per_host.required_buffer_size.maxCoeff() *
+                  options.num_sc_per_device;
+    CheckBufferUsage(max_required_buffer_size_per_device,
+                     state.coo_buffer_size_per_device, state.stacked_table_name,
+                     options.batch_number);
 
     PopulateOutputStats(state, out.stats, options.batch_number);
   }
