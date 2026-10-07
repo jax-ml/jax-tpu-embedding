@@ -34,6 +34,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
     self.global_devices = np.array([mock.create_autospec(jax.Device)])
     self.num_chips = 1
     self.num_sc_per_device = utils.num_sparsecores_per_device()
+    self.sc_simd_width = utils.sparsecore_simd_width()
     self.vocab_size = 32
     self.emb_size = 8
     self.input_tensor = np.array(
@@ -114,6 +115,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -225,6 +227,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -263,6 +266,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -312,6 +316,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         max_ids_per_partition=16,
         max_unique_ids_per_partition=64,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
     )
 
     num_minibatches_per_physical_sparse_core = 1
@@ -345,6 +350,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         [self.input_weights],
         mesh,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
@@ -434,6 +440,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         weights,
         mesh,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
@@ -532,6 +539,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         weights,
         mesh,
         num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,

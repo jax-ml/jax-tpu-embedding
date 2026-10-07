@@ -119,8 +119,14 @@ TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
   };
   EXPECT_EQ(ComputeCooBufferSizePerDevice(options, stacked_table_metadata),
+            16 * 4 * 4);
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(
+                /*global_device_count=*/1, /*num_sc_per_device=*/4,
+                stacked_table_metadata, /*batch_number=*/0,
+                MinibatchingMode::kDisabled),
             16 * 4 * 4);
   stacked_table_metadata[0].suggested_coo_buffer_size_per_device = 48;
   EXPECT_EQ(ComputeCooBufferSizePerDevice(options, stacked_table_metadata), 64);
@@ -151,6 +157,7 @@ TEST(SortAndGroupTest, Base) {
       .local_device_count = 4,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
   };
   MinibatchingSplit minibatching_split = 0;
@@ -238,6 +245,7 @@ TEST(SortAndGroupTest, TwoScs) {
       .local_device_count = 2,
       .global_device_count = 1,
       .num_sc_per_device = 2,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
   };
   MinibatchingSplit minibatching_split = 0;
@@ -311,6 +319,7 @@ TEST_P(VerifyIdLimitationsTest,
       .local_device_count = 4,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
   };
   MinibatchingSplit minibatching_split = 0;
@@ -502,6 +511,7 @@ TEST(SortAndGroupTest, IdDropping) {
       .local_device_count = 4,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
       .allow_id_dropping = true,
   };
   bool minibatching_split = 0;
@@ -592,6 +602,7 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
       .local_device_count = 4,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
   };
   MinibatchingSplit minibatching_split = 0;
@@ -722,6 +733,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
       .minibatching_bucketing_hash_fn = hash_fn};
@@ -851,6 +863,7 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 4,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
       .minibatching_bucketing_hash_fn = hash_fn};
@@ -1032,6 +1045,7 @@ TEST(InputPreprocessingUtilTest,
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 1,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
   };
 
@@ -1097,6 +1111,7 @@ TEST(InputPreprocessingUtilTest,
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 1,
+      .sc_simd_width = 8,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
       .minibatching_bucketing_hash_fn = hash_fn,
@@ -1163,6 +1178,41 @@ TEST(InputPreprocessingUtilTest,
       0, 1, 2, 3, INT_MAX, INT_MAX};
   EXPECT_THAT(absl::MakeSpan(csr_arrays.sample_ids).subspan(0, 6),
               ElementsAreArray(expected_sample_ids));
+}
+
+TEST(InputPreprocessingUtilTest, GetRowPointersSizePerBucketAndDevice) {
+  // TPU v5p (4 SCs per device, SIMD width 8): 1 chip -> 8 per bucket, 32 per
+  // device.
+  PreprocessSparseDenseMatmulInputOptions v5p_opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+  };
+  EXPECT_EQ(v5p_opts.GetRowPointersSizePerBucket(), 8);
+  EXPECT_EQ(v5p_opts.GetRowPointersSizePerDevice(), 32);
+
+  // TPU v6e (2 SCs per device, SIMD width 8): 1 chip -> 8 per bucket, 16 per
+  // device.
+  PreprocessSparseDenseMatmulInputOptions v6e_opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+  };
+  EXPECT_EQ(v6e_opts.GetRowPointersSizePerBucket(), 8);
+  EXPECT_EQ(v6e_opts.GetRowPointersSizePerDevice(), 16);
+
+  // TPU7x (2 SCs per device, SIMD width 16): 1 chip -> 16 per bucket, 32 per
+  // device.
+  PreprocessSparseDenseMatmulInputOptions v7x_opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 16,
+  };
+  EXPECT_EQ(v7x_opts.GetRowPointersSizePerBucket(), 16);
+  EXPECT_EQ(v7x_opts.GetRowPointersSizePerDevice(), 32);
 }
 
 }  // namespace

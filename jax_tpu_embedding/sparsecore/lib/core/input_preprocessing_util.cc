@@ -265,21 +265,21 @@ int64_t ComputeTheoreticalMaxCooBufferSize(int max_ids_per_partition,
 }
 
 int ComputeCooBufferSizePerDevice(
-    const PreprocessSparseDenseMatmulInputOptions& options,
-    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+    int global_device_count, int num_sc_per_device,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    int batch_number, MinibatchingMode minibatching_mode) {
   const int max_ids_per_partition =
       MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
   const std::optional<int> suggested_coo_buffer_size_per_device =
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
-  const int num_scs = options.GetNumScs();
-  const int num_scs_per_device = options.num_sc_per_device;
-  const int batch_number = options.batch_number;
+  const int num_scs = global_device_count * num_sc_per_device;
+  const int num_scs_per_device = num_sc_per_device;
 
   const int64_t max_ids_rounded_up = xla::RoundUpTo<int64_t>(
       max_ids_per_partition, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
   const int64_t theoretical_max = ComputeTheoreticalMaxCooBufferSize(
-      max_ids_per_partition, options.global_device_count,
-      options.num_sc_per_device, options.GetMinibatchingMode());
+      max_ids_per_partition, global_device_count, num_sc_per_device,
+      minibatching_mode);
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                          << ": " << theoretical_max
@@ -320,6 +320,15 @@ int ComputeCooBufferSizePerDevice(
       << ") for table " << stacked_table_name
       << " is out of the valid range (0, INT_MAX).";
   return static_cast<int>(computed_coo_buffer_size_per_device);
+}
+
+int ComputeCooBufferSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  return ComputeCooBufferSizePerDevice(
+      options.global_device_count, options.num_sc_per_device,
+      stacked_table_metadata, options.batch_number,
+      options.GetMinibatchingMode());
 }
 
 int MaxIdsPerPartitionForStackedTables(
@@ -529,6 +538,11 @@ absl::Status PreprocessSparseDenseMatmulInputOptions::Validate() const {
     return absl::InvalidArgumentError(
         absl::StrCat("Total number of SparseCores (", GetNumScs(),
                      ") must be a power of 2."));
+  }
+  if (sc_simd_width <= 0 ||
+      !absl::has_single_bit(static_cast<uint32_t>(sc_simd_width))) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "sc_simd_width (", sc_simd_width, ") must be a positive power of 2."));
   }
   if (minibatching_mode != MinibatchingMode::kDisabled &&
       minibatching_mode != MinibatchingMode::kHost &&

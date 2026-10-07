@@ -493,6 +493,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const int global_device_count ABSL_REQUIRE_EXPLICIT_INIT;
   // The number of SparseCores per TPU device.
   const int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
+  // The SIMD width of each SparseCore tile.
+  const int sc_simd_width = 8;
   // The sharding strategy used to distribute embedding IDs across SparseCores.
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
@@ -552,8 +554,10 @@ struct PreprocessSparseDenseMatmulInputOptions {
 
   // Returns the size of row pointers per bucket.
   int GetRowPointersSizePerBucket() const {
-    return std::max(static_cast<int>(GetNumScs()),
-                    TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+    // This calculation should be aligned with the corresponding XLA
+    // calculation.
+    return std::max({static_cast<int>(GetNumScs()),
+                     TPU_VECTOR_REGISTER_ALIGNMENT_SIZE, sc_simd_width});
   }
 
   // Returns the size of row pointers per device.
@@ -633,6 +637,11 @@ inline int GetActualRowPointersSizePerDevice(
 int64_t ComputeTheoreticalMaxCooBufferSize(
     int max_ids_per_partition, int global_device_count, int num_sc_per_device,
     MinibatchingMode minibatching_mode = MinibatchingMode::kDisabled);
+
+int ComputeCooBufferSizePerDevice(
+    int global_device_count, int num_sc_per_device,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    int batch_number, MinibatchingMode minibatching_mode);
 
 int ComputeCooBufferSizePerDevice(
     const PreprocessSparseDenseMatmulInputOptions& options,

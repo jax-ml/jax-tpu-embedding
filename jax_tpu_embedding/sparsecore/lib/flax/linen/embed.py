@@ -104,6 +104,7 @@ class SparseCoreEmbed(nn.Module):
 
   # Initialized in __post_init__.
   num_sc_per_device: int = -1
+  sc_simd_width: int = -1
 
   def __post_init__(self):
     if self._mesh is None:
@@ -117,6 +118,12 @@ class SparseCoreEmbed(nn.Module):
     self.num_sc_per_device = utils.num_sparsecores_per_device(
         self._mesh.devices.item(0)
     )
+    try:
+      self.sc_simd_width = utils.sparsecore_simd_width(
+          self._mesh.devices.item(0)
+      )
+    except (ValueError, IndexError):
+      self.sc_simd_width = 8
 
     super().__post_init__()
 
@@ -221,6 +228,7 @@ class SparseCoreEmbed(nn.Module):
             else embedding.MinibatchingMode.DISABLED
         ),
         all_reduce_interface=all_reduce_interface,
+        sc_simd_width=self.sc_simd_width,
     )[0]
 
   def __call__(

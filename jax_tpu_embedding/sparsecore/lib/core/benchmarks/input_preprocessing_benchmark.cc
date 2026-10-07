@@ -73,6 +73,7 @@ void LogStats(const Eigen::MatrixBase<Derived>& data, absl::string_view name) {
 // FDO parameters for reference: max_ids_per_partition=4456,
 // max_unique_ids_per_partition=792.
 constexpr int kNumScPerDevice = 4;
+constexpr int kScSimdWidth = 8;
 constexpr int kGlobalDeviceCount = 128;
 constexpr int kBatchSizePerSc = 16384;
 constexpr int kSeed = 31337;
@@ -218,6 +219,7 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       .local_device_count = 1,
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
+      .sc_simd_width = kScSimdWidth,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
   };
@@ -273,6 +275,7 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .local_device_count = 1,
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
+      .sc_simd_width = kScSimdWidth,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
   };
@@ -345,6 +348,7 @@ void BM_FillBuffer(benchmark::State& state) {
       .local_device_count = 1,
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
+      .sc_simd_width = kScSimdWidth,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
   };
