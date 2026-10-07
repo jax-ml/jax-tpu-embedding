@@ -19,6 +19,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_f2a
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
@@ -498,18 +499,48 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
       )
 
   @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
       dict(
-          testcase_name="default",
+          testcase_name="default_dim_8",
           min_value=None,
           max_value=None,
+          emb_size=_EMB_SIZE,
       ),
       dict(
-          testcase_name="bounds",
+          testcase_name="default_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="default_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="bounds_dim_8",
           min_value=2.0,
           max_value=12.0,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="bounds_dim_5",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="bounds_dim_21",
+          min_value=2.0,
+          max_value=12.0,
+          emb_size=21,
       ),
   )
-  def test_sc_emb_backward_pass_with_f2a(self, min_value, max_value):
+  def test_sc_emb_backward_pass_with_f2a(
+      self, min_value, max_value, emb_size: int
+  ):
     # Arrange
     input_tensor = jnp.array([
         [0, 1, 2, 3],
@@ -531,9 +562,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     ])
     input_weights = jnp.ones((_BATCH_SIZE, 4), dtype=np.float32)
 
-    embedding_table = jnp.arange(
-        _VOCAB_SIZE * _EMB_SIZE, dtype=np.float32
-    ).reshape(_VOCAB_SIZE, _EMB_SIZE)
+    embedding_table = test_utils.element_id_initializer((_VOCAB_SIZE, emb_size))
 
     accumulator = jnp.full(embedding_table.shape, 0.1, np.float32)
     local_step = jnp.zeros(embedding_table.shape, np.float32)
@@ -574,7 +603,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
     l2_regularization_strength = 0.01
     max_lr_multiplier = 10.0
 
-    activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.1, np.float32)
+    activations_grad = jnp.full((_BATCH_SIZE, emb_size), 0.1, np.float32)
 
     def _compute_table_grad(inputs, weights, activation_grad):
       batch_size = activation_grad.shape[0]
@@ -583,7 +612,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
       cols = jnp.concatenate(np.unstack(inputs))
       vals = jnp.concatenate(np.unstack(weights)).reshape(-1, 1)
 
-      grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE))
+      grad = jnp.zeros(shape=(_VOCAB_SIZE, emb_size))
       grad = grad.at[cols, :].add(vals * activation_grad[rows, :])
       return grad
 
@@ -685,7 +714,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         global_step,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
-        computation_name="f2a_test_computation_parameterized",
+        computation_name=f"f2a_test_computation_parameterized_dim_{emb_size}",
         sharding_strategy=1,
         min_value=min_value,
         max_value=max_value,

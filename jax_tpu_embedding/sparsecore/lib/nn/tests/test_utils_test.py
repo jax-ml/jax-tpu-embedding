@@ -55,6 +55,19 @@ class TestUtilsTest(parameterized.TestCase):
     )
     np.testing.assert_array_equal(expected, actual)
 
+  def test_element_id_initializer(self):
+    expected = np.array(
+        [
+            [10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0],
+        ],
+        dtype=np.float32,
+    )
+    actual = test_utils.element_id_initializer(
+        shape=(2, 3), offset=10, dtype=np.float32
+    )
+    np.testing.assert_array_equal(expected, actual)
+
   def test_row_id_with_offset_initializer(self):
     expected = np.array(
         [

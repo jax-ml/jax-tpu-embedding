@@ -19,6 +19,7 @@ import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
@@ -432,7 +433,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     vals = jnp.concatenate(np.unstack(weights)).reshape(-1, 1)
 
     # grad = transpose(A) @ activation_grad
-    grad = jnp.zeros(shape=(_VOCAB_SIZE, _EMB_SIZE))
+    grad = jnp.zeros(shape=(_VOCAB_SIZE, activation_grad.shape[1]))
     grad = grad.at[cols, :].add(vals * activation_grad[rows, :])
     return grad
 
@@ -448,10 +449,46 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     return grad
 
   @parameterized.named_parameters(
-      ("no_clipping", None, None),
-      ("clipping", 2.0, 10.0),
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(
+          testcase_name="no_clipping_dim_8",
+          min_value=None,
+          max_value=None,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_5",
+          min_value=None,
+          max_value=None,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="no_clipping_dim_21",
+          min_value=None,
+          max_value=None,
+          emb_size=21,
+      ),
+      dict(
+          testcase_name="clipping_dim_8",
+          min_value=2.0,
+          max_value=10.0,
+          emb_size=_EMB_SIZE,
+      ),
+      dict(
+          testcase_name="clipping_dim_5",
+          min_value=2.0,
+          max_value=10.0,
+          emb_size=5,
+      ),
+      dict(
+          testcase_name="clipping_dim_21",
+          min_value=2.0,
+          max_value=10.0,
+          emb_size=21,
+      ),
   )
-  def test_adam_optimizer_update(self, min_value, max_value):
+  def test_adam_optimizer_update(self, min_value, max_value, emb_size: int):
     # Arrange
     # Process the input.
     input_tensor = np.array(
@@ -495,12 +532,8 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
         num_sc_per_device=utils.num_sparsecores_per_device(),
         sc_simd_width=utils.sparsecore_simd_width(),
     )
-    embedding_table = (
-        np.array(
-            [[(i + 1) for _ in range(_EMB_SIZE)] for i in range(_VOCAB_SIZE)]
-        )
-        .reshape(_VOCAB_SIZE, _EMB_SIZE)
-        .astype(np.float32)
+    embedding_table = test_utils.row_id_initializer(
+        (_VOCAB_SIZE, emb_size), offset=1
     )
     embedding_table_sharded = self._shard_table(embedding_table)
 
@@ -515,7 +548,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
     beta_2 = np.float32(0.999)
     epsilon = np.float32(1e-8)
 
-    activations_grad = jnp.full((_BATCH_SIZE, _EMB_SIZE), 0.012, np.float32)
+    activations_grad = jnp.full((_BATCH_SIZE, emb_size), 0.012, np.float32)
     table_grad = self._compute_table_grad(
         input_tensor, input_weights, activations_grad
     )
@@ -578,7 +611,7 @@ class SparseDenseMatmulGradWithadamTest(parameterized.TestCase):
             epsilon_hat,
             max_ids_per_partition=16,
             max_unique_ids_per_partition=16,
-            computation_name="optimizer_test_computation",
+            computation_name=f"optimizer_test_computation_dim_{emb_size}",
             sharding_strategy=1,
             min_value=min_value,
             max_value=max_value,
