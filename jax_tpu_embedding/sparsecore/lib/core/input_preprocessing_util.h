@@ -494,7 +494,7 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // The number of SparseCores per TPU device.
   const int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
   // The SIMD width of each SparseCore tile.
-  const int sc_simd_width = 8;
+  const int sc_simd_width ABSL_REQUIRE_EXPLICIT_INIT;
   // The sharding strategy used to distribute embedding IDs across SparseCores.
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
