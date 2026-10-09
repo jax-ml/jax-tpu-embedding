@@ -216,6 +216,87 @@ int FillBufferSegment(const BufferFillingOptions& options,
   return coo_index;
 }
 
+int FillMegacoreDeviceBuffer(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const PreprocessSparseDenseMatmulInputOptions& options, int rows_per_sc,
+    internal::CsrArraysRefPerDevice& csr_arrays) {
+  const int global_device_count = options.global_device_count;
+  const int num_sc_per_device = options.num_sc_per_device;
+  const int num_scs = options.GetNumScs();
+  const int num_minibatches_per_sc = grouped_coo_tensors.GetNumMinibatches();
+  const int coo_buffer_size = csr_arrays.embedding_ids.cols();
+  const int row_pointers_size = csr_arrays.row_pointers.cols();
+
+  struct MegacoreEntry {
+    int embedding_id;
+    int sample_id;
+    float gain;
+  };
+  std::vector<std::vector<MegacoreEntry>> per_device_entries(
+      global_device_count);
+
+  for (int local_sc_id = 0; local_sc_id < num_sc_per_device; ++local_sc_id) {
+    for (int minibatch_id = 0; minibatch_id < num_minibatches_per_sc;
+         ++minibatch_id) {
+      for (const CooFormat& coo_tensor :
+           grouped_coo_tensors(local_sc_id, minibatch_id)) {
+        const int global_sc_id = coo_tensor.col_id % num_scs;
+        const int target_device = global_sc_id / num_sc_per_device;
+        const int dest_sc = global_sc_id % num_sc_per_device;
+        const int emb_id = coo_tensor.col_id / num_scs;
+        per_device_entries[target_device].push_back(MegacoreEntry{
+            .embedding_id = dest_sc * rows_per_sc + emb_id,
+            .sample_id = coo_tensor.row_id,
+            .gain = coo_tensor.gain,
+        });
+      }
+    }
+  }
+
+  int cursor = 0;
+  int dropped_id_count = 0;
+  for (int d = 0; d < global_device_count; ++d) {
+    auto& entries = per_device_entries[d];
+    std::sort(entries.begin(), entries.end(),
+              [](const MegacoreEntry& a, const MegacoreEntry& b) {
+                if (a.embedding_id != b.embedding_id) {
+                  return a.embedding_id < b.embedding_id;
+                }
+                return a.sample_id < b.sample_id;
+              });
+    for (const MegacoreEntry& entry : entries) {
+      if (cursor >= coo_buffer_size) {
+        ++dropped_id_count;
+        continue;
+      }
+      csr_arrays.embedding_ids[cursor] = entry.embedding_id;
+      csr_arrays.sample_ids[cursor] = entry.sample_id;
+      csr_arrays.gains[cursor] = entry.gain;
+      ++cursor;
+    }
+    csr_arrays.row_pointers[d] = cursor;
+    const int aligned_cursor =
+        std::min(coo_buffer_size,
+                 xla::RoundUpTo(cursor, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE));
+    while (cursor < aligned_cursor) {
+      csr_arrays.embedding_ids[cursor] = -1;
+      csr_arrays.sample_ids[cursor] = -1;
+      csr_arrays.gains[cursor] = 0.0f;
+      ++cursor;
+    }
+  }
+  for (int d = global_device_count; d < row_pointers_size; ++d) {
+    csr_arrays.row_pointers[d] = cursor;
+  }
+  while (cursor < coo_buffer_size) {
+    csr_arrays.embedding_ids[cursor] = -1;
+    csr_arrays.sample_ids[cursor] = -1;
+    csr_arrays.gains[cursor] = 0.0f;
+    ++cursor;
+  }
+  return dropped_id_count;
+}
+
 }  // namespace
 
 RowCombiner GetRowCombiner(absl::string_view combiner) {
@@ -227,6 +308,33 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
     return RowCombiner::kSqrtn;
   }
   return RowCombiner::kSum;
+}
+
+bool EnableMegacoreCsrForStackedTables(
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  if (stacked_table_metadata.empty()) {
+    return false;
+  }
+  const bool enable_megacore_csr =
+      stacked_table_metadata[0].enable_megacore_csr;
+  for (const FeatureMetadataInStack& metadata : stacked_table_metadata) {
+    DCHECK_EQ(metadata.enable_megacore_csr, enable_megacore_csr)
+        << "All features in a stacked table must have the same "
+           "enable_megacore_csr setting (feature: "
+        << metadata.name << ").";
+  }
+  return enable_megacore_csr;
+}
+
+int ComputeRowPointersSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  if (EnableMegacoreCsrForStackedTables(stacked_table_metadata)) {
+    return xla::RoundUpTo(std::max(options.global_device_count,
+                                   TPU_VECTOR_REGISTER_ALIGNMENT_SIZE),
+                          TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  }
+  return options.GetRowPointersSizePerDevice();
 }
 
 int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
@@ -319,6 +427,21 @@ int ComputeCooBufferSizePerDevice(
       << "Computed Coo Buffer Size (" << computed_coo_buffer_size_per_device
       << ") for table " << stacked_table_name
       << " is out of the valid range (0, INT_MAX).";
+  if (EnableMegacoreCsrForStackedTables(stacked_table_metadata)) {
+    constexpr int kMinMegacoreCooBufferSize = 256;
+    const int v1_coo_buffer_size =
+        static_cast<int>(computed_coo_buffer_size_per_device);
+    const int max_len =
+        (num_scs_per_device > 1 &&
+         v1_coo_buffer_size > kMinMegacoreCooBufferSize)
+            ? std::max(kMinMegacoreCooBufferSize,
+                       xla::CeilOfRatio(v1_coo_buffer_size, num_scs_per_device))
+            : v1_coo_buffer_size;
+    return std::max(
+        kMinMegacoreCooBufferSize,
+        xla::RoundUpTo(max_len, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE) +
+            (global_device_count - 1) * TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+  }
   return static_cast<int>(computed_coo_buffer_size_per_device);
 }
 
@@ -353,12 +476,28 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
-    internal::CsrArraysRefPerDevice csr_arrays) {
+    internal::CsrArraysRefPerDevice csr_arrays, bool enable_megacore_csr,
+    int rows_per_sc) {
   tsl::profiler::TraceMe t([&] {
     return tsl::profiler::TraceMeEncode(
         absl::StrCat("ScheduleFillLocalDeviceBuffer/", stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
+  if (enable_megacore_csr) {
+    tsl::AsyncValueRef<int> dropped_id_count_av =
+        tsl::MakeUnconstructedAsyncValueRef<int>();
+    options.async_task_scheduler([=, &grouped_coo_tensors]() mutable {
+      tsl::profiler::TraceMe trace_megacore([&] {
+        return tsl::profiler::TraceMeEncode(
+            absl::StrCat("FillMegacoreDeviceBuffer/", stacked_table_name),
+            {{"batch_number", options.batch_number}});
+      });
+      const int dropped_id_count = FillMegacoreDeviceBuffer(
+          grouped_coo_tensors, options, rows_per_sc, csr_arrays);
+      dropped_id_count_av.emplace(dropped_id_count);
+    });
+    return dropped_id_count_av;
+  }
   const int row_pointers_size_per_bucket =
       options.GetRowPointersSizePerBucket();
 
@@ -500,10 +639,11 @@ void FillLocalDeviceBuffer(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     internal::CsrArraysRefPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound) {
+    int& dropped_id_count_static_bound, bool enable_megacore_csr,
+    int rows_per_sc) {
   tsl::AsyncValueRef<int> dropped_id_count = FillLocalDeviceBufferAsync(
       grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes, options,
-      stacked_table_name, csr_arrays);
+      stacked_table_name, csr_arrays, enable_megacore_csr, rows_per_sc);
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
 }
