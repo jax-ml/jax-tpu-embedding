@@ -16,15 +16,19 @@ from typing import override
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
+from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
 
-class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
+class SparseDenseMatmulCsrWithMiniBatchingValidationTest(
+    parameterized.TestCase
+):
 
   @override
   def setUp(self):
@@ -81,12 +85,8 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
     )
 
     # Define the embedding table.
-    self.emb_table = (
-        np.array(
-            [[i for _ in range(self.emb_size)] for i in range(self.vocab_size)]
-        )
-        .reshape(self.vocab_size, self.emb_size)
-        .astype(np.float32)
+    self.emb_table = test_utils.row_id_initializer(
+        (self.vocab_size, self.emb_size)
     )
 
     self.emb_table_sharded = utils.shard_emb_table(
@@ -336,7 +336,14 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         enable_minibatching=True,
     )
 
-  def test_sc_emb_forward_pass(self):
+  @parameterized.named_parameters(
+      # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
+      # exercise the sub-word and multi-word-with-remainder cases respectively.
+      dict(testcase_name="dim_8", emb_size=8),
+      dict(testcase_name="dim_5", emb_size=5),
+      dict(testcase_name="dim_21", emb_size=21),
+  )
+  def test_sc_emb_forward_pass(self, emb_size: int):
     # Process the input.
     batch_size = 16
     mesh = jax.sharding.Mesh(self.global_devices, "x")
@@ -362,6 +369,14 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         num_minibatches_per_physical_sparse_core,
     )
 
+    # Define and shard an embedding table with the parameterized width.
+    emb_table = test_utils.row_id_initializer((self.vocab_size, emb_size))
+    emb_table_sharded = utils.shard_emb_table(
+        emb_table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+
     # Do the embedding lookup.
     emb_activations = self.tpu_sparse_dense_matmul_csr_with_mini_batching(
         lhs_row_pointers,
@@ -369,7 +384,7 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
         sample_ids,
         gains,
         num_minibatches_per_physical_sparse_core,
-        self.emb_table_sharded[0],
+        emb_table_sharded[0],
         device_batch_size=batch_size // self.num_chips,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
@@ -379,27 +394,11 @@ class SparseDenseMatmulCsrWithMiniBatchingValidationTest(absltest.TestCase):
 
     logging.debug("emb_activations: %s", emb_activations)
 
-    # Check the embedding activations.
-    expected_emb_activations = np.array(
-        [
-            [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-            [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0],
-            [9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0],
-            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            [6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0],
-            [12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0],
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
-            [15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0],
-            [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0],
-            [11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0],
-            [7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0],
-            [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0],
-            [14.0, 14.0, 14.0, 14.0, 14.0, 14.0, 14.0, 14.0],
-            [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
-            [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
-        ],
-        dtype=np.float32,
+    # Check the embedding activations. Each sample looks up a single id, and
+    # row i of the table is filled with i, so the activation for a sample is
+    # its id repeated emb_size times.
+    expected_emb_activations = np.tile(
+        self.input_tensor.astype(np.float32), (1, emb_size)
     )
 
     np.testing.assert_equal(emb_activations, expected_emb_activations)
