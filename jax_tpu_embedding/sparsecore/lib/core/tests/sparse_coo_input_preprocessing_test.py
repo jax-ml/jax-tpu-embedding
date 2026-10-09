@@ -1484,6 +1484,71 @@ class MeanCombinerTest(parameterized.TestCase):
         gains_raw[self.stacked_name],
     )
 
+  @parameterized.parameters(False, True)
+  def test_sparse_tensor_input_int32_indices(self, has_leading_dimension):
+    indices_i64 = np.indices((16, 16), dtype=np.int64).reshape(2, -1).T.copy()
+    indices_i32 = indices_i64.astype(np.int32)
+    indices_i16 = indices_i64.astype(np.int16)
+    values = np.arange(16 * 16, dtype=np.int32)
+    dense_shape = np.array([16, 16], dtype=np.int64)
+    row_splits_i32 = np.arange(0, 17 * 16, 16, dtype=np.int32)
+    row_splits_i64 = row_splits_i32.astype(np.int64)
+    row_splits_strided = np.arange(0, 34 * 8, 8, dtype=np.int32)[::2]
+    fixed_valency_scalar = np.array(16, dtype=np.int32)
+
+    sparse_tensor_input_preprocessing = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input
+    )
+    out_i64 = sparse_tensor_input_preprocessing(
+        [indices_i64],
+        [values],
+        [dense_shape],
+        [self.feature_spec],
+        local_device_count=4,
+        global_device_count=4,
+        num_sc_per_device=4,
+        sharding_strategy=ShardingStrategy.MOD,
+        has_leading_dimension=has_leading_dimension,
+        allow_id_dropping=False,
+        batch_number=42,
+    )
+    assert_equal_coo_buffer = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        4,
+        4,
+        out_i64[0][self.stacked_name],
+    )
+    for alt_idx in (
+        indices_i32,
+        indices_i16,
+        row_splits_i32,
+        row_splits_i64,
+        row_splits_strided,
+        fixed_valency_scalar,
+    ):
+      out_alt = sparse_tensor_input_preprocessing(
+          [alt_idx],
+          [values],
+          [dense_shape],
+          [self.feature_spec],
+          local_device_count=4,
+          global_device_count=4,
+          num_sc_per_device=4,
+          sharding_strategy=ShardingStrategy.MOD,
+          has_leading_dimension=has_leading_dimension,
+          allow_id_dropping=False,
+          batch_number=42,
+      )
+      np.testing.assert_equal(
+          out_i64[0][self.stacked_name],
+          out_alt[0][self.stacked_name],
+      )
+      for d64, d_alt in zip(out_i64[1:4], out_alt[1:4]):
+        assert_equal_coo_buffer(
+            d_alt[self.stacked_name],
+            d64[self.stacked_name],
+        )
+
 
 if __name__ == "__main__":
   absltest.main()
