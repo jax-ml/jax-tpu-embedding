@@ -52,6 +52,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
 
     self.num_sc_per_device = utils.num_sparsecores_per_device()
     self.sc_simd_width = utils.sparsecore_simd_width()
+    self.hbm_word_size_in_4b = utils.hbm_word_size_in_4b()
     self._shard_table = functools.partial(
         utils.shard_emb_table,
         num_devices=len(self.global_devices),
@@ -103,6 +104,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         mesh,
         num_sc_per_device=self.num_sc_per_device,
         sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,
@@ -209,6 +211,7 @@ class SparseDenseMatmulGradWithSgdWithMiniBatchingTest(parameterized.TestCase):
         mesh,
         num_sc_per_device=self.num_sc_per_device,
         sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
         max_ids_per_partition=16,
         max_unique_ids_per_partition=16,
         minibatching_mode=input_preprocessing.MinibatchingMode.HOST,

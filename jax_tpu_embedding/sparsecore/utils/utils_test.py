@@ -179,6 +179,11 @@ class UtilsTest(parameterized.TestCase):
     with self.assertRaises(ValueError):
       utils.sparsecore_simd_width(device)
 
+  def test_hbm_word_size_in_4b_unknown_device_raises(self):
+    device = mock.Mock(device_kind='cpu')
+    with self.assertRaises(ValueError):
+      utils.hbm_word_size_in_4b(device)
+
 
 if __name__ == '__main__':
   absltest.main()

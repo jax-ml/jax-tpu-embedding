@@ -559,9 +559,9 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                 ids_per_sc_partition_per_bucket.rowwise().sum().array();
             stats.required_buffer_size[local_sc_id] +=
                 partition_sizes
-                    .unaryExpr([](int val) {
-                      return xla::RoundUpTo(val,
-                                            TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+                    .unaryExpr([hbm_word_size_in_4b =
+                                    options.hbm_word_size_in_4b](int val) {
+                      return xla::RoundUpTo(val, hbm_word_size_in_4b);
                     })
                     .sum();
 

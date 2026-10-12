@@ -554,6 +554,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=utils.num_sparsecores_per_device(),
         sc_simd_width=utils.sparsecore_simd_width(),
+        hbm_word_size_in_4b=utils.hbm_word_size_in_4b(),
     )
 
     def _shard_table(table):
@@ -750,6 +751,7 @@ class SparseDenseMatmulGradWithF2aTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=utils.num_sparsecores_per_device(),
         sc_simd_width=utils.sparsecore_simd_width(),
+        hbm_word_size_in_4b=utils.hbm_word_size_in_4b(),
     )
 
     def _shard_table(table):

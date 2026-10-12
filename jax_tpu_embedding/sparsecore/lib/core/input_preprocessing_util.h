@@ -45,14 +45,6 @@
 
 namespace jax_sc_embedding {
 
-// TPU_VECTOR_REGISTER_ALIGNMENT_SIZE represents the required alignment for data
-// loaded into TPU vector registers, which are typically 8 sublanes x 128 lanes.
-// Data dimensions, specially the second most minor, must be padded to be
-// multiples of this value to ensure efficient TPU processing and avoid memory
-// inefficiency. This alignment is enforced by XLA. This applies to most current
-// generations of TPUs (v2, v3, v4, v5, v6).
-inline constexpr int TPU_VECTOR_REGISTER_ALIGNMENT_SIZE = 8;
-
 // numpy uses row major order, while eigen defaults to column major.
 template <typename T>
 using MatrixX =
@@ -495,6 +487,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   const int num_sc_per_device ABSL_REQUIRE_EXPLICIT_INIT;
   // The SIMD width of each SparseCore tile.
   const int sc_simd_width ABSL_REQUIRE_EXPLICIT_INIT;
+  // The HBM word size in 4-byte words.
+  const int hbm_word_size_in_4b = 8;
   // The sharding strategy used to distribute embedding IDs across SparseCores.
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
@@ -556,8 +550,8 @@ struct PreprocessSparseDenseMatmulInputOptions {
   int GetRowPointersSizePerBucket() const {
     // This calculation should be aligned with the corresponding XLA
     // calculation.
-    return std::max({static_cast<int>(GetNumScs()),
-                     TPU_VECTOR_REGISTER_ALIGNMENT_SIZE, sc_simd_width});
+    return std::max(
+        {static_cast<int>(GetNumScs()), hbm_word_size_in_4b, sc_simd_width});
   }
 
   // Returns the size of row pointers per device.
@@ -636,10 +630,11 @@ inline int GetActualRowPointersSizePerDevice(
 
 int64_t ComputeTheoreticalMaxCooBufferSize(
     int max_ids_per_partition, int global_device_count, int num_sc_per_device,
+    int hbm_word_size_in_4b,
     MinibatchingMode minibatching_mode = MinibatchingMode::kDisabled);
 
 int ComputeCooBufferSizePerDevice(
-    int global_device_count, int num_sc_per_device,
+    int global_device_count, int num_sc_per_device, int hbm_word_size_in_4b,
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     int batch_number, MinibatchingMode minibatching_mode);
 

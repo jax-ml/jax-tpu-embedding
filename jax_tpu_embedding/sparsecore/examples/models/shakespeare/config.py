@@ -73,6 +73,7 @@ class Config:
   num_local_devices: int
   num_sc_per_device: int
   sc_simd_width: int
+  hbm_word_size_in_4b: int
   num_processes: int
   process_id: int
   sharding_axis: str
@@ -103,6 +104,7 @@ def get_config() -> Config:
   num_local_devices = len(local_devices)
   num_sc_per_device = utils.num_sparsecores_per_device(global_devices[0])
   sc_simd_width = utils.sparsecore_simd_width(global_devices[0])
+  hbm_word_size_in_4b = utils.hbm_word_size_in_4b(global_devices[0])
 
   num_processes = jax.process_count()
   process_id = jax.process_index()
@@ -120,6 +122,7 @@ def get_config() -> Config:
       num_local_devices=num_local_devices,
       num_sc_per_device=num_sc_per_device,
       sc_simd_width=sc_simd_width,
+      hbm_word_size_in_4b=hbm_word_size_in_4b,
       num_processes=num_processes,
       process_id=process_id,
       sharding_axis=_SHARDING_AXIS,
@@ -204,6 +207,7 @@ def process_inputs(
       global_device_count=config.num_global_devices,
       num_sc_per_device=config.num_sc_per_device,
       sc_simd_width=config.sc_simd_width,
+      hbm_word_size_in_4b=config.hbm_word_size_in_4b,
       sharding_strategy='MOD',
       has_leading_dimension=has_leading_dimension,
       batch_number=batch_number,

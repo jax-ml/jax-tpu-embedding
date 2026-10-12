@@ -203,6 +203,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         allow_id_dropping=True,
     )
 
@@ -241,6 +242,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
           global_device_count=global_device_count,
           num_sc_per_device=4,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           allow_id_dropping=True,
       )
 
@@ -269,6 +271,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         global_device_count=1,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy="MOD",
         batch_number=42,
     )
@@ -304,6 +307,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy="MOD",
         batch_number=42,
     )
@@ -330,6 +334,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
     np.testing.assert_equal(
         preprocessed_input.lhs_row_pointers["table_b"],
@@ -372,6 +377,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         global_device_count=2,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy="MOD",
         batch_number=42,
     )
@@ -393,6 +399,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
     (
         second_half_a_row_pointers,
@@ -407,6 +414,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
     (
@@ -422,6 +430,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
     (
         second_half_b_row_pointers,
@@ -436,6 +445,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
     np.testing.assert_equal(
@@ -520,6 +530,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         global_device_count=2,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy="MOD",
         has_leading_dimension=True,
         batch_number=42,
@@ -543,6 +554,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
     (
         second_half_a_row_pointers,
@@ -557,6 +569,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
     (
@@ -572,6 +585,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
     (
         second_half_b_row_pointers,
@@ -586,6 +600,7 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         max_unique_ids_per_partition=64,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
     )
 
     np.testing.assert_equal(

@@ -233,6 +233,7 @@ def preprocess_numpy(state: google_benchmark.State):
             global_device_count=16,
             num_sc_per_device=4,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             batch_number=batch_num,
             allow_id_dropping=batch_num == 0,
         )
@@ -266,6 +267,7 @@ def preprocess_sparse_coo(state: google_benchmark.State):
             global_device_count=16,
             num_sc_per_device=4,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             batch_number=batch_num,
             allow_id_dropping=batch_num == 0,
         )
@@ -316,6 +318,7 @@ def preprocess_minibatching(
         global_device_count=16,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         minibatching_mode=pybind_input_preprocessing.MinibatchingMode.HOST,
         all_reduce_interface=all_reduce_interfaces[host_id],
         batch_number=batch_number,

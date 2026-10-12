@@ -124,7 +124,7 @@ GetStackedTableMetadata(py::list& feature_specs) {
 py::tuple PyPreprocessSparseDenseMatmulInput(
     absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     py::list feature_specs, int local_device_count, int global_device_count,
-    int num_sc_per_device, int sc_simd_width,
+    int num_sc_per_device, int sc_simd_width, int hbm_word_size_in_4b,
     ShardingStrategy sharding_strategy, bool has_leading_dimension,
     bool allow_id_dropping, int batch_number,
     MinibatchingMode minibatching_mode,
@@ -135,6 +135,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .sc_simd_width = sc_simd_width,
+      .hbm_word_size_in_4b = hbm_word_size_in_4b,
       .sharding_strategy = sharding_strategy,
       .allow_id_dropping = allow_id_dropping,
       .minibatching_mode = minibatching_mode,
@@ -192,7 +193,7 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
 py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
     py::list features, std::optional<py::list> feature_weights,
     py::list feature_specs, int local_device_count, int global_device_count,
-    int num_sc_per_device, int sc_simd_width,
+    int num_sc_per_device, int sc_simd_width, int hbm_word_size_in_4b,
     ShardingStrategy sharding_strategy, bool has_leading_dimension,
     bool allow_id_dropping, int batch_number,
     MinibatchingMode minibatching_mode,
@@ -213,19 +214,21 @@ py::tuple PyNumpyPreprocessSparseDenseMatmulInput(
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
-      global_device_count, num_sc_per_device, sc_simd_width, sharding_strategy,
-      has_leading_dimension, allow_id_dropping, batch_number, minibatching_mode,
-      all_reduce_interface);
+      global_device_count, num_sc_per_device, sc_simd_width,
+      hbm_word_size_in_4b, sharding_strategy, has_leading_dimension,
+      allow_id_dropping, batch_number, minibatching_mode, all_reduce_interface);
 }
 
 int PyComputeRowPointersSizePerDevice(int global_device_count,
                                       int num_sc_per_device, int sc_simd_width,
+                                      int hbm_word_size_in_4b,
                                       MinibatchingMode minibatching_mode) {
   PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .sc_simd_width = sc_simd_width,
+      .hbm_word_size_in_4b = hbm_word_size_in_4b,
       .minibatching_mode = minibatching_mode,
   };
   return options.GetRowPointersSizePerDevice();
@@ -234,14 +237,15 @@ int PyComputeRowPointersSizePerDevice(int global_device_count,
 py::dict PyComputeCooBufferSizePerDevice(py::list feature_specs,
                                          int global_device_count,
                                          int num_sc_per_device,
+                                         int hbm_word_size_in_4b,
                                          MinibatchingMode minibatching_mode) {
   const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables = GetStackedTableMetadata(feature_specs);
   py::dict result;
   for (const auto& [stack_name, metadata] : stacked_tables) {
     result[py::cast(stack_name)] = ComputeCooBufferSizePerDevice(
-        global_device_count, num_sc_per_device, absl::MakeSpan(metadata),
-        /*batch_number=*/0, minibatching_mode);
+        global_device_count, num_sc_per_device, hbm_word_size_in_4b,
+        absl::MakeSpan(metadata), /*batch_number=*/0, minibatching_mode);
   }
   return result;
 }
@@ -249,7 +253,7 @@ py::dict PyComputeCooBufferSizePerDevice(py::list feature_specs,
 py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
     py::list indices, py::list values, py::list dense_shapes,
     py::list feature_specs, int local_device_count, int global_device_count,
-    int num_sc_per_device, int sc_simd_width,
+    int num_sc_per_device, int sc_simd_width, int hbm_word_size_in_4b,
     ShardingStrategy sharding_strategy, bool has_leading_dimension,
     bool allow_id_dropping, int batch_number,
     MinibatchingMode minibatching_mode,
@@ -271,9 +275,9 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
   }
   return PyPreprocessSparseDenseMatmulInput(
       absl::MakeSpan(input_batches), feature_specs, local_device_count,
-      global_device_count, num_sc_per_device, sc_simd_width, sharding_strategy,
-      has_leading_dimension, allow_id_dropping, batch_number, minibatching_mode,
-      all_reduce_interface);
+      global_device_count, num_sc_per_device, sc_simd_width,
+      hbm_word_size_in_4b, sharding_strategy, has_leading_dimension,
+      allow_id_dropping, batch_number, minibatching_mode, all_reduce_interface);
 }
 }  // namespace
 
@@ -298,6 +302,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("feature_weights"), py::arg("feature_specs"),
         py::arg("local_device_count"), py::arg("global_device_count"),
         py::kw_only(), py::arg("num_sc_per_device"), py::arg("sc_simd_width"),
+        py::arg("hbm_word_size_in_4b"),
         py::arg("sharding_strategy") = ShardingStrategy::kMod,
         py::arg("has_leading_dimension") = false,
         py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
@@ -308,6 +313,7 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
         py::arg("values"), py::arg("dense_shapes"), py::arg("feature_specs"),
         py::arg("local_device_count"), py::arg("global_device_count"),
         py::kw_only(), py::arg("num_sc_per_device"), py::arg("sc_simd_width"),
+        py::arg("hbm_word_size_in_4b"),
         py::arg("sharding_strategy") = ShardingStrategy::kMod,
         py::arg("has_leading_dimension") = false,
         py::arg("allow_id_dropping") = false, py::arg("batch_number") = 0,
@@ -316,14 +322,16 @@ PYBIND11_MODULE(pybind_input_preprocessing, m) {
   m.def("compute_row_pointers_size_per_device",
         &PyComputeRowPointersSizePerDevice, py::arg("global_device_count"),
         py::arg("num_sc_per_device"), py::arg("sc_simd_width"),
+        py::arg("hbm_word_size_in_4b"),
         py::arg("minibatching_mode") = MinibatchingMode::kDisabled);
   m.def("compute_theoretical_max_coo_buffer_size",
         &ComputeTheoreticalMaxCooBufferSize, py::arg("max_ids_per_partition"),
         py::arg("global_device_count"), py::arg("num_sc_per_device"),
+        py::arg("hbm_word_size_in_4b"),
         py::arg("minibatching_mode") = MinibatchingMode::kDisabled);
   m.def("compute_coo_buffer_size_per_device", &PyComputeCooBufferSizePerDevice,
         py::arg("feature_specs"), py::arg("global_device_count"),
-        py::arg("num_sc_per_device"),
+        py::arg("num_sc_per_device"), py::arg("hbm_word_size_in_4b"),
         py::arg("minibatching_mode") = MinibatchingMode::kDisabled);
   py::class_<SparseDenseMatmulInputStats>(m, "SparseDenseMatmulInputStats")
       .def(py::init<>())

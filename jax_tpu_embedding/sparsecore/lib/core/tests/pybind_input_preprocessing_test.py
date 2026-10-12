@@ -127,6 +127,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             global_device_count=self.global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -167,6 +168,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             global_device_count=self.global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -374,6 +376,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         global_device_count=2,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -579,6 +582,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=False,
             allow_id_dropping=False,
@@ -749,6 +753,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1024,6 +1029,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1119,6 +1125,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=4,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=True,
             allow_id_dropping=False,
@@ -1150,6 +1157,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         global_device_count=4,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=False,
         allow_id_dropping=False,
@@ -1774,6 +1782,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=False,
             allow_id_dropping=False,
@@ -1807,6 +1816,7 @@ class InputPreprocessingTest(parameterized.TestCase):
         global_device_count=1,
         num_sc_per_device=4,
         sc_simd_width=8,
+        hbm_word_size_in_4b=8,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=False,
         allow_id_dropping=False,
@@ -1851,6 +1861,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             batch_number=batch_number,
         )
     )
@@ -1865,6 +1876,7 @@ class InputPreprocessingTest(parameterized.TestCase):
             global_device_count=1,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=8,
+            hbm_word_size_in_4b=8,
             batch_number=batch_number,
         )
     )
@@ -1898,6 +1910,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           num_sc_per_device=4,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
       )
 
@@ -1916,6 +1929,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           0,
           num_sc_per_device=4,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
       )
 
@@ -1935,6 +1949,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           num_sc_per_device=4,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
       )
 
@@ -1950,6 +1965,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           num_sc_per_device=4,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
           sharding_strategy=typing.cast(
               pybind_input_preprocessing.ShardingStrategy, 0
@@ -1971,6 +1987,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           num_sc_per_device=4,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
       )
 
@@ -1989,6 +2006,7 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           num_sc_per_device=0,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
       )
 
@@ -2007,40 +2025,36 @@ class InputPreprocessingTest(parameterized.TestCase):
           1,
           num_sc_per_device=3,
           sc_simd_width=8,
+          hbm_word_size_in_4b=8,
           batch_number=batch_number,
       )
 
 
-class PybindBufferSizeTest(absltest.TestCase):
+class PybindBufferSizeTest(parameterized.TestCase):
 
-  def test_compute_row_pointers_size(self):
+  @parameterized.named_parameters(
+      ("tpu_v5p", 4, 8, 32),
+      ("tpu_v6e", 2, 8, 16),
+      ("tpu_v7x", 2, 16, 32),
+  )
+  def test_compute_row_pointers_size(
+      self, num_sc_per_device, sc_simd_width, expected_size
+  ):
     size = pybind_input_preprocessing.compute_row_pointers_size_per_device(
         global_device_count=1,
-        num_sc_per_device=4,
-        sc_simd_width=8,
+        num_sc_per_device=num_sc_per_device,
+        sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=8,
         minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
     )
-    self.assertEqual(size, 32)
-    size_v6e = pybind_input_preprocessing.compute_row_pointers_size_per_device(
-        global_device_count=1,
-        num_sc_per_device=2,
-        sc_simd_width=8,
-        minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
-    )
-    self.assertEqual(size_v6e, 16)
-    size_v7x = pybind_input_preprocessing.compute_row_pointers_size_per_device(
-        global_device_count=1,
-        num_sc_per_device=2,
-        sc_simd_width=16,
-        minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
-    )
-    self.assertEqual(size_v7x, 32)
+    self.assertEqual(size, expected_size)
 
   def test_compute_theoretical_max_coo_buffer_size(self):
     res = pybind_input_preprocessing.compute_theoretical_max_coo_buffer_size(
         max_ids_per_partition=12,
         global_device_count=1,
         num_sc_per_device=4,
+        hbm_word_size_in_4b=8,
         minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
     )
     self.assertEqual(res, 256)
@@ -2090,6 +2104,7 @@ class PybindBufferSizeTest(absltest.TestCase):
         [feature_spec],
         global_device_count=1,
         num_sc_per_device=4,
+        hbm_word_size_in_4b=8,
         minibatching_mode=pybind_input_preprocessing.MinibatchingMode.DISABLED,
     )
     self.assertEqual(res["test_table"], 64)

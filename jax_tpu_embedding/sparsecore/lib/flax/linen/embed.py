@@ -105,6 +105,7 @@ class SparseCoreEmbed(nn.Module):
   # Initialized in __post_init__.
   num_sc_per_device: int = -1
   sc_simd_width: int = -1
+  hbm_word_size_in_4b: int = -1
 
   def __post_init__(self):
     if self._mesh is None:
@@ -124,6 +125,13 @@ class SparseCoreEmbed(nn.Module):
       )
     except (ValueError, IndexError):
       self.sc_simd_width = 8
+
+    try:
+      self.hbm_word_size_in_4b = utils.hbm_word_size_in_4b(
+          self._mesh.devices.item(0)
+      )
+    except (ValueError, IndexError):
+      self.hbm_word_size_in_4b = 8
 
     super().__post_init__()
 
@@ -229,6 +237,7 @@ class SparseCoreEmbed(nn.Module):
         ),
         all_reduce_interface=all_reduce_interface,
         sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
     )[0]
 
   def __call__(

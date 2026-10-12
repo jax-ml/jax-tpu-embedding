@@ -106,6 +106,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     global_device_count = 4
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -121,6 +122,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -162,6 +164,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -219,6 +222,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
     global_device_count = 4
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -234,6 +238,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -262,6 +267,7 @@ class SparseTensorInputPreprocessingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -439,6 +445,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
   global_device_count = 1
   num_sc_per_device = 4
   sc_simd_width = 8
+  hbm_word_size_in_4b = 8
 
   @parameterized.parameters(False, True)
   def test_transformation_with_col_transformations(self, has_leading_dimension):
@@ -452,6 +459,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
             global_device_count=self.global_device_count,
             num_sc_per_device=self.num_sc_per_device,
             sc_simd_width=self.sc_simd_width,
+            hbm_word_size_in_4b=self.hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -481,6 +489,7 @@ class InputPreprocessingColumnTransformationTest(parameterized.TestCase):
         global_device_count=self.global_device_count,
         num_sc_per_device=self.num_sc_per_device,
         sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -976,6 +985,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     global_device_count = 1
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features_a, input_features_a2],
@@ -985,6 +995,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1022,6 +1033,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -1057,6 +1069,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     global_device_count = 1
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features_a, self.input_features_b],
@@ -1066,6 +1079,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1103,6 +1117,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -1167,6 +1182,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     global_device_count = 2
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features_a, self.input_features_b],
@@ -1176,6 +1192,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1213,6 +1230,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -1248,6 +1266,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
     global_device_count = 2
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     row_pointers, embedding_ids, sample_ids, gains, *_ = (
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             [self.input_features_a, self.input_features_b],
@@ -1257,6 +1276,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,
@@ -1294,6 +1314,7 @@ class InputPreprocessingTableStackingTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -1397,6 +1418,7 @@ class MeanCombinerTest(parameterized.TestCase):
     global_device_count = 4
     num_sc_per_device = 4
     sc_simd_width = 8
+    hbm_word_size_in_4b = 8
     (
         row_pointers_sparse,
         embedding_ids_sparse,
@@ -1412,6 +1434,7 @@ class MeanCombinerTest(parameterized.TestCase):
         global_device_count=global_device_count,
         num_sc_per_device=num_sc_per_device,
         sc_simd_width=sc_simd_width,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
         sharding_strategy=ShardingStrategy.MOD,
         has_leading_dimension=has_leading_dimension,
         allow_id_dropping=False,
@@ -1455,6 +1478,7 @@ class MeanCombinerTest(parameterized.TestCase):
             global_device_count=global_device_count,
             num_sc_per_device=num_sc_per_device,
             sc_simd_width=sc_simd_width,
+            hbm_word_size_in_4b=hbm_word_size_in_4b,
             sharding_strategy=ShardingStrategy.MOD,
             has_leading_dimension=has_leading_dimension,
             allow_id_dropping=False,

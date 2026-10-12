@@ -74,6 +74,7 @@ void LogStats(const Eigen::MatrixBase<Derived>& data, absl::string_view name) {
 // max_unique_ids_per_partition=792.
 constexpr int kNumScPerDevice = 4;
 constexpr int kScSimdWidth = 8;
+constexpr int kHbmWordSizeIn4b = 8;
 constexpr int kGlobalDeviceCount = 128;
 constexpr int kBatchSizePerSc = 16384;
 constexpr int kSeed = 31337;
@@ -220,6 +221,7 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .sc_simd_width = kScSimdWidth,
+      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
   };
@@ -276,6 +278,7 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .sc_simd_width = kScSimdWidth,
+      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
   };
@@ -349,6 +352,7 @@ void BM_FillBuffer(benchmark::State& state) {
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
       .sc_simd_width = kScSimdWidth,
+      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kHost,
   };

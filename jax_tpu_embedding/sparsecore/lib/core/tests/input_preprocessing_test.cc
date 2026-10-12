@@ -231,6 +231,7 @@ TEST_F(TableStackingTest, MultiProcessStackingSplitThenStack) {
       .global_device_count = 2,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -298,6 +299,7 @@ TEST_F(TableStackingTest, SingleProcessSingleDeviceSplitThenStack) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -326,6 +328,7 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
       .global_device_count = 2,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   std::vector<int> expected_ids_per_sc[] = {{1 + 9, 2 + 10, 3 + 11, 4 + 12},
@@ -363,6 +366,7 @@ TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   const int row_pointers_size_per_device =
@@ -491,6 +495,7 @@ TEST_F(TableStackingTest, CooTensorsPerScCalculation) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -678,6 +683,7 @@ TEST_F(MinibatchingCountTest,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .minibatching_mode = MinibatchingMode::kHost};
 
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
@@ -706,6 +712,7 @@ TEST_F(MinibatchingCountTest, SingleHostMinibatchCountIsCorrectWhenRequired) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .minibatching_mode = MinibatchingMode::kHost};
 
   // Reduce max ids and max unique ids to trigger minibatching.
@@ -770,6 +777,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenNotRequired) {
           .global_device_count = 2,
           .num_sc_per_device = 4,
           .sc_simd_width = 8,
+          .hbm_word_size_in_4b = 8,
           .minibatching_mode = MinibatchingMode::kHost,
           .batch_number = 100,
           .all_reduce_interface = &all_reducers[host_id]};
@@ -821,6 +829,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenRequired) {
           .global_device_count = 2,
           .num_sc_per_device = 4,
           .sc_simd_width = 8,
+          .hbm_word_size_in_4b = 8,
           .minibatching_mode = MinibatchingMode::kHost,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
@@ -873,6 +882,7 @@ TEST_F(MinibatchingCountTest, MultiHostMinibatchCountIsCorrectWhenOneRequires) {
           .global_device_count = 2,
           .num_sc_per_device = 4,
           .sc_simd_width = 8,
+          .hbm_word_size_in_4b = 8,
           .minibatching_mode = MinibatchingMode::kHost,
           .all_reduce_interface = nodes[host_id]->GetAllReduceInterface()};
       TF_ASSERT_OK_AND_ASSIGN(PreprocessSparseDenseMatmulOutput output,
@@ -912,6 +922,7 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
         .global_device_count = 1,
         .num_sc_per_device = 4,
         .sc_simd_width = 8,
+        .hbm_word_size_in_4b = 8,
         .minibatching_mode = MinibatchingMode::kHost,
         .batch_number = batch_num,
         .all_reduce_interface = all_reduce.get()};
@@ -945,6 +956,7 @@ TEST_F(MinibatchingCountTest,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kDevice,
   };
@@ -999,12 +1011,14 @@ TEST_F(MinibatchingCountTest,
   // smaller than the number of IDs. Buffer size exceeding should still cause ID
   // dropping!
   const int kNumScPerDevice = 4;
-  const int kAlignment = TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * kNumScPerDevice;
+  const int kHbmWordSizeIn4b = 8;
+  const int kAlignment = kHbmWordSizeIn4b * kNumScPerDevice;
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = kNumScPerDevice,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kDevice,
   };
@@ -1044,6 +1058,7 @@ TEST_F(MinibatchingCountTest, InvalidMinibatchingModeReturnsError) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .minibatching_mode = static_cast<MinibatchingMode>(99),
   };
 
@@ -1069,6 +1084,7 @@ TEST_F(MinibatchingCountTest,
       .global_device_count = 2,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .minibatching_mode = MinibatchingMode::kDevice,
       .all_reduce_interface = nullptr,
   };
@@ -1111,7 +1127,7 @@ void ValidateMinibatchOrSparseCoreSlice(
     const Eigen::Ref<const RowVectorXf>& gains_slice,
     int64_t total_padded_vocab, int batch_size_per_sc,
     int max_ids_per_partition, int max_unique_ids_per_partition,
-    int64_t& total_ids_in_slice) {
+    int64_t& total_ids_in_slice, int hbm_word_size_in_4b) {
   int32_t start_index = 0;
   for (int i = 0; i < row_pointers_slice.size(); ++i) {
     int end_index = row_pointers_slice(i);
@@ -1138,7 +1154,7 @@ void ValidateMinibatchOrSparseCoreSlice(
       ASSERT_LE(ids_count, max_ids_per_partition);
       ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
     }
-    start_index = xla::RoundUpTo(end_index, TPU_VECTOR_REGISTER_ALIGNMENT_SIZE);
+    start_index = xla::RoundUpTo(end_index, hbm_word_size_in_4b);
   }
 }
 
@@ -1190,6 +1206,7 @@ void RunPreprocessingOutputIsValidTest(
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = num_sc_per_device,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .allow_id_dropping = true,
       .minibatching_mode = minibatching_mode,
       .batch_number = 42};
@@ -1220,7 +1237,8 @@ void RunPreprocessingOutputIsValidTest(
     ValidateMinibatchOrSparseCoreSlice(
         row_pointers.row(0).head(row_pointers_size), embedding_ids.row(0),
         sample_ids.row(0), gains.row(0), table_shard_size, batch_size_per_sc,
-        max_ids_per_partition, max_unique_ids_per_partition, total_present_ids);
+        max_ids_per_partition, max_unique_ids_per_partition, total_present_ids,
+        options.hbm_word_size_in_4b);
   } else {
     const int coo_buffer_size_per_sc = embedding_ids.cols() / num_sc_per_device;
     const int row_pointers_size_per_bucket =
@@ -1236,7 +1254,8 @@ void RunPreprocessingOutputIsValidTest(
           sample_ids.row(0).segment(coo_buffer_offset, coo_buffer_size_per_sc),
           gains.row(0).segment(coo_buffer_offset, coo_buffer_size_per_sc),
           table_shard_size, batch_size_per_sc, max_ids_per_partition,
-          max_unique_ids_per_partition, total_present_ids);
+          max_unique_ids_per_partition, total_present_ids,
+          options.hbm_word_size_in_4b);
     }
   }
   EXPECT_EQ(total_present_ids + output.stats.TotalDroppedIdCount(),
@@ -1363,6 +1382,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .allow_id_dropping = true,
       .minibatching_mode = MinibatchingMode::kDisabled,
       .batch_number = 1};
@@ -1371,6 +1391,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
       .global_device_count = global_device_count,
       .num_sc_per_device = num_sc_per_device,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .allow_id_dropping = false,
       .minibatching_mode = MinibatchingMode::kDisabled,
       .batch_number = 1};
@@ -1480,7 +1501,7 @@ void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
   // size. Expect id dropping if buffer size is reduced enough to be less than
   // required amount due to alignment.
   const int kDeviceCooBufferAlignment =
-      TPU_VECTOR_REGISTER_ALIGNMENT_SIZE * num_sc_per_device;
+      options_allow_dropping.hbm_word_size_in_4b * num_sc_per_device;
   if (required_buffer_size_per_device > kDeviceCooBufferAlignment) {
     FeatureMetadataInStack& table_metadata =
         stacked_tables.at("stacked_table")[0];
@@ -1511,6 +1532,7 @@ TEST_F(TableStackingTest,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   // Act
@@ -1535,6 +1557,7 @@ TEST_F(TableStackingTest,
       .global_device_count = 0,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   // Act
@@ -1560,6 +1583,7 @@ TEST_F(TableStackingTest,
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   // Act
@@ -1585,6 +1609,7 @@ TEST_F(TableStackingTest, InvalidShardingStrategyReturnsInvalidArgument) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
       .sharding_strategy = static_cast<ShardingStrategy>(0),
   };
 
@@ -1608,6 +1633,7 @@ TEST_F(TableStackingTest, EmptyInputBatchesReturnsInvalidArgument) {
       .global_device_count = 1,
       .num_sc_per_device = 4,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
   std::vector<std::unique_ptr<AbstractInputBatch>> empty_input_batches;
 
@@ -1632,6 +1658,7 @@ TEST_F(TableStackingTest,
       .global_device_count = 1,
       .num_sc_per_device = 0,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   // Act
@@ -1655,6 +1682,7 @@ TEST_F(TableStackingTest, TotalNumScsIsNotPowerOfTwoReturnsInvalidArgument) {
       .global_device_count = 1,
       .num_sc_per_device = 3,
       .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
   };
 
   // Act

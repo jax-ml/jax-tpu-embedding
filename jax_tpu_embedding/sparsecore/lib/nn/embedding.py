@@ -302,6 +302,29 @@ def _get_sc_simd_width(sc_simd_width: int | None) -> int:
     return 8
 
 
+def _get_hbm_word_size_in_4b(hbm_word_size_in_4b: int | None) -> int:
+  """Get the HBM word size in 4-byte words per device.
+
+  Args:
+    hbm_word_size_in_4b: The HBM word size in 4-byte words. If `None`, it will
+      be set to the HBM word size in 4-byte words on the current host machine.
+
+  Returns:
+    The HBM word size in 4-byte words.
+
+  Raises:
+    ValueError: If the given HBM word size in 4-byte words is invalid.
+  """
+  if hbm_word_size_in_4b is not None:
+    if hbm_word_size_in_4b not in utils.HBM_WORD_SIZE_IN_4B_MAP.values():
+      raise ValueError(f"Invalid hbm_word_size_in_4b: {hbm_word_size_in_4b}")
+    return hbm_word_size_in_4b
+  try:
+    return utils.hbm_word_size_in_4b()
+  except (ValueError, IndexError):
+    return 8
+
+
 def get_table_specs(
     feature_specs: Nested[embedding_spec.FeatureSpec],
 ) -> Mapping[str, embedding_spec.TableSpec]:
@@ -528,16 +551,19 @@ def compute_row_pointers_size_per_device(
     global_device_count: int,
     num_sc_per_device: int | None = None,
     sc_simd_width: int | None = None,
+    hbm_word_size_in_4b: int | None = None,
     minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> int:
   """Computes the required row pointers buffer size per device."""
   resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   resolved_sc_simd_width = _get_sc_simd_width(sc_simd_width)
+  resolved_hbm_word_size_in_4b = _get_hbm_word_size_in_4b(hbm_word_size_in_4b)
   resolved_mode = minibatching_mode_to_enum(minibatching_mode)
   return pybind_input_preprocessing.compute_row_pointers_size_per_device(
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
       sc_simd_width=resolved_sc_simd_width,
+      hbm_word_size_in_4b=resolved_hbm_word_size_in_4b,
       minibatching_mode=resolved_mode,
   )
 
@@ -546,15 +572,18 @@ def compute_theoretical_max_coo_buffer_size(
     max_ids_per_partition: int,
     global_device_count: int,
     num_sc_per_device: int | None = None,
+    hbm_word_size_in_4b: int | None = None,
     minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> int:
   """Computes the theoretical max COO buffer size per device."""
   resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  resolved_hbm_word_size_in_4b = _get_hbm_word_size_in_4b(hbm_word_size_in_4b)
   resolved_mode = minibatching_mode_to_enum(minibatching_mode)
   return pybind_input_preprocessing.compute_theoretical_max_coo_buffer_size(
       max_ids_per_partition=max_ids_per_partition,
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
+      hbm_word_size_in_4b=resolved_hbm_word_size_in_4b,
       minibatching_mode=resolved_mode,
   )
 
@@ -563,6 +592,7 @@ def compute_coo_buffer_size_per_device(
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int | None = None,
+    hbm_word_size_in_4b: int | None = None,
     minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> dict[str, int]:
   """Computes the required COO buffer size per device.
@@ -573,6 +603,8 @@ def compute_coo_buffer_size_per_device(
       `mesh.size`.
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
       be set to the number of sparse cores on the current host machine.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words. If `None`, it will
+      be set to the HBM word size in 4-byte words on the current host machine.
     minibatching_mode: The minibatching mode (`MinibatchingMode` enum or string:
       "DISABLED", "HOST", "DEVICE").
 
@@ -581,6 +613,7 @@ def compute_coo_buffer_size_per_device(
     per device.
   """
   resolved_num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
+  resolved_hbm_word_size_in_4b = _get_hbm_word_size_in_4b(hbm_word_size_in_4b)
   resolved_mode = minibatching_mode_to_enum(minibatching_mode)
   # TODO: b/491557196 - Evaluate if passing deconstructed feature specs (e.g.,
   # max_ids_per_partition, suggested_buffer_size) to the pybind boundary is
@@ -590,6 +623,7 @@ def compute_coo_buffer_size_per_device(
       feature_specs=jax.tree.leaves(feature_specs),
       global_device_count=global_device_count,
       num_sc_per_device=resolved_num_sc_per_device,
+      hbm_word_size_in_4b=resolved_hbm_word_size_in_4b,
       minibatching_mode=resolved_mode,
   )
 
@@ -667,6 +701,7 @@ def preprocess_sparse_dense_matmul_input(
     *,
     num_sc_per_device: int | None = None,
     sc_simd_width: int | None = None,
+    hbm_word_size_in_4b: int | None = None,
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
@@ -697,6 +732,8 @@ def preprocess_sparse_dense_matmul_input(
       be set to the number of sparse cores on the current host machine.
     sc_simd_width: The SparseCore SIMD width. If `None`, it will be set to the
       SparseCore SIMD width on the current host machine.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words. If `None`, it will
+      be set to the HBM word size in 4-byte words on the current host machine.
     sharding_strategy: The sharding strategy (e.g., MOD)
     has_leading_dimension: If set to True, then the first dimension of the
       output will be the number of local devices. This is useful when using the
@@ -721,6 +758,7 @@ def preprocess_sparse_dense_matmul_input(
   resolved_minibatching_mode = minibatching_mode_to_enum(minibatching_mode)
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   sc_simd_width = _get_sc_simd_width(sc_simd_width)
+  hbm_word_size_in_4b = _get_hbm_word_size_in_4b(hbm_word_size_in_4b)
   _assert_same_structure(features, feature_specs, "features", "feature_specs")
   if features_weights is not None:
     _assert_same_structure(
@@ -746,6 +784,7 @@ def preprocess_sparse_dense_matmul_input(
           global_device_count,
           num_sc_per_device=num_sc_per_device,
           sc_simd_width=sc_simd_width,
+          hbm_word_size_in_4b=hbm_word_size_in_4b,
           sharding_strategy=sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension=has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
@@ -775,6 +814,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
     *,
     num_sc_per_device: int | None = None,
     sc_simd_width: int | None = None,
+    hbm_word_size_in_4b: int | None = None,
     sharding_strategy: str = "MOD",
     has_leading_dimension: bool = False,
     allow_id_dropping: bool = False,
@@ -818,6 +858,8 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       be set to the number of sparse cores on the current host machine.
     sc_simd_width: The SparseCore SIMD width. If `None`, it will be set to the
       SparseCore SIMD width on the current host machine.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words. If `None`, it will
+      be set to the HBM word size in 4-byte words on the current host machine.
     sharding_strategy: The sharding strategy (e.g., MOD)
     has_leading_dimension: If set to True, then the first dimension of the
       output will be the number of local devices. This is useful when using the
@@ -840,6 +882,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   resolved_minibatching_mode = minibatching_mode_to_enum(minibatching_mode)
   num_sc_per_device = _get_num_sc_per_device(num_sc_per_device)
   sc_simd_width = _get_sc_simd_width(sc_simd_width)
+  hbm_word_size_in_4b = _get_hbm_word_size_in_4b(hbm_word_size_in_4b)
   _assert_same_structure(indices, feature_specs, "indices", "feature_specs")
   _assert_same_structure(values, feature_specs, "values", "feature_specs")
   _assert_same_structure(
@@ -866,6 +909,7 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
           global_device_count,
           num_sc_per_device=num_sc_per_device,
           sc_simd_width=sc_simd_width,
+          hbm_word_size_in_4b=hbm_word_size_in_4b,
           sharding_strategy=sharding_strategy_to_enum(sharding_strategy),
           has_leading_dimension=has_leading_dimension,
           allow_id_dropping=allow_id_dropping,
@@ -892,6 +936,7 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
     *,
     num_sc_per_device: int | None = None,
     sc_simd_width: int | None = None,
+    hbm_word_size_in_4b: int | None = None,
     has_leading_dimension: bool = False,
     minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
 ) -> PreprocessedInput:
@@ -907,6 +952,7 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
     global_device_count: The number of global devices (chips).
     num_sc_per_device: The number of sparse cores per device.
     sc_simd_width: The SparseCore SIMD width.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words.
     has_leading_dimension: Whether the output has a leading dimension for local
       devices.
     minibatching_mode: The minibatching mode (`MinibatchingMode` enum or string:
@@ -920,6 +966,7 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
       feature_specs,
       global_device_count,
       num_sc_per_device=num_sc_per_device,
+      hbm_word_size_in_4b=hbm_word_size_in_4b,
       minibatching_mode=resolved_mode,
   )
 
@@ -927,6 +974,7 @@ def eval_preprocess_sparse_dense_matmul_input_shape(
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
       sc_simd_width=sc_simd_width,
+      hbm_word_size_in_4b=hbm_word_size_in_4b,
       minibatching_mode=resolved_mode,
   )
 
