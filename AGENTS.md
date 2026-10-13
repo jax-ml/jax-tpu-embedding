@@ -1,8 +1,14 @@
 # JAX SparseCore AI Agent Directives
 
+> **Google-internal contributors:** This file is written for the open-source
+> layout of the repository (`jax_tpu_embedding/sparsecore/...` paths, `bazel`
+> commands) and is exported to GitHub. The translation to the internal layout
+> and all internal-only guidance live in
+> [`_agents/AGENTS.md`](_agents/AGENTS.md), which is not exported. Never add
+> internal paths, targets, or links to this file.
+
 These guidelines enforce structural invariants for AI assistants operating
-within the JAX SparseCore (`third_party/py/jax_tpu_embedding/sparsecore/...`)
-codebase.
+within the JAX SparseCore (`jax_tpu_embedding/sparsecore/`) codebase.
 
 ## Array vs. Sharding PyTree Annotations
 
