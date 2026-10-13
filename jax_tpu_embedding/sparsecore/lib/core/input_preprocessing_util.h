@@ -488,7 +488,7 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // The SIMD width of each SparseCore tile.
   const int sc_simd_width ABSL_REQUIRE_EXPLICIT_INIT;
   // The HBM word size in 4-byte words.
-  const int hbm_word_size_in_4b = 8;
+  const int hbm_word_size_in_4b ABSL_REQUIRE_EXPLICIT_INIT;
   // The sharding strategy used to distribute embedding IDs across SparseCores.
   const ShardingStrategy sharding_strategy = ShardingStrategy::kMod;
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
