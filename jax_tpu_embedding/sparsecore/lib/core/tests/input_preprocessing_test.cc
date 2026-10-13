@@ -1023,12 +1023,15 @@ TEST_F(MinibatchingCountTest,
       .minibatching_mode = MinibatchingMode::kDevice,
   };
 
-  stacked_table_metadata_[0].max_ids_per_partition = 16;
-  stacked_table_metadata_[0].max_unique_ids_per_partition = 16;
+  // Keep partition limits above observed IDs so only buffer capacity is
+  // exceeded (and to avoid triggering the process-wide LOG_EVERY_N_SEC warning
+  // in LogIfDeviceMinibatchingRequired).
+  stacked_table_metadata_[0].max_ids_per_partition = 256;
+  stacked_table_metadata_[0].max_unique_ids_per_partition = 256;
   // Restrict COO buffer size to minimum aligned size (32).
   stacked_table_metadata_[0].suggested_coo_buffer_size_per_device = kAlignment;
-  stacked_table_metadata_[1].max_ids_per_partition = 16;
-  stacked_table_metadata_[1].max_unique_ids_per_partition = 16;
+  stacked_table_metadata_[1].max_ids_per_partition = 256;
+  stacked_table_metadata_[1].max_unique_ids_per_partition = 256;
   stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = kAlignment;
 
   // Create inputs with 80 and 90 IDs, which will exceed the 32 buffer capacity.
