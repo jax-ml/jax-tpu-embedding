@@ -27,11 +27,12 @@ definition.
 
 ## Input Preprocessing Performance Evidence
 
-**Rule**: Treat input preprocessing in `lib/core/` as performance-critical.
-Every change to its hot path needs a before/after run of
-`lib/core/benchmarks:input_preprocessing_benchmark`, reported as `PERF=<results
-link>` or `PERF=not required (<reason>)` in the change description. Follow the
-presubmit failure message for the exact command.
+**Rule**: Treat input preprocessing in `sparsecore/lib/core/` as
+performance-critical. Every change to its hot path needs a before/after run of
+`sparsecore/lib/core/benchmarks:input_preprocessing_benchmark`, with the results
+(or the reason no run is needed) summarized in the change description. For
+internal contributors, the internal review flow asks for this as a `PERF=` tag
+and gives the exact command to run.
 
 **Why**: This code runs on the host for every batch and every stacked table, so
 small per-ID costs add up quickly. Past measurements show how sensitive it is:
@@ -52,9 +53,9 @@ would show up without a benchmark.
 extraction, sort and group, minibatching splits and merges, and CSR buffer
 filling (`coo_format.h`, `input_preprocessing*.{h,cc}`,
 `partitioned_coo_tensors.h`, `sort_and_group_coo_tensors_impl.h` and the
-`*_impl.h` input streams). `PERF=not required (<reason>)` is appropriate only
-when the change cannot alter generated code on that path, for example comments,
-renames, or code that runs once per table such as validation.
+`*_impl.h` input streams). Skipping the benchmark is appropriate only when the
+change cannot alter generated code on that path, for example comments, renames,
+or code that runs once per table such as validation.
 
 **Writing hot-path code**:
 
@@ -78,3 +79,28 @@ results by wall time, then CPU time, then allocations. Cite only deltas with
 p<0.05, never the geomean, and explain any tradeoff between metrics. Ignore peak
 memory per op, whose run-to-run noise is too large to be useful; use allocations
 per op for memory instead.
+
+## Verify Each Optimization Independently
+
+**Rule**: When a change combines several optimizations (as a rule of thumb,
+three or more), measure each one on its own with an ablation study instead of
+only reporting the combined result. Benchmark the baseline, then either each
+optimization alone or the full change with one optimization removed at a time,
+using the same benchmark, workloads and settings. Prefer splitting independent
+optimizations into separate changes, each with its own results.
+
+**Why**: A combined result can hide opposite effects: one optimization can
+regress a workload while another improves it by more, so the net gain looks fine
+while a regression ships. Small effects also disappear into run-to-run noise.
+Micro-optimizations such as `__restrict__` qualifiers, branch hints
+(`ABSL_PREDICT_TRUE` / `ABSL_PREDICT_FALSE`), forced inlining or manual
+unrolling often leave the generated code unchanged or make no measurable
+difference, yet they add complexity and can become wrong as the code evolves.
+
+**Resolution**: Keep an optimization only if it shows a statistically
+significant improvement (p<0.05) on its own, ranked by wall time, then CPU time,
+then allocations, or if it is needed for another kept optimization to work. For
+hints that only steer the compiler, first check whether they change the
+generated code by comparing the optimized benchmark binary or the function's
+disassembly with and without them; drop those that do not. Report results per
+optimization, and state which workloads each one helps or hurts.
