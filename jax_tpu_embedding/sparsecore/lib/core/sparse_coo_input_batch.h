@@ -20,9 +20,7 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
-#include "absl/base/call_once.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
@@ -38,7 +36,8 @@ namespace py = ::pybind11;
 
 // This class represents a sparse input batch in COO format.
 // - `indices` is a 2D array where each row represents a (row_id, col_id) pair.
-//   It is assumed that `indices` is sorted in row-major order.
+//   It is assumed that `indices` is sorted in row-major order (non-decreasing
+//   `row_id`, with strictly increasing `col_id` within each row).
 // - `values` is a 1D array where each element represents the value associated
 //   with the corresponding (row_id, col_id) pair in `indices`.
 class PySparseCooInputBatch : public AbstractInputBatch {
@@ -46,11 +45,9 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   PySparseCooInputBatch(const py::array_t<int64_t>& indices,
                         const py::array_t<int32_t>& values,
                         const py::array_t<int64_t>& dense_shape,
-                        const int64_t max_vocab_id,
                         const std::string table_name)
       : indices_(indices),
         values_(values),
-        max_vocab_id_(max_vocab_id),
         batch_size_(dense_shape.at(0)),
         table_name_(std::move(table_name)) {
     DCHECK(PyGILState_Check())
@@ -64,10 +61,7 @@ class PySparseCooInputBatch : public AbstractInputBatch {
   int64_t id_count() const override { return values_.size(); }
 
   std::optional<int64_t> GetIdsCountInSlice(int start_row,
-                                            int end_row) const override {
-    ConstructRowPointersIfRequired();
-    return row_pointers_[end_row] - row_pointers_[start_row];
-  }
+                                            int end_row) const override;
 
   bool HasVariableWeights() const override { return false; }
 
@@ -77,23 +71,12 @@ class PySparseCooInputBatch : public AbstractInputBatch {
       ExtractedCooTensorsPerSparseCore& coo_tensors) override;
 
  private:
-  // (N,2) array, sorted by row_id.
+  // (N,2) array, sorted in row-major order (non-decreasing row_id, strictly
+  // increasing col_id within each row).
   const py::array_t<int64_t> indices_;
   const py::array_t<int32_t> values_;
-  const int64_t max_vocab_id_;
   const int64_t batch_size_;
   const std::string table_name_;
-
-  mutable std::vector<int64_t> row_pointers_;
-  mutable absl::once_flag row_pointer_construction_flag_;
-
-  // Converts this to a CSR format. A refactor could return an object of type
-  // SparseCsrInputBatch after Slicing, and ExtractCooTensors can call
-  // the same function on a temporary object of SparseCsrInputBatch type.
-  void ConstructRowPointersIfRequired() const;
-
-  // Internal function called by `ConstructRowPointersIfRequired`.
-  void ConstructRowPointers() const;
 };
 }  // namespace jax_sc_embedding
 

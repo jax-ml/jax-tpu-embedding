@@ -836,9 +836,10 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
   Args:
     indices: A nested structure of 2-D int64 tensors, where each tensor has
       shape [N, ndims]. It represents the indices of non-zero elements in a
-      sparse tensor, with elements being zero-indexed. For instance,
-      `indices=[[1,3], [2,4]]` indicates that elements at [1,3] and [2,4] have
-      non-zero values.
+      sparse tensor, with elements being zero-indexed, and must be sorted in
+      row-major order with strictly increasing column indices within each row
+      (e.g., after `tf.sparse.reorder`). For instance, `indices=[[1,3], [2,4]]`
+      indicates that elements at [1,3] and [2,4] have non-zero values.
     values: A nested structure of 1-D int32 tensors, each with shape [N],
       representing the embedding IDs corresponding to `indices`. For example,
       with `indices=[[1,3], [2,4]]`, `values=[18, 3]` means the embedding ID at

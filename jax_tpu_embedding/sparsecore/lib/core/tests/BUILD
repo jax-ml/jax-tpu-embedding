@@ -175,3 +175,19 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "sparse_coo_input_stream_test",
+    srcs = ["sparse_coo_input_stream_test.cc"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core:coo_format",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
+        "//jax_tpu_embedding/sparsecore/lib/core:process_coo_tensors",
+        "//jax_tpu_embedding/sparsecore/lib/core:sparse_coo_input_stream",
+        "//jax_tpu_embedding/sparsecore/lib/core:sparse_csr_input_stream",
+        "//jax_tpu_embedding/sparsecore/lib/core:unity_weights_stream",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+    ],
+)

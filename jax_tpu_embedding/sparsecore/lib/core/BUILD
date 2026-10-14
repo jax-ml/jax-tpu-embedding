@@ -96,12 +96,10 @@ pybind_library(
         ":abstract_input_batch",
         ":input_preprocessing_util",
         ":process_coo_tensors",
-        ":sparse_csr_input_stream",
+        ":sparse_coo_input_stream",
         ":unity_weights_stream",
-        "@com_google_absl//absl/base",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
         "@tsl//tsl/profiler/lib:traceme",
     ],
 )
@@ -231,6 +229,16 @@ cc_library(
     deps = [
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "sparse_coo_input_stream",
+    hdrs = ["sparse_coo_input_stream_impl.h"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/types:span",
     ],
 )
