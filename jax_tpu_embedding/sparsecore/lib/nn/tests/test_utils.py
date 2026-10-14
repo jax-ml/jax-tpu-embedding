@@ -13,6 +13,9 @@
 # limitations under the License.
 """Test utils for JAX SparseCore."""
 
+import importlib.metadata
+import math
+import re
 from typing import Sequence
 
 from absl.testing import absltest
@@ -26,6 +29,36 @@ import numpy as np
 def round_up_to_multiple(number: int, factor: int) -> int:
   """Returns the next largest multiple of factor greater than number."""
   return number if number % factor == 0 else (number // factor + 1) * factor
+
+
+def is_libtpu_at_least(min_version: tuple[int, int, int]) -> bool:
+  """Returns True if libtpu is not installed or is at least `min_version`."""
+  try:
+    version_str = importlib.metadata.version("libtpu")
+  except importlib.metadata.PackageNotFoundError:
+    return True
+  match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_str)
+  if match is None:
+    return True
+  version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+  return version >= min_version
+
+
+def skip_if_unpadded_width_unsupported(
+    test_case: absltest.TestCase, emb_size: int
+) -> None:
+  """Skips `test_case` if libtpu may not support an unpadded `emb_size`.
+
+  Older libtpu releases, including the one pinned by the OSS TPU CI, may not
+  support feature widths that are not a multiple of 8. Remove this once the CI
+  uses libtpu >= 0.0.51.
+
+  Args:
+    test_case: The test to skip.
+    emb_size: The embedding (feature) width under test.
+  """
+  if emb_size % 8 != 0 and not is_libtpu_at_least((0, 0, 51)):
+    test_case.skipTest("Unpadded feature widths require libtpu >= 0.0.51")
 
 
 def row_id_initializer(
@@ -47,6 +80,29 @@ def row_id_initializer(
   """
   return jnp.broadcast_to(
       jnp.arange(offset, offset + shape[0], dtype=dtype)[:, None], shape
+  )
+
+
+def element_id_initializer(
+    shape: Sequence[int],
+    dtype: jax.typing.DTypeLike = jnp.float32,
+    offset: int = 0,
+) -> jax.Array:
+  """An initializer for an array where each value is its row-major index.
+
+  Unlike `row_id_initializer`, every element gets a distinct value, so tests
+  can also catch values that are misplaced within a row. Used for testing.
+
+  Args:
+   shape: Shape of a jax.Array to be initialized.
+   dtype: type of jax.Array.
+   offset: An int offset added to all values in the jax.Array.
+
+  Returns:
+   A jax.Array for testing.
+  """
+  return jnp.arange(offset, offset + math.prod(shape), dtype=dtype).reshape(
+      shape
   )
 
 
