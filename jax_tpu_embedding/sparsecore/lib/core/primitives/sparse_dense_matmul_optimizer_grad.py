@@ -230,9 +230,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
 
   op = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[
-          ir.TupleType.get_tuple([tables[0].type for _ in range(len(tables))])
-      ],
+      result_types=[ir.TupleType.get_tuple([table.type for table in tables])],
       backend_config=backend_config,
       called_computations=[optimizer_update_computation_name],
       skip_ffi_layout_processing=True,
