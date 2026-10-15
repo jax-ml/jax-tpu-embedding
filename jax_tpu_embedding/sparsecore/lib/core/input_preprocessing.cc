@@ -62,11 +62,6 @@ struct FeatureSliceInfo {
   int batch_size_per_slice;
 };
 
-struct FeatureSlice {
-  FeatureSliceInfo info;
-  const FeatureMetadataInStack* metadata;
-};
-
 void AllocateOutputCsrBuffersIfNeeded(
     MatrixXi& row_pointers, MatrixXi& embedding_ids, MatrixXi& sample_ids,
     MatrixXf& gains, const PreprocessSparseDenseMatmulInputOptions& options,
@@ -328,6 +323,78 @@ inline MinibatchingSplit Deserialize(uint64_t value) {
 inline bool Serialize(bool value) { return value; }
 inline bool Deserialize(bool value) { return value; }
 
+// Extracts COO tensors for a single SparseCore slice across all stacked
+// features on a local device.
+ExtractedCooTensorsPerSparseCore ExtractCooTensorsForSingleSparseCore(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    int local_device_id, int sc_id, int batch_size_per_slice,
+    bool has_variable_weights,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  const int feature_slices_per_device = options.num_sc_per_device;
+  int64_t ids_for_sc = 0;
+  bool exact_size_known = true;
+  for (const auto& feature_metadata : stacked_table_metadata) {
+    const std::unique_ptr<AbstractInputBatch>& curr_batch =
+        input_batches[feature_metadata.feature_index];
+    const int num_samples = curr_batch->size();
+    const int num_samples_per_split =
+        num_samples / (options.local_device_count * feature_slices_per_device);
+    const int start_index =
+        (local_device_id * feature_slices_per_device + sc_id) *
+        num_samples_per_split;
+    const int end_index =
+        std::min(num_samples, start_index + num_samples_per_split);
+    std::optional<int64_t> ids_in_slice =
+        curr_batch->GetIdsCountInSlice(start_index, end_index);
+    if (ids_in_slice.has_value()) {
+      ids_for_sc += ids_in_slice.value();
+    } else {
+      exact_size_known = false;
+      break;
+    }
+  }
+  if (!exact_size_known) {
+    int64_t total_ids_for_device = 0;
+    for (const auto& feature_metadata : stacked_table_metadata) {
+      total_ids_for_device +=
+          input_batches[feature_metadata.feature_index]->id_count() /
+          options.local_device_count;
+    }
+    ids_for_sc = total_ids_for_device / options.num_sc_per_device;
+  }
+
+  ExtractedCooTensorsPerSparseCore coo_tensors_per_sc(
+      batch_size_per_slice, has_variable_weights,
+      stacked_table_metadata[0].row_combiner,
+      absl::countr_zero(static_cast<uint32_t>(options.GetNumScs())));
+  coo_tensors_per_sc.reserve(ids_for_sc);
+  for (const auto& feature_metadata : stacked_table_metadata) {
+    const std::unique_ptr<AbstractInputBatch>& curr_batch =
+        input_batches[feature_metadata.feature_index];
+    const int num_samples = curr_batch->size();
+    const int num_samples_per_split =
+        num_samples / (options.local_device_count * feature_slices_per_device);
+    const int start_index =
+        (local_device_id * feature_slices_per_device + sc_id) *
+        num_samples_per_split;
+    const int end_index =
+        std::min(num_samples, start_index + num_samples_per_split);
+    const FeatureSliceInfo slice_info{
+        .local_device_id = local_device_id,
+        .feature_slice_id = sc_id,
+        .feature_slices_per_device = feature_slices_per_device,
+        .start_index = start_index,
+        .end_index = end_index,
+        .batch_size_per_slice = batch_size_per_slice,
+    };
+    ExtractCooTensorsForSingleFeatureSlice(feature_metadata, input_batches,
+                                           slice_info, options,
+                                           coo_tensors_per_sc);
+  }
+  return coo_tensors_per_sc;
+}
+
 // Extract the COO tensors for all features.
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     const absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
@@ -362,70 +429,6 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
   const int batch_size_per_slice =
       xla::CeilOfRatio(batch_size_for_device, feature_slices_per_device);
 
-  // Precompute slice information for all features and slices.
-  std::vector<FeatureSlice> feature_slices(feature_slices_per_device *
-                                           stacked_table_metadata.size());
-
-  bool exact_size_known = true;
-  std::vector<int64_t> ids_per_sc(options.num_sc_per_device, 0);
-
-  for (int feature_idx = 0; feature_idx < stacked_table_metadata.size();
-       ++feature_idx) {
-    const auto& feature_metadata = stacked_table_metadata[feature_idx];
-    const std::unique_ptr<AbstractInputBatch>& curr_batch =
-        input_batches[feature_metadata.feature_index];
-    const int num_samples = curr_batch->size();
-    // This division is exact as checked earlier in CheckDeviceBatchSize.
-    const int num_samples_per_split =
-        num_samples / (options.local_device_count * feature_slices_per_device);
-    for (int feature_slice_id = 0; feature_slice_id < feature_slices_per_device;
-         ++feature_slice_id) {
-      const int start_index =
-          (local_device_id * feature_slices_per_device + feature_slice_id) *
-          num_samples_per_split;
-      int end_index =
-          std::min(num_samples, start_index + num_samples_per_split);
-
-      // Store slice information in slice-major order.
-      feature_slices[feature_slice_id * stacked_table_metadata.size() +
-                     feature_idx] = {
-          .info =
-              FeatureSliceInfo{
-                  .local_device_id = local_device_id,
-                  .feature_slice_id = feature_slice_id,
-                  .feature_slices_per_device = feature_slices_per_device,
-                  .start_index = start_index,
-                  .end_index = end_index,
-                  .batch_size_per_slice = batch_size_per_slice},
-          .metadata = &feature_metadata};
-
-      if (exact_size_known) {
-        std::optional<int64_t> ids_in_slice =
-            curr_batch->GetIdsCountInSlice(start_index, end_index);
-        if (ids_in_slice.has_value()) {
-          ids_per_sc[feature_slice_id] += ids_in_slice.value();
-        } else {
-          exact_size_known = false;
-        }
-      }
-    }
-  }
-
-  // If exact size is not known, fall back to using the total id_count per
-  // feature.
-  if (!exact_size_known) {
-    int64_t total_ids_for_device = 0;
-    for (const auto& feature_metadata : stacked_table_metadata) {
-      total_ids_for_device +=
-          input_batches[feature_metadata.feature_index]->id_count() /
-          options.local_device_count;
-    }
-    int64_t ids_per_sc_est = total_ids_for_device / options.num_sc_per_device;
-    for (int i = 0; i < options.num_sc_per_device; ++i) {
-      ids_per_sc[i] = ids_per_sc_est;
-    }
-  }
-
   // Extract COO tensors for each slice asynchronously per SC.
   for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
     auto av = extracted_coo_tensors.per_sc_tensors_av[sc_id];
@@ -436,20 +439,9 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
                          "/SC", sc_id),
             {{"batch_number", options.batch_number}});
       });
-      ExtractedCooTensorsPerSparseCore coo_tensors_per_sc(
-          batch_size_per_slice, has_variable_weights,
-          stacked_table_metadata[0].row_combiner,
-          absl::countr_zero(static_cast<uint32_t>(options.GetNumScs())));
-      coo_tensors_per_sc.reserve(ids_per_sc[sc_id]);
-      for (int feature_idx = 0; feature_idx < stacked_table_metadata.size();
-           ++feature_idx) {
-        const auto& slice =
-            feature_slices[sc_id * stacked_table_metadata.size() + feature_idx];
-        ExtractCooTensorsForSingleFeatureSlice(*slice.metadata, input_batches,
-                                               slice.info, options,
-                                               coo_tensors_per_sc);
-      }
-      av.emplace(std::move(coo_tensors_per_sc));
+      av.emplace(ExtractCooTensorsForSingleSparseCore(
+          stacked_table_metadata, input_batches, local_device_id, sc_id,
+          batch_size_per_slice, has_variable_weights, options));
     });
   }
   return extracted_coo_tensors;

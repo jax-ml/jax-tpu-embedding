@@ -567,6 +567,46 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
   return suggested_coo_buffer_size_per_device;
 }
 
+int FillLocalSparseCoreBufferSegment(
+    const int local_sc_id, const absl::Span<const CooFormat> coo_tensors,
+    const int batch_size_per_sc,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    internal::CsrArraysRefPerDevice& csr_arrays) {
+  DCHECK(!options.IsMinibatchingEnabled());
+  DCHECK_GT(batch_size_per_sc, 0);
+  const int row_pointers_size_per_bucket =
+      options.GetRowPointersSizePerBucket();
+  const int num_sc_per_device = options.num_sc_per_device;
+  const int coo_buffer_size_per_sc =
+      csr_arrays.embedding_ids.cols() / num_sc_per_device;
+  const int coo_buffer_size = coo_buffer_size_per_sc * num_sc_per_device;
+  const int lhs_row_begin = local_sc_id * row_pointers_size_per_bucket;
+  const int lhs_row_end = lhs_row_begin + row_pointers_size_per_bucket;
+  const int coo_begin =
+      std::min(local_sc_id * coo_buffer_size_per_sc, coo_buffer_size);
+  const int coo_end =
+      std::min(coo_begin + coo_buffer_size_per_sc, coo_buffer_size);
+
+  int dropped_ids_in_segment = 0;
+  FillBufferSegment(
+      {
+          .local_sc_id = local_sc_id,
+          .coo_tensors = coo_tensors,
+          .lhs_row_begin = lhs_row_begin,
+          .lhs_row_end = lhs_row_end,
+          .coo_begin = coo_begin,
+          .coo_end = coo_end,
+          .batch_size_per_sc = batch_size_per_sc,
+          .num_sc_per_device = num_sc_per_device,
+          .num_scs = static_cast<int>(options.GetNumScs()),
+          .coo_buffer_size = coo_buffer_size,
+          .hbm_word_size_in_4b = options.hbm_word_size_in_4b,
+          .minibatching_mode = options.minibatching_mode,
+      },
+      csr_arrays, dropped_ids_in_segment);
+  return dropped_ids_in_segment;
+}
+
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
 // `gains` because we fill values in a loop to a bigger array.
 // Returns the number of dropped IDs.
@@ -651,14 +691,21 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                              local_sc_id, "/MB", minibatch_id),
                 {{"batch_number", options.batch_number}});
           });
+          if (!is_minibatching) {
+            const int dropped_ids_in_segment =
+                FillLocalSparseCoreBufferSegment(
+                    local_sc_id,
+                    grouped_coo_tensors(local_sc_id, minibatch_id),
+                    batch_size_per_sc, options, csr_arrays);
+            shared_segment_data->dropped_id_counts[segment_idx].emplace(
+                dropped_ids_in_segment);
+            return;
+          }
           const int lhs_row_end =
               current_lhs_row_begin + row_pointers_size_per_bucket;
           int coo_begin = coo_begins[segment_idx].get();
-          const int coo_end =
-              is_minibatching
-                  ? coo_buffer_size                      // use whole buffer
-                  : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
-          // Fill Minibatch or SparseCore slice.
+          const int coo_end = coo_buffer_size;
+          // Fill Minibatch slice.
           int dropped_ids_in_segment = 0;
           coo_begin = FillBufferSegment(
               {
@@ -678,16 +725,9 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
               csr_arrays, dropped_ids_in_segment);
           shared_segment_data->dropped_id_counts[segment_idx].emplace(
               dropped_ids_in_segment);
-          if (is_minibatching) {
-            // Align minibatch buffer
-            PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
-                         options.hbm_word_size_in_4b, csr_arrays);
-          } else {
-            // Align SparseCore buffer (since each SC has only 1 minibatch).
-            const int sc_end = (local_sc_id + 1) * coo_buffer_size_per_sc;
-            PadCooBuffer(coo_begin, sc_end, PadType::kPadToEnd,
-                         options.hbm_word_size_in_4b, csr_arrays);
-          }
+          // Align minibatch buffer
+          PadCooBuffer(coo_begin, coo_buffer_size, PadType::kAlignOnly,
+                       options.hbm_word_size_in_4b, csr_arrays);
           // We could compute per minibatch buffer size, but we serialize the
           // filling for multiple (>1) minibatches instead. Also because it lies
           // on the slow path anyways.

@@ -352,6 +352,44 @@ TEST_F(TableStackingTest, MultiChipSplitThenStack) {
   }
 }
 
+TEST_F(TableStackingTest, ExtractCooTensorsForSingleSparseCoreExtractsSlice) {
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+  };
+
+  ExtractedCooTensors extracted_device =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
+          stacked_table_metadata_multi_, absl::MakeSpan(input_batches_multi_),
+          /*local_device_id=*/0, options);
+  extracted_device.BlockUntilReady();
+
+  const int batch_size_per_slice =
+      extracted_device.batch_size_for_device / options.num_sc_per_device;
+  std::vector<CooFormat> combined_coo_tensors;
+  for (int sc_id = 0; sc_id < options.num_sc_per_device; ++sc_id) {
+    ExtractedCooTensorsPerSparseCore sc_tensors =
+        internal::ExtractCooTensorsForSingleSparseCore(
+            stacked_table_metadata_multi_, absl::MakeSpan(input_batches_multi_),
+            /*local_device_id=*/0, sc_id, batch_size_per_slice,
+            /*has_variable_weights=*/false, options);
+    EXPECT_EQ(sc_tensors.size(), 6) << "sc_id: " << sc_id;
+    EXPECT_THAT(
+        sc_tensors.keys,
+        ElementsAreArray(extracted_device.per_sc_tensors_av[sc_id].get().keys))
+        << "sc_id: " << sc_id;
+    for (int i = 0; i < sc_tensors.size(); ++i) {
+      combined_coo_tensors.push_back(sc_tensors.get(i));
+    }
+  }
+
+  EXPECT_THAT(combined_coo_tensors,
+              ElementsAreArray(extracted_device.ToCooVector()));
+}
+
 TEST_F(TableStackingTest, PreprocessInputWritesToProvidedOutputBuffers) {
   const int local_device_count = 1;
   const int global_device_count = 1;
