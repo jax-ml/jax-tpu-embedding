@@ -324,7 +324,9 @@ BENCHMARK(BM_SortAndGroup_Phase1)
     ->Threads(8)
     ->UseRealTime();
 
-void BM_FillBuffer(benchmark::State& state) {
+template <bool kEnableMegacoreCsr>
+void BM_FillBufferImpl(benchmark::State& state,
+                       MinibatchingMode minibatching_mode) {
   const int num_features = state.range(0);
   const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(1));
   state.SetLabel(WorkloadProfileToString(profile));
@@ -354,7 +356,7 @@ void BM_FillBuffer(benchmark::State& state) {
       .sc_simd_width = kScSimdWidth,
       .hbm_word_size_in_4b = kHbmWordSizeIn4b,
       .allow_id_dropping = false,
-      .minibatching_mode = MinibatchingMode::kHost,
+      .minibatching_mode = minibatching_mode,
   };
 
   ExtractedCooTensors extracted_coo_tensors =
@@ -390,12 +392,30 @@ void BM_FillBuffer(benchmark::State& state) {
       csr_arrays_per_host.GetCsrArraysRefForDevice(0);
   int dropped_id_count_static_bound = 0;
 
+  std::optional<MegacoreCsrOptions> megacore_csr;
+  if constexpr (kEnableMegacoreCsr) {
+    megacore_csr = MegacoreCsrOptions{
+        .rows_per_sc = std::max(1, workload_config.vocab_size /
+                                       (kGlobalDeviceCount * kNumScPerDevice))};
+  }
+
   for (auto s : state) {
     FillLocalDeviceBuffer(grouped_coo_tensors, kBatchSizePerSc,
                           stats_per_device.required_buffer_size, options,
-                          stacked_table_metadata_list[0].name, csr_arrays,
-                          dropped_id_count_static_bound);
+                          stacked_table_metadata_list[0].name, megacore_csr,
+                          csr_arrays, dropped_id_count_static_bound);
   }
+}
+
+void BM_FillBuffer(benchmark::State& state) {
+  BM_FillBufferImpl</*kEnableMegacoreCsr=*/false>(state,
+                                                  MinibatchingMode::kHost);
+}
+
+void BM_FillBuffer_Megacore(benchmark::State& state) {
+  // Megacore CSR only supports device minibatching.
+  BM_FillBufferImpl</*kEnableMegacoreCsr=*/true>(state,
+                                                 MinibatchingMode::kDevice);
 }
 
 // Buffer filling is independent of the row combiner.
@@ -405,6 +425,17 @@ BENCHMARK(BM_FillBuffer)
     ->Args({1, 1})   // HighMultivalency
     ->UseRealTime();
 BENCHMARK(BM_FillBuffer)
+    // Args: {num_features, profile}
+    ->Args({20, 0})  // LargeVocab
+    ->Args({1, 1})   // HighMultivalency
+    ->Threads(8)
+    ->UseRealTime();
+BENCHMARK(BM_FillBuffer_Megacore)
+    // Args: {num_features, profile}
+    ->Args({20, 0})  // LargeVocab
+    ->Args({1, 1})   // HighMultivalency
+    ->UseRealTime();
+BENCHMARK(BM_FillBuffer_Megacore)
     // Args: {num_features, profile}
     ->Args({20, 0})  // LargeVocab
     ->Args({1, 1})   // HighMultivalency

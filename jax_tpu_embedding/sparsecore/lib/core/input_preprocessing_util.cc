@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
+#include "absl/container/inlined_vector.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
@@ -219,6 +220,159 @@ int FillBufferSegment(const BufferFillingOptions& options,
   return coo_index;
 }
 
+// Number of per-SC COO spans stored inline (without heap allocation) when
+// filling Megacore CSR buffers.
+constexpr int kInlinedScPerDevice = 16;
+
+// Pads the Megacore COO buffer with (-1, -1, 0.0f) up to the next HBM word
+// boundary, without exceeding `coo_end`.
+void AlignMegacoreCooBuffer(int& coo_index, int coo_end,
+                            int hbm_word_size_in_4b,
+                            internal::CsrArraysRefPerDevice& csr) {
+  while (coo_index % hbm_word_size_in_4b != 0 && coo_index < coo_end) {
+    csr.embedding_ids[coo_index] = -1;
+    csr.sample_ids[coo_index] = -1;
+    csr.gains[coo_index] = 0.0f;
+    ++coo_index;
+  }
+}
+
+// Fills the Megacore row pointers and COO buffer by merging the already-sorted
+// per-SC COO spans on the fly. Row pointers are offsets into the COO buffer.
+// Returns the COO index where the filled data ends.
+int FillMegacoreBuffer(const DevicePartitionedCooTensors& grouped_coo_tensors,
+                       int batch_size_per_sc, int rows_per_sc,
+                       const PreprocessSparseDenseMatmulInputOptions& options,
+                       internal::CsrArraysRefPerDevice& csr_arrays,
+                       int& dropped_id_count) {
+  const int num_scs = options.GetNumScs();
+  const int num_sc_per_device = options.num_sc_per_device;
+  const int num_sc_bits = absl::countr_zero(static_cast<uint32_t>(num_scs));
+  const int num_sc_per_device_bits =
+      absl::countr_zero(static_cast<uint32_t>(num_sc_per_device));
+  const int coo_end = csr_arrays.embedding_ids.size();
+
+  absl::InlinedVector<absl::Span<const CooFormat>, kInlinedScPerDevice>
+      sc_spans(num_sc_per_device);
+  int total_coo_size = 0;
+  for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
+    sc_spans[sc_id] = grouped_coo_tensors(sc_id, /*bucket_id=*/0);
+    total_coo_size += sc_spans[sc_id].size();
+  }
+
+  int lhs_row_index = 0;
+  int coo_index = 0;
+  int current_partition_id = 0;
+  // Ends each partition in [current_partition_id, target_partition_id) at
+  // `coo_index` and aligns the start of the next one.
+  auto advance_to_partition = [&](int target_partition_id) {
+    DCHECK_LE(current_partition_id, target_partition_id);
+    for (; current_partition_id < target_partition_id; ++current_partition_id) {
+      csr_arrays.row_pointers[lhs_row_index++] = coo_index;
+      AlignMegacoreCooBuffer(coo_index, coo_end, options.hbm_word_size_in_4b,
+                             csr_arrays);
+    }
+  };
+
+  int processed = 0;
+  while (processed < total_coo_size && coo_index < coo_end) {
+    // Rotating `col_id` right by `num_sc_bits` places `global_sc_id`
+    // (`(target_partition_id << num_sc_per_device_bits) | dest_sc`) in the high
+    // bits and `emb_id` in the low bits. Since `emb_id < rows_per_sc`, the
+    // smallest key is the smallest `(target_partition_id, linearized_emb_id)`.
+    // Ties resolve to the lowest local SC, which owns the smallest row_ids.
+    int best_sc = -1;
+    uint32_t best_key = 0;
+    for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
+      if (sc_spans[sc_id].empty()) {
+        continue;
+      }
+      const uint32_t key = absl::rotr(
+          static_cast<uint32_t>(sc_spans[sc_id].front().col_id), num_sc_bits);
+      if (best_sc == -1 || key < best_key) {
+        best_sc = sc_id;
+        best_key = key;
+      }
+    }
+    absl::Span<const CooFormat>& span = sc_spans[best_sc];
+    const int col_id = span.front().col_id;
+    DCHECK_GE(col_id, 0);
+    const uint32_t unsigned_col_id = static_cast<uint32_t>(col_id);
+    const uint32_t global_sc_id = unsigned_col_id & (num_scs - 1);
+    advance_to_partition(global_sc_id >> num_sc_per_device_bits);
+    const uint32_t dest_sc = global_sc_id & (num_sc_per_device - 1);
+    const uint32_t emb_id = unsigned_col_id >> num_sc_bits;
+    DCHECK(num_sc_per_device == 1 ||
+           emb_id < static_cast<uint32_t>(rows_per_sc));
+    const int linearized_emb_id =
+        static_cast<int>(int64_t{dest_sc} * rows_per_sc + emb_id);
+
+    // Each local SC owns a disjoint, increasing row_id range, so emitting the
+    // whole `col_id` run of the winning span keeps (embedding_id, sample_id)
+    // sorted.
+    for (;
+         !span.empty() && span.front().col_id == col_id && coo_index < coo_end;
+         span.remove_prefix(1)) {
+      const CooFormat& coo_tensor = span.front();
+      DCHECK_LT(coo_tensor.row_id, batch_size_per_sc * num_sc_per_device);
+      csr_arrays.embedding_ids[coo_index] = linearized_emb_id;
+      csr_arrays.sample_ids[coo_index] = coo_tensor.row_id;
+      csr_arrays.gains[coo_index] = coo_tensor.gain;
+      ++coo_index;
+      ++processed;
+    }
+  }
+  if (processed < total_coo_size) {
+    LOG_EVERY_N(WARNING, 100)
+        << "The static buffer is too small for the current batch. IDs will be "
+           "dropped! Megacore COO buffer size: "
+        << coo_end << ", total number of input COOs: " << total_coo_size
+        << ", while currently processed only: " << processed;
+    dropped_id_count += total_coo_size - processed;
+  }
+  // Fill remaining partitions, then pad the alignment row pointers as empty
+  // rows.
+  advance_to_partition(/*target_partition_id=*/options.global_device_count);
+  PadRowPointersBuffer(lhs_row_index, /*padding=*/coo_index,
+                       csr_arrays.row_pointers.size(), csr_arrays.row_pointers);
+  return coo_index;
+}
+
+// Megacore counterpart of `FillLocalDeviceBufferAsync`. Megacore CSR does not
+// support host minibatching, so there is a single minibatch, filled in one
+// task.
+tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const int batch_size_per_sc,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name, MegacoreCsrOptions megacore_csr,
+    internal::CsrArraysRefPerDevice csr_arrays) {
+  DCHECK_GT(batch_size_per_sc, 0);
+  DCHECK(options.num_sc_per_device == 1 || megacore_csr.rows_per_sc > 0);
+  DCHECK_EQ(grouped_coo_tensors.GetNumMinibatches(), 1);
+  tsl::AsyncValueRef<int> dropped_id_count_av =
+      tsl::MakeUnconstructedAsyncValueRef<int>();
+  options.async_task_scheduler([=, &grouped_coo_tensors]() mutable {
+    tsl::profiler::TraceMe traceme([&] {
+      return tsl::profiler::TraceMeEncode(
+          absl::StrCat("FillMegacoreBuffer/", stacked_table_name),
+          {{"batch_number", options.batch_number}});
+    });
+    int dropped_id_count = 0;
+    const int coo_index = FillMegacoreBuffer(
+        grouped_coo_tensors, batch_size_per_sc, megacore_csr.rows_per_sc,
+        options, csr_arrays, dropped_id_count);
+    // Consumers may read the full `embedding_ids` and `sample_ids` buffers and
+    // treat -1 as padding, so pad trailing IDs with -1. Trailing gains are
+    // undefined and must not be read.
+    const int trailing_size = csr_arrays.embedding_ids.size() - coo_index;
+    csr_arrays.embedding_ids.segment(coo_index, trailing_size).setConstant(-1);
+    csr_arrays.sample_ids.segment(coo_index, trailing_size).setConstant(-1);
+    dropped_id_count_av.emplace(dropped_id_count);
+  });
+  return dropped_id_count_av;
+}
+
 }  // namespace
 
 RowCombiner GetRowCombiner(absl::string_view combiner) {
@@ -230,6 +384,33 @@ RowCombiner GetRowCombiner(absl::string_view combiner) {
     return RowCombiner::kSqrtn;
   }
   return RowCombiner::kSum;
+}
+
+bool EnableMegacoreCsrForStackedTables(
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  if (stacked_table_metadata.empty()) {
+    return false;
+  }
+  const bool enable_megacore_csr =
+      stacked_table_metadata[0].enable_megacore_csr;
+  for (const FeatureMetadataInStack& metadata : stacked_table_metadata) {
+    CHECK_EQ(metadata.enable_megacore_csr, enable_megacore_csr)
+        << "All features in a stacked table must have the same "
+           "enable_megacore_csr setting (feature: "
+        << metadata.name << ").";
+  }
+  return enable_megacore_csr;
+}
+
+int ComputeRowPointersSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  if (EnableMegacoreCsrForStackedTables(stacked_table_metadata)) {
+    // One row pointer per destination device, padded to the HBM word size.
+    return xla::RoundUpTo(options.global_device_count,
+                          options.hbm_word_size_in_4b);
+  }
+  return options.GetRowPointersSizePerDevice();
 }
 
 int64_t MayBeUpdateBufferSize(int64_t theoretical_max,
@@ -323,6 +504,43 @@ int ComputeCooBufferSizePerDevice(
       << "Computed Coo Buffer Size (" << computed_coo_buffer_size_per_device
       << ") for table " << stacked_table_name
       << " is out of the valid range (0, INT_MAX).";
+  if (EnableMegacoreCsrForStackedTables(stacked_table_metadata)) {
+    // Megacore consumers may sort the full COO buffer on SparseCore, which
+    // requires a minimum number of elements per tile (~128 for 16 tiles x 8
+    // lanes). 256 keeps small buffers above that.
+    constexpr int64_t kMinMegacoreCooBufferSize = 256;
+    // The SparseCore multi-tile radix sort writes past the end of its output
+    // unless the length is a multiple of 16 tiles x 8 lanes.
+    constexpr int64_t kMegacoreCooBufferSizeAlignment = 128;
+    constexpr int64_t kMaxTileSpmemBytes = 512 * 1024;
+    constexpr int64_t kCooElementBytes =
+        sizeof(int) + sizeof(int) + sizeof(float);
+    // Each device's row starts at an aligned offset, and `sparse_map_row`
+    // writes an aligned chunk for trailing empty rows, so keep one more
+    // aligned chunk after the last row.
+    computed_coo_buffer_size_per_device = std::max(
+        kMinMegacoreCooBufferSize,
+        xla::RoundUpTo<int64_t>(
+            xla::RoundUpTo<int64_t>(computed_coo_buffer_size_per_device,
+                                    hbm_word_size_in_4b) +
+                int64_t{global_device_count} * hbm_word_size_in_4b,
+            kMegacoreCooBufferSizeAlignment));
+    CHECK_LE(computed_coo_buffer_size_per_device * kCooElementBytes,
+             kMaxTileSpmemBytes)
+        << "Computed Coo Buffer Size (" << computed_coo_buffer_size_per_device
+        << " elements, "
+        << computed_coo_buffer_size_per_device * kCooElementBytes
+        << " bytes) for table " << stacked_table_name
+        << " exceeds the 512 KB TileSpmem limit (" << kMaxTileSpmemBytes
+        << " bytes). The size is derived from "
+        << (suggested_coo_buffer_size_per_device.has_value()
+                ? "`suggested_coo_buffer_size_per_device`"
+                : "the theoretical max because no "
+                  "`suggested_coo_buffer_size_per_device` is set")
+        << ". Set a smaller `suggested_coo_buffer_size_per_device` (e.g. from "
+           "the stats returned by the sparse dense matmul preprocessing API) "
+           "or reduce `max_ids_per_partition`.";
+  }
   return static_cast<int>(computed_coo_buffer_size_per_device);
 }
 
@@ -357,12 +575,18 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice csr_arrays) {
   tsl::profiler::TraceMe t([&] {
     return tsl::profiler::TraceMeEncode(
         absl::StrCat("ScheduleFillLocalDeviceBuffer/", stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
+  if (megacore_csr.has_value()) {
+    return FillMegacoreLocalDeviceBufferAsync(
+        grouped_coo_tensors, batch_size_per_sc, options, stacked_table_name,
+        *megacore_csr, csr_arrays);
+  }
   const int row_pointers_size_per_bucket =
       options.GetRowPointersSizePerBucket();
 
@@ -505,11 +729,12 @@ void FillLocalDeviceBuffer(
     const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice& csr_arrays,
     int& dropped_id_count_static_bound) {
   tsl::AsyncValueRef<int> dropped_id_count = FillLocalDeviceBufferAsync(
       grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes, options,
-      stacked_table_name, csr_arrays);
+      stacked_table_name, megacore_csr, csr_arrays);
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
 }

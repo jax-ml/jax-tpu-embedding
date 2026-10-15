@@ -18,6 +18,7 @@
 #include <climits>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -637,7 +638,8 @@ TEST(InputPreprocessingUtilTest, FillBuffer) {
   FillLocalDeviceBuffer(
       coo_tensors_by_id,
       /*batch_size_per_sc=*/2, stats_per_device.required_buffer_size, options,
-      /*stacked_table_name=*/"test_table", csr_array, dropped_static_bound);
+      /*stacked_table_name=*/"test_table",
+      /*megacore_csr=*/std::nullopt, csr_array, dropped_static_bound);
 
   std::array<int, 32> expected_row_pointers = {
       2, 10, 18, 26, 32, 32, 32, 32,  //
@@ -769,7 +771,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingSingleMinibatch) {
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*batch_size_per_sc=*/2,
                         stats_per_device.required_buffer_size, options,
-                        /*stacked_table_name=*/"test_table", csr_array,
+                        /*stacked_table_name=*/"test_table",
+                        /*megacore_csr=*/std::nullopt, csr_array,
                         stats_per_device.dropped_id_count);
 
   std::array<int, 32> expected_row_pointers = {
@@ -932,7 +935,8 @@ TEST(InputPreprocessingUtilTest, FillBufferMinibatchingFourMinibatches) {
   FillLocalDeviceBuffer(coo_tensors_by_id,
                         /*batch_size_per_sc=*/2,
                         stats_per_device.required_buffer_size, options,
-                        /*stacked_table_name=*/"test_table", csr_array,
+                        /*stacked_table_name=*/"test_table",
+                        /*megacore_csr=*/std::nullopt, csr_array,
                         stats_per_device.dropped_id_count);
 
   // clang-format off
@@ -1084,7 +1088,8 @@ TEST(InputPreprocessingUtilTest,
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, batch_size_per_sc,
                         stats_per_device.required_buffer_size, opts,
-                        /*stacked_table_name=*/"test_table", csr_arrays,
+                        /*stacked_table_name=*/"test_table",
+                        /*megacore_csr=*/std::nullopt, csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
 
   EXPECT_EQ(dropped_static, 1);
@@ -1159,7 +1164,8 @@ TEST(InputPreprocessingUtilTest,
   int dropped_static = 0;
   FillLocalDeviceBuffer(grouped, batch_size_per_sc,
                         stats_per_device.required_buffer_size, opts,
-                        /*stacked_table_name=*/"test_table", csr_arrays,
+                        /*stacked_table_name=*/"test_table",
+                        /*megacore_csr=*/std::nullopt, csr_arrays,
                         /*dropped_id_count_static_bound=*/dropped_static);
 
   EXPECT_EQ(stats_per_device.dropped_id_count, 0);

@@ -17,6 +17,7 @@
 #include <bitset>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -151,6 +152,8 @@ struct TableState {
   absl::string_view stacked_table_name;
   absl::Span<const FeatureMetadataInStack> stacked_table_metadata;
   bool has_variable_weights;
+  // Set iff Megacore CSR buffers are produced for this stacked table.
+  std::optional<MegacoreCsrOptions> megacore_csr;
   int coo_buffer_size_per_device;
   CsrArraysPerHost csr_arrays_per_host;
   StatsPerHost stats_per_host;
@@ -163,7 +166,7 @@ struct TableState {
 
   TableState(absl::string_view name,
              absl::Span<const FeatureMetadataInStack> metadata,
-             bool has_variable_weights,
+             bool has_variable_weights, bool enable_megacore_csr,
              const PreprocessSparseDenseMatmulInputOptions& options,
              int coo_buffer_size_per_device, Eigen::Ref<MatrixXi> row_pointers,
              Eigen::Ref<MatrixXi> embedding_ids,
@@ -176,6 +179,22 @@ struct TableState {
         stats_per_host(options.local_device_count, options.GetNumScs(),
                        options.num_sc_per_device),
         batch_size_for_device(0) {
+    if (enable_megacore_csr) {
+      int rows_per_sc = 0;
+      if (options.num_sc_per_device > 1) {
+        for (const auto& feature_metadata : stacked_table_metadata) {
+          CHECK(feature_metadata.max_col_id >= 0 &&
+                feature_metadata.max_col_id < std::numeric_limits<int>::max())
+              << "max_col_id must be set to a non-negative value on "
+                 "FeatureMetadataInStack when enable_megacore_csr is true and "
+                 "num_sc_per_device > 1 (table: "
+              << stacked_table_name << ", feature: " << feature_metadata.name
+              << ").";
+          rows_per_sc = std::max(rows_per_sc, feature_metadata.max_col_id + 1);
+        }
+      }
+      megacore_csr = MegacoreCsrOptions{.rows_per_sc = rows_per_sc};
+    }
     extracted_coo_tensors_per_device.resize(options.local_device_count);
     device_sorting_results.resize(options.local_device_count);
   }
@@ -670,7 +689,8 @@ void FillDeviceBuffersForTable(
 
       tsl::AsyncValueRef<int> dropped_id_count_av = FillLocalDeviceBufferAsync(
           grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes,
-          options, state.stacked_table_name, csr_arrays_per_device);
+          options, state.stacked_table_name, state.megacore_csr,
+          csr_arrays_per_device);
 
       dropped_id_count_av.AndThen(
           [sorting_result_av, &counter, dropped_id_count_av]() {
@@ -825,15 +845,21 @@ PreprocessSparseDenseMatmulInput(
 
   PreprocessSparseDenseMatmulOutput out;
 
-  const int row_pointers_size_per_device =
-      options.GetRowPointersSizePerDevice();
-
   std::vector<TableState> table_states;
   table_states.reserve(stacked_tables.size());
   for (const auto& [stacked_table_name, stacked_table_metadata] :
        stacked_tables) {
     const bool stack_has_weights =
         StackHasVariableWeights(input_batches, stacked_table_metadata);
+    const bool enable_megacore_csr =
+        EnableMegacoreCsrForStackedTables(stacked_table_metadata);
+    if (enable_megacore_csr && options.IsHostMinibatchingEnabled()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Megacore CSR does not support host minibatching (table: ",
+          stacked_table_name, "); use MinibatchingMode::kDevice."));
+    }
+    const int row_pointers_size_per_device =
+        ComputeRowPointersSizePerDevice(options, stacked_table_metadata);
     const int coo_buffer_size_per_device =
         ComputeCooBufferSizePerDevice(options, stacked_table_metadata);
 
@@ -842,7 +868,7 @@ PreprocessSparseDenseMatmulInput(
         coo_buffer_size_per_device, output_csr_arrays, out);
 
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
-                              stack_has_weights, options,
+                              stack_has_weights, enable_megacore_csr, options,
                               coo_buffer_size_per_device, row_pointers,
                               embedding_ids, sample_ids, gains);
   }
@@ -941,13 +967,16 @@ PreprocessSparseDenseMatmulInput(
       state.stats_per_host.dropped_id_count +=
           result_av.get().total_dropped_id_count;
     }
-    // NOMUTANTS -- Informational.
-    CheckBufferUsage(
-        /* max_required_buffer_size_per_device= */
-        state.stats_per_host.required_buffer_size.maxCoeff() *
-            options.num_sc_per_device,
-        state.coo_buffer_size_per_device, state.stacked_table_name,
-        options.batch_number);
+    const int max_required_buffer_size_per_device =
+        state.megacore_csr.has_value()
+            ? state.stats_per_host.required_buffer_size.rowwise()
+                  .sum()
+                  .maxCoeff()
+            : state.stats_per_host.required_buffer_size.maxCoeff() *
+                  options.num_sc_per_device;
+    CheckBufferUsage(max_required_buffer_size_per_device,
+                     state.coo_buffer_size_per_device, state.stacked_table_name,
+                     options.batch_number);
 
     PopulateOutputStats(state, out.stats, options.batch_number);
   }

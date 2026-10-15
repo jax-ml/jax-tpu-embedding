@@ -578,7 +578,8 @@ struct FeatureMetadataInStack {
       int col_shift, int64_t batch_size,
       std::optional<int> suggested_coo_buffer_size_per_device = std::nullopt,
       RowCombiner row_combiner = RowCombiner::kSum,
-      int max_col_id = std::numeric_limits<int>::max())
+      int max_col_id = std::numeric_limits<int>::max(),
+      bool enable_megacore_csr = false)
       : name(name),
         feature_index(feature_index),
         max_ids_per_partition(max_ids_per_partition),
@@ -590,7 +591,8 @@ struct FeatureMetadataInStack {
         col_shift(col_shift),
         batch_size(batch_size),
         row_combiner(row_combiner),
-        max_col_id(max_col_id) {}
+        max_col_id(max_col_id),
+        enable_megacore_csr(enable_megacore_csr) {}
 
   std::string name;
 
@@ -616,6 +618,10 @@ struct FeatureMetadataInStack {
   // shard.
   int max_col_id;
 
+  // Whether to produce Megacore (chip-level) CSR buffers instead of per-SC
+  // CSR buffers for this stacked table.
+  bool enable_megacore_csr = false;
+
   bool operator==(const FeatureMetadataInStack& other) const = default;
 };
 
@@ -627,6 +633,13 @@ inline int GetActualRowPointersSizePerDevice(
   return options.GetRowPointersSizePerBucket() * num_minibatches *
          options.num_sc_per_device;
 }
+
+bool EnableMegacoreCsrForStackedTables(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
+
+int ComputeRowPointersSizePerDevice(
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
 int64_t ComputeTheoreticalMaxCooBufferSize(
     int max_ids_per_partition, int global_device_count, int num_sc_per_device,
@@ -648,21 +661,35 @@ int MaxIdsPerPartitionForStackedTables(
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
+// Options for filling Megacore (chip-level) CSR buffers.
+struct MegacoreCsrOptions {
+  // Row stride used to linearize embedding IDs as
+  // `dest_sc * rows_per_sc + row_in_sc`. Unused if `num_sc_per_device == 1`.
+  int rows_per_sc;
+};
+
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
     int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice& csr_arrays,
     int& dropped_id_count_static_bound);
 
-// Returns the number of dropped IDs.
+// Returns the number of dropped IDs. If `megacore_csr` is set, fills a single
+// chip-level CSR buffer whose embedding IDs are linearized as
+// `dest_sc * rows_per_sc + row_in_sc`, where `dest_sc` is the SparseCore that
+// owns the row on its destination device. Row `i` covers the COO range
+// `[round_up(row_pointers[i - 1], 8), row_pointers[i])`, and all other COO
+// entries have embedding and sample IDs of -1.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
     int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice csr_arrays);
 
 }  // namespace jax_sc_embedding

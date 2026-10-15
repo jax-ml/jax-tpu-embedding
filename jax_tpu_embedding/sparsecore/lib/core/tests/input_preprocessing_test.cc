@@ -1709,5 +1709,274 @@ FUZZ_TEST(InputPreprocessingFuzzTest, StatsValidationTest)
         // Domain for global_device_count
         fuzztest::ElementOf<int>({1, 2, 4}));
 
+FeatureMetadataInStack CreateBufferSizeTestMetadata(
+    bool enable_megacore_csr, int max_ids_per_partition = 464,
+    std::optional<int> suggested_coo_buffer_size_per_device = 6560) {
+  return FeatureMetadataInStack(
+      /*name=*/"table_0", /*feature_index=*/0, max_ids_per_partition,
+      /*max_unique_ids_per_partition=*/216, /*row_offset=*/0,
+      /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/128,
+      suggested_coo_buffer_size_per_device, RowCombiner::kSum,
+      /*max_col_id=*/631, enable_megacore_csr);
+}
+
+TEST(MegacoreCsrTest, RowPointersSizeIsOnePerDeviceAligned) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  std::vector<FeatureMetadataInStack> per_sc_metadata = {
+      CreateBufferSizeTestMetadata(/*enable_megacore_csr=*/false)};
+  std::vector<FeatureMetadataInStack> megacore_metadata = {
+      CreateBufferSizeTestMetadata(/*enable_megacore_csr=*/true)};
+
+  // Act
+  const int per_sc_size =
+      ComputeRowPointersSizePerDevice(options, per_sc_metadata);
+  const int megacore_size =
+      ComputeRowPointersSizePerDevice(options, megacore_metadata);
+
+  // Assert
+  // Per-SC: 16 global SCs x 64 buckets x 4 local SCs = 4096.
+  EXPECT_EQ(per_sc_size, 4096);
+  // Megacore: RoundUpTo(4 devices, 8) = 8.
+  EXPECT_EQ(megacore_size, 8);
+}
+
+TEST(MegacoreCsrTest, RowPointersSizeIgnoresMinibatchingMode) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDisabled,
+  };
+  std::vector<FeatureMetadataInStack> megacore_metadata = {
+      CreateBufferSizeTestMetadata(/*enable_megacore_csr=*/true)};
+
+  // Act
+  const int size = ComputeRowPointersSizePerDevice(options, megacore_metadata);
+
+  // Assert
+  EXPECT_EQ(size, 8);
+}
+
+TEST(MegacoreCsrTest, CooBufferSizeAddsAlignmentPaddingPerDevice) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  std::vector<FeatureMetadataInStack> per_sc_metadata = {
+      CreateBufferSizeTestMetadata(/*enable_megacore_csr=*/false)};
+  std::vector<FeatureMetadataInStack> megacore_metadata = {
+      CreateBufferSizeTestMetadata(/*enable_megacore_csr=*/true)};
+
+  // Act
+  const int per_sc_size =
+      ComputeCooBufferSizePerDevice(options, per_sc_metadata);
+  const int megacore_size =
+      ComputeCooBufferSizePerDevice(options, megacore_metadata);
+
+  // Assert
+  EXPECT_EQ(per_sc_size, 6560);
+  // RoundUpTo(RoundUpTo(6560, 8) + 4 * 8, 128) = 6656.
+  EXPECT_EQ(megacore_size, 6656);
+}
+
+TEST(MegacoreCsrTest, CooBufferSizeExceedingTileSpmemDies) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  std::vector<FeatureMetadataInStack> oversized_metadata = {
+      CreateBufferSizeTestMetadata(
+          /*enable_megacore_csr=*/true, /*max_ids_per_partition=*/4096,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt)};
+
+  // Act & Assert
+  EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, oversized_metadata),
+               "exceeds the 512 KB TileSpmem limit.*Set a smaller "
+               "`suggested_coo_buffer_size_per_device`");
+}
+
+TEST(MegacoreCsrTest, PreprocessesIntoMegacoreCsrFormat) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDisabled,
+  };
+  // Sample 0 (SC 0, sample_id 0): {0, 5}
+  // Sample 1 (SC 0, sample_id 1): {2}
+  // Sample 2 (SC 1, sample_id 2): {4, 4} (deduped to gain 2.0)
+  // Sample 3 (SC 1, sample_id 3): {7}
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(
+      CreateInputBatchFromSamples({{0, 5}, {2}, {4, 4}, {7}}));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/16,
+                /*max_unique_ids_per_partition=*/16,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/4,
+                /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+                RowCombiner::kSum, /*max_col_id=*/9,
+                /*enable_megacore_csr=*/true)}}});
+
+  // Act
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  // Assert
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("megacore_table");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("megacore_table");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("megacore_table");
+  const MatrixXf& gains = output.lhs_gains.at("megacore_table");
+
+  ASSERT_EQ(row_pointers.rows(), 1);
+  ASSERT_EQ(row_pointers.cols(), 8);
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray({3, 10, 16, 16, 16, 16, 16, 16}));
+
+  ASSERT_EQ(embedding_ids.cols(), 256);
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
+              ElementsAreArray({0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1,
+                                -1, -1, -1}));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
+              ElementsAreArray(
+                  {0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1}));
+  EXPECT_THAT(
+      absl::MakeConstSpan(gains.data(), 16),
+      ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+  // Trailing embedding and sample IDs beyond the last row are padded with -1.
+  // Trailing gains are undefined.
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), embedding_ids.size())
+                  .subspan(16),
+              Each(-1));
+  EXPECT_THAT(
+      absl::MakeConstSpan(sample_ids.data(), sample_ids.size()).subspan(16),
+      Each(-1));
+}
+
+TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  // Same input as `PreprocessesIntoMegacoreCsrFormat`, but with
+  // max_ids_per_partition = 1: device minibatching does not enforce the
+  // per-partition limits on the host, so all IDs land in a single minibatch.
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(
+      CreateInputBatchFromSamples({{0, 5}, {2}, {4, 4}, {7}}));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/1,
+                /*max_unique_ids_per_partition=*/1,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/4,
+                /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+                RowCombiner::kSum, /*max_col_id=*/9,
+                /*enable_megacore_csr=*/true)}}});
+
+  // Act
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  // Assert
+  EXPECT_EQ(output.num_minibatches, 1);
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("megacore_table");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("megacore_table");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("megacore_table");
+  const MatrixXf& gains = output.lhs_gains.at("megacore_table");
+
+  ASSERT_EQ(row_pointers.rows(), 1);
+  ASSERT_EQ(row_pointers.cols(), 8);
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray({3, 10, 16, 16, 16, 16, 16, 16}));
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
+              ElementsAreArray({0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1,
+                                -1, -1, -1}));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
+              ElementsAreArray(
+                  {0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1}));
+  EXPECT_THAT(
+      absl::MakeConstSpan(gains.data(), 16),
+      ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+}
+
+TEST(MegacoreCsrTest, RejectsHostMinibatching) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kHost,
+  };
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(
+      CreateInputBatchFromSamples({{0, 5}, {2}, {4, 4}, {7}}));
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/16,
+                /*max_unique_ids_per_partition=*/16,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/4,
+                /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+                RowCombiner::kSum, /*max_col_id=*/9,
+                /*enable_megacore_csr=*/true)}}});
+
+  // Act & Assert
+  EXPECT_THAT(PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                               stacked_tables, options),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("does not support host minibatching")));
+}
+
 }  // namespace
 }  // namespace jax_sc_embedding
