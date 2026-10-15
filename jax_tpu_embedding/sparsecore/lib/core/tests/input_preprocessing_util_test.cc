@@ -36,6 +36,7 @@ namespace jax_sc_embedding {
 namespace {
 
 using ::testing::_;
+using ::testing::Each;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
@@ -1270,6 +1271,210 @@ TEST(InputPreprocessingUtilTest, ValidateOptionsZeroHbmWordSizeIn4bFails) {
       .hbm_word_size_in_4b = 0,
   };
   EXPECT_FALSE(zero_word_size.Validate().ok());
+}
+
+TEST(SortAndGroupTest, SingleSparseCoreSortsGroupsAndComputesStats) {
+  std::vector<CooFormat> coo_formats;
+  for (int row = 0; row < 8; ++row) {
+    coo_formats.push_back(CooFormat(row, 0, 1.0));
+    coo_formats.push_back(CooFormat(row, 1, 1.0));
+    coo_formats.push_back(CooFormat(row, 2, 1.0));
+    coo_formats.push_back(CooFormat(row, 3, 1.0));
+  }
+  ExtractedCooTensors extracted_coo_tensors(/*num_sc_per_device=*/4,
+                                            /*batch_size_for_device=*/8,
+                                            coo_formats);
+  FeatureMetadataInStack feature_metadata(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
+      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+  };
+
+  internal::SparseCoreSortingTaskResult<MinibatchingSplit> sc1_result =
+      internal::SortAndGroupCooTensorsForSingleSparseCore<
+          /*kHasVariableWeights=*/false, /*kCreateBuckets=*/false,
+          MinibatchingSplit>(extracted_coo_tensors.per_sc_tensors_av[1].get(),
+                             /*local_sc_id=*/1, "stacked_table",
+                             feature_metadata, options);
+
+  std::vector<CooFormat> expected_sc_1 = {
+      CooFormat(2, 0, 1.0), CooFormat(3, 0, 1.0), CooFormat(2, 1, 1.0),
+      CooFormat(3, 1, 1.0), CooFormat(2, 2, 1.0), CooFormat(3, 2, 1.0),
+      CooFormat(2, 3, 1.0), CooFormat(3, 3, 1.0),
+  };
+  EXPECT_THAT(sc1_result.grouped_coo_tensors(/*bucket_id=*/0),
+              ElementsAreArray(expected_sc_1));
+  EXPECT_EQ(sc1_result.dropped_id_count, 0);
+  EXPECT_EQ(sc1_result.split_val, 0);
+  internal::StatsPerDevice sc1_stats =
+      sc1_result.stats_host.GetStatsPerDevice(0);
+  EXPECT_THAT(sc1_stats.max_ids_per_partition, ElementsAre(2, 2, 2, 2));
+  EXPECT_THAT(sc1_stats.max_unique_ids_per_partition, ElementsAre(1, 1, 1, 1));
+  EXPECT_THAT(sc1_stats.required_buffer_size, ElementsAre(0, 32, 0, 0));
+}
+
+TEST(SortAndGroupTest, SingleSparseCoreDropsExcessIdsWhenAllowed) {
+  std::vector<CooFormat> coo_formats;
+  for (int row = 0; row < 16; ++row) {
+    coo_formats.push_back(CooFormat(row, 0, 1.0));
+    coo_formats.push_back(CooFormat(row, 1, 1.0));
+    coo_formats.push_back(CooFormat(row, 2, 1.0));
+    coo_formats.push_back(CooFormat(row, 3, 1.0));
+  }
+  ExtractedCooTensors extracted_coo_tensors(/*num_sc_per_device=*/4,
+                                            /*batch_size_for_device=*/16,
+                                            coo_formats);
+  FeatureMetadataInStack feature_metadata(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/2,
+      /*max_unique_ids_per_partition=*/1, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = true,
+  };
+
+  internal::SparseCoreSortingTaskResult<bool> sc2_result =
+      internal::SortAndGroupCooTensorsForSingleSparseCore<
+          /*kHasVariableWeights=*/false, /*kCreateBuckets=*/false, bool>(
+          extracted_coo_tensors.per_sc_tensors_av[2].get(), /*local_sc_id=*/2,
+          "stacked_table", feature_metadata, options);
+
+  std::vector<CooFormat> expected_sc_2 = {
+      CooFormat(8, 0, 1.0), CooFormat(9, 0, 1.0), CooFormat(8, 1, 1.0),
+      CooFormat(9, 1, 1.0), CooFormat(8, 2, 1.0), CooFormat(9, 2, 1.0),
+      CooFormat(8, 3, 1.0), CooFormat(9, 3, 1.0),
+  };
+  EXPECT_THAT(sc2_result.grouped_coo_tensors(/*bucket_id=*/0),
+              ElementsAreArray(expected_sc_2));
+  EXPECT_EQ(sc2_result.dropped_id_count, 8);
+}
+
+TEST(InputPreprocessingUtilTest,
+     FillLocalSparseCoreBufferSegmentFillsDisjointSegment) {
+  std::vector<CooFormat> coo_formats;
+  for (int row = 0; row < 8; ++row) {
+    coo_formats.push_back(CooFormat(row, 0, 1.0));
+    coo_formats.push_back(CooFormat(row, 1, 1.0));
+    coo_formats.push_back(CooFormat(row, 2, 1.0));
+    coo_formats.push_back(CooFormat(row, 3, 1.0));
+  }
+  ExtractedCooTensors extracted_coo_tensors(/*num_sc_per_device=*/4,
+                                            /*batch_size_for_device=*/8,
+                                            coo_formats);
+  FeatureMetadataInStack feature_metadata(
+      "stacked_table", /*feature_index=*/0, /*max_ids_per_partition=*/32,
+      /*max_unique_ids_per_partition=*/32, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/0);
+  PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 4,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+  };
+  MinibatchingSplit minibatching_split = 0;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
+  DevicePartitionedCooTensors coo_tensors_by_id =
+      SortAndGroupCooTensorsPerLocalDevice(
+          extracted_coo_tensors, "stacked_table", feature_metadata, options,
+          stats_per_device, minibatching_split);
+
+  constexpr int kSentinel = -999;
+  MatrixXi row_pointers = MatrixXi::Constant(1, 8 * 4, kSentinel);
+  MatrixXi embedding_ids = MatrixXi::Constant(1, 40 * 4, kSentinel);
+  MatrixXi sample_ids = MatrixXi::Constant(1, 40 * 4, kSentinel);
+  MatrixXf gains = MatrixXf::Constant(1, 40 * 4, -999.0f);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+  internal::CsrArraysRefPerDevice csr_array =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
+
+  const int dropped = FillLocalSparseCoreBufferSegment(
+      /*local_sc_id=*/1,
+      coo_tensors_by_id(/*local_sc_id=*/1, /*bucket_id=*/0),
+      /*batch_size_per_sc=*/2, options, csr_array);
+
+  EXPECT_EQ(dropped, 0);
+  // SC 0 and SC 2..3 row_pointers remain untouched; only SC 1 [8, 16) is
+  // filled.
+  EXPECT_THAT(absl::MakeSpan(csr_array.row_pointers).subspan(0, 8),
+              Each(Eq(kSentinel)));
+  EXPECT_THAT(absl::MakeSpan(csr_array.row_pointers).subspan(8, 8),
+              ElementsAre(2, 10, 18, 26, 32, 32, 32, 32));
+  EXPECT_THAT(absl::MakeSpan(csr_array.row_pointers).subspan(16, 16),
+              Each(Eq(kSentinel)));
+
+  // SC 0 [0, 40) and SC 2..3 [80, 160) COO segments remain untouched.
+  EXPECT_THAT(absl::MakeSpan(csr_array.embedding_ids).subspan(0, 40),
+              Each(Eq(kSentinel)));
+  EXPECT_THAT(absl::MakeSpan(csr_array.embedding_ids).subspan(40, 32),
+              ElementsAre(0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  //
+                          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  //
+                          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  //
+                          0, 0, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX));
+  EXPECT_THAT(absl::MakeSpan(csr_array.sample_ids).subspan(40, 32),
+              ElementsAre(0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  //
+                          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  //
+                          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  //
+                          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX));
+  EXPECT_THAT(absl::MakeSpan(csr_array.embedding_ids).subspan(80, 80),
+              Each(Eq(kSentinel)));
+}
+
+TEST(InputPreprocessingUtilTest,
+     FillLocalSparseCoreBufferSegmentReturnsDroppedIdCount) {
+  std::vector<CooFormat> coo_tensors = {
+      CooFormat(/*row=*/0, /*col=*/0, /*gain=*/1.0f),
+      CooFormat(/*row=*/0, /*col=*/1, /*gain=*/1.0f),
+      CooFormat(/*row=*/1, /*col=*/0, /*gain=*/1.0f),
+      CooFormat(/*row=*/1, /*col=*/1, /*gain=*/1.0f),
+  };
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 1,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+  };
+
+  constexpr int kCooBufferSizePerSc = 3;
+  MatrixXi row_pointers(1, options.GetRowPointersSizePerBucket());
+  MatrixXi embedding_ids(1, kCooBufferSizePerSc);
+  MatrixXi sample_ids(1, kCooBufferSizePerSc);
+  MatrixXf gains(1, kCooBufferSizePerSc);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+  internal::CsrArraysRefPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
+
+  const int dropped = FillLocalSparseCoreBufferSegment(
+      /*local_sc_id=*/0, coo_tensors, /*batch_size_per_sc=*/4, options,
+      csr_arrays);
+  EXPECT_EQ(dropped, 1);
 }
 
 }  // namespace

@@ -358,6 +358,190 @@ inline void UpdateKeysWithBucketId(
   }
 }
 
+template <typename SplitType>
+struct SparseCoreSortingTaskResult {
+  PartitionedCooTensors grouped_coo_tensors;
+  StatsPerHost stats_host;
+  int dropped_id_count = 0;
+  SplitType split_val = {};
+};
+
+template <bool kHasVariableWeights, bool kCreateBuckets, typename SplitType>
+SparseCoreSortingTaskResult<SplitType>
+SortAndGroupCooTensorsForSingleSparseCore(
+    const ExtractedCooTensorsPerSparseCore& extracted_coo_tensors,
+    int local_sc_id, absl::string_view stacked_table_name,
+    const FeatureMetadataInStack& feature_metadata,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  tsl::profiler::TraceMe sort_traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("SortAndGroupCooTensorsPerSparseCore/", stacked_table_name,
+                     "/SC", local_sc_id),
+        {{"batch_number", options.batch_number}});
+  });
+
+  const uint32_t global_sc_count = options.GetNumScs();
+  const int num_sc_bits = absl::bit_width(global_sc_count - 1);
+  const int bucket_count =
+      kCreateBuckets ? CooFormat::kMaxMinibatchingBuckets : 1;
+  const int max_ids_per_partition = feature_metadata.max_ids_per_partition;
+  const int max_unique_ids_per_partition =
+      feature_metadata.max_unique_ids_per_partition;
+
+  int total_dropped = 0;
+  SplitType task_split = {};
+
+  StatsPerHost local_stats_host(1, global_sc_count, options.num_sc_per_device);
+
+  // Prepare Local Result for ONE SC.
+  PartitionedCooTensors grouped_coo_tensors(global_sc_count, bucket_count);
+  grouped_coo_tensors.Reserve(extracted_coo_tensors.size());
+
+  StatsPerDevice stats = local_stats_host.GetStatsPerDevice(0);
+
+  ValidateKeyCapacity(local_sc_id, extracted_coo_tensors.size());
+
+  std::vector<uint64_t> keys;
+  if constexpr (kHasVariableWeights) {
+    tsl::profiler::TraceMe generate_keys_traceme([&] {
+      return tsl::profiler::TraceMeEncode(
+          absl::StrCat("GenerateKeys/", stacked_table_name, "/SC", local_sc_id),
+          {{"batch_number", options.batch_number}});
+    });
+    GenerateKeysFromIds(extracted_coo_tensors, num_sc_bits, kCreateBuckets,
+                        options.minibatching_bucketing_hash_fn, keys);
+    generate_keys_traceme.Stop();
+  } else {
+    keys = extracted_coo_tensors.keys;
+    if constexpr (kCreateBuckets) {
+      tsl::profiler::TraceMe generate_keys_traceme([&] {
+        return tsl::profiler::TraceMeEncode(
+            absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
+                         local_sc_id),
+            {{"batch_number", options.batch_number}});
+      });
+      UpdateKeysWithBucketId(num_sc_bits,
+                             options.minibatching_bucketing_hash_fn, keys);
+      generate_keys_traceme.Stop();
+    }
+  }
+
+  // Sort keys to group by bucket_id, global_sc_id, and column_id.
+  tsl::profiler::TraceMe vqsort_traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("VQSort/", stacked_table_name, "/SC", local_sc_id),
+        {{"batch_number", options.batch_number}});
+  });
+  hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
+  vqsort_traceme.Stop();
+
+  // These counters track the number of IDs that are actually kept
+  // (not dropped) for each partition and bucket for this device.
+  MatrixXi kept_ids_per_sc_partition_per_bucket =
+      MatrixXi::Zero(global_sc_count, bucket_count);
+  MatrixXi kept_unique_ids_per_partition_per_bucket =
+      MatrixXi::Zero(global_sc_count, bucket_count);
+  MatrixXi ids_per_sc_partition_per_bucket =
+      MatrixXi::Zero(global_sc_count, bucket_count);
+  MatrixXi unique_ids_per_partition_per_bucket =
+      MatrixXi::Zero(global_sc_count, bucket_count);
+
+  const LocalSparseCoreTensorGroupingContext context = {
+      .keys = keys,
+      .extracted_coo_tensors = extracted_coo_tensors,
+      .stacked_table_name = stacked_table_name,
+      .feature_metadata = feature_metadata,
+      .options = options,
+      .local_sc_id = local_sc_id,
+      .num_sc_bits = num_sc_bits,
+      .grouped_coo_tensors = grouped_coo_tensors,
+      .ids_per_sc_partition_per_bucket = ids_per_sc_partition_per_bucket,
+      .unique_ids_per_partition_per_bucket =
+          unique_ids_per_partition_per_bucket,
+      .stats = stats,
+      .kept_ids_per_sc_partition_per_bucket =
+          kept_ids_per_sc_partition_per_bucket,
+      .kept_unique_ids_per_partition_per_bucket =
+          kept_unique_ids_per_partition_per_bucket,
+  };
+
+  // Group tensors by destination SC and minibatching bucket,
+  // apply deduplication, collect statistics, and handle ID dropping.
+  switch (context.feature_metadata.row_combiner) {
+    case RowCombiner::kSum:
+      GroupAndDeduplicateCooTensorsForLocalSparseCore<
+          kHasVariableWeights, kCreateBuckets, RowCombiner::kSum>(context);
+      break;
+    case RowCombiner::kMean:
+      GroupAndDeduplicateCooTensorsForLocalSparseCore<
+          kHasVariableWeights, kCreateBuckets, RowCombiner::kMean>(context);
+      break;
+    case RowCombiner::kSqrtn:
+      GroupAndDeduplicateCooTensorsForLocalSparseCore<
+          kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn>(context);
+      break;
+  }
+
+  grouped_coo_tensors.FillRemainingScBuckets();
+
+  // Update global max using this device's values.
+  UpdateMaxIdsPerPartition(stats.max_ids_per_partition,
+                           ids_per_sc_partition_per_bucket);
+  UpdateMaxIdsPerPartition(stats.max_unique_ids_per_partition,
+                           unique_ids_per_partition_per_bucket);
+
+  // Update required buffer size. `stats.required_buffer_size` is
+  // 1xNumScPerDevice. We should index it by `local_sc_id`.
+  Eigen::Array<int, Eigen::Dynamic, 1> partition_sizes =
+      ids_per_sc_partition_per_bucket.rowwise().sum().array();
+  stats.required_buffer_size[local_sc_id] +=
+      partition_sizes
+          .unaryExpr([hbm_word_size_in_4b = options.hbm_word_size_in_4b](
+                         int val) {
+            return xla::RoundUpTo(val, hbm_word_size_in_4b);
+          })
+          .sum();
+
+  LogSparseCoreStats(local_sc_id, stacked_table_name,
+                     ids_per_sc_partition_per_bucket,
+                     unique_ids_per_partition_per_bucket, keys.size(),
+                     grouped_coo_tensors);
+
+  const int32_t observed_max_ids_per_bucket =
+      ids_per_sc_partition_per_bucket.maxCoeff();
+  const int32_t observed_max_unique_ids_per_bucket =
+      unique_ids_per_partition_per_bucket.maxCoeff();
+
+  if (options.IsHostMinibatchingEnabled()) {
+    UpdateMinibatchingSplit(ids_per_sc_partition_per_bucket,
+                            unique_ids_per_partition_per_bucket,
+                            global_sc_count, max_ids_per_partition,
+                            max_unique_ids_per_partition, task_split);
+  }
+  // Only validate if creating minibatching buckets or when
+  // minibatching is disabled, not when checking if minibatching is
+  // required (or when device minibatching is enabled).
+  if (!options.IsMinibatchingEnabled() || kCreateBuckets) {
+    ValidateMaxIdsOrDie(observed_max_ids_per_bucket,
+                        observed_max_unique_ids_per_bucket,
+                        max_ids_per_partition, max_unique_ids_per_partition,
+                        stacked_table_name, options.allow_id_dropping);
+  } else if (options.IsDeviceMinibatchingEnabled()) {
+    LogIfDeviceMinibatchingRequired(
+        observed_max_ids_per_bucket, observed_max_unique_ids_per_bucket,
+        max_ids_per_partition, max_unique_ids_per_partition,
+        stacked_table_name);
+  }
+
+  total_dropped += stats.dropped_id_count;
+
+  return SparseCoreSortingTaskResult<SplitType>{
+      .grouped_coo_tensors = std::move(grouped_coo_tensors),
+      .stats_host = std::move(local_stats_host),
+      .dropped_id_count = total_dropped,
+      .split_val = task_split};
+}
+
 }  // namespace internal
 
 // Sorts and groups the provided COO tensors in this hierarchy: Local SC ->
@@ -385,11 +569,6 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
         {{"batch_number", options.batch_number}});
   });
   const int num_sc_per_device = options.num_sc_per_device;
-  const uint32_t global_sc_count = options.GetNumScs();
-  const int num_sc_bits = absl::bit_width(global_sc_count - 1);
-  const int max_ids_per_partition = feature_metadata.max_ids_per_partition;
-  const int max_unique_ids_per_partition =
-      feature_metadata.max_unique_ids_per_partition;
   // This function can be called in two passes for minibatching. The logic for
   // stats collection and ID dropping depends on the pass.
   //
@@ -401,17 +580,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   // - A dummy stats object is used (stats are not re-computed).
   // - IDs may be dropped if they exceed capacity.
 
-  // Partition COO tensors among SparseCores for the local device (based on row
-  // id).
-  const int bucket_count =
-      kCreateBuckets ? CooFormat::kMaxMinibatchingBuckets : 1;
-
-  struct SortingTaskResult {
-    PartitionedCooTensors grouped_coo_tensors;
-    StatsPerHost stats_host;
-    int dropped_id_count = 0;
-    SplitType split_val = {};
-  };
+  using SortingTaskResult = internal::SparseCoreSortingTaskResult<SplitType>;
 
   std::vector<tsl::AsyncValueRef<SortingTaskResult>> task_results;
   task_results.reserve(num_sc_per_device);
@@ -426,188 +595,14 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     tsl::RunWhenReady(
         {sc_tensor_av.GetAsyncValue()},
         [local_sc_id, result_av, sc_tensor_av, &feature_metadata, &options,
-         num_sc_bits, global_sc_count, bucket_count, max_ids_per_partition,
-         max_unique_ids_per_partition, stacked_table_name]() mutable {
+         stacked_table_name]() mutable {
           options.async_task_scheduler([=]() mutable {
-            tsl::profiler::TraceMe sort_traceme([&] {
-              return tsl::profiler::TraceMeEncode(
-                  absl::StrCat("SortAndGroupCooTensorsPerSparseCore/",
-                               stacked_table_name, "/SC", local_sc_id),
-                  {{"batch_number", options.batch_number}});
-            });
-
-            // We need to aggregate stats and splits as well.
-            int total_dropped = 0;
-            SplitType task_split = {};
-
-            StatsPerHost local_stats_host(1, global_sc_count,
-                                          options.num_sc_per_device);
-
-            const auto& extracted_coo_tensors = sc_tensor_av.get();
-            // Prepare Local Result for ONE SC.
-            PartitionedCooTensors grouped_coo_tensors(global_sc_count,
-                                                      bucket_count);
-
-            grouped_coo_tensors.Reserve(extracted_coo_tensors.size());
-
-            internal::StatsPerDevice stats =
-                local_stats_host.GetStatsPerDevice(0);
-
-            internal::ValidateKeyCapacity(local_sc_id,
-                                          extracted_coo_tensors.size());
-
-            std::vector<uint64_t> keys;
-            if constexpr (kHasVariableWeights) {
-              tsl::profiler::TraceMe generate_keys_traceme([&] {
-                return tsl::profiler::TraceMeEncode(
-                    absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
-                                 local_sc_id),
-                    {{"batch_number", options.batch_number}});
-              });
-              internal::GenerateKeysFromIds(
-                  extracted_coo_tensors, num_sc_bits, kCreateBuckets,
-                  options.minibatching_bucketing_hash_fn, keys);
-              generate_keys_traceme.Stop();
-            } else {
-              keys = extracted_coo_tensors.keys;
-              if constexpr (kCreateBuckets) {
-                tsl::profiler::TraceMe generate_keys_traceme([&] {
-                  return tsl::profiler::TraceMeEncode(
-                      absl::StrCat("GenerateKeys/", stacked_table_name, "/SC",
-                                   local_sc_id),
-                      {{"batch_number", options.batch_number}});
-                });
-                internal::UpdateKeysWithBucketId(
-                    num_sc_bits, options.minibatching_bucketing_hash_fn, keys);
-                generate_keys_traceme.Stop();
-              }
-            }
-
-            // Sort keys to group by bucket_id, global_sc_id, and column_id.
-            tsl::profiler::TraceMe vqsort_traceme([&] {
-              return tsl::profiler::TraceMeEncode(
-                  absl::StrCat("VQSort/", stacked_table_name, "/SC",
-                               local_sc_id),
-                  {{"batch_number", options.batch_number}});
-            });
-            hwy::VQSort(keys.data(), keys.size(), hwy::SortAscending());
-            vqsort_traceme.Stop();
-
-            // These counters track the number of IDs that are actually kept
-            // (not dropped) for each partition and bucket for this device.
-            MatrixXi kept_ids_per_sc_partition_per_bucket =
-                MatrixXi::Zero(global_sc_count, bucket_count);
-            MatrixXi kept_unique_ids_per_partition_per_bucket =
-                MatrixXi::Zero(global_sc_count, bucket_count);
-            MatrixXi ids_per_sc_partition_per_bucket =
-                MatrixXi::Zero(global_sc_count, bucket_count);
-            MatrixXi unique_ids_per_partition_per_bucket =
-                MatrixXi::Zero(global_sc_count, bucket_count);
-
-            const internal::LocalSparseCoreTensorGroupingContext context = {
-                .keys = keys,
-                .extracted_coo_tensors = extracted_coo_tensors,
-                .stacked_table_name = stacked_table_name,
-                .feature_metadata = feature_metadata,
-                .options = options,
-                .local_sc_id = local_sc_id,
-                .num_sc_bits = num_sc_bits,
-                .grouped_coo_tensors = grouped_coo_tensors,
-                .ids_per_sc_partition_per_bucket =
-                    ids_per_sc_partition_per_bucket,
-                .unique_ids_per_partition_per_bucket =
-                    unique_ids_per_partition_per_bucket,
-                .stats = stats,
-                .kept_ids_per_sc_partition_per_bucket =
-                    kept_ids_per_sc_partition_per_bucket,
-                .kept_unique_ids_per_partition_per_bucket =
-                    kept_unique_ids_per_partition_per_bucket,
-            };
-
-            // Group tensors by destination SC and minibatching bucket,
-            // apply deduplication, collect statistics, and handle ID dropping.
-            switch (context.feature_metadata.row_combiner) {
-              case RowCombiner::kSum:
-                internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum>(
-                    context);
-                break;
-              case RowCombiner::kMean:
-                internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean>(
-                    context);
-                break;
-              case RowCombiner::kSqrtn:
-                internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn>(
-                    context);
-                break;
-            }
-
-            grouped_coo_tensors.FillRemainingScBuckets();
-
-            // Update global max using this device's values.
-            internal::UpdateMaxIdsPerPartition(stats.max_ids_per_partition,
-                                               ids_per_sc_partition_per_bucket);
-            internal::UpdateMaxIdsPerPartition(
-                stats.max_unique_ids_per_partition,
-                unique_ids_per_partition_per_bucket);
-
-            // Update required buffer size. `stats.required_buffer_size` is
-            // 1xNumScPerDevice. We should index it by `local_sc_id`.
-            Eigen::Array<int, Eigen::Dynamic, 1> partition_sizes =
-                ids_per_sc_partition_per_bucket.rowwise().sum().array();
-            stats.required_buffer_size[local_sc_id] +=
-                partition_sizes
-                    .unaryExpr([hbm_word_size_in_4b =
-                                    options.hbm_word_size_in_4b](int val) {
-                      return xla::RoundUpTo(val, hbm_word_size_in_4b);
-                    })
-                    .sum();
-
-            internal::LogSparseCoreStats(local_sc_id, stacked_table_name,
-                                         ids_per_sc_partition_per_bucket,
-                                         unique_ids_per_partition_per_bucket,
-                                         keys.size(), grouped_coo_tensors);
-
-            const int32_t observed_max_ids_per_bucket =
-                ids_per_sc_partition_per_bucket.maxCoeff();
-            const int32_t observed_max_unique_ids_per_bucket =
-                unique_ids_per_partition_per_bucket.maxCoeff();
-
-            if (options.IsHostMinibatchingEnabled()) {
-              internal::UpdateMinibatchingSplit(
-                  ids_per_sc_partition_per_bucket,
-                  unique_ids_per_partition_per_bucket, global_sc_count,
-                  max_ids_per_partition, max_unique_ids_per_partition,
-                  task_split);
-            }
-            // Only validate if creating minibatching buckets or when
-            // minibatching is disabled, not when checking if minibatching is
-            // required (or when device minibatching is enabled).
-            if (!options.IsMinibatchingEnabled() || kCreateBuckets) {
-              internal::ValidateMaxIdsOrDie(
-                  observed_max_ids_per_bucket,
-                  observed_max_unique_ids_per_bucket, max_ids_per_partition,
-                  max_unique_ids_per_partition, stacked_table_name,
-                  options.allow_id_dropping);
-            } else if (options.IsDeviceMinibatchingEnabled()) {
-              internal::LogIfDeviceMinibatchingRequired(
-                  observed_max_ids_per_bucket,
-                  observed_max_unique_ids_per_bucket, max_ids_per_partition,
-                  max_unique_ids_per_partition, stacked_table_name);
-            }
-
-            total_dropped += stats.dropped_id_count;
-
-            // Merge the parts for this task.
-            SortingTaskResult task_result = {
-                .grouped_coo_tensors = std::move(grouped_coo_tensors),
-                .stats_host = std::move(local_stats_host),
-                .dropped_id_count = total_dropped,
-                .split_val = task_split};
-
-            result_av.emplace(std::move(task_result));
+            const auto& sc_tensors = sc_tensor_av.get();
+            result_av.emplace(
+                internal::SortAndGroupCooTensorsForSingleSparseCore<
+                    kHasVariableWeights, kCreateBuckets, SplitType>(
+                    sc_tensors, local_sc_id, stacked_table_name,
+                    feature_metadata, options));
           });
         });
   }

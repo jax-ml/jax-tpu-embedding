@@ -43,6 +43,13 @@ struct SparseDenseMatmulInputStats {
 };
 
 namespace internal {
+ExtractedCooTensorsPerSparseCore ExtractCooTensorsForSingleSparseCore(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    int local_device_id, int sc_id, int batch_size_per_slice,
+    bool has_variable_weights,
+    const PreprocessSparseDenseMatmulInputOptions& options);
+
 ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,

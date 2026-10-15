@@ -668,6 +668,16 @@ struct MegacoreCsrOptions {
   int rows_per_sc;
 };
 
+// Fills the CSR buffer segment for a single local SparseCore when minibatching
+// is disabled. Each `local_sc_id` writes to a disjoint slice of `csr_arrays`
+// and may be called concurrently across `local_sc_id`s on the same device.
+// Returns the number of dropped IDs in this segment.
+int FillLocalSparseCoreBufferSegment(
+    int local_sc_id, absl::Span<const CooFormat> coo_tensors,
+    int batch_size_per_sc,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    internal::CsrArraysRefPerDevice& csr_arrays);
+
 // Blocking version for testing only.
 void FillLocalDeviceBuffer(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
