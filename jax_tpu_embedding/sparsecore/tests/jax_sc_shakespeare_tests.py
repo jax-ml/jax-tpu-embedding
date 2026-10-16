@@ -112,6 +112,14 @@ class ShakespeareTest(absltest.TestCase):
         ),
         has_aux=True,
     )
+
+    @jax.jit
+    def tc_train_step(params, opt_state, activations, labels):
+      (loss_val, _), grads = loss_grad_fn(params, activations, labels)
+      updates, opt_state = tx.update(grads[0], opt_state)
+      params = optax.apply_updates(params, updates)
+      return params, opt_state, loss_val, grads[1]
+
     sharded_matmul = functools.partial(
         embedding.tpu_sparse_dense_matmul,
         global_device_count=config.num_global_devices,
@@ -172,12 +180,9 @@ class ShakespeareTest(absltest.TestCase):
       # ------------------------------------------------------------------------
       # Step 3: TC forward/backward pass.
       # ------------------------------------------------------------------------
-      (loss_val, unused_logits), grads = loss_grad_fn(
-          params, activations, labels
+      params, opt_state, loss_val, emb_grads = tc_train_step(
+          params, opt_state, activations, labels
       )
-
-      updates, opt_state = tx.update(grads[0], opt_state)
-      params = optax.apply_updates(params, updates)
 
       # ------------------------------------------------------------------------
       # Step 4: SC backward pass.
@@ -185,7 +190,7 @@ class ShakespeareTest(absltest.TestCase):
 
       gradient_updates = {
           config.feature_name: jnp.reshape(
-              grads[1][config.feature_name], (-1, config.embedding_size)
+              emb_grads[config.feature_name], (-1, config.embedding_size)
           )
       }
       embedding_variables = sparse_grad_update(
@@ -197,6 +202,8 @@ class ShakespeareTest(absltest.TestCase):
       if step % 10 == 0:
         logging.info('Loss step %s: %s', step, loss_val)
         losses.append(loss_val)
+      # Saves overlap with the following steps; the restore below needs step 80.
+      if step % 40 == 0:
         chkpt_manager.save(
             step,
             args=ocp.args.Composite(
@@ -207,8 +214,8 @@ class ShakespeareTest(absltest.TestCase):
                 ),
             ),
         )
-        chkpt_manager.wait_until_finished()
       step += 1
+    chkpt_manager.wait_until_finished()
 
     # We want the last loss (at the last recorded step) to be less than 0.001.
     self.assertLess(losses[-1], 0.001)
