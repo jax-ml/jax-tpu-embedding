@@ -563,6 +563,55 @@ class OptimizerSpecTest(absltest.TestCase):
     )
     self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters_f2a)
 
+  def test_custom_optimizer_hyperparameters(self):
+    def scaled_sgd(grad, table, lr, scale, shift):
+      return table - lr * (scale * grad + shift)
+
+    op = embedding_spec.CustomOptimizerSpec(
+        learning_rate=schedules.linear_schedule(
+            init_value=1.0, end_value=0.1, transition_steps=100
+        ),
+        custom_computation_fn=scaled_sgd,
+        hyperparameters=(2.0, jnp.array(0.5, dtype=jnp.float32)),
+    )
+    # The learning rate always comes first, followed by the extra
+    # hyperparameters in declaration order.
+    expected_hyperparameters = (
+        jnp.array(1.0, dtype=jnp.float32),
+        jnp.array(2.0, dtype=jnp.float32),
+        jnp.array(0.5, dtype=jnp.float32),
+    )
+    self.assertEqual(op.get_hyperparameters(0), expected_hyperparameters)
+    self.assertEqual(op.get_hyperparameters(100)[0], 0.1)
+
+    # The lowered computation takes exactly len(get_hyperparameters()) extra
+    # operands after the gradient, table and slot variables.
+    stablehlo = embedding_spec.CustomOptimizerSpec.lower_to_stablehlo(
+        scaled_sgd,
+        embedding_dim=8,
+        num_slot_variables=0,
+        num_hyperparameters=len(op.get_hyperparameters(0)),
+    )
+    self.assertIn("module", stablehlo)
+    # Re-wrapping with clipping limits must agree on the operand count.
+    wrapped = embedding_spec.CustomOptimizerSpec.wrap_stablehlo_with_limits(
+        stablehlo,
+        embedding_dim=8,
+        num_slot_variables=0,
+        num_hyperparameters=len(op.get_hyperparameters(0)),
+        min_value=-1.0,
+        max_value=1.0,
+    )
+    self.assertIn("module", wrapped)
+
+    # Without extra hyperparameters only the learning rate is passed.
+    self.assertEqual(
+        embedding_spec.CustomOptimizerSpec(
+            learning_rate=0.5, custom_computation_fn=scaled_sgd
+        ).get_hyperparameters(),
+        (jnp.array(0.5, dtype=jnp.float32),),
+    )
+
   def test_table_spec_quantization_config_equality(self):
     """Tables should compare equal only when the quantization config matches."""
     q_cfg = embedding_spec.FixedQuantizationConfig(

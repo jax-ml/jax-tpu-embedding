@@ -1499,6 +1499,126 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         expected_accumulator_c, grad_update["table_c"][1][:, :_DIM_C]
     )
 
+  def test_custom_optimizer_with_hyperparameters(self):
+    devices = jax.devices()[:1]
+    mesh = jax.sharding.Mesh(devices, "x")
+
+    # Extra hyperparameters follow the learning rate, in declaration order.
+    def scaled_sgd_jax(grad, table, lr, scale, shift):
+      return table - lr * (scale * grad + shift)
+
+    scale, shift = 2.0, 0.5
+    custom_sgd_spec = embedding_spec.CustomOptimizerSpec(
+        learning_rate=0.01,
+        custom_computation_fn=scaled_sgd_jax,
+        short_name_str="custom_scaled_sgd",
+        hyperparameters=(scale, jnp.array(shift, dtype=jnp.float32)),
+    )
+
+    feature_spec_c = dataclasses.replace(
+        self.feature_spec_c,
+        table_spec=dataclasses.replace(
+            self.table_spec_c, optimizer=custom_sgd_spec
+        ),
+    )
+    feature_specs = {"feature_spec_c": feature_spec_c}
+
+    embedding.prepare_feature_specs_for_training(
+        feature_specs,
+        num_sc_per_device=4,
+        global_device_count=len(devices),
+    )
+
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {"feature_spec_c": self.input_tensor_table_c},
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=1,
+        num_sc_per_device=4,
+        sharding_strategy="MOD",
+    )
+
+    table_dim_c = table_stacking._next_largest_multiple(_DIM_C, 8)
+    emb_table_c = (
+        np.array([[i for _ in range(table_dim_c)] for i in range(_VOC_C)])
+        .reshape(_VOC_C, table_dim_c)
+        .astype(np.float32)
+    )
+    emb_table_c_sharded = utils.shard_emb_table(
+        emb_table_c, num_devices=1, num_sc_per_device=4
+    )
+    sharding = NamedSharding(mesh, P("x", None))
+    embedding_variables = {
+        "table_c": (
+            jax.make_array_from_single_device_arrays(
+                shape=(_VOC_C, table_dim_c),
+                sharding=sharding,
+                arrays=[
+                    jax.device_put(emb_table_c_sharded[0], device=devices[0])
+                ],
+            ),
+        )
+    }
+
+    activations_grad = {
+        "feature_spec_c": jnp.ones((_BATCH_SIZE, _DIM_C), dtype=jnp.float32)
+    }
+
+    grad_update = jax.jit(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul_grad,
+            feature_specs=feature_specs,
+            sharding_strategy="MOD",
+        )
+    )(activations_grad, preprocessed_inputs, embedding_variables)
+
+    # Every row that received a gradient is hit exactly once by a gradient of
+    # ones (see test_custom_optimizer_adagrad for the per-row hit pattern), so
+    # updated rows move by lr * (scale * 1 + shift) and the rest are unchanged.
+    expected_delta = 0.01 * (scale * 1.0 + shift)
+    expected_table_c = np.array(
+        [
+            [0.0 - expected_delta] * _DIM_C,
+            [4.0 - expected_delta] * _DIM_C,
+            [8.0 - expected_delta] * _DIM_C,
+            [12.0 - expected_delta] * _DIM_C,
+            [16.0] * _DIM_C,
+            [20.0] * _DIM_C,
+            [24.0] * _DIM_C,
+            [28.0] * _DIM_C,
+            [1.0 - expected_delta] * _DIM_C,
+            [5.0 - expected_delta] * _DIM_C,
+            [9.0 - expected_delta] * _DIM_C,
+            [13.0 - expected_delta] * _DIM_C,
+            [17.0] * _DIM_C,
+            [21.0] * _DIM_C,
+            [25.0] * _DIM_C,
+            [29.0] * _DIM_C,
+            [2.0 - expected_delta] * _DIM_C,
+            [6.0 - expected_delta] * _DIM_C,
+            [10.0 - expected_delta] * _DIM_C,
+            [14.0 - expected_delta] * _DIM_C,
+            [18.0] * _DIM_C,
+            [22.0] * _DIM_C,
+            [26.0] * _DIM_C,
+            [30.0] * _DIM_C,
+            [3.0 - expected_delta] * _DIM_C,
+            [7.0 - expected_delta] * _DIM_C,
+            [11.0 - expected_delta] * _DIM_C,
+            [15.0 - expected_delta] * _DIM_C,
+            [19.0] * _DIM_C,
+            [23.0] * _DIM_C,
+            [27.0] * _DIM_C,
+            [31.0] * _DIM_C,
+        ],
+        dtype=np.float32,
+    )
+
+    np.testing.assert_allclose(
+        expected_table_c, grad_update["table_c"][0][:, :_DIM_C], rtol=1e-6
+    )
+
   def test_custom_optimizer_stacked(self):
     devices = jax.devices()[:2]
     num_sc_per_device = 4

@@ -42,6 +42,16 @@ NumericParameter: TypeAlias = jax.typing.ArrayLike
 LearningRate: TypeAlias = NumericParameter | Callable[..., NumericParameter]
 HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
+# Update computation of a `CustomOptimizerSpec`. It is invoked positionally as
+# `fn(gradient, table, *slot_variables, learning_rate, *hyperparameters)` with
+# one `jax.Array` per argument and returns `(updated_table,
+# *updated_slot_variables)`, or just `updated_table` when there are no slot
+# variables. The number of slot variables and hyperparameters is fixed by the
+# spec instance rather than the type, so the parameter list is left open.
+CustomOptimizerComputation: TypeAlias = Callable[
+    ..., jax.Array | tuple[jax.Array, ...]
+]
+
 # Standard initializers are defined in jax.nn.initializers. See
 # http://jax.readthedocs.io/en/latest/jax.nn.initializers.html.
 # We expand the type union to also accept generic callables returning ArrayLike
@@ -262,25 +272,30 @@ class CustomOptimizerSpec(OptimizerSpec):
 
   Attributes:
     learning_rate: The learning rate for the training variables or embeddings.
-    custom_computation_fn: The python function for the custom optimizer.
-    stablehlo: The StableHLO module for the custom optimizer.
+    custom_computation_fn: The python function for the custom optimizer; see
+      `CustomOptimizerComputation` for its calling convention.
+    stablehlo: The StableHLO module for the custom optimizer. Its `main`
+      function follows the same convention as `CustomOptimizerComputation`.
     slot_variable_initializers_tuple: Tuple of initializers for the slot
       variables.
     short_name_str: Short name for the optimizer.
     slot_shapes: Optional shape specification per slot variable. Defaults to
       table-shaped slots. See `slot_shape.SlotShape`.
+    hyperparameters: Additional hyperparameters passed to the custom computation
+      after the learning rate, in order.
   """
 
   def __init__(
       self,
       learning_rate: LearningRate = 0.001,
-      custom_computation_fn: Callable[..., Any] | None = None,
+      custom_computation_fn: CustomOptimizerComputation | None = None,
       stablehlo: str | bytes | Any | None = None,
       slot_variable_initializers_tuple: tuple[
           CallableTableInitializer, ...
       ] = (),
       short_name_str: str = "custom",
       slot_shapes: Sequence[slot_shape.SlotShape] | None = None,
+      hyperparameters: Sequence[float | jax.Array] = (),
   ):
     """Initializes the instance."""
     super().__init__(learning_rate=learning_rate)
@@ -289,6 +304,7 @@ class CustomOptimizerSpec(OptimizerSpec):
     self.slot_variable_initializers_tuple = slot_variable_initializers_tuple
     self.short_name_str = short_name_str
     self.slot_shapes = tuple(slot_shapes) if slot_shapes is not None else None
+    self.hyperparameters = tuple(hyperparameters)
 
   @override
   def slot_variables_initializers(self) -> tuple[CallableTableInitializer, ...]:
@@ -303,6 +319,16 @@ class CustomOptimizerSpec(OptimizerSpec):
     return tuple(s.resolve_shape(table_shape) for s in self.slot_shapes)
 
   @override
+  def get_hyperparameters(
+      self, step: jax.Array | int | None = None
+  ) -> tuple[jax.Array, ...]:
+    """Returns the learning rate followed by the extra hyperparameters."""
+    return (
+        self.get_learning_rate(step),
+        *(jnp.asarray(h, dtype=jnp.float32) for h in self.hyperparameters),
+    )
+
+  @override
   def __hash__(self) -> int:
     return hash((
         self.learning_rate,
@@ -311,6 +337,7 @@ class CustomOptimizerSpec(OptimizerSpec):
         self.slot_variable_initializers_tuple,
         self.short_name_str,
         self.slot_shapes,
+        self.hyperparameters,
     ))
 
   @override
@@ -326,7 +353,7 @@ class CustomOptimizerSpec(OptimizerSpec):
   @classmethod
   def lower_to_stablehlo(
       cls,
-      custom_computation_fn: Callable[..., Any],
+      custom_computation_fn: CustomOptimizerComputation,
       embedding_dim: int = 1,
       num_slot_variables: int = 0,
       num_hyperparameters: int = 1,
@@ -337,8 +364,8 @@ class CustomOptimizerSpec(OptimizerSpec):
     """Traces and lowers a custom optimizer function into StableHLO text.
 
     Args:
-      custom_computation_fn: The custom optimizer callable accepting gradient,
-        embedding table, slot variables, learning rate, and hyperparameters.
+      custom_computation_fn: The custom optimizer callable; see
+        `CustomOptimizerComputation` for its calling convention.
       embedding_dim: Dimension of the embedding table.
       num_slot_variables: Number of slot variables in the optimizer state.
       num_hyperparameters: Number of hyperparameters passed to the optimizer.
