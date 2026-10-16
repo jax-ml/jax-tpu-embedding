@@ -59,7 +59,9 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
 using ::jax_sc_embedding::testing_utils::SetUpMinibatchingNodes;
+using ::testing::_;
 using ::testing::Each;
+using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Gt;
@@ -1866,15 +1868,83 @@ TEST(MegacoreCsrTest, PreprocessesIntoMegacoreCsrFormat) {
 
   ASSERT_EQ(embedding_ids.cols(), 256);
   EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
-              ElementsAreArray({0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1,
-                                -1, -1, -1}));
+              ElementsAre(0, 1, 11, _, _, _, _, _, 0, 11, _, _, _, _, _, _));
   EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
-              ElementsAreArray(
-                  {0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1}));
-  EXPECT_THAT(
-      absl::MakeConstSpan(gains.data(), 16),
-      ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-                        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+              ElementsAre(0, 2, 0, _, _, _, _, _, 1, 3, _, _, _, _, _, _));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
+              ElementsAre(1.0f, 2.0f, 1.0f, _, _, _, _, _, 1.0f, 1.0f, _, _, _,
+                          _, _, _));
+}
+
+TEST(MegacoreCsrTest, PadsReusedOutputBuffers) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDisabled,
+  };
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(
+      CreateInputBatchFromSamples({{0, 5}, {2}, {4, 4}, {7}}));
+  const std::vector<FeatureMetadataInStack> metadata = {FeatureMetadataInStack(
+      /*name=*/"feature_0", /*feature_index=*/0,
+      /*max_ids_per_partition=*/16,
+      /*max_unique_ids_per_partition=*/16,
+      /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+      /*batch_size=*/4,
+      /*suggested_coo_buffer_size_per_device=*/std::nullopt, RowCombiner::kSum,
+      /*max_col_id=*/9,
+      /*enable_megacore_csr=*/true)};
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"megacore_table", metadata}});
+  const int coo_buffer_size = ComputeCooBufferSizePerDevice(options, metadata);
+  // Leftovers from a previous batch in buffers that are reused.
+  MatrixXi row_pointers(1, ComputeRowPointersSizePerDevice(options, metadata));
+  MatrixXi embedding_ids = MatrixXi::Constant(1, coo_buffer_size, 3);
+  MatrixXi sample_ids = MatrixXi::Constant(1, coo_buffer_size, 1);
+  MatrixXf gains = MatrixXf::Constant(1, coo_buffer_size, 5.0f);
+  OutputCsrArrays output_csr_arrays;
+  output_csr_arrays.lhs_row_pointers.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXi>(row_pointers.data(), 1, row_pointers.cols())});
+  output_csr_arrays.lhs_embedding_ids.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXi>(embedding_ids.data(), 1, coo_buffer_size)});
+  output_csr_arrays.lhs_sample_ids.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXi>(sample_ids.data(), 1, coo_buffer_size)});
+  output_csr_arrays.lhs_gains.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXf>(gains.data(), 1, coo_buffer_size)});
+
+  // Act
+  ASSERT_THAT(PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                               stacked_tables, options,
+                                               &output_csr_arrays),
+              IsOk());
+
+  // Assert
+  // Rows end at 3 and 10, so everything from 10 on, including the alignment
+  // gaps and the tail past the last aligned row (16), is padding.
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray({3, 10, 16, 16, 16, 16, 16, 16}));
+  ASSERT_EQ(coo_buffer_size, 256);
+  constexpr int kPad = std::numeric_limits<int32_t>::max();
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
+              ElementsAre(0, 1, 11, kPad, kPad, kPad, kPad, kPad, 0, 11, kPad,
+                          kPad, kPad, kPad, kPad, kPad));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
+              ElementsAre(0, 2, 0, kPad, kPad, kPad, kPad, kPad, 1, 3, kPad,
+                          kPad, kPad, kPad, kPad, kPad));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
+              ElementsAre(1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                          1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data() + 16, 240), Each(kPad));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data() + 16, 240), Each(kPad));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data() + 16, 240), Each(0.0f));
 }
 
 TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
@@ -1926,15 +1996,12 @@ TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
   EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
               ElementsAreArray({3, 10, 16, 16, 16, 16, 16, 16}));
   EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
-              ElementsAreArray({0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1,
-                                -1, -1, -1}));
+              ElementsAre(0, 1, 11, _, _, _, _, _, 0, 11, _, _, _, _, _, _));
   EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
-              ElementsAreArray(
-                  {0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1}));
-  EXPECT_THAT(
-      absl::MakeConstSpan(gains.data(), 16),
-      ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-                        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+              ElementsAre(0, 2, 0, _, _, _, _, _, 1, 3, _, _, _, _, _, _));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
+              ElementsAre(1.0f, 2.0f, 1.0f, _, _, _, _, _, 1.0f, 1.0f, _, _, _,
+                          _, _, _));
 }
 
 TEST(MegacoreCsrTest, RejectsHostMinibatching) {
@@ -2014,21 +2081,21 @@ TEST(MegacoreCsrTest, DropsIdsWhenBufferSizeExceeded) {
                 /*enable_megacore_csr=*/true)}}});
 
   // Device 0 writes 70 + 70 = 140 elements (row_pointers[0] = 140) and pads 4
-  // entries with -1 to align to 144 (next multiple of 8).
+  // entries to align to 144 (next multiple of 8).
   // Device 1 writes 80 elements from global_sc_id 2 (indices 144..224) and 32
   // of the 80 elements from global_sc_id 3 (indices 224..256), hitting the 256
   // COO buffer limit and dropping the remaining 48 IDs (300 - 252 = 48).
-  std::vector<int> expected_embedding_ids;
+  std::vector<testing::Matcher<int>> expected_embedding_ids;
   for (int i = 0; i < 70; ++i) expected_embedding_ids.push_back(i);
   for (int i = 0; i < 70; ++i) expected_embedding_ids.push_back(100 + i);
-  expected_embedding_ids.insert(expected_embedding_ids.end(), 4, -1);
+  expected_embedding_ids.insert(expected_embedding_ids.end(), 4, _);
   for (int i = 0; i < 80; ++i) expected_embedding_ids.push_back(i);
   for (int i = 0; i < 32; ++i) expected_embedding_ids.push_back(100 + i);
-  std::vector<int> expected_sample_ids(140, 0);
-  expected_sample_ids.insert(expected_sample_ids.end(), 4, -1);
+  std::vector<testing::Matcher<int>> expected_sample_ids(140, 0);
+  expected_sample_ids.insert(expected_sample_ids.end(), 4, _);
   expected_sample_ids.insert(expected_sample_ids.end(), 112, 1);
-  std::vector<float> expected_gains(140, 1.0f);
-  expected_gains.insert(expected_gains.end(), 4, 0.0f);
+  std::vector<testing::Matcher<float>> expected_gains(140, 1.0f);
+  expected_gains.insert(expected_gains.end(), 4, _);
   expected_gains.insert(expected_gains.end(), 112, 1.0f);
 
   // Act

@@ -53,7 +53,7 @@ BucketMap = dict[int, BucketData]
 _MIN_MEGACORE_COO_BUFFER_SIZE = 256
 _MEGACORE_COO_BUFFER_ALIGNMENT = 128
 _MAX_MINIBATCHING_BUCKETS = 64
-_MEGACORE_PADDING_ID = -1
+_MEGACORE_PADDING_ID = np.iinfo(np.int32).max
 
 
 def _preprocess_batch_to_megacore_buckets(
@@ -158,8 +158,9 @@ def _pack_buckets_to_megacore_csr(
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Packs per-global-SC buckets into chip-level Megacore CSR buffers."""
   row_pointers: list[int] = []
-  embedding_ids = np.zeros(coo_buffer_size, dtype=np.int32)
-  sample_ids = np.zeros(coo_buffer_size, dtype=np.int32)
+  # Alignment gaps and the tail past the last row stay padding.
+  embedding_ids = np.full(coo_buffer_size, _MEGACORE_PADDING_ID, dtype=np.int32)
+  sample_ids = np.full(coo_buffer_size, _MEGACORE_PADDING_ID, dtype=np.int32)
   gains = np.zeros(coo_buffer_size, dtype=np.float32)
 
   coo_index = 0
@@ -175,11 +176,10 @@ def _pack_buckets_to_megacore_csr(
         coo_index += 1
 
     row_pointers.append(coo_index)
-    while coo_index % hbm_word_size_in_4b != 0 and coo_index < coo_buffer_size:
-      embedding_ids[coo_index] = _MEGACORE_PADDING_ID
-      sample_ids[coo_index] = _MEGACORE_PADDING_ID
-      gains[coo_index] = 0.0
-      coo_index += 1
+    coo_index = min(
+        input_preprocessing._round_up(coo_index, hbm_word_size_in_4b),
+        coo_buffer_size,
+    )
 
   row_pointers_size = input_preprocessing._round_up(
       global_device_count, hbm_word_size_in_4b

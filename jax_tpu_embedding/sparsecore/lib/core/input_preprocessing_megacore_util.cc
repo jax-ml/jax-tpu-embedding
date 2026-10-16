@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -41,14 +42,15 @@ namespace {
 // filling Megacore CSR buffers.
 constexpr int kInlinedScPerDevice = 16;
 
-// Pads the Megacore COO buffer with (-1, -1, 0.0f) up to the next HBM word
-// boundary, without exceeding `coo_end`.
+// Pads the Megacore COO buffer with (INT_MAX, INT_MAX, 0.0f) up to the next HBM
+// word boundary, without exceeding `coo_end`. `INT_MAX` padding IDs sort after
+// all valid IDs, so consumers that sort the whole buffer keep padding last.
 void AlignMegacoreCooBuffer(int& coo_index, int coo_end,
                             int hbm_word_size_in_4b,
                             internal::CsrArraysRefPerDevice& csr) {
   while (coo_index % hbm_word_size_in_4b != 0 && coo_index < coo_end) {
-    csr.embedding_ids[coo_index] = -1;
-    csr.sample_ids[coo_index] = -1;
+    csr.embedding_ids[coo_index] = std::numeric_limits<int32_t>::max();
+    csr.sample_ids[coo_index] = std::numeric_limits<int32_t>::max();
     csr.gains[coo_index] = 0.0f;
     ++coo_index;
   }
@@ -331,6 +333,15 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
        row_index < csr_arrays.row_pointers.size(); ++row_index) {
     csr_arrays.row_pointers[row_index] = coo_index;
   }
+  // Pad the tail past the last aligned row as well, because consumers like
+  // SPAX `DedupedCsrLookupStrategy` sort and scan the whole buffer. The
+  // buffers may be reused across batches, so this must be written every batch.
+  const int tail_size = coo_end - coo_index;
+  csr_arrays.embedding_ids.segment(coo_index, tail_size)
+      .setConstant(std::numeric_limits<int32_t>::max());
+  csr_arrays.sample_ids.segment(coo_index, tail_size)
+      .setConstant(std::numeric_limits<int32_t>::max());
+  csr_arrays.gains.segment(coo_index, tail_size).setZero();
   int dropped_id_count = 0;
   if (processed < total_coo_size) {
     LOG_EVERY_N(WARNING, 100)
