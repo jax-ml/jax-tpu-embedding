@@ -363,6 +363,10 @@ inline void UpdateKeysWithBucketId(
 // Sorts and groups the provided COO tensors in this hierarchy: Local SC ->
 // Minibatching Bucket -> Global SC.
 //
+// NOTE: Although `extracted_coo_tensors` is taken by const reference, the
+// per-SparseCore `keys` it refers to (through `AsyncValueRef`) are sorted in
+// place, and regenerated first when `kHasVariableWeights` is true. Callers that
+// reuse `extracted_coo_tensors` afterwards observe sorted keys.
 //
 // NOTE: We use output buffers `max_ids_per_sc`, `max_unique_ids_per_sc`, and
 // `required_buffer_size_per_sc` because we fill values in a loop to a bigger
@@ -672,6 +676,9 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   return device_result;
 }
 
+// Dispatches to `SortAndGroupCooTensorsPerLocalDeviceImpl` with bucket creation
+// enabled only for host minibatching. As with the implementation, the
+// per-SparseCore keys in `extracted_coo_tensors` are sorted in place.
 template <bool kHasVariableWeights = false, typename SplitType>
 tsl::AsyncValueRef<DeviceSortingTaskResult>
 SortAndGroupCooTensorsPerLocalDeviceAsync(
