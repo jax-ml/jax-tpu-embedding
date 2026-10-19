@@ -36,6 +36,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
+#include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 
 namespace jax_sc_embedding {
 
@@ -288,6 +289,16 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
           stacked_table_metadata_list, absl::MakeSpan(input_batches),
           /*local_device_id=*/0, options);
 
+  // Sorting permutes the extracted keys in place, so keep a pristine copy and
+  // restore it before every iteration. Otherwise, every iteration after the
+  // first would sort already-sorted keys and understate the sorting cost.
+  std::vector<std::vector<uint64_t>> unsorted_keys_per_sc;
+  unsorted_keys_per_sc.reserve(extracted_coo_tensors.per_sc_tensors_av.size());
+  for (const auto& sc_tensor_av : extracted_coo_tensors.per_sc_tensors_av) {
+    tsl::BlockUntilReady(sc_tensor_av);
+    unsorted_keys_per_sc.push_back(sc_tensor_av->keys);
+  }
+
   bool minibatching_required = false;
   StatsPerHost stats_per_host(
       /*local_device_count=*/1,
@@ -307,6 +318,12 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
   }
 
   for (auto s : state) {
+    state.PauseTiming();
+    for (size_t sc_id = 0; sc_id < unsorted_keys_per_sc.size(); ++sc_id) {
+      extracted_coo_tensors.per_sc_tensors_av[sc_id]->keys =
+          unsorted_keys_per_sc[sc_id];
+    }
+    state.ResumeTiming();
     SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
         extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
         options, stats_per_device, minibatching_required);
