@@ -38,13 +38,20 @@ cc_library(
 
 cc_library(
     name = "input_preprocessing_util",
-    srcs = ["input_preprocessing_util.cc"],
-    hdrs = ["input_preprocessing_util.h"],
+    srcs = [
+        "input_preprocessing_megacore_util.cc",
+        "input_preprocessing_util.cc",
+    ],
+    hdrs = [
+        "input_preprocessing_megacore_util.h",
+        "input_preprocessing_util.h",
+    ],
     deps = [
         ":all_reduce_interface",
         ":coo_format",
         ":input_preprocessing_threads",
         ":partitioned_coo_tensors",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -174,6 +181,20 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "input_preprocessing_megacore",
+    srcs = [
+        "input_preprocessing_megacore.py",
+    ],
+    deps = [
+        ":input_preprocessing",
+        ":pybind_input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/utils",
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
     name = "constants",
     srcs = [
         "constants.py",
@@ -197,6 +218,7 @@ pytype_strict_library(
     deps = [
         ":constants",  # buildcleaner: keep
         ":input_preprocessing",  # buildcleaner: keep
+        ":input_preprocessing_megacore",  # buildcleaner: keep
         ":pybind_input_preprocessing",  # buildcleaner: keep
         ":pybind_input_preprocessing_pyi",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/lib/core/primitives",  # buildcleaner: keep

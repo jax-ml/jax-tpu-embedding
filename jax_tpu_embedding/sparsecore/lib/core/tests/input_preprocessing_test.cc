@@ -1875,14 +1875,6 @@ TEST(MegacoreCsrTest, PreprocessesIntoMegacoreCsrFormat) {
       absl::MakeConstSpan(gains.data(), 16),
       ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
                         1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
-  // Trailing embedding and sample IDs beyond the last row are padded with -1.
-  // Trailing gains are undefined.
-  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), embedding_ids.size())
-                  .subspan(16),
-              Each(-1));
-  EXPECT_THAT(
-      absl::MakeConstSpan(sample_ids.data(), sample_ids.size()).subspan(16),
-      Each(-1));
 }
 
 TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
@@ -1976,6 +1968,178 @@ TEST(MegacoreCsrTest, RejectsHostMinibatching) {
                                                stacked_tables, options),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("does not support host minibatching")));
+}
+
+TEST(MegacoreCsrTest, DropsIdsWhenBufferSizeExceeded) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  // 4 global SparseCores (2 devices * 2 SCs/device), rows_per_sc = 100.
+  // Create 300 unique col_ids across 2 samples:
+  // - Sample 0 (SC 0, sample_id 0): 70 IDs on global_sc_id 0, 70 on
+  //   global_sc_id 1 (140 total for device 0).
+  // - Sample 1 (SC 1, sample_id 1): 80 IDs on global_sc_id 2, 80 on
+  //   global_sc_id 3 (160 total for device 1).
+  std::vector<int64_t> sample_0;
+  std::vector<int64_t> sample_1;
+  for (int i = 0; i < 70; ++i) {
+    sample_0.push_back(i * 4);
+    sample_0.push_back(i * 4 + 1);
+  }
+  for (int i = 0; i < 80; ++i) {
+    sample_1.push_back(i * 4 + 2);
+    sample_1.push_back(i * 4 + 3);
+  }
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples({sample_0, sample_1}));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/64,
+                /*max_unique_ids_per_partition=*/64,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/2,
+                /*suggested_coo_buffer_size_per_device=*/16, RowCombiner::kSum,
+                /*max_col_id=*/99,
+                /*enable_megacore_csr=*/true)}}});
+
+  // Device 0 writes 70 + 70 = 140 elements (row_pointers[0] = 140) and pads 4
+  // entries with -1 to align to 144 (next multiple of 8).
+  // Device 1 writes 80 elements from global_sc_id 2 (indices 144..224) and 32
+  // of the 80 elements from global_sc_id 3 (indices 224..256), hitting the 256
+  // COO buffer limit and dropping the remaining 48 IDs (300 - 252 = 48).
+  std::vector<int> expected_embedding_ids;
+  for (int i = 0; i < 70; ++i) expected_embedding_ids.push_back(i);
+  for (int i = 0; i < 70; ++i) expected_embedding_ids.push_back(100 + i);
+  expected_embedding_ids.insert(expected_embedding_ids.end(), 4, -1);
+  for (int i = 0; i < 80; ++i) expected_embedding_ids.push_back(i);
+  for (int i = 0; i < 32; ++i) expected_embedding_ids.push_back(100 + i);
+  std::vector<int> expected_sample_ids(140, 0);
+  expected_sample_ids.insert(expected_sample_ids.end(), 4, -1);
+  expected_sample_ids.insert(expected_sample_ids.end(), 112, 1);
+  std::vector<float> expected_gains(140, 1.0f);
+  expected_gains.insert(expected_gains.end(), 4, 0.0f);
+  expected_gains.insert(expected_gains.end(), 112, 1.0f);
+
+  // Act
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                        stacked_tables, options));
+
+  // Assert
+  EXPECT_EQ(output.stats.dropped_id_count.at("megacore_table"), 48);
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("megacore_table");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("megacore_table");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("megacore_table");
+  const MatrixXf& gains = output.lhs_gains.at("megacore_table");
+
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray({140, 256, 256, 256, 256, 256, 256, 256}));
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 256),
+              ElementsAreArray(expected_embedding_ids));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 256),
+              ElementsAreArray(expected_sample_ids));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 256),
+              ElementsAreArray(expected_gains));
+}
+
+TEST(MegacoreCsrTest, DropsIdsMidMergeAcrossLocalScs) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  // 4 global SparseCores, rows_per_sc = 128, COO buffer size 256. Samples 0-1
+  // are on local SC 0 and samples 2-3 on local SC 1.
+  // - global_sc_id 0: samples 0 and 1 both hold col_ids 4 * i for i < 124,
+  //   filling 248 of the 256 entries.
+  // - global_sc_id 2 (col_id % 4 == 2, emb_id = col_id / 4): 11 IDs with
+  //   interleaved emb_ids across both local SCs, truncated to the 8 remaining
+  //   entries mid-merge.
+  // - global_sc_id 3: col_id 3 in sample 3, dropped entirely.
+  std::vector<std::vector<int64_t>> samples(4);
+  for (int i = 0; i < 124; ++i) {
+    samples[0].push_back(i * 4);
+    samples[1].push_back(i * 4);
+  }
+  // emb_ids: sample 0 {0, 2 (twice), 4}, sample 1 {2, 6},
+  // sample 2 {0, 1, 3, 5}, sample 3 {1, 4}.
+  samples[0].insert(samples[0].end(), {2, 10, 10, 18});
+  samples[1].insert(samples[1].end(), {10, 26});
+  samples[2] = {2, 6, 14, 22};
+  samples[3] = {6, 18, 3};
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples(samples));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/64,
+                /*max_unique_ids_per_partition=*/64,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/4,
+                /*suggested_coo_buffer_size_per_device=*/16, RowCombiner::kSum,
+                /*max_col_id=*/127,
+                /*enable_megacore_csr=*/true)}}});
+
+  // global_sc_id 2 merges, as (emb_id, sample_id, gain): (0, 0, 1), (0, 2, 1),
+  // (1, 2, 1), (1, 3, 1), (2, 0, 2), (2, 1, 1), (3, 2, 1), (4, 0, 1) and drops
+  // (4, 3, 1), (5, 2, 1), (6, 1, 1). With col_id 3, 4 IDs are dropped.
+  std::vector<int> expected_embedding_ids;
+  std::vector<int> expected_sample_ids;
+  for (int i = 0; i < 124; ++i) {
+    expected_embedding_ids.insert(expected_embedding_ids.end(), {i, i});
+    expected_sample_ids.insert(expected_sample_ids.end(), {0, 1});
+  }
+  expected_embedding_ids.insert(expected_embedding_ids.end(),
+                                {0, 0, 1, 1, 2, 2, 3, 4});
+  expected_sample_ids.insert(expected_sample_ids.end(),
+                             {0, 2, 2, 3, 0, 1, 2, 0});
+  std::vector<float> expected_gains(248, 1.0f);
+  expected_gains.insert(expected_gains.end(),
+                        {1.0f, 1.0f, 1.0f, 1.0f, 2.0f, 1.0f, 1.0f, 1.0f});
+
+  // Act
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  // Assert
+  EXPECT_EQ(output.stats.dropped_id_count.at("megacore_table"), 4);
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("megacore_table");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("megacore_table");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("megacore_table");
+  const MatrixXf& gains = output.lhs_gains.at("megacore_table");
+
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray({248, 256, 256, 256, 256, 256, 256, 256}));
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), embedding_ids.size()),
+              ElementsAreArray(expected_embedding_ids));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), sample_ids.size()),
+              ElementsAreArray(expected_sample_ids));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), gains.size()),
+              ElementsAreArray(expected_gains));
 }
 
 }  // namespace

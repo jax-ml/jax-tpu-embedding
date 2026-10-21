@@ -99,6 +99,7 @@ pytype_strict_contrib_test(
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
+        "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_megacore",
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("jax"),
         pypi_requirement("numpy"),

@@ -19,6 +19,7 @@ from absl.testing import absltest
 import jax
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
+from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_megacore
 import numpy as np
 
 
@@ -754,6 +755,312 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
 
     with self.subTest(name="GainsEquality"):
       np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
+
+
+class InputPreprocessingMegacoreTest(absltest.TestCase):
+
+  @override
+  def setUp(self):
+    super().setUp()
+    self.global_devices = np.array([MockDevice(id=i) for i in range(4)])
+
+  def test_preprocesses_into_megacore_csr_format(self):
+    # Matches MegacoreCsrTest.PreprocessesIntoMegacoreCsrFormat in C++.
+    # 2 global devices, 2 SCs per device => 4 global SCs.
+    # rows_per_sc = 10 (max_col_id = 9).
+    # Sample 0: {0, 5} -> (g=0, dest_sc=0, emb=0, lin=0, s=0),
+    #                     (g=1, dest_sc=1, emb=1, lin=11, s=0)
+    # Sample 1: {2}    -> (g=2, dest_sc=0, emb=0, lin=0, s=1)
+    # Sample 2: {4, 4} -> (g=0, dest_sc=0, emb=1, lin=1, s=2, gain=2.0)
+    # Sample 3: {7}    -> (g=3, dest_sc=1, emb=1, lin=11, s=3)
+    features = [[0, 5], [2], [4, 4], [7]]
+    weights = [[1.0, 1.0], [1.0], [1.0, 1.0], [1.0]]
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+
+    row_pointers, embedding_ids, sample_ids, gains = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            rows_per_sc=10,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+        )
+    )
+
+    np.testing.assert_array_equal(
+        row_pointers, np.array([3, 10, 16, 16, 16, 16, 16, 16], dtype=np.int32)
+    )
+    expected_embedding_ids = np.zeros(256, dtype=np.int32)
+    expected_embedding_ids[:16] = [
+        0,
+        1,
+        11,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        0,
+        11,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+    ]
+    expected_sample_ids = np.zeros(256, dtype=np.int32)
+    expected_sample_ids[:16] = [
+        0,
+        2,
+        0,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        1,
+        3,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+    ]
+    expected_gains = np.zeros(256, dtype=np.float32)
+    expected_gains[:16] = [
+        1.0,
+        2.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+    np.testing.assert_array_equal(embedding_ids, expected_embedding_ids)
+    np.testing.assert_array_equal(sample_ids, expected_sample_ids)
+    np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
+
+  def test_supports_device_minibatching(self):
+    features = [[0, 5], [2], [4, 4], [7]]
+    weights = [[1.0, 1.0], [1.0], [1.0, 1.0], [1.0]]
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+
+    row_pointers, embedding_ids, sample_ids, gains = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=1,
+            max_unique_ids_per_partition=1,
+            rows_per_sc=10,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+            minibatching_mode=input_preprocessing_megacore.MinibatchingMode.DEVICE,
+            suggested_coo_buffer_size_per_device=64,
+        )
+    )
+
+    np.testing.assert_array_equal(
+        row_pointers, np.array([3, 10, 16, 16, 16, 16, 16, 16], dtype=np.int32)
+    )
+    np.testing.assert_array_equal(
+        embedding_ids[:16],
+        np.array(
+            [0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1, -1, -1, -1],
+            dtype=np.int32,
+        ),
+    )
+    np.testing.assert_array_equal(
+        sample_ids[:16],
+        np.array(
+            [0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1],
+            dtype=np.int32,
+        ),
+    )
+    np.testing.assert_allclose(
+        gains[:16],
+        np.array(
+            [
+                1.0,
+                2.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            dtype=np.float32,
+        ),
+        atol=1e-6,
+    )
+
+  def test_validation_errors(self):
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+    features = [[0, 5], [2], [4, 4], [7]]
+    weights = [[1.0, 1.0], [1.0], [1.0, 1.0], [1.0]]
+
+    with self.assertRaisesRegex(
+        ValueError, "does not support host minibatching"
+    ):
+      input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+          features,
+          weights,
+          mesh,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=16,
+          rows_per_sc=10,
+          num_sc_per_device=2,
+          hbm_word_size_in_4b=8,
+          minibatching_mode=input_preprocessing_megacore.MinibatchingMode.HOST,
+      )
+
+    with self.assertRaisesRegex(ValueError, "rows_per_sc must be positive"):
+      input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+          features,
+          weights,
+          mesh,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=16,
+          rows_per_sc=0,
+          num_sc_per_device=2,
+          hbm_word_size_in_4b=8,
+      )
+
+  def test_truncates_when_exceeding_coo_buffer_size(self):
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+    # 4 global SparseCores (2 devices * 2 SCs/device).
+    # Create 300 unique col_ids across 2 samples:
+    # - Sample 0: 70 on SC 0, 70 on SC 1 (140 total for device 0)
+    # - Sample 1: 80 on SC 2, 80 on SC 3 (160 total for device 1)
+    features = [
+        [i * 4 for i in range(70)] + [i * 4 + 1 for i in range(70)],
+        [i * 4 + 2 for i in range(80)] + [i * 4 + 3 for i in range(80)],
+    ]
+    weights = [[1.0] * 140, [1.0] * 160]
+    # Device 0 writes 70 + 70 = 140 elements (row_pointers[0] = 140), then pads
+    # 4 entries with -1 to align to 144 (next multiple of 8).
+    # Device 1 writes 80 elements from SC 2 (indices 144..224) and 32 of the 80
+    # elements from SC 3 (indices 224..256), hitting coo_buffer_size = 256.
+    expected_row_pointers = np.array(
+        [140, 256, 256, 256, 256, 256, 256, 256], dtype=np.int32
+    )
+    expected_embedding_ids = np.concatenate([
+        np.arange(70, dtype=np.int32),
+        np.arange(100, 170, dtype=np.int32),
+        np.full(4, -1, dtype=np.int32),
+        np.arange(80, dtype=np.int32),
+        np.arange(100, 132, dtype=np.int32),
+    ])
+    expected_sample_ids = np.concatenate([
+        np.zeros(140, dtype=np.int32),
+        np.full(4, -1, dtype=np.int32),
+        np.ones(112, dtype=np.int32),
+    ])
+    expected_gains = np.concatenate([
+        np.ones(140, dtype=np.float32),
+        np.zeros(4, dtype=np.float32),
+        np.ones(112, dtype=np.float32),
+    ])
+
+    row_pointers, embedding_ids, sample_ids, gains = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=64,
+            max_unique_ids_per_partition=64,
+            rows_per_sc=100,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+            minibatching_mode=input_preprocessing_megacore.MinibatchingMode.DEVICE,
+            suggested_coo_buffer_size_per_device=16,
+        )
+    )
+
+    np.testing.assert_array_equal(row_pointers, expected_row_pointers)
+    np.testing.assert_array_equal(embedding_ids, expected_embedding_ids)
+    np.testing.assert_array_equal(sample_ids, expected_sample_ids)
+    np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
+
+  def test_truncates_mid_merge_across_local_scs(self):
+    # Matches MegacoreCsrTest.DropsIdsMidMergeAcrossLocalScs in C++.
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+    # 4 global SCs, rows_per_sc = 128, COO buffer size 256. Samples 0-1 are on
+    # local SC 0 and samples 2-3 on local SC 1.
+    # - SC 0: samples 0 and 1 both hold col_ids 4 * i for i < 124, filling 248
+    #   of the 256 entries.
+    # - SC 2 (col_id % 4 == 2, emb_id = col_id // 4): 11 IDs with interleaved
+    #   emb_ids across both local SCs, truncated to the 8 remaining entries
+    #   mid-merge.
+    # - SC 3: col_id 3 in sample 3, dropped entirely.
+    features = [
+        [i * 4 for i in range(124)] + [2, 10, 10, 18],
+        [i * 4 for i in range(124)] + [10, 26],
+        [2, 6, 14, 22],
+        [6, 18, 3],
+    ]
+    weights = [[1.0] * len(sample) for sample in features]
+    # SC 2 merges, as (emb_id, sample_id, gain): (0, 0, 1), (0, 2, 1),
+    # (1, 2, 1), (1, 3, 1), (2, 0, 2), (2, 1, 1), (3, 2, 1), (4, 0, 1) and
+    # drops (4, 3, 1), (5, 2, 1), (6, 1, 1).
+    expected_row_pointers = np.array(
+        [248, 256, 256, 256, 256, 256, 256, 256], dtype=np.int32
+    )
+    expected_embedding_ids = np.concatenate([
+        np.repeat(np.arange(124, dtype=np.int32), 2),
+        np.array([0, 0, 1, 1, 2, 2, 3, 4], dtype=np.int32),
+    ])
+    expected_sample_ids = np.concatenate([
+        np.tile(np.array([0, 1], dtype=np.int32), 124),
+        np.array([0, 2, 2, 3, 0, 1, 2, 0], dtype=np.int32),
+    ])
+    expected_gains = np.concatenate([
+        np.ones(248, dtype=np.float32),
+        np.array([1, 1, 1, 1, 2, 1, 1, 1], dtype=np.float32),
+    ])
+
+    row_pointers, embedding_ids, sample_ids, gains = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=64,
+            max_unique_ids_per_partition=64,
+            rows_per_sc=128,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+            minibatching_mode=input_preprocessing_megacore.MinibatchingMode.DEVICE,
+            suggested_coo_buffer_size_per_device=16,
+        )
+    )
+
+    np.testing.assert_array_equal(row_pointers, expected_row_pointers)
+    np.testing.assert_array_equal(embedding_ids, expected_embedding_ids)
+    np.testing.assert_array_equal(sample_ids, expected_sample_ids)
+    np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
 
 
 if __name__ == "__main__":
