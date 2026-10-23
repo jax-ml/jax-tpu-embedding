@@ -23,6 +23,7 @@ from typing import Generic, ParamSpec, Protocol, TypeAlias, TypeVar, cast
 
 from flax import struct
 import jax
+from jax.experimental import layout
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -55,6 +56,12 @@ _ShardingT = TypeVar('_ShardingT')
 _T = TypeVar('_T')
 _PipelineStateT = TypeVar('_PipelineStateT', bound=struct.PyTreeNode)
 _P = ParamSpec('_P')
+
+# Sharding of a pipeline placeholder. Embedding activations and gradients have
+# the layout format of the embedding table.
+_PlaceholderSharding: TypeAlias = jax.sharding.Sharding | layout.Format
+# A pipeline input, or its abstract value.
+_InputLeaf: TypeAlias = jax.typing.ArrayLike | jax.ShapeDtypeStruct
 
 
 def _eval_shape(
@@ -483,6 +490,23 @@ def get_pipeline_state_sharding(
   )
 
 
+def _is_kept_input(sharding: _PlaceholderSharding, x: _InputLeaf) -> bool:
+  """Returns whether `_create_sharded_array` returns `x` itself.
+
+  Args:
+    sharding: The sharding of the placeholder.
+    x: An input, or its abstract value.
+
+  Returns:
+    True for a scalar, or for a fully replicated sharding. A layout format is
+    never fully replicated.
+  """
+  return jnp.ndim(x) == 0 or (
+      isinstance(sharding, jax.sharding.Sharding)
+      and sharding.is_fully_replicated
+  )
+
+
 def get_initial_state(
     pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
     tc_train_state: _TcTrainState,
@@ -531,14 +555,7 @@ def get_initial_state(
   # Wrap input initialization functions with sharding if provided.
   # TODO(b/436649494): Try sharding the placeholder inputs implicitly.
   def _create_sharded_array(sharding, x):
-    if (
-        isinstance(x, int)
-        or (hasattr(x, 'ndim') and x.ndim == 0)
-        or (
-            hasattr(sharding, 'is_fully_replicated')
-            and sharding.is_fully_replicated
-        )
-    ):
+    if _is_kept_input(sharding, x):
       return x
     num_devices = (
         sharding.num_devices
@@ -628,6 +645,173 @@ def get_initial_state(
       ),
       placeholder_output=placeholder_output,
       placeholder_tc_aux=jax.tree.map(_safe_copy, aux),
+  )
+
+
+def _as_shape_dtype_struct(x: _InputLeaf) -> jax.ShapeDtypeStruct:
+  """Returns the abstract value of `x` as an argument of `jax.jit`.
+
+  Args:
+    x: An array, a tracer, a Python scalar or a `jax.ShapeDtypeStruct`.
+
+  Returns:
+    The abstract value of `x`, with the sharding of a committed array.
+  """
+  if isinstance(x, jax.ShapeDtypeStruct):
+    return x
+  aval = jax.typeof(x)
+  # A tracer, an uncommitted array, a NumPy array and a Python scalar have no
+  # sharding that `jax.jit` must keep.
+  sharding = None
+  if (
+      isinstance(x, jax.Array)
+      and not isinstance(x, jax.core.Tracer)
+      and x.committed
+  ):
+    sharding = x.sharding
+  return jax.ShapeDtypeStruct(
+      aval.shape, aval.dtype, sharding=sharding, weak_type=aval.weak_type
+  )
+
+
+def _zeros_like_shape(x: _InputLeaf) -> jax.ShapeDtypeStruct:
+  """Returns the abstract value of `jnp.zeros_like(x)`.
+
+  Mirrors `jax.lax.full_like`:
+  - The zeros have the weak type of an array or a Python scalar. A
+    `jax.ShapeDtypeStruct` has no abstract value, so its zeros are strongly
+    typed.
+  - The zeros keep the sharding of `x`, unless they are weakly typed.
+
+  Args:
+    x: An array, a tracer, a Python scalar or a `jax.ShapeDtypeStruct`.
+
+  Returns:
+    The abstract value of the zeros.
+  """
+  value = _as_shape_dtype_struct(x)
+  if isinstance(x, jax.ShapeDtypeStruct):
+    return _replace_shape_dtype_struct(value, weak_type=False)
+  if value.weak_type:
+    return _replace_shape_dtype_struct(value, sharding=None)
+  return value
+
+
+def _create_sharded_array_shape(
+    sharding: _PlaceholderSharding, x: _InputLeaf
+) -> jax.ShapeDtypeStruct:
+  """Returns the abstract value of `_create_sharded_array(sharding, x)`.
+
+  Args:
+    sharding: The sharding of the placeholder.
+    x: An input, or its abstract value.
+
+  Returns:
+    The abstract value of `x` if `_create_sharded_array` keeps it, else the
+    abstract value of strongly typed zeros with `sharding`.
+  """
+  value = _as_shape_dtype_struct(x)
+  if _is_kept_input(sharding, x):
+    return value
+  return jax.ShapeDtypeStruct(value.shape, value.dtype, sharding=sharding)
+
+
+def get_initial_state_shapes(
+    pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
+    tc_train_state: _TcTrainState,
+    embedding_variables: _EmbeddingVariables,
+    sc_fwd_function: ScFwdStageFun[
+        _SparseInput, _EmbeddingActivations, _EmbeddingVariables, _ScFwdAux
+    ],
+    tc_function: TcStageFun[
+        _EmbeddingActivations,
+        _DenseInput,
+        _EmbeddingGradients,
+        _PipelineOutput,
+        _TcTrainState,
+        _ScFwdAux,
+        _TcAux,
+    ],
+    dense_input_sharding: jax.sharding.Sharding | None = None,
+    sparse_input_sharding: jax.sharding.Sharding | None = None,
+) -> PipelineState[
+    jax.ShapeDtypeStruct,
+    jax.ShapeDtypeStruct,
+    jax.ShapeDtypeStruct,
+    jax.ShapeDtypeStruct,
+    jax.ShapeDtypeStruct,
+    jax.ShapeDtypeStruct,
+    jax.ShapeDtypeStruct,
+]:
+  """Gets the abstract value of `get_initial_state`, without device computation.
+
+  The inputs can be `jax.ShapeDtypeStruct`s, for example to lower the pipelined
+  step for devices that the process does not own (cross compilation). Like
+  `get_initial_state`, it compiles the TensorCore function once, to get its
+  output shardings.
+
+  Args:
+    pipeline_input: Input to the sc_fwd, tc and sc_bwd for the current step.
+    tc_train_state: Training state for the TensorCore. The leaves must have the
+      sharding of the training state that the step gets.
+    embedding_variables: Embedding variables for the SparseCore.
+    sc_fwd_function: SparseCore forward pass function.
+    tc_function: TensorCore forward/backward pass function.
+    dense_input_sharding: The sharding of the dense inputs.
+    sparse_input_sharding: The sharding of the sparse inputs.
+
+  Returns:
+    The initial pipeline state, with `jax.ShapeDtypeStruct` leaves that have the
+    shape, dtype, weak type and sharding of the leaves of `get_initial_state`.
+  """
+  # Each initializer is the abstract counterpart of the initializer at the same
+  # place in `get_initial_state`.
+  sparse_init_fn = _zeros_like_shape
+  dense_init_fn = _zeros_like_shape
+  sc_init_fn = _zeros_like_shape
+  if sparse_input_sharding is not None:
+    sparse_init_fn = functools.partial(
+        _create_sharded_array_shape, sparse_input_sharding
+    )
+    lout = utils.embedding_table_format_with_sharding(
+        sharding=sparse_input_sharding,
+    )
+    sc_init_fn = functools.partial(_create_sharded_array_shape, lout)
+  if dense_input_sharding is not None:
+    dense_init_fn = functools.partial(
+        _create_sharded_array_shape, dense_input_sharding
+    )
+
+  dense_inputs = jax.tree.map(dense_init_fn, pipeline_input.dense_inputs)
+  sparse_inputs = jax.tree.map(sparse_init_fn, pipeline_input.sparse_inputs)
+
+  emb_act_shapes, sc_fwd_aux_shapes = jax.eval_shape(
+      sc_fwd_function, sparse_inputs, embedding_variables
+  )
+  sc_fwd_aux = jax.tree.map(_zeros_like_shape, sc_fwd_aux_shapes)
+  emb_act = jax.tree.map(sc_init_fn, emb_act_shapes)
+  emb_grads_shapes, output_shapes, _, aux_shapes = _eval_shape(
+      tc_function, emb_act, dense_inputs, tc_train_state, sc_fwd_aux
+  )
+  aux = jax.tree.map(_zeros_like_shape, aux_shapes)
+
+  return PipelineState(
+      pipeline_step=jax.eval_shape(lambda: jnp.array(0)),
+      last_step_inputs=LastStepInput(
+          sparse_inputs=sparse_inputs,
+          embedding_activations=emb_act,
+          dense_inputs=dense_inputs,
+          sc_fwd_aux=sc_fwd_aux,
+      ),
+      step_before_last_step_inputs=StepBeforeLastStepInput(
+          sparse_inputs=sparse_inputs,
+          embedding_gradients=jax.tree.map(sc_init_fn, emb_grads_shapes),
+          tc_aux=aux,
+      ),
+      # `_create_output_arrays` makes strongly typed zeros with the sharding of
+      # the spec, like `jnp.zeros_like` on a spec.
+      placeholder_output=jax.tree.map(_zeros_like_shape, output_shapes),
+      placeholder_tc_aux=aux,
   )
 
 
