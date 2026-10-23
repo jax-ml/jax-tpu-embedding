@@ -103,6 +103,19 @@ def _replace_shape_dtype_struct(
   return jax.ShapeDtypeStruct(**new_kwargs)
 
 
+def _apply_sharding(sharding, shapes):
+  """Applies a sharding prefix tree to a ShapeDtypeStruct tree."""
+  if shapes is None:
+    return None
+  if sharding is None or isinstance(sharding, jax.sharding.Sharding):
+    return jax.tree.map(
+        lambda x: _replace_shape_dtype_struct(x, sharding=sharding), shapes
+    )
+  return jax.tree.map(
+      _apply_sharding, sharding, shapes, is_leaf=lambda x: x is not sharding
+  )
+
+
 def _create_output_arrays(spec: jax.ShapeDtypeStruct):
   """Takes a spec and creates a zero array of the same sharding and shape."""
   if (
@@ -525,6 +538,7 @@ def get_initial_state(
     ],
     dense_input_sharding: jax.sharding.Sharding | None = None,
     sparse_input_sharding: jax.sharding.Sharding | None = None,
+    pipeline_output_sharding: _ShardingT | None = None,
 ) -> PipelineState[
     _SparseInput,
     _DenseInput,
@@ -544,6 +558,10 @@ def get_initial_state(
     tc_function: TensorCore forward/backward pass function.
     dense_input_sharding: The sharding of the dense inputs.
     sparse_input_sharding: The sharding of the sparse inputs.
+    pipeline_output_sharding: Optional sharding (or sharding prefix tree) of the
+      output from the TensorCore (`tc_function`). When provided, `tc_function`
+      is evaluated with `jax.eval_shape` instead of compiling the function to
+      infer output shardings.
 
   Returns:
     Initial pipeline state.
@@ -612,13 +630,23 @@ def get_initial_state(
 
   placeholder_emb_grads: _EmbeddingGradients
   placeholder_output: _PipelineOutput
-  emb_grads_shapes, output_shapes, _, aux_shapes = _eval_shape(
-      tc_function,
-      placeholder_emb_act,
-      dense_placeholder_inputs,
-      tc_train_state,
-      placeholder_sc_fwd_aux,
-  )
+  if pipeline_output_sharding is not None:
+    emb_grads_shapes, output_shapes, _, aux_shapes = jax.eval_shape(
+        tc_function,
+        placeholder_emb_act,
+        dense_placeholder_inputs,
+        tc_train_state,
+        placeholder_sc_fwd_aux,
+    )
+    output_shapes = _apply_sharding(pipeline_output_sharding, output_shapes)
+  else:
+    emb_grads_shapes, output_shapes, _, aux_shapes = _eval_shape(
+        tc_function,
+        placeholder_emb_act,
+        dense_placeholder_inputs,
+        tc_train_state,
+        placeholder_sc_fwd_aux,
+    )
 
   placeholder_emb_grads = jax.tree.map(
       sc_init_fn,
