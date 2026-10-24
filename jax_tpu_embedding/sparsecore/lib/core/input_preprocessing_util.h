@@ -682,9 +682,9 @@ void FillLocalDeviceBuffer(
 // chip-level CSR buffer whose embedding IDs are linearized as
 // `dest_sc * rows_per_sc + row_in_sc`, where `dest_sc` is the SparseCore that
 // owns the row on its destination device. Row `i` covers the COO range
-// `[round_up(row_pointers[i - 1], 8), row_pointers[i])`, and alignment padding
-// between rows has embedding and sample IDs of -1. Entries beyond the last
-// aligned row are left uninitialized.
+// `[round_up(row_pointers[i - 1], 8), row_pointers[i])`. Alignment padding
+// between rows and all entries beyond the last aligned row have embedding and
+// sample IDs of INT_MAX and gains of 0.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
     int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,

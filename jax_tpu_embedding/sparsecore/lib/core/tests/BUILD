@@ -97,6 +97,7 @@ pytype_strict_contrib_test(
         "JAX_PLATFORMS": "cpu",
     },
     deps = [
+        ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_megacore",
