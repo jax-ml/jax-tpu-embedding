@@ -20,6 +20,7 @@ import jax
 from jax_tpu_embedding.sparsecore.lib.core import constants
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing_megacore
+from jax_tpu_embedding.sparsecore.lib.core.tests import test_utils
 import numpy as np
 
 
@@ -793,66 +794,26 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     np.testing.assert_array_equal(
         row_pointers, np.array([3, 10, 16, 16, 16, 16, 16, 16], dtype=np.int32)
     )
-    expected_embedding_ids = np.zeros(256, dtype=np.int32)
-    expected_embedding_ids[:16] = [
-        0,
-        1,
-        11,
-        -1,
-        -1,
-        -1,
-        -1,
-        -1,
-        0,
-        11,
-        -1,
-        -1,
-        -1,
-        -1,
-        -1,
-        -1,
-    ]
-    expected_sample_ids = np.zeros(256, dtype=np.int32)
-    expected_sample_ids[:16] = [
-        0,
-        2,
-        0,
-        -1,
-        -1,
-        -1,
-        -1,
-        -1,
-        1,
-        3,
-        -1,
-        -1,
-        -1,
-        -1,
-        -1,
-        -1,
-    ]
+    expected_embedding_ids = np.full(
+        256, constants.PADDING_VALUE, dtype=np.int32
+    )
+    expected_embedding_ids[0:3] = [0, 1, 11]
+    expected_embedding_ids[8:10] = [0, 11]
+    expected_sample_ids = np.full(256, constants.PADDING_VALUE, dtype=np.int32)
+    expected_sample_ids[0:3] = [0, 2, 0]
+    expected_sample_ids[8:10] = [1, 3]
     expected_gains = np.zeros(256, dtype=np.float32)
-    expected_gains[:16] = [
-        1.0,
-        2.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    ]
-    np.testing.assert_array_equal(embedding_ids, expected_embedding_ids)
-    np.testing.assert_array_equal(sample_ids, expected_sample_ids)
-    np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
+    expected_gains[0:3] = [1.0, 2.0, 1.0]
+    expected_gains[8:10] = [1.0, 1.0]
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, embedding_ids, expected_embedding_ids
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, sample_ids, expected_sample_ids
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, gains, expected_gains
+    )
 
   def test_supports_device_minibatching(self):
     features = [[0, 5], [2], [4, 4], [7]]
@@ -877,44 +838,25 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     np.testing.assert_array_equal(
         row_pointers, np.array([3, 10, 16, 16, 16, 16, 16, 16], dtype=np.int32)
     )
-    np.testing.assert_array_equal(
-        embedding_ids[:16],
-        np.array(
-            [0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1, -1, -1, -1],
-            dtype=np.int32,
-        ),
+    expected_embedding_ids = np.full(
+        256, constants.PADDING_VALUE, dtype=np.int32
     )
-    np.testing.assert_array_equal(
-        sample_ids[:16],
-        np.array(
-            [0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1],
-            dtype=np.int32,
-        ),
+    expected_embedding_ids[0:3] = [0, 1, 11]
+    expected_embedding_ids[8:10] = [0, 11]
+    expected_sample_ids = np.full(256, constants.PADDING_VALUE, dtype=np.int32)
+    expected_sample_ids[0:3] = [0, 2, 0]
+    expected_sample_ids[8:10] = [1, 3]
+    expected_gains = np.zeros(256, dtype=np.float32)
+    expected_gains[0:3] = [1.0, 2.0, 1.0]
+    expected_gains[8:10] = [1.0, 1.0]
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, embedding_ids, expected_embedding_ids
     )
-    np.testing.assert_allclose(
-        gains[:16],
-        np.array(
-            [
-                1.0,
-                2.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ],
-            dtype=np.float32,
-        ),
-        atol=1e-6,
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, sample_ids, expected_sample_ids
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, gains, expected_gains
     )
 
   def test_validation_errors(self):
@@ -961,29 +903,25 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     ]
     weights = [[1.0] * 140, [1.0] * 160]
     # Device 0 writes 70 + 70 = 140 elements (row_pointers[0] = 140), then pads
-    # 4 entries with -1 to align to 144 (next multiple of 8).
+    # 4 entries to align to 144 (next multiple of 8).
     # Device 1 writes 80 elements from SC 2 (indices 144..224) and 32 of the 80
     # elements from SC 3 (indices 224..256), hitting coo_buffer_size = 256.
     expected_row_pointers = np.array(
         [140, 256, 256, 256, 256, 256, 256, 256], dtype=np.int32
     )
-    expected_embedding_ids = np.concatenate([
-        np.arange(70, dtype=np.int32),
-        np.arange(100, 170, dtype=np.int32),
-        np.full(4, -1, dtype=np.int32),
-        np.arange(80, dtype=np.int32),
-        np.arange(100, 132, dtype=np.int32),
-    ])
-    expected_sample_ids = np.concatenate([
-        np.zeros(140, dtype=np.int32),
-        np.full(4, -1, dtype=np.int32),
-        np.ones(112, dtype=np.int32),
-    ])
-    expected_gains = np.concatenate([
-        np.ones(140, dtype=np.float32),
-        np.zeros(4, dtype=np.float32),
-        np.ones(112, dtype=np.float32),
-    ])
+    expected_embedding_ids = np.full(
+        256, constants.PADDING_VALUE, dtype=np.int32
+    )
+    expected_embedding_ids[0:70] = np.arange(70, dtype=np.int32)
+    expected_embedding_ids[70:140] = np.arange(100, 170, dtype=np.int32)
+    expected_embedding_ids[144:224] = np.arange(80, dtype=np.int32)
+    expected_embedding_ids[224:256] = np.arange(100, 132, dtype=np.int32)
+    expected_sample_ids = np.full(256, constants.PADDING_VALUE, dtype=np.int32)
+    expected_sample_ids[0:140] = 0
+    expected_sample_ids[144:256] = 1
+    expected_gains = np.zeros(256, dtype=np.float32)
+    expected_gains[0:140] = 1.0
+    expected_gains[144:256] = 1.0
 
     row_pointers, embedding_ids, sample_ids, gains = (
         input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
@@ -1001,9 +939,15 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     )
 
     np.testing.assert_array_equal(row_pointers, expected_row_pointers)
-    np.testing.assert_array_equal(embedding_ids, expected_embedding_ids)
-    np.testing.assert_array_equal(sample_ids, expected_sample_ids)
-    np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, embedding_ids, expected_embedding_ids
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, sample_ids, expected_sample_ids
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 1, row_pointers, gains, expected_gains
+    )
 
   def test_truncates_mid_merge_across_local_scs(self):
     # Matches MegacoreCsrTest.DropsIdsMidMergeAcrossLocalScs in C++.

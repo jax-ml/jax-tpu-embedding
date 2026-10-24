@@ -59,7 +59,9 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::StatusIs;
 using ::jax_sc_embedding::testing_utils::SetUpMinibatchingNodes;
+using ::testing::_;
 using ::testing::Each;
+using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Gt;
@@ -1866,15 +1868,12 @@ TEST(MegacoreCsrTest, PreprocessesIntoMegacoreCsrFormat) {
 
   ASSERT_EQ(embedding_ids.cols(), 256);
   EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
-              ElementsAreArray({0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1,
-                                -1, -1, -1}));
+              ElementsAre(0, 1, 11, _, _, _, _, _, 0, 11, _, _, _, _, _, _));
   EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
-              ElementsAreArray(
-                  {0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1}));
-  EXPECT_THAT(
-      absl::MakeConstSpan(gains.data(), 16),
-      ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-                        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+              ElementsAre(0, 2, 0, _, _, _, _, _, 1, 3, _, _, _, _, _, _));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
+              ElementsAre(1.0f, 2.0f, 1.0f, _, _, _, _, _, 1.0f, 1.0f, _, _, _,
+                          _, _, _));
 }
 
 TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
@@ -1926,15 +1925,12 @@ TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
   EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
               ElementsAreArray({3, 10, 16, 16, 16, 16, 16, 16}));
   EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
-              ElementsAreArray({0, 1, 11, -1, -1, -1, -1, -1, 0, 11, -1, -1, -1,
-                                -1, -1, -1}));
+              ElementsAre(0, 1, 11, _, _, _, _, _, 0, 11, _, _, _, _, _, _));
   EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
-              ElementsAreArray(
-                  {0, 2, 0, -1, -1, -1, -1, -1, 1, 3, -1, -1, -1, -1, -1, -1}));
-  EXPECT_THAT(
-      absl::MakeConstSpan(gains.data(), 16),
-      ElementsAreArray({1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-                        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}));
+              ElementsAre(0, 2, 0, _, _, _, _, _, 1, 3, _, _, _, _, _, _));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
+              ElementsAre(1.0f, 2.0f, 1.0f, _, _, _, _, _, 1.0f, 1.0f, _, _, _,
+                          _, _, _));
 }
 
 TEST(MegacoreCsrTest, RejectsHostMinibatching) {
@@ -2014,21 +2010,21 @@ TEST(MegacoreCsrTest, DropsIdsWhenBufferSizeExceeded) {
                 /*enable_megacore_csr=*/true)}}});
 
   // Device 0 writes 70 + 70 = 140 elements (row_pointers[0] = 140) and pads 4
-  // entries with -1 to align to 144 (next multiple of 8).
+  // entries to align to 144 (next multiple of 8).
   // Device 1 writes 80 elements from global_sc_id 2 (indices 144..224) and 32
   // of the 80 elements from global_sc_id 3 (indices 224..256), hitting the 256
   // COO buffer limit and dropping the remaining 48 IDs (300 - 252 = 48).
-  std::vector<int> expected_embedding_ids;
+  std::vector<testing::Matcher<int>> expected_embedding_ids;
   for (int i = 0; i < 70; ++i) expected_embedding_ids.push_back(i);
   for (int i = 0; i < 70; ++i) expected_embedding_ids.push_back(100 + i);
-  expected_embedding_ids.insert(expected_embedding_ids.end(), 4, -1);
+  expected_embedding_ids.insert(expected_embedding_ids.end(), 4, _);
   for (int i = 0; i < 80; ++i) expected_embedding_ids.push_back(i);
   for (int i = 0; i < 32; ++i) expected_embedding_ids.push_back(100 + i);
-  std::vector<int> expected_sample_ids(140, 0);
-  expected_sample_ids.insert(expected_sample_ids.end(), 4, -1);
+  std::vector<testing::Matcher<int>> expected_sample_ids(140, 0);
+  expected_sample_ids.insert(expected_sample_ids.end(), 4, _);
   expected_sample_ids.insert(expected_sample_ids.end(), 112, 1);
-  std::vector<float> expected_gains(140, 1.0f);
-  expected_gains.insert(expected_gains.end(), 4, 0.0f);
+  std::vector<testing::Matcher<float>> expected_gains(140, 1.0f);
+  expected_gains.insert(expected_gains.end(), 4, _);
   expected_gains.insert(expected_gains.end(), 112, 1.0f);
 
   // Act

@@ -683,7 +683,7 @@ void FillLocalDeviceBuffer(
 // `dest_sc * rows_per_sc + row_in_sc`, where `dest_sc` is the SparseCore that
 // owns the row on its destination device. Row `i` covers the COO range
 // `[round_up(row_pointers[i - 1], 8), row_pointers[i])`, and alignment padding
-// between rows has embedding and sample IDs of -1. Entries beyond the last
+// between rows has embedding and sample IDs of INT_MAX. Entries beyond the last
 // aligned row are left uninitialized.
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const DevicePartitionedCooTensors& grouped_coo_tensors,

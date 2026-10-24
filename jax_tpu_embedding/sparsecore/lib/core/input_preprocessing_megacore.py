@@ -53,7 +53,7 @@ BucketMap = dict[int, BucketData]
 _MIN_MEGACORE_COO_BUFFER_SIZE = 256
 _MEGACORE_COO_BUFFER_ALIGNMENT = 128
 _MAX_MINIBATCHING_BUCKETS = 64
-_MEGACORE_PADDING_ID = -1
+_MEGACORE_PADDING_ID = np.iinfo(np.int32).max
 
 
 def _preprocess_batch_to_megacore_buckets(

@@ -19,9 +19,9 @@ import numpy as np
 def assert_equal_coo_buffer(
     local_device_count: int,
     num_sc_per_device: int,
-    row_pointers: np.ndarray,
-    actual: np.ndarray,
-    expected: np.ndarray,
+    row_pointers: np.typing.ArrayLike,
+    actual: np.typing.ArrayLike,
+    expected: np.typing.ArrayLike,
 ):
   """Compares COO buffers up to active row_pointers.
 
@@ -39,9 +39,9 @@ def assert_equal_coo_buffer(
   local_sc_count = local_device_count * num_sc_per_device
 
   # Ignore leading dim
-  row_pointers = row_pointers.reshape(-1)
-  actual = actual.reshape(-1)
-  expected = expected.reshape(-1)
+  row_pointers = np.asarray(row_pointers).reshape(-1)
+  actual = np.asarray(actual).reshape(-1)
+  expected = np.asarray(expected).reshape(-1)
 
   for row_pointer_slice, actual_sc_slice, expected_sc_slice in zip(
       np.split(row_pointers, local_sc_count),
