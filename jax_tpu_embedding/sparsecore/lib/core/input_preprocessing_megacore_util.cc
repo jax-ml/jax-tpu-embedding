@@ -333,6 +333,17 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
        row_index < csr_arrays.row_pointers.size(); ++row_index) {
     csr_arrays.row_pointers[row_index] = coo_index;
   }
+  // Pad the tail past the last aligned row as well, because device consumers
+  // may sort and scan the whole buffer. The buffers may be reused across
+  // batches, so this must be written every batch.
+  // TODO(b/572790535): Consider to move the last-row padding into SPAX for
+  // better performance.
+  const int tail_size = coo_end - coo_index;
+  csr_arrays.embedding_ids.segment(coo_index, tail_size)
+      .setConstant(std::numeric_limits<int32_t>::max());
+  csr_arrays.sample_ids.segment(coo_index, tail_size)
+      .setConstant(std::numeric_limits<int32_t>::max());
+  csr_arrays.gains.segment(coo_index, tail_size).setZero();
   int dropped_id_count = 0;
   if (processed < total_coo_size) {
     LOG_EVERY_N(WARNING, 100)

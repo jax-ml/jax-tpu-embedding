@@ -805,15 +805,10 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     expected_gains = np.zeros(256, dtype=np.float32)
     expected_gains[0:3] = [1.0, 2.0, 1.0]
     expected_gains[8:10] = [1.0, 1.0]
-    test_utils.assert_equal_coo_buffer(
-        1, 1, row_pointers, embedding_ids, expected_embedding_ids
-    )
-    test_utils.assert_equal_coo_buffer(
-        1, 1, row_pointers, sample_ids, expected_sample_ids
-    )
-    test_utils.assert_equal_coo_buffer(
-        1, 1, row_pointers, gains, expected_gains
-    )
+    # The alignment gaps and the tail past the last aligned row are padding.
+    np.testing.assert_array_equal(embedding_ids, expected_embedding_ids)
+    np.testing.assert_array_equal(sample_ids, expected_sample_ids)
+    np.testing.assert_array_equal(gains, expected_gains)
 
   def test_supports_device_minibatching(self):
     features = [[0, 5], [2], [4, 4], [7]]

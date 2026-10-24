@@ -1876,6 +1876,77 @@ TEST(MegacoreCsrTest, PreprocessesIntoMegacoreCsrFormat) {
                           _, _, _));
 }
 
+TEST(MegacoreCsrTest, PadsReusedOutputBuffers) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDisabled,
+  };
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(
+      CreateInputBatchFromSamples({{0, 5}, {2}, {4, 4}, {7}}));
+  const std::vector<FeatureMetadataInStack> metadata = {FeatureMetadataInStack(
+      /*name=*/"feature_0", /*feature_index=*/0,
+      /*max_ids_per_partition=*/16,
+      /*max_unique_ids_per_partition=*/16,
+      /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+      /*batch_size=*/4,
+      /*suggested_coo_buffer_size_per_device=*/std::nullopt, RowCombiner::kSum,
+      /*max_col_id=*/9,
+      /*enable_megacore_csr=*/true)};
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"megacore_table", metadata}});
+  const int coo_buffer_size = ComputeCooBufferSizePerDevice(options, metadata);
+  // Leftovers from a previous batch in buffers that are reused.
+  MatrixXi row_pointers(1, ComputeRowPointersSizePerDevice(options, metadata));
+  MatrixXi embedding_ids = MatrixXi::Constant(1, coo_buffer_size, 3);
+  MatrixXi sample_ids = MatrixXi::Constant(1, coo_buffer_size, 1);
+  MatrixXf gains = MatrixXf::Constant(1, coo_buffer_size, 5.0f);
+  OutputCsrArrays output_csr_arrays;
+  output_csr_arrays.lhs_row_pointers.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXi>(row_pointers.data(), 1, row_pointers.cols())});
+  output_csr_arrays.lhs_embedding_ids.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXi>(embedding_ids.data(), 1, coo_buffer_size)});
+  output_csr_arrays.lhs_sample_ids.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXi>(sample_ids.data(), 1, coo_buffer_size)});
+  output_csr_arrays.lhs_gains.insert(
+      {"megacore_table",
+       Eigen::Map<MatrixXf>(gains.data(), 1, coo_buffer_size)});
+
+  // Act
+  ASSERT_THAT(PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                               stacked_tables, options,
+                                               &output_csr_arrays),
+              IsOk());
+
+  // Assert
+  // Rows end at 3 and 10, so everything from 10 on, including the alignment
+  // gaps and the tail past the last aligned row (16), is padding.
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+              ElementsAreArray({3, 10, 16, 16, 16, 16, 16, 16}));
+  ASSERT_EQ(coo_buffer_size, 256);
+  constexpr int kPad = std::numeric_limits<int32_t>::max();
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 16),
+              ElementsAre(0, 1, 11, kPad, kPad, kPad, kPad, kPad, 0, 11, kPad,
+                          kPad, kPad, kPad, kPad, kPad));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 16),
+              ElementsAre(0, 2, 0, kPad, kPad, kPad, kPad, kPad, 1, 3, kPad,
+                          kPad, kPad, kPad, kPad, kPad));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
+              ElementsAre(1.0f, 2.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                          1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data() + 16, 240), Each(kPad));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data() + 16, 240), Each(kPad));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data() + 16, 240), Each(0.0f));
+}
+
 TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
   // Arrange
   PreprocessSparseDenseMatmulInputOptions options{
