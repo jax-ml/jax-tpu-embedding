@@ -336,8 +336,8 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
   // Pad the tail past the last aligned row as well, because device consumers
   // may sort and scan the whole buffer. The buffers may be reused across
   // batches, so this must be written every batch.
-  // TODO(b/572790535): Consider to move the last-row padding into SPAX for
-  // better performance.
+  // TODO(b/578149210): Remove the last-row tail padding once a dynamic slice
+  // is used to bound the valid range.
   const int tail_size = coo_end - coo_index;
   csr_arrays.embedding_ids.segment(coo_index, tail_size)
       .setConstant(std::numeric_limits<int32_t>::max());
