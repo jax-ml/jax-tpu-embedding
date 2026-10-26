@@ -14,6 +14,7 @@
 """Unit tests for SparseCore embedding pipelining utility functions."""
 
 import functools
+from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -212,6 +213,60 @@ class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
     )
     self.assertFalse(shapes.placeholder_tc_aux.weak_type)
 
+  def test_get_initial_state_with_pipeline_output_sharding_skips_compile(self):
+    pipeline_input = embedding_pipelining_utils.CurrentStepInput(
+        sparse_inputs=jnp.zeros((4, 8), dtype=jnp.float32),
+        dense_inputs=jnp.zeros((4, 16), dtype=jnp.float32),
+    )
+    tc_train_state = {"params": jnp.zeros((16, 8), dtype=jnp.float32)}
+    embedding_variables = {"table": jnp.zeros((100, 8), dtype=jnp.float32)}
+
+    def sc_fwd_fn(sparse_inputs, embedding_variables):
+      del embedding_variables
+      return sparse_inputs, None
+
+    def tc_fn(
+        embedding_activations,
+        dense_inputs,
+        train_state,
+        sc_fwd_aux=None,
+    ):
+      del dense_inputs, sc_fwd_aux
+      emb_grad = embedding_activations
+      out = {
+          "loss": jnp.zeros((), dtype=jnp.float32),
+          "grads": {"w": jnp.zeros((4, 8), dtype=jnp.float32)},
+          "unused": None,
+      }
+      return emb_grad, out, train_state, None
+
+    mesh = jax.sharding.Mesh(np.array(jax.devices()), ("data",))
+    replicated_sharding = jax.sharding.NamedSharding(
+        mesh, jax.sharding.PartitionSpec()
+    )
+    pipeline_output_sharding = {
+        "loss": None,
+        "grads": replicated_sharding,
+        "unused": {"nested": replicated_sharding},
+    }
+
+    with mock.patch.object(
+        embedding_pipelining_utils,
+        "_eval_shape",
+        side_effect=AssertionError("_eval_shape should not be called"),
+    ):
+      state = embedding_pipelining_utils.get_initial_state(
+          pipeline_input=pipeline_input,
+          tc_train_state=tc_train_state,
+          embedding_variables=embedding_variables,
+          sc_fwd_function=sc_fwd_fn,
+          tc_function=tc_fn,
+          pipeline_output_sharding=pipeline_output_sharding,
+      )
+
+    self.assertEqual(state.placeholder_output["loss"].shape, ())
+    self.assertEqual(state.placeholder_output["grads"]["w"].shape, (4, 8))
+    self.assertIsNone(state.placeholder_output["unused"])
 
 if __name__ == "__main__":
   absltest.main()
