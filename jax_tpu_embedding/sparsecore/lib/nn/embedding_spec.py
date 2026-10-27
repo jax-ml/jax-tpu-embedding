@@ -1124,9 +1124,7 @@ class TableSpec:
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create."""
-  quantization_config: (
-      FixedQuantizationConfig | AbsmaxQuantizationConfig | None
-  ) = None
+  quantization_config: QuantizationConfig | None = None
   """Optional quantization config for this table. None disables quantization."""
 
   _initialized: bool = dataclasses.field(
@@ -1313,14 +1311,30 @@ class StackedTableSpec(struct.PyTreeNode, eq=True, frozen=True, kw_only=True):
   suggested_coo_buffer_size_per_device: int | None = None
   """The minimum size of the input buffer that the preprocessing should try to
   create for this stack."""
-  quantization_config: (
-      FixedQuantizationConfig | AbsmaxQuantizationConfig | None
-  ) = None
+  quantization_config: QuantizationConfig | None = None
   """Optional quantization config for this stack. None disables quantization."""
 
 
+class QuantizationConfig(metaclass=abc.ABCMeta):
+  """Base class for embedding quantization configurations."""
+
+  __slots__ = ()
+
+  @abc.abstractmethod
+  def validate_table(
+      self, embedding_dim: int, table_name: str | None = None
+  ) -> None:
+    """Validates that this quantization config is compatible with the table."""
+    raise NotImplementedError
+
+  @abc.abstractmethod
+  def to_backend_config(self) -> dict[str, Any]:
+    """Returns the backend config for this quantization config."""
+    raise NotImplementedError
+
+
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
-class FixedQuantizationConfig:
+class FixedQuantizationConfig(QuantizationConfig):
   """Fixed-range (static) quantization configuration."""
 
   min_value: float
@@ -1340,12 +1354,14 @@ class FixedQuantizationConfig:
   def supports_scalar_embeddings(self) -> bool:
     return True
 
+  @override
   def validate_table(
       self, embedding_dim: int, table_name: str | None = None
   ) -> None:
     """Validates that this quantization config is compatible with the table."""
     del embedding_dim, table_name
 
+  @override
   def to_backend_config(self) -> dict[str, Any]:
     return {
         "fixed": {
@@ -1357,7 +1373,7 @@ class FixedQuantizationConfig:
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
-class AbsmaxQuantizationConfig:
+class AbsmaxQuantizationConfig(QuantizationConfig):
   """Dynamic-range (absmax) quantization configuration."""
 
   num_buckets: int = 256
@@ -1372,6 +1388,7 @@ class AbsmaxQuantizationConfig:
   def supports_scalar_embeddings(self) -> bool:
     return False
 
+  @override
   def validate_table(
       self, embedding_dim: int, table_name: str | None = None
   ) -> None:
@@ -1385,6 +1402,7 @@ class AbsmaxQuantizationConfig:
           f" embeddings{table_suffix}."
       )
 
+  @override
   def to_backend_config(self) -> dict[str, Any]:
     return {
         "absmax": {
@@ -1392,7 +1410,3 @@ class AbsmaxQuantizationConfig:
         }
     }
 
-
-# TODO(b/567708562): Remove this backward-compatible alias once callers migrate
-# to FixedQuantizationConfig.
-QuantizationConfig = FixedQuantizationConfig
