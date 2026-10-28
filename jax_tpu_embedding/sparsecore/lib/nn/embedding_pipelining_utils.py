@@ -30,6 +30,8 @@ from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.utils import utils
 import numpy as np
 
+
+# Type variables.
 # stubs for user defined types (internal only, users should not use these types)
 
 # Input to the pipeline stages (SC fwd, TC fwd/bwd, SC bwd)
@@ -64,89 +66,7 @@ _PlaceholderSharding: TypeAlias = jax.sharding.Sharding | layout.Format
 _InputLeaf: TypeAlias = jax.typing.ArrayLike | jax.ShapeDtypeStruct
 
 
-def _eval_shape(
-    fn: Callable[_P, _T],
-    *args: _P.args,
-    **kwargs: _P.kwargs,
-) -> _T:
-  """Similar to jax.eval_shape, but also returns the output shardings."""
-
-  jitted_fn = jax.jit(fn)
-  out = jitted_fn.eval_shape(*args, **kwargs)
-  sharding = jitted_fn.lower(*args, **kwargs).compile().output_shardings
-
-  return jax.tree.map(
-      lambda x, s: _replace_shape_dtype_struct(x, sharding=s),
-      out,
-      sharding,
-  )
-
-
-def _safe_copy(x: _T) -> _T:
-  """Safe copy of a JAX or NumPy array; passes through non-arrays."""
-  if isinstance(x, (jax.Array, np.ndarray)):
-    return cast(_T, jnp.copy(x))
-  return x
-
-
-def _replace_shape_dtype_struct(
-    obj: jax.ShapeDtypeStruct, **kwargs
-) -> jax.ShapeDtypeStruct:
-  """Replaces the attributes of a ShapeDtypeStruct with the given values."""
-  new_kwargs = {
-      'shape': obj.shape,
-      'dtype': obj.dtype,
-      'sharding': obj.sharding,
-      'weak_type': obj.weak_type,
-  }
-  new_kwargs.update(kwargs)
-  return jax.ShapeDtypeStruct(**new_kwargs)
-
-
-def _apply_sharding(sharding, shapes):
-  """Applies a sharding prefix tree to a ShapeDtypeStruct tree."""
-  if shapes is None:
-    return None
-  if sharding is None or isinstance(sharding, jax.sharding.Sharding):
-    return jax.tree.map(
-        lambda x: _replace_shape_dtype_struct(x, sharding=sharding), shapes
-    )
-  return jax.tree.map(
-      _apply_sharding, sharding, shapes, is_leaf=lambda x: x is not sharding
-  )
-
-
-def _create_output_arrays(spec: jax.ShapeDtypeStruct):
-  """Takes a spec and creates a zero array of the same sharding and shape."""
-  if (
-      jnp.dtype(spec) == jax.dtypes.float0
-      or spec.sharding is None
-      or not spec.shape
-      or spec.sharding.is_fully_replicated
-  ):
-    return jnp.zeros_like(spec)
-  local_arrays = []
-  local_indices_map = spec.sharding.addressable_devices_indices_map(spec.shape)
-  for local_device in spec.sharding.addressable_devices:
-    if local_device in local_indices_map:
-      local_slice = local_indices_map[local_device]
-
-      local_shape = []
-      for i, s in enumerate(local_slice):
-        if s.stop is None or s.start is None:
-          # Replicated dimension
-          local_shape.append(spec.shape[i])
-        else:
-          local_shape.append(s.stop - s.start)
-      local_data = jnp.zeros(local_shape, dtype=spec.dtype, device=local_device)
-      local_arrays.append(local_data)
-    else:
-      return jnp.zeros_like(spec)
-  return jax.make_array_from_single_device_arrays(
-      spec.shape, spec.sharding, local_arrays
-  )
-
-
+# Stage function protocols.
 # generic functions that user need to instantiate with their own input and
 # output types, along with train state and embedding variables. using a protocol
 # to use generics with callable
@@ -241,6 +161,7 @@ class ScBwdStageFun(
     ...
 
 
+# Pipeline state.
 class CurrentStepInput(Generic[_SparseInput, _DenseInput], struct.PyTreeNode):
   """Step i inputs."""
 
@@ -317,6 +238,49 @@ ShardedStepBeforeLastStepInput: TypeAlias = StepBeforeLastStepInput[
 ]
 
 
+def get_pipeline_state_sharding(
+    pipeline_state_cls: Callable[..., _PipelineStateT],
+    dense_input_sharding: _ShardingT,
+    sparse_input_sharding: jax.sharding.Sharding,
+    pipeline_output_sharding: _ShardingT,
+    tc_aux_sharding: _ShardingT,
+) -> _PipelineStateT:
+  """Get the sharding for the pipeline state.
+
+  Args:
+    pipeline_state_cls: The class of the pipeline state instantiated with user
+      type parameters.
+    dense_input_sharding: The sharding of the dense inputs.
+    sparse_input_sharding: The sharding of the sparse inputs.
+    pipeline_output_sharding: The sharding of the output from the TensorCore.
+    tc_aux_sharding: The sharding of the auxiliary data from the TensorCore.
+
+  Returns:
+    The sharding of the pipeline state.
+  """
+
+  sc_layout = utils.embedding_table_format_with_sharding(
+      sharding=sparse_input_sharding,
+  )
+  return pipeline_state_cls(
+      pipeline_step=None,
+      last_step_inputs=ShardedLastStepInput(
+          sparse_inputs=sparse_input_sharding,
+          embedding_activations=sc_layout,
+          dense_inputs=dense_input_sharding,
+          sc_fwd_aux=dense_input_sharding,
+      ),
+      step_before_last_step_inputs=ShardedStepBeforeLastStepInput(
+          sparse_inputs=sparse_input_sharding,
+          embedding_gradients=sc_layout,
+          tc_aux=tc_aux_sharding,
+      ),
+      placeholder_output=pipeline_output_sharding,
+      placeholder_tc_aux=tc_aux_sharding,
+  )
+
+
+# Step counting.
 def get_pipeline_train_steps(num_steps: int) -> int:
   """Get the number of pipeline train steps."""
   return num_steps + 2
@@ -338,6 +302,7 @@ def is_output_valid(pipeline_step: int, num_steps: int) -> bool:
   return 1 <= pipeline_step <= num_steps
 
 
+# Default SparseCore stages.
 NestedArray = embedding.Nested[jax.Array]
 NestedFeatureSpecs = embedding.Nested[embedding_spec.FeatureSpec]
 NestedEmbeddingVariables = Mapping[str, embedding.EmbeddingVariables]
@@ -461,211 +426,19 @@ def get_default_sc_bwd_function(
   return sc_bwd_default_function
 
 
-def get_pipeline_state_sharding(
-    pipeline_state_cls: Callable[..., _PipelineStateT],
-    dense_input_sharding: _ShardingT,
-    sparse_input_sharding: jax.sharding.Sharding,
-    pipeline_output_sharding: _ShardingT,
-    tc_aux_sharding: _ShardingT,
-) -> _PipelineStateT:
-  """Get the sharding for the pipeline state.
-
-  Args:
-    pipeline_state_cls: The class of the pipeline state instantiated with user
-      type parameters.
-    dense_input_sharding: The sharding of the dense inputs.
-    sparse_input_sharding: The sharding of the sparse inputs.
-    pipeline_output_sharding: The sharding of the output from the TensorCore.
-    tc_aux_sharding: The sharding of the auxiliary data from the TensorCore.
-
-  Returns:
-    The sharding of the pipeline state.
-  """
-
-  sc_layout = utils.embedding_table_format_with_sharding(
-      sharding=sparse_input_sharding,
-  )
-  return pipeline_state_cls(
-      pipeline_step=None,
-      last_step_inputs=ShardedLastStepInput(
-          sparse_inputs=sparse_input_sharding,
-          embedding_activations=sc_layout,
-          dense_inputs=dense_input_sharding,
-          sc_fwd_aux=dense_input_sharding,
-      ),
-      step_before_last_step_inputs=ShardedStepBeforeLastStepInput(
-          sparse_inputs=sparse_input_sharding,
-          embedding_gradients=sc_layout,
-          tc_aux=tc_aux_sharding,
-      ),
-      placeholder_output=pipeline_output_sharding,
-      placeholder_tc_aux=tc_aux_sharding,
-  )
-
-
-def _is_kept_input(sharding: _PlaceholderSharding, x: _InputLeaf) -> bool:
-  """Returns whether `_create_sharded_array` returns `x` itself.
-
-  Args:
-    sharding: The sharding of the placeholder.
-    x: An input, or its abstract value.
-
-  Returns:
-    True for a scalar, or for a fully replicated sharding. A layout format is
-    never fully replicated.
-  """
-  return jnp.ndim(x) == 0 or (
-      isinstance(sharding, jax.sharding.Sharding)
-      and sharding.is_fully_replicated
-  )
-
-
-# TODO(b/436649494): Try sharding the placeholder inputs implicitly.
-def _create_sharded_array(sharding, x):
-  """Returns zeros like `x` with `sharding`, or `x` if it need not be sharded.
-
-  Args:
-    sharding: The sharding or layout format of the placeholder.
-    x: An input, or the abstract value of a placeholder.
-  """
-  if _is_kept_input(sharding, x):
-    return x
-  num_devices = (
-      sharding.num_devices
-      if hasattr(sharding, 'num_devices')
-      else sharding.sharding.num_devices  # This is for type `Layout`.
-  )
-  return jax.make_array_from_callback(
-      x.shape,
-      sharding,
-      lambda index: jnp.zeros(
-          [x.shape[0] // num_devices, *x.shape[1:]],
-          dtype=x.dtype,
-      ),
-  )
-
-
-def _input_placeholder(
-    sharding: jax.sharding.Sharding | None, x: jax.typing.ArrayLike
-) -> jax.typing.ArrayLike:
-  """Returns the placeholder of the input `x`.
-
-  It is the concrete value of `_zeros_like_shape(x)` without a sharding, and of
-  `_create_sharded_array_shape(sharding, x)` with a sharding.
-
-  Args:
-    sharding: The sharding of the inputs, or None.
-    x: An input.
-  """
-  if sharding is None:
-    return jnp.zeros_like(x)
-  return _create_sharded_array(sharding, x)
-
-
-def _zeros_from_shape(spec: jax.ShapeDtypeStruct) -> jax.Array:
-  """Returns strongly typed zeros with the shape, dtype and format of `spec`.
-
-  Args:
-    spec: The abstract value of a placeholder that is not an input.
-  """
-  # `spec.sharding` drops the layout; `spec.format` keeps it.
-  if spec.format.layout is not None:
-    return _create_sharded_array(spec.format, spec)
-  return _create_output_arrays(spec)
-
-
-def get_initial_state(
-    pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
-    tc_train_state: _TcTrainState,
-    embedding_variables: _EmbeddingVariables,
-    sc_fwd_function: ScFwdStageFun[
-        _SparseInput, _EmbeddingActivations, _EmbeddingVariables, _ScFwdAux
-    ],
-    tc_function: TcStageFun[
-        _EmbeddingActivations,
-        _DenseInput,
-        _EmbeddingGradients,
-        _PipelineOutput,
-        _TcTrainState,
-        _ScFwdAux,
-        _TcAux,
-    ],
-    dense_input_sharding: jax.sharding.Sharding | None = None,
-    sparse_input_sharding: jax.sharding.Sharding | None = None,
-    pipeline_output_sharding: _ShardingT | None = None,
-) -> PipelineState[
-    _SparseInput,
-    _DenseInput,
-    _EmbeddingActivations,
-    _EmbeddingGradients,
-    _TcAux,
-    _ScFwdAux,
-    _PipelineOutput,
-]:
-  """Gets the initial pipeline state: the arrays of `get_initial_state_shapes`.
-
-  Args:
-    pipeline_input: Input to the sc_fwd, tc and sc_bwd for the current step.
-    tc_train_state: Training state for the TensorCore.
-    embedding_variables: Embedding variables for the SparseCore.
-    sc_fwd_function: SparseCore forward pass function.
-    tc_function: TensorCore forward/backward pass function.
-    dense_input_sharding: The sharding of the dense inputs.
-    sparse_input_sharding: The sharding of the sparse inputs.
-    pipeline_output_sharding: Optional sharding (or sharding prefix tree) of the
-      output from the TensorCore (`tc_function`). When provided, `tc_function`
-      is evaluated with `jax.eval_shape` instead of compiling the function to
-      infer output shardings.
-
-  Returns:
-    Initial pipeline state.
-  """
-  shapes = get_initial_state_shapes(
-      pipeline_input=pipeline_input,
-      tc_train_state=tc_train_state,
-      embedding_variables=embedding_variables,
-      sc_fwd_function=sc_fwd_function,
-      tc_function=tc_function,
-      dense_input_sharding=dense_input_sharding,
-      sparse_input_sharding=sparse_input_sharding,
-      pipeline_output_sharding=pipeline_output_sharding,
-  )
-
-  # The input placeholders are made from the inputs, because
-  # `_create_sharded_array` keeps some inputs. Each other placeholder is made
-  # from its abstract value only.
-  sparse_inputs = jax.tree.map(
-      functools.partial(_input_placeholder, sparse_input_sharding),
-      pipeline_input.sparse_inputs,
-  )
-  dense_inputs = jax.tree.map(
-      functools.partial(_input_placeholder, dense_input_sharding),
-      pipeline_input.dense_inputs,
-  )
-  map_to_zeros = functools.partial(jax.tree.map, _zeros_from_shape)
-  aux = map_to_zeros(shapes.placeholder_tc_aux)
-
-  # need a few copies for donation, as we reuse some inputs
-  return PipelineState(
-      pipeline_step=jnp.array(0),
-      last_step_inputs=LastStepInput(
-          sparse_inputs=sparse_inputs,
-          embedding_activations=map_to_zeros(
-              shapes.last_step_inputs.embedding_activations
-          ),
-          dense_inputs=dense_inputs,
-          sc_fwd_aux=map_to_zeros(shapes.last_step_inputs.sc_fwd_aux),
-      ),
-      step_before_last_step_inputs=StepBeforeLastStepInput(
-          sparse_inputs=jax.tree.map(_safe_copy, sparse_inputs),
-          embedding_gradients=map_to_zeros(
-              shapes.step_before_last_step_inputs.embedding_gradients
-          ),
-          tc_aux=aux,
-      ),
-      placeholder_output=map_to_zeros(shapes.placeholder_output),
-      placeholder_tc_aux=jax.tree.map(_safe_copy, aux),
-  )
+# Placeholders. Each concrete initializer is next to its abstract value.
+def _replace_shape_dtype_struct(
+    obj: jax.ShapeDtypeStruct, **kwargs
+) -> jax.ShapeDtypeStruct:
+  """Replaces the attributes of a ShapeDtypeStruct with the given values."""
+  new_kwargs = {
+      'shape': obj.shape,
+      'dtype': obj.dtype,
+      'sharding': obj.sharding,
+      'weak_type': obj.weak_type,
+  }
+  new_kwargs.update(kwargs)
+  return jax.ShapeDtypeStruct(**new_kwargs)
 
 
 def _as_shape_dtype_struct(x: _InputLeaf) -> jax.ShapeDtypeStruct:
@@ -694,6 +467,40 @@ def _as_shape_dtype_struct(x: _InputLeaf) -> jax.ShapeDtypeStruct:
   )
 
 
+def _is_kept_input(sharding: _PlaceholderSharding, x: _InputLeaf) -> bool:
+  """Returns whether `_create_sharded_array` returns `x` itself.
+
+  Args:
+    sharding: The sharding of the placeholder.
+    x: An input, or its abstract value.
+
+  Returns:
+    True for a scalar, or for a fully replicated sharding. A layout format is
+    never fully replicated.
+  """
+  return jnp.ndim(x) == 0 or (
+      isinstance(sharding, jax.sharding.Sharding)
+      and sharding.is_fully_replicated
+  )
+
+
+def _input_placeholder(
+    sharding: jax.sharding.Sharding | None, x: jax.typing.ArrayLike
+) -> jax.typing.ArrayLike:
+  """Returns the placeholder of the input `x`.
+
+  It is the concrete value of `_zeros_like_shape(x)` without a sharding, and of
+  `_create_sharded_array_shape(sharding, x)` with a sharding.
+
+  Args:
+    sharding: The sharding of the inputs, or None.
+    x: An input.
+  """
+  if sharding is None:
+    return jnp.zeros_like(x)
+  return _create_sharded_array(sharding, x)
+
+
 def _zeros_like_shape(x: _InputLeaf) -> jax.ShapeDtypeStruct:
   """Returns the abstract value of `jnp.zeros_like(x)`.
 
@@ -717,6 +524,30 @@ def _zeros_like_shape(x: _InputLeaf) -> jax.ShapeDtypeStruct:
   return value
 
 
+def _create_sharded_array(sharding, x):
+  """Returns zeros like `x` with `sharding`, or `x` if it need not be sharded.
+
+  Args:
+    sharding: The sharding or layout format of the placeholder.
+    x: An input, or the abstract value of a placeholder.
+  """
+  if _is_kept_input(sharding, x):
+    return x
+  num_devices = (
+      sharding.num_devices
+      if hasattr(sharding, 'num_devices')
+      else sharding.sharding.num_devices  # This is for type `Layout`.
+  )
+  return jax.make_array_from_callback(
+      x.shape,
+      sharding,
+      lambda index: jnp.zeros(
+          [x.shape[0] // num_devices, *x.shape[1:]],
+          dtype=x.dtype,
+      ),
+  )
+
+
 def _create_sharded_array_shape(
     sharding: _PlaceholderSharding, x: _InputLeaf
 ) -> jax.ShapeDtypeStruct:
@@ -736,6 +567,89 @@ def _create_sharded_array_shape(
   return jax.ShapeDtypeStruct(value.shape, value.dtype, sharding=sharding)
 
 
+def _zeros_from_shape(spec: jax.ShapeDtypeStruct) -> jax.Array:
+  """Returns strongly typed zeros with the shape, dtype and format of `spec`.
+
+  Args:
+    spec: The abstract value of a placeholder that is not an input.
+  """
+  # `spec.sharding` drops the layout; `spec.format` keeps it.
+  if spec.format.layout is not None:
+    return _create_sharded_array(spec.format, spec)
+  return _create_output_arrays(spec)
+
+
+def _create_output_arrays(spec: jax.ShapeDtypeStruct):
+  """Takes a spec and creates a zero array of the same sharding and shape."""
+  if (
+      jnp.dtype(spec) == jax.dtypes.float0
+      or spec.sharding is None
+      or not spec.shape
+      or spec.sharding.is_fully_replicated
+  ):
+    return jnp.zeros_like(spec)
+  local_arrays = []
+  local_indices_map = spec.sharding.addressable_devices_indices_map(spec.shape)
+  for local_device in spec.sharding.addressable_devices:
+    if local_device in local_indices_map:
+      local_slice = local_indices_map[local_device]
+
+      local_shape = []
+      for i, s in enumerate(local_slice):
+        if s.stop is None or s.start is None:
+          # Replicated dimension
+          local_shape.append(spec.shape[i])
+        else:
+          local_shape.append(s.stop - s.start)
+      local_data = jnp.zeros(local_shape, dtype=spec.dtype, device=local_device)
+      local_arrays.append(local_data)
+    else:
+      return jnp.zeros_like(spec)
+  return jax.make_array_from_single_device_arrays(
+      spec.shape, spec.sharding, local_arrays
+  )
+
+
+def _safe_copy(x: _T) -> _T:
+  """Safe copy of a JAX or NumPy array; passes through non-arrays."""
+  if isinstance(x, (jax.Array, np.ndarray)):
+    return cast(_T, jnp.copy(x))
+  return x
+
+
+# Shape evaluation.
+def _eval_shape(
+    fn: Callable[_P, _T],
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _T:
+  """Similar to jax.eval_shape, but also returns the output shardings."""
+
+  jitted_fn = jax.jit(fn)
+  out = jitted_fn.eval_shape(*args, **kwargs)
+  sharding = jitted_fn.lower(*args, **kwargs).compile().output_shardings
+
+  return jax.tree.map(
+      lambda x, s: _replace_shape_dtype_struct(x, sharding=s),
+      out,
+      sharding,
+  )
+
+
+def _apply_sharding(sharding, shapes):
+  """Applies a sharding prefix tree to a ShapeDtypeStruct tree."""
+  if shapes is None:
+    return None
+  if sharding is None or isinstance(sharding, jax.sharding.Sharding):
+    return jax.tree.map(
+        lambda x: _replace_shape_dtype_struct(x, sharding=sharding), shapes
+    )
+  return jax.tree.map(
+      _apply_sharding, sharding, shapes, is_leaf=lambda x: x is not sharding
+  )
+
+
+# Initial state: get_initial_state materializes get_initial_state_shapes.
 def get_initial_state_shapes(
     pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
     tc_train_state: _TcTrainState,
@@ -845,6 +759,101 @@ def get_initial_state_shapes(
   )
 
 
+def get_initial_state(
+    pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
+    tc_train_state: _TcTrainState,
+    embedding_variables: _EmbeddingVariables,
+    sc_fwd_function: ScFwdStageFun[
+        _SparseInput, _EmbeddingActivations, _EmbeddingVariables, _ScFwdAux
+    ],
+    tc_function: TcStageFun[
+        _EmbeddingActivations,
+        _DenseInput,
+        _EmbeddingGradients,
+        _PipelineOutput,
+        _TcTrainState,
+        _ScFwdAux,
+        _TcAux,
+    ],
+    dense_input_sharding: jax.sharding.Sharding | None = None,
+    sparse_input_sharding: jax.sharding.Sharding | None = None,
+    pipeline_output_sharding: _ShardingT | None = None,
+) -> PipelineState[
+    _SparseInput,
+    _DenseInput,
+    _EmbeddingActivations,
+    _EmbeddingGradients,
+    _TcAux,
+    _ScFwdAux,
+    _PipelineOutput,
+]:
+  """Gets the initial pipeline state: the arrays of `get_initial_state_shapes`.
+
+  Args:
+    pipeline_input: Input to the sc_fwd, tc and sc_bwd for the current step.
+    tc_train_state: Training state for the TensorCore.
+    embedding_variables: Embedding variables for the SparseCore.
+    sc_fwd_function: SparseCore forward pass function.
+    tc_function: TensorCore forward/backward pass function.
+    dense_input_sharding: The sharding of the dense inputs.
+    sparse_input_sharding: The sharding of the sparse inputs.
+    pipeline_output_sharding: Optional sharding (or sharding prefix tree) of the
+      output from the TensorCore (`tc_function`). When provided, `tc_function`
+      is evaluated with `jax.eval_shape` instead of compiling the function to
+      infer output shardings.
+
+  Returns:
+    Initial pipeline state.
+  """
+  shapes = get_initial_state_shapes(
+      pipeline_input=pipeline_input,
+      tc_train_state=tc_train_state,
+      embedding_variables=embedding_variables,
+      sc_fwd_function=sc_fwd_function,
+      tc_function=tc_function,
+      dense_input_sharding=dense_input_sharding,
+      sparse_input_sharding=sparse_input_sharding,
+      pipeline_output_sharding=pipeline_output_sharding,
+  )
+
+  # The input placeholders are made from the inputs, because
+  # `_create_sharded_array` keeps some inputs. Each other placeholder is made
+  # from its abstract value only.
+  sparse_inputs = jax.tree.map(
+      functools.partial(_input_placeholder, sparse_input_sharding),
+      pipeline_input.sparse_inputs,
+  )
+  dense_inputs = jax.tree.map(
+      functools.partial(_input_placeholder, dense_input_sharding),
+      pipeline_input.dense_inputs,
+  )
+  map_to_zeros = functools.partial(jax.tree.map, _zeros_from_shape)
+  aux = map_to_zeros(shapes.placeholder_tc_aux)
+
+  # need a few copies for donation, as we reuse some inputs
+  return PipelineState(
+      pipeline_step=jnp.array(0),
+      last_step_inputs=LastStepInput(
+          sparse_inputs=sparse_inputs,
+          embedding_activations=map_to_zeros(
+              shapes.last_step_inputs.embedding_activations
+          ),
+          dense_inputs=dense_inputs,
+          sc_fwd_aux=map_to_zeros(shapes.last_step_inputs.sc_fwd_aux),
+      ),
+      step_before_last_step_inputs=StepBeforeLastStepInput(
+          sparse_inputs=jax.tree.map(_safe_copy, sparse_inputs),
+          embedding_gradients=map_to_zeros(
+              shapes.step_before_last_step_inputs.embedding_gradients
+          ),
+          tc_aux=aux,
+      ),
+      placeholder_output=map_to_zeros(shapes.placeholder_output),
+      placeholder_tc_aux=jax.tree.map(_safe_copy, aux),
+  )
+
+
+# Pipelined step.
 def step(
     # input
     pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
