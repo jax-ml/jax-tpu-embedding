@@ -19,6 +19,7 @@ from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
+from jax.experimental import layout
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_pipelining_utils
 import numpy as np
@@ -26,6 +27,72 @@ import numpy as np
 # The `get_initial_state_shapes` tests shard over a mesh. With one device, every
 # sharding is fully replicated.
 jax.config.update("jax_num_cpu_devices", 4)
+
+
+def _sc_fwd_fn(sparse_inputs, embedding_variables):
+  del embedding_variables
+  activations = sparse_inputs * 2
+  # A weakly typed aux, as from a Python scalar.
+  return activations, {"weak": jnp.asarray(0.5), "sum": activations.sum(1)}
+
+
+def _tc_fn(embedding_activations, dense_inputs, train_state, sc_fwd_aux=None):
+  del sc_fwd_aux
+  loss = jnp.sum(embedding_activations @ train_state["params"].T)
+  output = {
+      "loss": loss + dense_inputs["python_int"],
+      "weak": train_state["step"] * 1.0,
+      "grads": train_state,
+  }
+  # The trainer passes the weakly typed train step as the TensorCore aux.
+  return embedding_activations, output, train_state, train_state["step"]
+
+
+def _get_initial_state_kwargs(sharded):
+  """Returns the arguments of `get_initial_state` with each kind of input."""
+  mesh = jax.sharding.Mesh(np.array(jax.devices()), ("x",))
+  data_sharding = jax.sharding.NamedSharding(
+      mesh, jax.sharding.PartitionSpec("x")
+  )
+  replicated = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
+  batch = 2 * len(jax.devices())
+  pipeline_input = embedding_pipelining_utils.CurrentStepInput(
+      sparse_inputs=jax.device_put(
+          jnp.zeros((batch, 8), jnp.float32), data_sharding
+      ),
+      dense_inputs={
+          "committed": jax.device_put(
+              jnp.zeros((batch, 16), jnp.float32), data_sharding
+          ),
+          "committed_weak_scalar": jax.device_put(
+              jnp.asarray(1.0), replicated
+          ),
+          "uncommitted_scalar": jnp.zeros((), jnp.float32),
+          "uncommitted_weak_scalar": jnp.asarray(2.0),
+          "uncommitted_weak_vector": jax.lax.broadcast(
+              jnp.asarray(1.0), (batch,)
+          ),
+          "numpy": np.zeros((batch, 4), np.int32),
+          "python_int": 3,
+          "python_float": 1.0,
+      },
+  )
+  input_sharding = data_sharding if sharded else None
+  return dict(
+      pipeline_input=pipeline_input,
+      tc_train_state={
+          "params": jax.device_put(
+              jnp.zeros((16, 8), jnp.float32), replicated
+          ),
+          # The trainer step is weakly typed.
+          "step": jax.device_put(jnp.asarray(0), replicated),
+      },
+      embedding_variables={"table": jnp.zeros((100, 8), jnp.float32)},
+      sc_fwd_function=_sc_fwd_fn,
+      tc_function=_tc_fn,
+      dense_input_sharding=input_sharding,
+      sparse_input_sharding=input_sharding,
+  )
 
 
 class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
@@ -107,60 +174,9 @@ class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
 
   @parameterized.named_parameters(("unsharded", False), ("sharded", True))
   def test_get_initial_state_shapes_match_arrays(self, sharded):
-    mesh = jax.sharding.Mesh(np.array(jax.devices()), ("x",))
-    data_sharding = jax.sharding.NamedSharding(
-        mesh, jax.sharding.PartitionSpec("x")
-    )
-    replicated = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
-    batch = 2 * len(jax.devices())
-    pipeline_input = embedding_pipelining_utils.CurrentStepInput(
-        sparse_inputs=jax.device_put(
-            jnp.zeros((batch, 8), jnp.float32), data_sharding
-        ),
-        dense_inputs={
-            "committed": jax.device_put(
-                jnp.zeros((batch, 16), jnp.float32), data_sharding
-            ),
-            "committed_weak": jax.device_put(jnp.asarray(1.0), replicated),
-            "uncommitted_scalar": jnp.zeros((), jnp.float32),
-            "numpy": np.zeros((batch, 4), np.int32),
-            "python_int": 3,
-            "python_float": 1.0,
-        },
-    )
-    tc_train_state = {
-        "params": jax.device_put(jnp.zeros((16, 8), jnp.float32), replicated),
-        # The trainer step is weakly typed.
-        "step": jax.device_put(jnp.asarray(0), replicated),
-    }
-
-    def sc_fwd_fn(sparse_inputs, embedding_variables):
-      del embedding_variables
-      return sparse_inputs * 2, jnp.zeros((), jnp.float32)
-
-    def tc_fn(
-        embedding_activations, dense_inputs, train_state, sc_fwd_aux=None
-    ):
-      del sc_fwd_aux
-      loss = jnp.sum(embedding_activations @ train_state["params"].T)
-      out = {"loss": loss + dense_inputs["python_int"], "grads": train_state}
-      return embedding_activations, out, train_state, train_state["step"]
-
-    input_sharding = data_sharding if sharded else None
-    get_state = functools.partial(
-        embedding_pipelining_utils.get_initial_state,
-        pipeline_input=pipeline_input,
-        tc_train_state=tc_train_state,
-        embedding_variables={"table": jnp.zeros((100, 8), jnp.float32)},
-        sc_fwd_function=sc_fwd_fn,
-        tc_function=tc_fn,
-        dense_input_sharding=input_sharding,
-        sparse_input_sharding=input_sharding,
-    )
-    state = get_state()
-    shapes = embedding_pipelining_utils.get_initial_state_shapes(
-        *get_state.args, **get_state.keywords
-    )
+    kwargs = _get_initial_state_kwargs(sharded)
+    state = embedding_pipelining_utils.get_initial_state(**kwargs)
+    shapes = embedding_pipelining_utils.get_initial_state_shapes(**kwargs)
 
     def assert_matches(path, value, spec):
       aval = jax.typeof(value)
@@ -177,8 +193,46 @@ class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
         self.assertFalse(value.committed, msg=jax.tree_util.keystr(path))
 
     jax.tree.map_with_path(assert_matches, state, shapes)
-    # The weak train step does not make the placeholders weak.
-    self.assertFalse(shapes.placeholder_tc_aux.weak_type)
+
+  @parameterized.named_parameters(("unsharded", False), ("sharded", True))
+  def test_get_initial_state_weak_types(self, sharded):
+    # A placeholder must have the weak type of the value that it stands for, so
+    # that the step does not compile again for the first real input.
+    kwargs = _get_initial_state_kwargs(sharded)
+    state = embedding_pipelining_utils.get_initial_state(**kwargs)
+
+    weak = {
+        jax.tree_util.keystr(path)
+        for path, x in jax.tree_util.tree_leaves_with_path(state)
+        if isinstance(x, jax.Array) and jax.typeof(x).weak_type
+    }
+    expected = {
+        ".pipeline_step",
+        ".last_step_inputs.dense_inputs['committed_weak_scalar']",
+        ".last_step_inputs.dense_inputs['uncommitted_weak_scalar']",
+    }
+    if not sharded:
+      # `jnp.zeros_like` keeps the weak type, also of a Python scalar.
+      expected |= {
+          ".last_step_inputs.dense_inputs['uncommitted_weak_vector']",
+          ".last_step_inputs.dense_inputs['python_int']",
+          ".last_step_inputs.dense_inputs['python_float']",
+      }
+    # The placeholders that are not inputs are strongly typed, also when the
+    # SparseCore or TensorCore function returns weakly typed values.
+    self.assertEqual(weak, expected)
+    if sharded:
+      # A scalar input is its own placeholder.
+      dense_inputs = kwargs["pipeline_input"].dense_inputs
+      for name in (
+          "committed_weak_scalar",
+          "uncommitted_weak_scalar",
+          "python_int",
+          "python_float",
+      ):
+        self.assertIs(
+            state.last_step_inputs.dense_inputs[name], dense_inputs[name]
+        )
 
   def test_get_initial_state_shapes_from_abstract_inputs(self):
     pipeline_input = embedding_pipelining_utils.CurrentStepInput(
@@ -267,6 +321,36 @@ class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
     self.assertEqual(state.placeholder_output["loss"].shape, ())
     self.assertEqual(state.placeholder_output["grads"]["w"].shape, (4, 8))
     self.assertIsNone(state.placeholder_output["unused"])
+
+  def test_zeros_from_shape_with_layout_format(self):
+    # On TPU, the embedding activations and gradients have the tiled layout of
+    # the embedding table. A CPU test cannot make that layout, so it uses a
+    # column-major layout, which is not the default and is lost if the format is
+    # dropped. Other backends tile every array, so they cannot make it.
+    if jax.default_backend() != "cpu":
+      self.skipTest("The test layout is valid only on CPU.")
+    mesh = jax.sharding.Mesh(np.array(jax.devices()), ("x",))
+    sharding = jax.sharding.NamedSharding(
+        mesh, jax.sharding.PartitionSpec("x")
+    )
+    device_layout = layout.Layout(major_to_minor=(1, 0), tiling=())
+    spec = jax.ShapeDtypeStruct(
+        (2 * len(jax.devices()), 8),
+        jnp.float32,
+        sharding=layout.Format(device_layout, sharding),
+    )
+
+    zeros = embedding_pipelining_utils._zeros_from_shape(spec)
+
+    self.assertEqual(zeros.shape, spec.shape)
+    self.assertEqual(zeros.dtype, spec.dtype)
+    self.assertFalse(jax.typeof(zeros).weak_type)
+    self.assertEqual(
+        zeros.format,  # pyrefly: ignore[missing-attribute]
+        spec.format,
+    )
+    np.testing.assert_array_equal(zeros, np.zeros(spec.shape, np.float32))
+
 
 if __name__ == "__main__":
   absltest.main()

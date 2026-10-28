@@ -258,6 +258,7 @@ pytype_strict_contrib_test(
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("jax"),
+        pypi_requirement("jax/experimental:layout"),
         pypi_requirement("numpy"),
     ],
 )
