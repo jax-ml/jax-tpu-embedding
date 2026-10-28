@@ -795,12 +795,6 @@ class OptimizerSpecTest(absltest.TestCase):
         {"fixed": {"min_value": 0.0, "max_value": 1.0, "num_buckets": 256}},
     )
 
-  def test_quantization_config_alias(self):
-    self.assertIs(
-        embedding_spec.QuantizationConfig,
-        embedding_spec.FixedQuantizationConfig,
-    )
-
   def test_fixed_quantization_config_spec_validation(self):
     with self.assertRaises(ValueError):
       embedding_spec.FixedQuantizationConfig(
