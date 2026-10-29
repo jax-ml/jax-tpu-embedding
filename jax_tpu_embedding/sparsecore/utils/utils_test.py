@@ -64,6 +64,18 @@ class UtilsTest(parameterized.TestCase):
     unsharded = utils.unshard_emb_table(sharded, num_sc_per_device)
     np.testing.assert_array_equal(unsharded, table)
 
+  @parameterized.parameters(1, 2, 4)
+  def test_is_valid_num_sparsecores_per_device(self, num_sc_per_device: int):
+    self.assertTrue(
+        utils.is_valid_num_sparsecores_per_device(num_sc_per_device)
+    )
+
+  @parameterized.parameters(-2, 0, 3, 5, 8)
+  def test_is_invalid_num_sparsecores_per_device(self, num_sc_per_device: int):
+    self.assertFalse(
+        utils.is_valid_num_sparsecores_per_device(num_sc_per_device)
+    )
+
   @parameterized.named_parameters(
       ('single_chip_baseline', 512, 1, 4, 1.0, 0.33),
       ('four_chips_multi_hot', 4096, 4, 4, 32.0, None),
