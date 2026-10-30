@@ -263,7 +263,8 @@ def _get_num_sc_per_device(num_sc_per_device: int | None) -> int:
 
   Args:
     num_sc_per_device: The number of sparse cores per device. If `None`, it will
-      be set to the number of sparse cores on the current host machine.
+      be set to the number of sparse cores on the current host machine. A device
+      may use only a subset of its sparse cores for embeddings.
 
   Returns:
     The number of sparse cores per device.
@@ -273,7 +274,7 @@ def _get_num_sc_per_device(num_sc_per_device: int | None) -> int:
   """
   if num_sc_per_device is None:
     return utils.num_sparsecores_per_device()
-  elif num_sc_per_device not in utils.NUM_SC_PER_DEVICE_MAP.values():
+  elif not utils.is_valid_num_sparsecores_per_device(num_sc_per_device):
     raise ValueError(f"Invalid num_sc_per_device: {num_sc_per_device}")
   return num_sc_per_device
 
