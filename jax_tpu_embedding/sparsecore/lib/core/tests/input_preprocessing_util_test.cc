@@ -1224,18 +1224,18 @@ TEST(InputPreprocessingUtilTest, GetRowPointersSizeTpuV6e) {
   EXPECT_EQ(v6e_opts.GetRowPointersSizePerDevice(), 16);
 }
 
-TEST(InputPreprocessingUtilTest, GetRowPointersSizeTpuV7x) {
+TEST(InputPreprocessingUtilTest, GetRowPointersSizeTpu7x) {
   // TPU7x (2 SCs per device, SIMD width 16): 1 chip -> 16 per bucket, 32 per
   // device.
-  PreprocessSparseDenseMatmulInputOptions v7x_opts{
+  PreprocessSparseDenseMatmulInputOptions tpu7x_opts{
       .local_device_count = 1,
       .global_device_count = 1,
       .num_sc_per_device = 2,
       .sc_simd_width = 16,
       .hbm_word_size_in_4b = 8,
   };
-  EXPECT_EQ(v7x_opts.GetRowPointersSizePerBucket(), 16);
-  EXPECT_EQ(v7x_opts.GetRowPointersSizePerDevice(), 32);
+  EXPECT_EQ(tpu7x_opts.GetRowPointersSizePerBucket(), 16);
+  EXPECT_EQ(tpu7x_opts.GetRowPointersSizePerDevice(), 32);
 }
 
 TEST(InputPreprocessingUtilTest, ValidateOptionsValidHbmWordSizeIn4b) {

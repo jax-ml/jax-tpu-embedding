@@ -27,13 +27,14 @@ _ArrayType = typing.TypeVar('_ArrayType', bound=jax.typing.ArrayLike)
 # The device kind names (keys) must align with the external names mapped in
 # https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#versions.
 # The SparseCore counts (values) should match the JAX TPU info in
-# https://github.com/jax-ml/jax/blob/main/jax/_src/pallas/mosaic/tpu_info.py.
+# https://github.com/jax-ml/jax/blob/main/jax/_src/tpu_info.py.
 NUM_SC_PER_DEVICE_MAP = {
     'TPU v5': 4,
     'TPU v5p': 4,  # Alias for 'TPU v5'.
     'TPU v6e': 2,  # Trillium.
     'TPU v6 lite': 2,  # Alias for 'TPU v6e'.
     'TPU7x': 2,  # Ironwood. Megacore is disabled.
+    'TPU7': 2,  # Alias for 'TPU7x'.
 }
 
 SC_SIMD_WIDTH_MAP = {
@@ -42,6 +43,7 @@ SC_SIMD_WIDTH_MAP = {
     'TPU v6e': 8,  # Trillium.
     'TPU v6 lite': 8,  # Alias for 'TPU v6e'.
     'TPU7x': 16,  # Ironwood.
+    'TPU7': 16,  # Alias for 'TPU7x'.
 }
 
 HBM_WORD_SIZE_IN_4B_MAP = {
@@ -50,6 +52,7 @@ HBM_WORD_SIZE_IN_4B_MAP = {
     'TPU v6e': 8,  # Trillium.
     'TPU v6 lite': 8,  # Alias for 'TPU v6e'.
     'TPU7x': 8,  # Ironwood.
+    'TPU7': 8,  # Alias for 'TPU7x'.
 }
 
 
@@ -287,8 +290,8 @@ def estimate_preprocessing_parameters(
   Args:
     global_batch_size: Total batch size across all devices.
     global_device_count: Number of devices (chips) in the mesh.
-    num_sc_per_device: Number of SparseCores per device (e.g. 4 for v5e/v5p, 2
-      for v6e).
+    num_sc_per_device: Number of SparseCores per device (e.g. 4 for TPU v5p, 2
+      for TPU v6e and TPU7x).
     valency: Total average embedding lookups per sample across all stacked
       features.
     hot_shard_fraction: Assumed fraction of lookups concentrated on the hottest
