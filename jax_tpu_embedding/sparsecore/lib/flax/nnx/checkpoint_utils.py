@@ -44,7 +44,7 @@ class TargetTopology(typing.NamedTuple):
     num_global_devices: Total number of global devices (chips) in the target
       topology.
     num_sc_per_device: Number of SparseCores per device in the target topology.
-    device_kind: Optional TPU device kind (e.g. 'TPU v4', 'TPU v5') for
+    device_kind: Optional TPU device kind (e.g. 'TPU v5p', 'TPU v6e') for
       debugging.
   """
 

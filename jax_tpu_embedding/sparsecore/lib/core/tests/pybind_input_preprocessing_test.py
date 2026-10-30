@@ -2035,7 +2035,7 @@ class PybindBufferSizeTest(parameterized.TestCase):
   @parameterized.named_parameters(
       ("tpu_v5p", 4, 8, 32),
       ("tpu_v6e", 2, 8, 16),
-      ("tpu_v7x", 2, 16, 32),
+      ("tpu7x", 2, 16, 32),
   )
   def test_compute_row_pointers_size(
       self, num_sc_per_device, sc_simd_width, expected_size

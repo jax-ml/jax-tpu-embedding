@@ -18,39 +18,26 @@ import typing
 
 import einops
 import jax
+from jax._src import tpu_info
 from jax.experimental import layout
 
 Layout = layout.Layout
 
 _ArrayType = typing.TypeVar('_ArrayType', bound=jax.typing.ArrayLike)
 
-# The device kind names (keys) must align with the external names mapped in
-# https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#versions.
-# The SparseCore counts (values) should match the JAX TPU info in
-# https://github.com/jax-ml/jax/blob/main/jax/_src/pallas/mosaic/tpu_info.py.
-NUM_SC_PER_DEVICE_MAP = {
-    'TPU v5': 4,
-    'TPU v5p': 4,  # Alias for 'TPU v5'.
-    'TPU v6e': 2,  # Trillium.
-    'TPU v6 lite': 2,  # Alias for 'TPU v6e'.
-    'TPU7x': 2,  # Ironwood. Megacore is disabled.
-}
-
-SC_SIMD_WIDTH_MAP = {
-    'TPU v5': 8,
-    'TPU v5p': 8,  # Alias for 'TPU v5'.
-    'TPU v6e': 8,  # Trillium.
-    'TPU v6 lite': 8,  # Alias for 'TPU v6e'.
-    'TPU7x': 16,  # Ironwood.
-}
-
-HBM_WORD_SIZE_IN_4B_MAP = {
-    'TPU v5': 8,
-    'TPU v5p': 8,  # Alias for 'TPU v5'.
-    'TPU v6e': 8,  # Trillium.
-    'TPU v6 lite': 8,  # Alias for 'TPU v6e'.
-    'TPU7x': 8,  # Ironwood.
-}
+_SPARSECORE_INFOS: tuple[tpu_info.SparseCoreInfo, ...] = tuple(
+    sc_info
+    for chip in tpu_info.ChipVersion
+    if (sc_info := tpu_info.get_tpu_info_for_chip(chip, 1).sparse_core)
+    is not None
+)
+_MAX_NUM_SC_PER_DEVICE: int = max(sc.num_cores for sc in _SPARSECORE_INFOS)
+_VALID_SC_SIMD_WIDTHS: frozenset[int] = frozenset(
+    sc.num_lanes for sc in _SPARSECORE_INFOS
+)
+_VALID_HBM_WORD_SIZES_IN_4B: frozenset[int] = frozenset(
+    sc.dma_granule_size_bytes // 4 for sc in _SPARSECORE_INFOS
+)
 
 
 class DeviceLike(typing.Protocol):
@@ -60,6 +47,29 @@ class DeviceLike(typing.Protocol):
 
 
 MeshLike: typing.TypeAlias = jax.sharding.Mesh | jax.sharding.AbstractMesh
+
+
+def _get_sparsecore_info(
+    device: DeviceLike | None = None,
+) -> tpu_info.SparseCoreInfo:
+  """Returns SparseCore hardware info for a device (or the default device)."""
+  target_device = device or jax.devices()[0]
+
+  if not hasattr(target_device, 'device_kind'):
+    raise ValueError(
+        f'Cannot determine device kind for device: {target_device}'
+    )
+
+  device_kind = target_device.device_kind
+  chip_version = tpu_info.chip_version_from_device_kind(device_kind)
+  if chip_version is not None:
+    sc_info = tpu_info.get_tpu_info_for_chip(chip_version, 1).sparse_core
+    if sc_info is not None:
+      return sc_info
+
+  raise ValueError(
+      f'SparseCore is not supported on device kind: {device_kind}.'
+  )
 
 
 def num_sparsecores_per_device(
@@ -77,21 +87,7 @@ def num_sparsecores_per_device(
   Raises:
     ValueError: if the number of sparsecores cannot be determined.
   """
-  target_device = device or jax.devices()[0]
-
-  if not hasattr(target_device, 'device_kind'):
-    raise ValueError(
-        f'Cannot determine device kind for device: {target_device}'
-    )
-
-  device_kind = target_device.device_kind
-  if device_kind not in NUM_SC_PER_DEVICE_MAP:
-    raise ValueError(
-        f'Unknown sparsecore count for device kind: {device_kind}. Known'
-        f' device kinds: {NUM_SC_PER_DEVICE_MAP.keys()}'
-    )
-
-  return NUM_SC_PER_DEVICE_MAP[device_kind]
+  return _get_sparsecore_info(device).num_cores
 
 
 def is_valid_num_sparsecores_per_device(num_sc_per_device: int) -> bool:
@@ -110,7 +106,7 @@ def is_valid_num_sparsecores_per_device(num_sc_per_device: int) -> bool:
     True if `num_sc_per_device` is a valid number of sparsecores per device.
   """
   return (
-      0 < num_sc_per_device <= max(NUM_SC_PER_DEVICE_MAP.values())
+      0 < num_sc_per_device <= _MAX_NUM_SC_PER_DEVICE
       and num_sc_per_device & (num_sc_per_device - 1) == 0
   )
 
@@ -130,21 +126,12 @@ def sparsecore_simd_width(
   Raises:
     ValueError: if the SparseCore SIMD width cannot be determined.
   """
-  target_device = device or jax.devices()[0]
+  return _get_sparsecore_info(device).num_lanes
 
-  if not hasattr(target_device, 'device_kind'):
-    raise ValueError(
-        f'Cannot determine device kind for device: {target_device}'
-    )
 
-  device_kind = target_device.device_kind
-  if device_kind not in SC_SIMD_WIDTH_MAP:
-    raise ValueError(
-        f'Unknown sparsecore SIMD width for device kind: {device_kind}. Known'
-        f' device kinds: {SC_SIMD_WIDTH_MAP.keys()}'
-    )
-
-  return SC_SIMD_WIDTH_MAP[device_kind]
+def is_valid_sparsecore_simd_width(sc_simd_width: int) -> bool:
+  """Returns whether `sc_simd_width` is a valid SparseCore SIMD width."""
+  return sc_simd_width in _VALID_SC_SIMD_WIDTHS
 
 
 def hbm_word_size_in_4b(
@@ -162,21 +149,12 @@ def hbm_word_size_in_4b(
   Raises:
     ValueError: if the HBM word size in 4-byte words cannot be determined.
   """
-  target_device = device or jax.devices()[0]
+  return _get_sparsecore_info(device).dma_granule_size_bytes // 4
 
-  if not hasattr(target_device, 'device_kind'):
-    raise ValueError(
-        f'Cannot determine device kind for device: {target_device}'
-    )
 
-  device_kind = target_device.device_kind
-  if device_kind not in HBM_WORD_SIZE_IN_4B_MAP:
-    raise ValueError(
-        f'Unknown HBM word size in 4b for device kind: {device_kind}. Known'
-        f' device kinds: {HBM_WORD_SIZE_IN_4B_MAP.keys()}'
-    )
-
-  return HBM_WORD_SIZE_IN_4B_MAP[device_kind]
+def is_valid_hbm_word_size_in_4b(hbm_word_size_in_4b_val: int) -> bool:
+  """Returns whether `hbm_word_size_in_4b_val` is a valid HBM word size."""
+  return hbm_word_size_in_4b_val in _VALID_HBM_WORD_SIZES_IN_4B
 
 
 sparsecore_hbm_word_size_in_4b = hbm_word_size_in_4b
@@ -287,8 +265,8 @@ def estimate_preprocessing_parameters(
   Args:
     global_batch_size: Total batch size across all devices.
     global_device_count: Number of devices (chips) in the mesh.
-    num_sc_per_device: Number of SparseCores per device (e.g. 4 for v5e/v5p, 2
-      for v6e).
+    num_sc_per_device: Number of SparseCores per device (e.g. 4 for TPU v5p, 2
+      for TPU v6e and TPU7x).
     valency: Total average embedding lookups per sample across all stacked
       features.
     hot_shard_fraction: Assumed fraction of lookups concentrated on the hottest
