@@ -2067,13 +2067,16 @@ TEST(MegacoreCsrTest, DropsIdsWhenBufferSizeExceeded) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.push_back(CreateInputBatchFromSamples({sample_0, sample_1}));
 
+  // Keep partition limits above observed IDs so only buffer capacity is
+  // exceeded (and to avoid triggering the process-wide LOG_EVERY_N_SEC warning
+  // in LogIfDeviceMinibatchingRequired).
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables(
           {{"megacore_table",
             {FeatureMetadataInStack(
                 /*name=*/"feature_0", /*feature_index=*/0,
-                /*max_ids_per_partition=*/64,
-                /*max_unique_ids_per_partition=*/64,
+                /*max_ids_per_partition=*/256,
+                /*max_unique_ids_per_partition=*/256,
                 /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
                 /*batch_size=*/2,
                 /*suggested_coo_buffer_size_per_device=*/16, RowCombiner::kSum,
@@ -2155,13 +2158,16 @@ TEST(MegacoreCsrTest, DropsIdsMidMergeAcrossLocalScs) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.push_back(CreateInputBatchFromSamples(samples));
 
+  // Keep partition limits above observed IDs so only buffer capacity is
+  // exceeded (and to avoid triggering the process-wide LOG_EVERY_N_SEC warning
+  // in LogIfDeviceMinibatchingRequired).
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables(
           {{"megacore_table",
             {FeatureMetadataInStack(
                 /*name=*/"feature_0", /*feature_index=*/0,
-                /*max_ids_per_partition=*/64,
-                /*max_unique_ids_per_partition=*/64,
+                /*max_ids_per_partition=*/256,
+                /*max_unique_ids_per_partition=*/256,
                 /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
                 /*batch_size=*/4,
                 /*suggested_coo_buffer_size_per_device=*/16, RowCombiner::kSum,
