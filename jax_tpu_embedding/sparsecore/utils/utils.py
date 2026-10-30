@@ -94,6 +94,27 @@ def num_sparsecores_per_device(
   return NUM_SC_PER_DEVICE_MAP[device_kind]
 
 
+def is_valid_num_sparsecores_per_device(num_sc_per_device: int) -> bool:
+  """Returns whether a device can use `num_sc_per_device` sparsecores.
+
+  A device may use only a subset of its sparsecores for embeddings, e.g. to
+  leave the remaining sparsecores available for other work. Therefore, any power
+  of two up to the largest number of sparsecores per device is valid. Note that
+  the compiler must then be configured to run the embedding lookups on the same
+  number of sparsecores per device.
+
+  Args:
+    num_sc_per_device: The number of sparsecores per device.
+
+  Returns:
+    True if `num_sc_per_device` is a valid number of sparsecores per device.
+  """
+  return (
+      0 < num_sc_per_device <= max(NUM_SC_PER_DEVICE_MAP.values())
+      and num_sc_per_device & (num_sc_per_device - 1) == 0
+  )
+
+
 def sparsecore_simd_width(
     device: DeviceLike | None = None,
 ) -> int:
