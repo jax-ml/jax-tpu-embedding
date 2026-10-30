@@ -29,6 +29,7 @@ pytype_strict_library(
     deps = [
         pypi_requirement("einops"),
         pypi_requirement("jax"),
+        pypi_requirement("jax/_src:api"),
         pypi_requirement("jax/experimental:layout"),
     ],
 )

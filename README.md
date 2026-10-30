@@ -11,7 +11,7 @@
 ## What is JAX TPU Embedding?
 
 JAX SparseCore provides support for leveraging the SparseCore accelerators
-present in TPU generations starting with TPU v5.
+present in TPU generations starting with TPU v5p.
 
 SparseCores are specialized tiled processors engineered for high-performance
 acceleration of workloads that involve irregular, sparse memory access and
@@ -33,7 +33,7 @@ pip install jax-tpu-embedding
 ```
 
 *Note: To use TPU acceleration, you must run in an environment with access to
-TPU v5+ hardware and have the appropriate `jax` and `jaxlib` TPU releases
+TPU v5p+ hardware and have the appropriate `jax` and `jaxlib` TPU releases
 installed (see the
 [JAX installation guide](https://github.com/google/jax#installation)).*
 

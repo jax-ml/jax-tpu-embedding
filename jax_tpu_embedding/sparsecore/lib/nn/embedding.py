@@ -293,7 +293,7 @@ def _get_sc_simd_width(sc_simd_width: int | None) -> int:
     ValueError: If the given SparseCore SIMD width is invalid.
   """
   if sc_simd_width is not None:
-    if sc_simd_width not in utils.SC_SIMD_WIDTH_MAP.values():
+    if not utils.is_valid_sparsecore_simd_width(sc_simd_width):
       raise ValueError(f"Invalid sc_simd_width: {sc_simd_width}")
     return sc_simd_width
   try:
@@ -318,7 +318,7 @@ def _get_hbm_word_size_in_4b(hbm_word_size_in_4b: int | None) -> int:
     ValueError: If the given HBM word size in 4-byte words is invalid.
   """
   if hbm_word_size_in_4b is not None:
-    if hbm_word_size_in_4b not in utils.HBM_WORD_SIZE_IN_4B_MAP.values():
+    if not utils.is_valid_hbm_word_size_in_4b(hbm_word_size_in_4b):
       raise ValueError(f"Invalid hbm_word_size_in_4b: {hbm_word_size_in_4b}")
     return hbm_word_size_in_4b
   try:
