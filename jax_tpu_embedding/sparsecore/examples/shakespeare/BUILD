@@ -174,6 +174,22 @@ tpu_py_strict_test(
     ],
 )
 
+genrule(
+    name = "converted_checkpoint_2x2x1",
+    srcs = ["testdata/checkpoint-2x2x2.tgz"],
+    outs = ["testdata/converted-2x2x1.tgz"],
+    cmd = """
+        workdir=$$(mktemp -d)
+        $(execpath //jax_tpu_embedding/sparsecore/lib/flax/nnx:offline_converter) \\
+            --input_checkpoint=$(execpath testdata/checkpoint-2x2x2.tgz) \\
+            --output_checkpoint="$$workdir/converted-2x2x1" \\
+            --target_num_devices=4 \\
+            --target_device_kind=TPU_v5
+        tar -czf "$@" -C "$$workdir/converted-2x2x1" 1000
+    """,
+    tools = ["//jax_tpu_embedding/sparsecore/lib/flax/nnx:offline_converter"],
+)
+
 # Test restarting from a checkpoint that was converted from
 # testdata/checkpoint-2x2x2 to a 2x2x1 topology using the offline converter.
 tpu_py_strict_test(
@@ -188,7 +204,7 @@ tpu_py_strict_test(
         "--loss_window=100",
         # "--vmodule=jax_sc_shakespeare_jit_flax_nnx=1",
     ],
-    data = ["testdata/converted-2x2x1.tgz"],
+    data = [":converted_checkpoint_2x2x1"],
     main = "jax_sc_shakespeare_jit_flax_nnx.py",
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",

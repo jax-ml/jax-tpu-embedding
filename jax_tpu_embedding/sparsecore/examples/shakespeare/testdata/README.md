@@ -10,18 +10,9 @@ cross-topology checkpoint restoration.
     the `jax_sc_shakespeare_jit_flax_nnx` model on a 2x2x2 TPU topology. This is
     used by `jax_sc_shakespeare_jit_flax_nnx_restore_test` to verify restoring a
     checkpoint across different TPU topologies (e.g., restoring a 2x2x2
-    checkpoint onto a 2x2x1 topology).
-
-*   `converted-2x2x1.tgz`: A compressed conversion of `checkpoint-2x2x2.tgz` to
-    a 2x2x1 topology, converted using an offline utility:
-
-```
-offline_converter --input_checkpoint=checkpoint-2x2x2.tgz --output_checkpoint=converted-2x2x1 --target_num_devices=4 --target_device_kind=TPU_v5
-```
-
-(Note: After generating `converted-2x2x1`, compress its `1000` subdirectory into
-`converted-2x2x1.tgz` using `tar -czf converted-2x2x1.tgz -C converted-2x2x1
-1000` and remove the uncompressed directory).
+    checkpoint onto a 2x2x1 topology), and by the `:converted_checkpoint_2x2x1`
+    `genrule` in `BUILD` to generate `converted-2x2x1.tgz` at build time using
+    `offline_converter`.
 
 ## How to Re-generate Checkpoints
 

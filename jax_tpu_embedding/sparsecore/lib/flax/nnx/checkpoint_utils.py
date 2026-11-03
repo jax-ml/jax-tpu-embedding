@@ -15,8 +15,8 @@
 
 import collections
 import collections.abc
-import os
 import shutil
+import tempfile
 import time
 import typing
 from typing import Any
@@ -54,33 +54,15 @@ class TargetTopology(typing.NamedTuple):
 
 
 def decompress_checkpoint(checkpoint_path: str) -> str:
-  """Decompresses a checkpoint archive (.tgz) to TEST_UNDECLARED_OUTPUTS_DIR.
+  """Decompresses a checkpoint archive (.tgz) to a temporary directory.
 
   Args:
     checkpoint_path: The path to the compressed checkpoint archive.
 
   Returns:
     The path to the decompressed checkpoint directory.
-
-  Raises:
-    ValueError: If TEST_UNDECLARED_OUTPUTS_DIR is not set.
   """
-  testdir = os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
-  if not testdir:
-    raise ValueError(
-        'TEST_UNDECLARED_OUTPUTS_DIR environment variable is not set.'
-    )
-
-  archive_name = epath.Path(checkpoint_path).name
-  if archive_name.endswith('.tgz'):
-    dir_name = archive_name[: -len('.tgz')]
-  else:
-    dir_name = archive_name
-
-  output_dir = os.fspath(
-      epath.Path(testdir) / 'decompressed_checkpoints' / dir_name
-  )
-  os.makedirs(output_dir, exist_ok=True)
+  output_dir = tempfile.mkdtemp(prefix='decompressed_checkpoint_')
   logging.info('Decompressing checkpoint %s to %s', checkpoint_path, output_dir)
   shutil.unpack_archive(checkpoint_path, output_dir)
   return output_dir
