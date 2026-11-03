@@ -1288,6 +1288,7 @@ def tpu_sparse_dense_matmul(
             sharding_strategy=sharding_strategy_val,
             quantization_config=stacked_table.quantization_config,
             enable_minibatching=enable_minibatching,
+            table_name=stacked_table.stack_name,
         )
     )
 
@@ -1630,6 +1631,7 @@ def tpu_sparse_dense_matmul_grad(
           computation_name=symbol_name,
           sharding_strategy=sharding_strategy_val,
           enable_minibatching=enable_minibatching,
+          table_name=stack_table_spec.stack_name,
       )
     else:
       extra_kwargs: dict[str, bool | float | None] = {}
@@ -1657,6 +1659,7 @@ def tpu_sparse_dense_matmul_grad(
           computation_name=symbol_name,
           sharding_strategy=sharding_strategy_val,
           enable_minibatching=enable_minibatching,
+          table_name=stack_table_spec.stack_name,
           **extra_kwargs,
       )
 

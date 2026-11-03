@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import functools
+import json
 from typing import override
 from unittest import mock
 
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
+from jax.extend.mlir import ir
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_sgd
@@ -273,6 +275,35 @@ class SparseDenseMatmulGradWithSgdTest(parameterized.TestCase):
 
     np.testing.assert_allclose(
         actual_emb_table_unsharded, expected_emb_table_unsharded, atol=1e-5
+    )
+
+  def test_sc_emb_backward_pass_lowering_has_table_name(self):
+    ids = jax.ShapeDtypeStruct((16,), jnp.int32)
+    gains = jax.ShapeDtypeStruct((16,), jnp.float32)
+    table = jax.ShapeDtypeStruct((self.vocab_size, self.emb_size), jnp.float32)
+    grad = jax.ShapeDtypeStruct((self.batch_size, self.emb_size), jnp.float32)
+    lowered = jax.jit(
+        functools.partial(
+            sparse_dense_matmul_grad_with_sgd.tpu_sparse_dense_matmul_grad_with_sgd_primitive.bind,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            table_name="my_table",
+        )
+    ).lower(ids, ids, ids, gains, np.int32(1), table, grad, np.float32(0.01))
+    module = lowered.compiler_ir()
+    assert module is not None
+    with module.context:
+      custom_calls = []
+      for func in module.body.operations:
+        for op in func.regions[0].blocks[0].operations:
+          if op.operation.name == "stablehlo.custom_call":
+            custom_calls.append(op)
+      self.assertLen(custom_calls, 1)
+      config = json.loads(
+          ir.StringAttr(custom_calls[0].attributes["backend_config"]).value
+      )
+    self.assertEqual(
+        config["sparse_dense_matmul_config"]["table_name"], "my_table"
     )
 
 

@@ -59,9 +59,10 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
+    table_name: str | None = None,
 ) -> core.ShapedArray:
   """Abstract eval for sparse_dense_matmul_sgd."""
-  del enable_minibatching
+  del enable_minibatching, table_name
 
   utils.ensure_dtype(learning_rate, np.float32, "learning_rate")
   utils.validate_abstract_eval_params(
@@ -106,6 +107,7 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
+    table_name: str | None = None,
 ) -> Sequence[ir.Value]:
   """Lowering for sdmm_sgd."""
   sdmm_sgd_config = {
@@ -116,6 +118,8 @@ def _tpu_sparse_dense_matmul_grad_with_sgd_lowering(
       "num_slot_variables": 0,
       "num_hyperparameters": 1,
   }
+  if table_name is not None:
+    sdmm_sgd_config = {**sdmm_sgd_config, "table_name": table_name}
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",

@@ -35,6 +35,7 @@ tpu_py_strict_test(
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("jax"),
+        pypi_requirement("jax/extend/mlir:ir"),
         pypi_requirement("numpy"),
     ],
 )
@@ -163,6 +164,7 @@ tpu_py_strict_test(
         pypi_requirement("absl/testing:absltest"),
         pypi_requirement("absl/testing:parameterized"),
         pypi_requirement("jax"),
+        pypi_requirement("jax/extend/mlir:ir"),
         pypi_requirement("numpy"),
     ],
 )

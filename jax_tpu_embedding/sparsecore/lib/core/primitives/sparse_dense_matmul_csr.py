@@ -73,10 +73,11 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
     quantization_config: QuantizationConfigProtocol | None = None,
     # NOMUTANTS -- unused param for abstract eval.
     enable_minibatching: bool = False,
+    table_name: str | None = None,
 ) -> core.ShapedArray:
   """Abstract eval for sdmm_csr."""
 
-  del enable_minibatching
+  del enable_minibatching, table_name
 
   embedding_dim = utils.get_embedding_dim(embedding_table)
   utils.validate_abstract_eval_params(
@@ -131,6 +132,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     sharding_strategy: int = 1,
     quantization_config: QuantizationConfigProtocol | None = None,
     enable_minibatching: bool = False,
+    table_name: str | None = None,
 ) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
@@ -165,6 +167,8 @@ def _tpu_sparse_dense_matmul_csr_lowering(
         **sdmm_csr_config,
         "quantization_config": quantization_config.to_backend_config(),
     }
+  if table_name is not None:
+    sdmm_csr_config = {**sdmm_csr_config, "table_name": table_name}
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_csr_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",

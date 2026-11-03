@@ -83,9 +83,10 @@ def _tpu_sparse_dense_matmul_optimizer_grad_abstract_eval(
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    table_name: str | None = None,
 ) -> Tuple[core.ShapedArray, ...]:
   """Abstract eval for sparse_dense_matmul_optimizer_grad."""
-  del enable_minibatching
+  del enable_minibatching, table_name
   hyperparameters = hyperparams_and_embedding_vars[:num_hyperparameters]
   embedding_variables = hyperparams_and_embedding_vars[num_hyperparameters:]
 
@@ -155,6 +156,7 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
     computation_name: str = "sparse_dense_matmul_optimizer_grad",
     sharding_strategy: int = 1,
     enable_minibatching: bool = False,
+    table_name: str | None = None,
 ) -> Tuple[Sequence[ir.Value], ...]:
   """Lowering for sparse_dense_matmul_optimizer_grad."""
   hyperparameters = hyperparams_and_embedding_vars[:num_hyperparameters]
@@ -169,6 +171,8 @@ def _tpu_sparse_dense_matmul_optimizer_grad_lowering(
       "num_slot_variables": num_slot_variables,
       "num_hyperparameters": num_hyperparameters,
   }
+  if table_name is not None:
+    sdmm_sgd_config = {**sdmm_sgd_config, "table_name": table_name}
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",

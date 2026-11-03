@@ -80,10 +80,11 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
+    table_name: str | None = None,
 ) -> Tuple[core.ShapedArray, core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_ftrl."""
   del multiply_linear_by_learning_rate
-  del enable_minibatching
+  del enable_minibatching, table_name
 
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
@@ -156,6 +157,7 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
+    table_name: str | None = None,
 ) -> Tuple[Sequence[ir.Value], Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for sparse_dense_matmul_grad_with_ftrl."""
 
@@ -167,6 +169,8 @@ def _tpu_sparse_dense_matmul_grad_with_ftrl_lowering(
       "num_slot_variables": 2,
       "num_hyperparameters": 5,
   }
+  if table_name is not None:
+    sdmm_ftrl_config = {**sdmm_ftrl_config, "table_name": table_name}
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_ftrl_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",

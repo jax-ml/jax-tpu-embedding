@@ -11,7 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 import importlib.metadata
+import json
 import re
 from typing import override
 from unittest import mock
@@ -19,6 +21,7 @@ from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
+from jax.extend.mlir import ir
 import jax.numpy as jnp
 from jax_tpu_embedding.sparsecore.lib.core import input_preprocessing
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
@@ -449,6 +452,35 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
     )
 
     np.testing.assert_equal(emb_activations, expected_emb_activations)
+
+  def test_sc_emb_forward_pass_lowering_has_table_name(self):
+    ids = jax.ShapeDtypeStruct((16,), jnp.int32)
+    gains = jax.ShapeDtypeStruct((16,), jnp.float32)
+    table = jax.ShapeDtypeStruct((self.vocab_size, self.emb_size), jnp.float32)
+    lowered = jax.jit(
+        functools.partial(
+            sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_primitive.bind,
+            device_batch_size=self.batch_size,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            table_name="my_table",
+        )
+    ).lower(ids, ids, ids, gains, np.int32(1), table)
+    module = lowered.compiler_ir()
+    assert module is not None
+    with module.context:
+      custom_calls = []
+      for func in module.body.operations:
+        for op in func.regions[0].blocks[0].operations:
+          if op.operation.name == "stablehlo.custom_call":
+            custom_calls.append(op)
+      self.assertLen(custom_calls, 1)
+      config = json.loads(
+          ir.StringAttr(custom_calls[0].attributes["backend_config"]).value
+      )
+    self.assertEqual(
+        config["sparse_dense_matmul_config"]["table_name"], "my_table"
+    )
 
   def test_sc_emb_quantization_config_validation(self):
     mesh = jax.sharding.Mesh(self.global_devices, "x")

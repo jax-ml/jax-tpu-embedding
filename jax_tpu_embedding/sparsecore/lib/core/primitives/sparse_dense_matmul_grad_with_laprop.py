@@ -76,9 +76,10 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_abstract_eval(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
+    table_name: str | None = None,
 ) -> Tuple[core.ShapedArray, core.ShapedArray, core.ShapedArray]:
   """Abstract eval for sparse_dense_matmul_laprop."""
-  del enable_minibatching
+  del enable_minibatching, table_name
   utils.validate_abstract_eval_params(
       lhs_row_pointers,
       lhs_local_embedding_ids,
@@ -144,6 +145,7 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
     enable_minibatching: bool = False,
     min_value: float | None = None,
     max_value: float | None = None,
+    table_name: str | None = None,
 ) -> Tuple[Sequence[ir.Value], Sequence[ir.Value], Sequence[ir.Value]]:
   """Lowering for sparse_dense_matmul_grad_with_laprop."""
 
@@ -155,6 +157,8 @@ def _tpu_sparse_dense_matmul_grad_with_laprop_lowering(
       "num_slot_variables": 2,
       "num_hyperparameters": 4,
   }
+  if table_name is not None:
+    sdmm_sgd_config = {**sdmm_sgd_config, "table_name": table_name}
   backend_config = json.dumps({
       "sparse_dense_matmul_config": sdmm_sgd_config,
       "device_type": "DEVICE_TYPE_SPARSECORE",
