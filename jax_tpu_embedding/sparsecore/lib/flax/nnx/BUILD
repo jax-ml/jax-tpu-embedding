@@ -84,6 +84,7 @@ pytype_strict_library(
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
         pypi_requirement("etils/epath"),
+        pypi_requirement("jax"),
     ],
 )
 
@@ -99,6 +100,7 @@ pytype_strict_binary(
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
         pypi_requirement("etils/epath"),
+        pypi_requirement("jax"),
     ],
 )
 
@@ -106,6 +108,7 @@ pytype_strict_binary(
 # checkpoints converted using this binary.
 pytype_strict_test(
     name = "offline_converter_test",
+    timeout = "short",
     srcs = ["offline_converter.py"],
     args = [
         "--input_checkpoint=jax_tpu_embedding/sparsecore/examples/shakespeare/testdata/checkpoint-2x2x2.tgz",
@@ -123,11 +126,13 @@ pytype_strict_test(
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
         pypi_requirement("etils/epath"),
+        pypi_requirement("jax"),
     ],
 )
 
 pytype_strict_test(
     name = "offline_converter_unstacked_test",
+    timeout = "short",
     srcs = ["offline_converter.py"],
     args = [
         "--input_checkpoint=jax_tpu_embedding/sparsecore/examples/shakespeare/testdata/checkpoint-2x2x2.tgz",
@@ -143,5 +148,6 @@ pytype_strict_test(
         pypi_requirement("absl/flags"),
         pypi_requirement("absl/logging"),
         pypi_requirement("etils/epath"),
+        pypi_requirement("jax"),
     ],
 )

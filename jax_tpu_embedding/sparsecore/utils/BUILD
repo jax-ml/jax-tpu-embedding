@@ -30,11 +30,13 @@ pytype_strict_library(
         pypi_requirement("einops"),
         pypi_requirement("jax"),
         pypi_requirement("jax/experimental:layout"),
+        pypi_requirement("jax/experimental:pallas_tpu"),
     ],
 )
 
 pytype_strict_contrib_test(
     name = "utils_test",
+    timeout = "short",
     srcs = ["utils_test.py"],
     deps = [
         ":utils",

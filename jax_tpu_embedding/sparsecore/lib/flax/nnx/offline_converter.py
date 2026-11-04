@@ -20,6 +20,7 @@ from absl import app
 from absl import flags
 from absl import logging
 from etils import epath
+import jax
 from jax_tpu_embedding.sparsecore.lib.flax.nnx import checkpoint_utils
 from jax_tpu_embedding.sparsecore.utils import utils
 
@@ -53,19 +54,6 @@ _TARGET_GLOBAL_BATCH_SIZE = flags.DEFINE_integer(
     None,
     'Optional target global batch size for the target topology.',
 )
-
-
-class FakeDevice:
-  """A lightweight mock JAX device for offline topology construction."""
-
-  def __init__(self, device_id: int, device_kind: str = 'TPU v5'):
-    """Initializes a FakeDevice."""
-    self.id = device_id
-    self.process_index = 0
-    self.slice_index = 0
-    self.device_kind = device_kind
-    self.platform = 'tpu'
-    self.memory_kind = 'tpu_hbm'
 
 
 def expand_directory_path(input_dir: str) -> str | None:
@@ -102,16 +90,18 @@ def expand_directory_path(input_dir: str) -> str | None:
 def run_conversion() -> None:
   """Executes general offline checkpoint conversion for the target TPU topology."""
   if _TARGET_NUM_DEVICES.value is not None:
-    fake_devices = [
-        FakeDevice(i, device_kind=_TARGET_DEVICE_KIND.value.replace('_', ' '))
-        for i in range(_TARGET_NUM_DEVICES.value)
-    ]
-    num_sc_per_device = utils.num_sparsecores_per_device(fake_devices[0])
-    num_global_devices = len(fake_devices)
+    device_kind = _TARGET_DEVICE_KIND.value.replace('_', ' ')
+    abstract_device = jax.sharding.AbstractDevice(
+        device_kind=device_kind, num_cores=1, platform='tpu'
+    )
+    with jax.sharding.use_abstract_mesh(
+        jax.sharding.AbstractMesh((), (), abstract_device=abstract_device)
+    ):
+      num_sc_per_device = utils.num_sparsecores_per_device()
     target_topology = checkpoint_utils.TargetTopology(
-        num_global_devices=num_global_devices,
+        num_global_devices=_TARGET_NUM_DEVICES.value,
         num_sc_per_device=num_sc_per_device,
-        device_kind=fake_devices[0].device_kind,
+        device_kind=device_kind,
     )
   else:
     target_topology = None
