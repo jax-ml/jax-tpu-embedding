@@ -716,7 +716,10 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 struct MegacoreCsrOptions {
   // Row stride used to linearize embedding IDs as
   // `dest_sc * rows_per_sc + row_in_sc`. Unused if `num_sc_per_device == 1`.
-  int rows_per_sc;
+  int rows_per_sc = 0;
+  // Maximum number of COO IDs written per destination device row; 0 means
+  // unbounded (capped only by the total COO buffer size).
+  int max_ids_per_device = 0;
 };
 
 // Blocking version for testing only.

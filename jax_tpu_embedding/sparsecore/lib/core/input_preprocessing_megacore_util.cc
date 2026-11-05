@@ -259,9 +259,10 @@ void FillMegacoreBucketRange(
           csr_arrays.gains.segment(coo_index, bucket_size));
       continue;
     }
-    // The static COO buffer is full and IDs are dropped, which truncates at
-    // most one bucket. `FillMegacoreBucket` needs room for the whole bucket, so
-    // merge it into scratch buffers and keep its first `bucket_size` elements.
+    // Either the per-device row limit (`max_ids_per_device`) or the static COO
+    // buffer limit was reached and IDs are dropped. `FillMegacoreBucket` needs
+    // room for the whole bucket, so merge it into scratch buffers and keep its
+    // first `bucket_size` elements.
     RowVectorXi embedding_ids(total_count);
     RowVectorXi sample_ids(total_count);
     RowVectorXf gains(total_count);
@@ -312,6 +313,12 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
   int g = 0;
   for (int device_id = 0; device_id < options.global_device_count;
        ++device_id) {
+    const int row_end_limit =
+        megacore_csr.max_ids_per_device > 0
+            ? static_cast<int>(std::min<int64_t>(
+                  coo_end,
+                  int64_t{coo_index} + megacore_csr.max_ids_per_device))
+            : coo_end;
     for (int dest_sc = 0; dest_sc < num_sc_per_device; ++dest_sc, ++g) {
       int bucket_count = 0;
       for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
@@ -320,7 +327,7 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
             plan->sc_offsets[offset_base + 1] - plan->sc_offsets[offset_base];
       }
       plan->bucket_coo_begin[g] = coo_index;
-      const int written = std::min(bucket_count, coo_end - coo_index);
+      const int written = std::min(bucket_count, row_end_limit - coo_index);
       coo_index += written;
       processed += written;
       plan->bucket_coo_end[g] = coo_index;

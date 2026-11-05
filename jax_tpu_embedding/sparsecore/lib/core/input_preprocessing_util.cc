@@ -359,9 +359,6 @@ int ComputeCooBufferSizePerDevice(
     // The SparseCore multi-tile radix sort writes past the end of its output
     // unless the length is a multiple of 16 tiles x 8 lanes.
     constexpr int64_t kMegacoreCooBufferSizeAlignment = 128;
-    constexpr int64_t kMaxTileSpmemBytes = 512 * 1024;
-    constexpr int64_t kCooElementBytes =
-        sizeof(int) + sizeof(int) + sizeof(float);
     // Each device's row starts at an aligned offset, and `sparse_map_row`
     // writes an aligned chunk for trailing empty rows, so keep one more
     // aligned chunk after the last row.
@@ -372,21 +369,6 @@ int ComputeCooBufferSizePerDevice(
                                     hbm_word_size_in_4b) +
                 int64_t{global_device_count} * hbm_word_size_in_4b,
             kMegacoreCooBufferSizeAlignment));
-    CHECK_LE(computed_coo_buffer_size_per_device * kCooElementBytes,
-             kMaxTileSpmemBytes)
-        << "Computed Coo Buffer Size (" << computed_coo_buffer_size_per_device
-        << " elements, "
-        << computed_coo_buffer_size_per_device * kCooElementBytes
-        << " bytes) for table " << stacked_table_name
-        << " exceeds the 512 KB TileSpmem limit (" << kMaxTileSpmemBytes
-        << " bytes). The size is derived from "
-        << (suggested_coo_buffer_size_per_device.has_value()
-                ? "`suggested_coo_buffer_size_per_device`"
-                : "the theoretical max because no "
-                  "`suggested_coo_buffer_size_per_device` is set")
-        << ". Set a smaller `suggested_coo_buffer_size_per_device` (e.g. from "
-           "the stats returned by the sparse dense matmul preprocessing API) "
-           "or reduce `max_ids_per_partition`.";
   }
   return static_cast<int>(computed_coo_buffer_size_per_device);
 }

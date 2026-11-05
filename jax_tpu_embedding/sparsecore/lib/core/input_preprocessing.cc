@@ -192,7 +192,18 @@ struct TableState {
           rows_per_sc = std::max(rows_per_sc, feature_metadata.max_col_id + 1);
         }
       }
-      megacore_csr = MegacoreCsrOptions{.rows_per_sc = rows_per_sc};
+      const int max_ids_per_device =
+          options.allow_id_dropping
+              ? static_cast<int>(std::min<int64_t>(
+                    std::numeric_limits<int>::max(),
+                    int64_t{MaxIdsPerPartitionForStackedTables(
+                        stacked_table_metadata)} *
+                        options.num_sc_per_device))
+              : 0;
+      megacore_csr = MegacoreCsrOptions{
+          .rows_per_sc = rows_per_sc,
+          .max_ids_per_device = max_ids_per_device,
+      };
     }
     extracted_coo_tensors_per_device.resize(options.local_device_count);
     device_sorting_results.resize(options.local_device_count);
