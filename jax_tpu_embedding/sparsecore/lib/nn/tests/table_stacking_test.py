@@ -1643,7 +1643,7 @@ class TableStackingTest(parameterized.TestCase):
       self.assertEqual(stacked_row_ids_map[stack_name], expected_ids)
 
   def test_auto_stack_tables_with_quantization_config(self):
-    q_cfg = embedding_spec.QuantizationConfig(
+    q_cfg = embedding_spec.FixedQuantizationConfig(
         min_value=-5.0, max_value=5.0, num_buckets=256
     )
     table_spec_a = embedding_spec.TableSpec(
@@ -1701,10 +1701,10 @@ class TableStackingTest(parameterized.TestCase):
     )
 
   def test_auto_stack_tables_different_quantization_configs_split(self):
-    q_cfg_1 = embedding_spec.QuantizationConfig(
+    q_cfg_1 = embedding_spec.FixedQuantizationConfig(
         min_value=-5.0, max_value=5.0, num_buckets=256
     )
-    q_cfg_2 = embedding_spec.QuantizationConfig(
+    q_cfg_2 = embedding_spec.FixedQuantizationConfig(
         min_value=-2.0, max_value=2.0, num_buckets=256
     )
     table_spec_a = embedding_spec.TableSpec(
@@ -1787,10 +1787,10 @@ class TableStackingTest(parameterized.TestCase):
     )
 
   def test_manual_stacking_different_quantization_configs_raises(self):
-    q_cfg_1 = embedding_spec.QuantizationConfig(
+    q_cfg_1 = embedding_spec.FixedQuantizationConfig(
         min_value=-5.0, max_value=5.0, num_buckets=256
     )
-    q_cfg_2 = embedding_spec.QuantizationConfig(
+    q_cfg_2 = embedding_spec.FixedQuantizationConfig(
         min_value=-2.0, max_value=2.0, num_buckets=256
     )
     table_spec_a = embedding_spec.TableSpec(
