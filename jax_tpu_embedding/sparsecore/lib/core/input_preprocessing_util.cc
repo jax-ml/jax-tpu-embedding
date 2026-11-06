@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
@@ -41,11 +42,12 @@ namespace jax_sc_embedding {
 namespace {
 
 // Options for filling the SparseCore input buffers.
+template <typename CooT = CooFormat>
 struct BufferFillingOptions {
   // The local SparseCore ID on the current device.
   int local_sc_id ABSL_REQUIRE_EXPLICIT_INIT;
   // The input COO tensors for the current local_sc_id and minibatch.
-  absl::Span<const CooFormat> coo_tensors ABSL_REQUIRE_EXPLICIT_INIT;
+  absl::Span<const CooT> coo_tensors ABSL_REQUIRE_EXPLICIT_INIT;
 
   // The beginning index (inclusive) in the row_pointers buffer for this
   // segment.
@@ -74,8 +76,9 @@ struct BufferFillingOptions {
 };
 
 // Check if the current indexes are valid within the buffer sizes.
+template <typename CooT>
 bool ValidIndices(int row_index, int coo_offset, int processed,
-                  const BufferFillingOptions& options) {
+                  const BufferFillingOptions<CooT>& options) {
   if (processed == options.coo_tensors.size() &&
       coo_offset == options.coo_end) {
     return true;
@@ -146,7 +149,8 @@ void PadCooBuffer(int& coo_index, int coo_end, PadType pad_type,
 // If minibatching is enabled, it points to the global index in the COO buffer.
 // Otherwise, it's the `coo_index` relative to the beginning of the current
 // SparseCore's COO buffer segment.
-int GetRowPointer(int coo_index, const BufferFillingOptions& options) {
+template <typename CooT>
+int GetRowPointer(int coo_index, const BufferFillingOptions<CooT>& options) {
   if (options.minibatching_mode != MinibatchingMode::kDisabled) {
     return coo_index;
   }
@@ -155,10 +159,11 @@ int GetRowPointer(int coo_index, const BufferFillingOptions& options) {
 
 // Advance last_partition_id to target_partition_id, filling row pointers and
 // padding COO buffer for each partition.
+template <typename CooT>
 void AdvanceAndPadPartitions(int& current_partition_id,
                              const int target_partition_id, int& lhs_row_index,
                              int& coo_index, int processed,
-                             const BufferFillingOptions& options,
+                             const BufferFillingOptions<CooT>& options,
                              internal::CsrArraysRefPerDevice& csr_arrays) {
   DCHECK_LE(current_partition_id, target_partition_id);
   while (current_partition_id < target_partition_id) {
@@ -177,7 +182,8 @@ void AdvanceAndPadPartitions(int& current_partition_id,
 // Fill the row pointers buffer from `lhs_row_begin` to `lhs_row_end` and COO
 // buffer from `coo_begin` to `coo_end`. Returns the `coo_index` from where next
 // the COO buffer can be filled.
-int FillBufferSegment(const BufferFillingOptions& options,
+template <typename CooT>
+int FillBufferSegment(const BufferFillingOptions<CooT>& options,
                       internal::CsrArraysRefPerDevice& csr_arrays,
                       int& dropped_id_count_static_bound) {
   int lhs_row_index = options.lhs_row_begin;
@@ -185,11 +191,17 @@ int FillBufferSegment(const BufferFillingOptions& options,
   int current_partition_id = 0;
   int dropped_in_call = 0;
 
+  using UColIdT = std::make_unsigned_t<decltype(CooT::col_id)>;
+  const UColIdT sc_mask = static_cast<UColIdT>(options.num_scs - 1);
+  const int num_sc_bits =
+      absl::countr_zero(static_cast<uint32_t>(options.num_scs));
+
   int processed = 0;
-  for (const CooFormat& coo_tensor : options.coo_tensors) {
+  for (const CooT& coo_tensor : options.coo_tensors) {
     DCHECK_EQ(coo_tensor.row_id / options.batch_size_per_sc,
               options.local_sc_id);
-    const int target_partition_id = coo_tensor.col_id % options.num_scs;
+    const int target_partition_id =
+        static_cast<int>(static_cast<UColIdT>(coo_tensor.col_id) & sc_mask);
     AdvanceAndPadPartitions(current_partition_id, target_partition_id,
                             lhs_row_index, coo_index, processed, options,
                             csr_arrays);
@@ -200,7 +212,8 @@ int FillBufferSegment(const BufferFillingOptions& options,
       break;
     }
 
-    csr_arrays.embedding_ids[coo_index] = coo_tensor.col_id / options.num_scs;
+    csr_arrays.embedding_ids[coo_index] = static_cast<int>(
+        static_cast<UColIdT>(coo_tensor.col_id) >> num_sc_bits);
     csr_arrays.sample_ids[coo_index] =
         coo_tensor.row_id % options.batch_size_per_sc;
     csr_arrays.gains[coo_index] = coo_tensor.gain;
@@ -417,8 +430,9 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 // We use output buffers `row_pointers`, `embedding_ids`, `sample_ids`, and
 // `gains` because we fill values in a loop to a bigger array.
 // Returns the number of dropped IDs.
+template <typename CooT>
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
@@ -507,7 +521,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                   : coo_begin + coo_buffer_size_per_sc;  // partition coo buffer
           // Fill Minibatch or SparseCore slice.
           int dropped_ids_in_segment = 0;
-          coo_begin = FillBufferSegment(
+          coo_begin = FillBufferSegment<CooT>(
               {
                   .local_sc_id = local_sc_id,
                   .coo_tensors = grouped_coo_tensors(local_sc_id, minibatch_id),
@@ -571,8 +585,9 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
 }
 
 // Blocking version for testing only.
+template <typename CooT>
 void FillLocalDeviceBuffer(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     const int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
@@ -585,6 +600,43 @@ void FillLocalDeviceBuffer(
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
 }
+
+template tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync<CooFormat>(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
+    internal::CsrArraysRefPerDevice csr_arrays);
+
+template tsl::AsyncValueRef<int>
+FillLocalDeviceBufferAsync<CooFormatT<int64_t>>(
+    const DevicePartitionedCooTensorsT<CooFormatT<int64_t>>&
+        grouped_coo_tensors,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
+    internal::CsrArraysRefPerDevice csr_arrays);
+
+template void FillLocalDeviceBuffer<CooFormat>(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
+    internal::CsrArraysRefPerDevice& csr_arrays,
+    int& dropped_id_count_static_bound);
+
+template void FillLocalDeviceBuffer<CooFormatT<int64_t>>(
+    const DevicePartitionedCooTensorsT<CooFormatT<int64_t>>&
+        grouped_coo_tensors,
+    int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name,
+    std::optional<MegacoreCsrOptions> megacore_csr,
+    internal::CsrArraysRefPerDevice& csr_arrays,
+    int& dropped_id_count_static_bound);
 
 absl::Status PreprocessSparseDenseMatmulInputOptions::Validate() const {
   if (sharding_strategy != ShardingStrategy::kMod) {

@@ -31,6 +31,7 @@
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
@@ -91,6 +92,9 @@ enum class WorkloadProfile {
   // Moderate multivalency with medium vocabulary (1,000 keys), average valency
   // ~50. Exhibits moderate deduplication rates (~40-50%).
   kModerateMultivalency = 2,
+  // Sparse 64-bit vocabulary exceeding UINT32_MAX (5B keys), exercising the
+  // 64-bit global column ID path while emitting int32 shard-local IDs.
+  kLargeVocab64 = 3,
 };
 
 std::string WorkloadProfileToString(WorkloadProfile profile) {
@@ -101,11 +105,13 @@ std::string WorkloadProfileToString(WorkloadProfile profile) {
       return "HighMultivalency";
     case WorkloadProfile::kModerateMultivalency:
       return "ModerateMultivalency";
+    case WorkloadProfile::kLargeVocab64:
+      return "LargeVocab64";
   }
 }
 
 struct WorkloadConfig {
-  int vocab_size;
+  int64_t vocab_size;
   float lognormal_mean;
   float lognormal_stddev;
   double zipf_q;
@@ -138,23 +144,42 @@ WorkloadConfig GetWorkloadConfig(WorkloadProfile profile) {
           .zipf_q = 1.00278,
           .skew_probability = 0.5,
       };
+    case WorkloadProfile::kLargeVocab64:
+      return {
+          .vocab_size = 5'000'000'000LL,
+          .lognormal_mean = 1.5f,
+          .lognormal_stddev = 1.9f,
+          .zipf_q = 1.00278,
+          .skew_probability = 0.42430,
+      };
   }
 }
 
-std::vector<int> GenerateEmbeddingIdsForRow(absl::BitGen& gen,
-                                            const WorkloadConfig& config) {
-  std::vector<int> ids_out;
+std::vector<int64_t> GenerateEmbeddingIdsForRow(absl::BitGen& gen,
+                                                const WorkloadConfig& config) {
+  std::vector<int64_t> ids_out;
   int sample_size = static_cast<int>(std::round(std::exp(absl::Gaussian<float>(
       gen, config.lognormal_mean, config.lognormal_stddev))));
   sample_size = std::max(1, sample_size);
   ids_out.reserve(sample_size);
+  const bool fits_int32 = config.vocab_size <= std::numeric_limits<int>::max();
   for (int i = 0; i < sample_size; ++i) {
-    int embedding_id;
-    if (config.vocab_size > 1 &&
-        absl::Bernoulli(gen, config.skew_probability)) {
-      embedding_id = absl::Zipf<int>(gen, config.vocab_size - 1, config.zipf_q);
+    int64_t embedding_id;
+    if (fits_int32) {
+      const int vocab_size_32 = static_cast<int>(config.vocab_size);
+      if (vocab_size_32 > 1 && absl::Bernoulli(gen, config.skew_probability)) {
+        embedding_id = absl::Zipf<int>(gen, vocab_size_32 - 1, config.zipf_q);
+      } else {
+        embedding_id = absl::Uniform<int>(gen, 0, vocab_size_32);
+      }
     } else {
-      embedding_id = absl::Uniform<int>(gen, 0, config.vocab_size);
+      if (absl::Bernoulli(gen, config.skew_probability)) {
+        embedding_id =
+            absl::Zipf<int64_t>(gen, config.vocab_size - 1, config.zipf_q);
+      } else {
+        embedding_id =
+            absl::Uniform<int64_t>(gen, int64_t{0}, config.vocab_size);
+      }
     }
     ids_out.push_back(embedding_id);
   }
@@ -178,8 +203,9 @@ GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
     row_splits.push_back(0);
 
     for (int row = 0; row < batch_size_for_device; ++row) {
-      std::vector<int> embedding_ids = GenerateEmbeddingIdsForRow(gen, config);
-      for (int embedding_id : embedding_ids) {
+      std::vector<int64_t> embedding_ids =
+          GenerateEmbeddingIdsForRow(gen, config);
+      for (int64_t embedding_id : embedding_ids) {
         values.push_back(embedding_id);
       }
       row_splits.push_back(values.size());
@@ -192,6 +218,49 @@ GenerateSkewedRaggedTensorInputBatches(int num_sc_per_device,
   return input_batches;
 }
 
+std::vector<FeatureMetadataInStack> BuildStackedTableMetadata(
+    int num_features, RowCombiner combiner, int64_t vocab_size) {
+  const int64_t num_scs = int64_t{kGlobalDeviceCount} * kNumScPerDevice;
+  const int64_t rows_per_sc =
+      std::max<int64_t>(1, (vocab_size + num_scs - 1) / num_scs);
+  const std::optional<int64_t> max_col_id =
+      vocab_size > std::numeric_limits<int32_t>::max()
+          ? std::optional<int64_t>(rows_per_sc - 1)
+          : std::nullopt;
+  std::vector<FeatureMetadataInStack> metadata;
+  metadata.reserve(num_features);
+  for (int i = 0; i < num_features; ++i) {
+    // Set partition limits to INT_MAX to avoid ID dropping and observe the
+    // actual statistics of the generated data.
+    metadata.push_back(FeatureMetadataInStack(
+        absl::StrCat("table_", i), /*feature_index=*/i,
+        /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
+        /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
+        /*row_offset=*/0,
+        /*col_offset=*/0,
+        /*col_shift=*/0, /*batch_size=*/kBatchSizePerSc,
+        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+        /*row_combiner=*/combiner,
+        /*max_col_id=*/max_col_id));
+  }
+  return metadata;
+}
+
+template <typename ColIdT>
+void RunExtractBenchmark(
+    benchmark::State& state,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  for (auto s : state) {
+    ExtractedCooTensorsT<ColIdT> extracted_coo_tensors =
+        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice<ColIdT>(
+            stacked_table_metadata, input_batches,
+            /*local_device_id=*/0, options, /*has_variable_weights=*/false);
+    extracted_coo_tensors.BlockUntilReady();
+  }
+}
+
 void BM_ExtractCooTensors(benchmark::State& state) {
   const int num_features = state.range(0);
   const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
@@ -202,22 +271,11 @@ void BM_ExtractCooTensors(benchmark::State& state) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
       GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
                                              workload_config, num_features);
+  const std::vector<FeatureMetadataInStack> stacked_table_metadata =
+      BuildStackedTableMetadata(num_features, combiner,
+                                workload_config.vocab_size);
 
-  std::vector<FeatureMetadataInStack> stacked_table_metadata;
-  stacked_table_metadata.reserve(num_features);
-  for (int i = 0; i < num_features; ++i) {
-    stacked_table_metadata.push_back(FeatureMetadataInStack(
-        absl::StrCat("table_", i), /*feature_index=*/i,
-        /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
-        /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
-        /*row_offset=*/0,
-        /*col_offset=*/0,
-        /*col_shift=*/0, /*batch_size=*/kBatchSizePerSc,
-        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
-        /*row_combiner=*/combiner));
-  }
-
-  PreprocessSparseDenseMatmulInputOptions options = {
+  const PreprocessSparseDenseMatmulInputOptions options = {
       .local_device_count = 1,
       .global_device_count = kGlobalDeviceCount,
       .num_sc_per_device = kNumScPerDevice,
@@ -227,12 +285,12 @@ void BM_ExtractCooTensors(benchmark::State& state) {
       .minibatching_mode = MinibatchingMode::kHost,
   };
 
-  for (auto s : state) {
-    ExtractedCooTensors extracted_coo_tensors =
-        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-            stacked_table_metadata, absl::MakeSpan(input_batches),
-            /*local_device_id=*/0, options);
-    extracted_coo_tensors.BlockUntilReady();
+  if (workload_config.vocab_size > std::numeric_limits<int32_t>::max()) {
+    RunExtractBenchmark<int64_t>(state, stacked_table_metadata,
+                                 absl::MakeSpan(input_batches), options);
+  } else {
+    RunExtractBenchmark<int32_t>(state, stacked_table_metadata,
+                                 absl::MakeSpan(input_batches), options);
   }
 }
 BENCHMARK(BM_ExtractCooTensors)
@@ -244,50 +302,22 @@ BENCHMARK(BM_ExtractCooTensors)
     ->Args({1, 1, 1})   // kMean, HighMultivalency
     ->Args({1, 2, 1})   // kSqrtn, HighMultivalency
     ->Args({5, 1, 2})   // kMean, ModerateMultivalency
+    ->Args({20, 0, 3})  // kSum, LargeVocab64
+    ->Args({20, 1, 3})  // kMean, LargeVocab64
+    ->Args({20, 2, 3})  // kSqrtn, LargeVocab64
     ->Threads(8)
     ->UseRealTime();
 
-void BM_SortAndGroup_Phase1(benchmark::State& state) {
-  const int num_features = state.range(0);
-  const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
-  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(2));
-  state.SetLabel(absl::StrCat(CombinerToString(combiner), "/",
-                              WorkloadProfileToString(profile)));
-  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
-  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
-      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
-                                             workload_config, num_features);
-
-  std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
-  stacked_table_metadata_list.reserve(num_features);
-  for (int i = 0; i < num_features; ++i) {
-    // Set to INT_MAX to avoid ID dropping and observe the actual statistics of
-    // the generated data. This doesn't affect performance of grouping itself.
-    stacked_table_metadata_list.push_back(FeatureMetadataInStack(
-        absl::StrCat("table_", i), /*feature_index=*/i,
-        /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
-        /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
-        /*row_offset=*/0,
-        /*col_offset=*/0,
-        /*col_shift=*/0, /*batch_size=*/kBatchSizePerSc,
-        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
-        /*row_combiner=*/combiner));
-  }
-
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 1,
-      .global_device_count = kGlobalDeviceCount,
-      .num_sc_per_device = kNumScPerDevice,
-      .sc_simd_width = kScSimdWidth,
-      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
-      .allow_id_dropping = false,
-      .minibatching_mode = MinibatchingMode::kHost,
-  };
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_list, absl::MakeSpan(input_batches),
-          /*local_device_id=*/0, options);
+template <typename ColIdT>
+void RunSortAndGroupBenchmark(
+    benchmark::State& state,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata_list,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  ExtractedCooTensorsT<ColIdT> extracted_coo_tensors =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice<ColIdT>(
+          stacked_table_metadata_list, input_batches,
+          /*local_device_id=*/0, options, /*has_variable_weights=*/false);
 
   // Sorting permutes the extracted keys in place, so keep a pristine copy and
   // restore it before every iteration. Otherwise, every iteration after the
@@ -329,6 +359,39 @@ void BM_SortAndGroup_Phase1(benchmark::State& state) {
         options, stats_per_device, minibatching_required);
   }
 }
+
+void BM_SortAndGroup_Phase1(benchmark::State& state) {
+  const int num_features = state.range(0);
+  const RowCombiner combiner = static_cast<RowCombiner>(state.range(1));
+  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(2));
+  state.SetLabel(absl::StrCat(CombinerToString(combiner), "/",
+                              WorkloadProfileToString(profile)));
+  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
+                                             workload_config, num_features);
+  const std::vector<FeatureMetadataInStack> stacked_table_metadata_list =
+      BuildStackedTableMetadata(num_features, combiner,
+                                workload_config.vocab_size);
+
+  const PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = kGlobalDeviceCount,
+      .num_sc_per_device = kNumScPerDevice,
+      .sc_simd_width = kScSimdWidth,
+      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kHost,
+  };
+
+  if (workload_config.vocab_size > std::numeric_limits<int32_t>::max()) {
+    RunSortAndGroupBenchmark<int64_t>(state, stacked_table_metadata_list,
+                                      absl::MakeSpan(input_batches), options);
+  } else {
+    RunSortAndGroupBenchmark<int32_t>(state, stacked_table_metadata_list,
+                                      absl::MakeSpan(input_batches), options);
+  }
+}
 BENCHMARK(BM_SortAndGroup_Phase1)
     // Args: {num_features, combiner, workload_profile}
     ->Args({20, 0, 0})  // kSum, LargeVocab
@@ -338,48 +401,22 @@ BENCHMARK(BM_SortAndGroup_Phase1)
     ->Args({1, 1, 1})   // kMean, HighMultivalency
     ->Args({1, 2, 1})   // kSqrtn, HighMultivalency
     ->Args({1, 1, 2})   // kMean, ModerateMultivalency
+    ->Args({20, 0, 3})  // kSum, LargeVocab64
+    ->Args({20, 1, 3})  // kMean, LargeVocab64
+    ->Args({20, 2, 3})  // kSqrtn, LargeVocab64
     ->Threads(8)
     ->UseRealTime();
 
-template <bool kEnableMegacoreCsr>
-void BM_FillBufferImpl(benchmark::State& state,
-                       MinibatchingMode minibatching_mode) {
-  const int num_features = state.range(0);
-  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(1));
-  state.SetLabel(WorkloadProfileToString(profile));
-  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
-  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
-      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
-                                             workload_config, num_features);
-
-  std::vector<FeatureMetadataInStack> stacked_table_metadata_list;
-  stacked_table_metadata_list.reserve(num_features);
-  for (int i = 0; i < num_features; ++i) {
-    stacked_table_metadata_list.push_back(FeatureMetadataInStack(
-        absl::StrCat("table_", i), /*feature_index=*/i,
-        /*max_ids_per_partition=*/std::numeric_limits<int>::max(),
-        /*max_unique_ids_per_partition=*/std::numeric_limits<int>::max(),
-        /*row_offset=*/0,
-        /*col_offset=*/0,
-        /*col_shift=*/0, /*batch_size=*/kBatchSizePerSc,
-        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
-        /*row_combiner=*/RowCombiner::kSum));
-  }
-
-  PreprocessSparseDenseMatmulInputOptions options = {
-      .local_device_count = 1,
-      .global_device_count = kGlobalDeviceCount,
-      .num_sc_per_device = kNumScPerDevice,
-      .sc_simd_width = kScSimdWidth,
-      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
-      .allow_id_dropping = false,
-      .minibatching_mode = minibatching_mode,
-  };
-
-  ExtractedCooTensors extracted_coo_tensors =
-      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-          stacked_table_metadata_list, absl::MakeSpan(input_batches),
-          /*local_device_id=*/0, options);
+template <typename ColIdT, bool kEnableMegacoreCsr>
+void RunFillBufferBenchmark(
+    benchmark::State& state, const WorkloadConfig& workload_config,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata_list,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  ExtractedCooTensorsT<ColIdT> extracted_coo_tensors =
+      internal::ExtractCooTensorsForAllFeaturesPerLocalDevice<ColIdT>(
+          stacked_table_metadata_list, input_batches,
+          /*local_device_id=*/0, options, /*has_variable_weights=*/false);
 
   bool minibatching_required = false;
   StatsPerHost stats_per_host(
@@ -388,7 +425,7 @@ void BM_FillBufferImpl(benchmark::State& state,
       /*num_sc_per_device=*/kNumScPerDevice);
   internal::StatsPerDevice stats_per_device =
       stats_per_host.GetStatsPerDevice(0);
-  DevicePartitionedCooTensors grouped_coo_tensors =
+  DevicePartitionedCooTensorsT<CooFormatT<ColIdT>> grouped_coo_tensors =
       SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/false>(
           extracted_coo_tensors, "table_0", stacked_table_metadata_list[0],
           options, stats_per_device, minibatching_required);
@@ -411,9 +448,10 @@ void BM_FillBufferImpl(benchmark::State& state,
 
   std::optional<MegacoreCsrOptions> megacore_csr;
   if constexpr (kEnableMegacoreCsr) {
+    const int64_t num_scs = int64_t{kGlobalDeviceCount} * kNumScPerDevice;
     megacore_csr = MegacoreCsrOptions{
-        .rows_per_sc = std::max(1, workload_config.vocab_size /
-                                       (kGlobalDeviceCount * kNumScPerDevice))};
+        .rows_per_sc = std::max(
+            1, static_cast<int>(workload_config.vocab_size / num_scs))};
   }
 
   for (auto s : state) {
@@ -421,6 +459,41 @@ void BM_FillBufferImpl(benchmark::State& state,
                           stats_per_device.required_buffer_size, options,
                           stacked_table_metadata_list[0].name, megacore_csr,
                           csr_arrays, dropped_id_count_static_bound);
+  }
+}
+
+template <bool kEnableMegacoreCsr>
+void BM_FillBufferImpl(benchmark::State& state,
+                       MinibatchingMode minibatching_mode) {
+  const int num_features = state.range(0);
+  const WorkloadProfile profile = static_cast<WorkloadProfile>(state.range(1));
+  state.SetLabel(WorkloadProfileToString(profile));
+  const WorkloadConfig workload_config = GetWorkloadConfig(profile);
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches =
+      GenerateSkewedRaggedTensorInputBatches(kNumScPerDevice, kBatchSizePerSc,
+                                             workload_config, num_features);
+  const std::vector<FeatureMetadataInStack> stacked_table_metadata_list =
+      BuildStackedTableMetadata(num_features, RowCombiner::kSum,
+                                workload_config.vocab_size);
+
+  const PreprocessSparseDenseMatmulInputOptions options = {
+      .local_device_count = 1,
+      .global_device_count = kGlobalDeviceCount,
+      .num_sc_per_device = kNumScPerDevice,
+      .sc_simd_width = kScSimdWidth,
+      .hbm_word_size_in_4b = kHbmWordSizeIn4b,
+      .allow_id_dropping = false,
+      .minibatching_mode = minibatching_mode,
+  };
+
+  if (workload_config.vocab_size > std::numeric_limits<int32_t>::max()) {
+    RunFillBufferBenchmark<int64_t, kEnableMegacoreCsr>(
+        state, workload_config, stacked_table_metadata_list,
+        absl::MakeSpan(input_batches), options);
+  } else {
+    RunFillBufferBenchmark<int32_t, kEnableMegacoreCsr>(
+        state, workload_config, stacked_table_metadata_list,
+        absl::MakeSpan(input_batches), options);
   }
 }
 
@@ -440,22 +513,26 @@ BENCHMARK(BM_FillBuffer)
     // Args: {num_features, profile}
     ->Args({20, 0})  // LargeVocab
     ->Args({1, 1})   // HighMultivalency
+    ->Args({20, 3})  // LargeVocab64
     ->UseRealTime();
 BENCHMARK(BM_FillBuffer)
     // Args: {num_features, profile}
     ->Args({20, 0})  // LargeVocab
     ->Args({1, 1})   // HighMultivalency
+    ->Args({20, 3})  // LargeVocab64
     ->Threads(8)
     ->UseRealTime();
 BENCHMARK(BM_FillBuffer_Megacore)
     // Args: {num_features, profile}
     ->Args({20, 0})  // LargeVocab
     ->Args({1, 1})   // HighMultivalency
+    ->Args({20, 3})  // LargeVocab64
     ->UseRealTime();
 BENCHMARK(BM_FillBuffer_Megacore)
     // Args: {num_features, profile}
     ->Args({20, 0})  // LargeVocab
     ->Args({1, 1})   // HighMultivalency
+    ->Args({20, 3})  // LargeVocab64
     ->Threads(8)
     ->UseRealTime();
 

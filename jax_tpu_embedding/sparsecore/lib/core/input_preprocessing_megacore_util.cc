@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -56,20 +57,24 @@ void AlignMegacoreCooBuffer(int& coo_index, int coo_end,
   }
 }
 
-int GlobalScId(const CooFormat& coo, uint32_t sc_mask) {
-  return static_cast<int>(static_cast<uint32_t>(coo.col_id) & sc_mask);
+template <typename CooT>
+int GlobalScId(const CooT& coo, uint32_t sc_mask) {
+  using UColIdT = std::make_unsigned_t<decltype(CooT::col_id)>;
+  return static_cast<int>(static_cast<UColIdT>(coo.col_id) &
+                          static_cast<UColIdT>(sc_mask));
 }
 
 // Sets `offsets[g]` to the index of the first element of `coo_tensors` whose
 // global SparseCore ID is >= `g`. `coo_tensors` must be sorted by
 // `(global_sc_id, emb_id)`.
-void FindGlobalScOffsets(absl::Span<const CooFormat> coo_tensors,
-                         uint32_t sc_mask, absl::Span<int> offsets) {
+template <typename CooT>
+void FindGlobalScOffsets(absl::Span<const CooT> coo_tensors, uint32_t sc_mask,
+                         absl::Span<int> offsets) {
   auto it = coo_tensors.begin();
   for (int g = 0; g < offsets.size(); ++g) {
     it = std::partition_point(
         it, coo_tensors.end(),
-        [&](const CooFormat& coo) { return GlobalScId(coo, sc_mask) < g; });
+        [&](const CooT& coo) { return GlobalScId(coo, sc_mask) < g; });
     offsets[g] = static_cast<int>(it - coo_tensors.begin());
   }
 }
@@ -88,20 +93,22 @@ struct MegacoreFillPlan {
 
 // Copies sorted `coo_tensors` for a single SparseCore into the output CSR
 // slice, which must be at least as large as `coo_tensors`.
-void CopyMegacoreCooTensors(absl::Span<const CooFormat> coo_tensors,
+template <typename CooT>
+void CopyMegacoreCooTensors(absl::Span<const CooT> coo_tensors,
                             int dest_sc_offset, int num_sc_bits,
                             int max_row_id_exclusive,
                             Eigen::Ref<RowVectorXi> embedding_ids,
                             Eigen::Ref<RowVectorXi> sample_ids,
                             Eigen::Ref<RowVectorXf> gains) {
+  using UColIdT = std::make_unsigned_t<decltype(CooT::col_id)>;
   DCHECK_LE(coo_tensors.size(), embedding_ids.size());
   const int count = coo_tensors.size();
   const auto coo_it = coo_tensors.begin();
   for (int i = 0; i < count; ++i) {
-    const CooFormat& coo = coo_it[i];
+    const CooT& coo = coo_it[i];
     DCHECK_GE(coo.col_id, 0);
     DCHECK_LT(coo.row_id, max_row_id_exclusive);
-    const uint32_t emb_id = static_cast<uint32_t>(coo.col_id) >> num_sc_bits;
+    const UColIdT emb_id = static_cast<UColIdT>(coo.col_id) >> num_sc_bits;
     embedding_ids[i] = dest_sc_offset + static_cast<int>(emb_id);
     sample_ids[i] = coo.row_id;
     gains[i] = coo.gain;
@@ -111,11 +118,13 @@ void CopyMegacoreCooTensors(absl::Span<const CooFormat> coo_tensors,
 // The unmerged remainder `[head, end)` of one local SparseCore's COO tensors in
 // `FillMegacoreBucket`. `head_col_id` caches `head->col_id` for the min-scan,
 // and `last_col_id` caches `(end - 1)->col_id` to detect the last run.
+template <typename CooT>
 struct ScBucketInput {
-  absl::Span<const CooFormat>::const_iterator head;
-  absl::Span<const CooFormat>::const_iterator end;
-  int head_col_id;
-  int last_col_id;
+  using ColIdT = decltype(CooT::col_id);
+  typename absl::Span<const CooT>::const_iterator head;
+  typename absl::Span<const CooT>::const_iterator end;
+  ColIdT head_col_id;
+  ColIdT last_col_id;
 };
 
 // Performs a k-way merge of the non-empty per-local-SC `sc_coo_tensors` for a
@@ -133,18 +142,22 @@ struct ScBucketInput {
 //
 // The output slice must hold exactly the total number of elements across
 // `sc_coo_tensors`, so the merge needs no bounds checks.
-void FillMegacoreBucket(
-    absl::Span<const absl::Span<const CooFormat>> sc_coo_tensors,
-    int dest_sc_offset, int num_sc_bits, int max_row_id_exclusive,
-    Eigen::Ref<RowVectorXi> embedding_ids, Eigen::Ref<RowVectorXi> sample_ids,
-    Eigen::Ref<RowVectorXf> gains) {
+template <typename CooT>
+void FillMegacoreBucket(absl::Span<const absl::Span<const CooT>> sc_coo_tensors,
+                        int dest_sc_offset, int num_sc_bits,
+                        int max_row_id_exclusive,
+                        Eigen::Ref<RowVectorXi> embedding_ids,
+                        Eigen::Ref<RowVectorXi> sample_ids,
+                        Eigen::Ref<RowVectorXf> gains) {
+  using ColIdT = decltype(CooT::col_id);
+  using UColIdT = std::make_unsigned_t<ColIdT>;
   Eigen::Index out_index = 0;
   DCHECK_EQ(sample_ids.size(), embedding_ids.size());
   DCHECK_EQ(gains.size(), embedding_ids.size());
 
-  absl::InlinedVector<ScBucketInput, kInlinedScPerDevice> sc_inputs;
+  absl::InlinedVector<ScBucketInput<CooT>, kInlinedScPerDevice> sc_inputs;
   Eigen::Index total_count = 0;
-  for (absl::Span<const CooFormat> coo_tensors : sc_coo_tensors) {
+  for (absl::Span<const CooT> coo_tensors : sc_coo_tensors) {
     sc_inputs.push_back({.head = coo_tensors.begin(),
                          .end = coo_tensors.end(),
                          .head_col_id = coo_tensors.front().col_id,
@@ -158,19 +171,19 @@ void FillMegacoreBucket(
   auto sc_inputs_end = sc_inputs.end();
 
   // Copies the remainder of `sc_input` to the output.
-  auto copy_remainder = [&](const ScBucketInput& sc_input) {
+  auto copy_remainder = [&](const ScBucketInput<CooT>& sc_input) {
     const Eigen::Index count = sc_input.end - sc_input.head;
-    CopyMegacoreCooTensors(absl::MakeConstSpan(sc_input.head, sc_input.end),
-                           dest_sc_offset, num_sc_bits, max_row_id_exclusive,
-                           embedding_ids.segment(out_index, count),
-                           sample_ids.segment(out_index, count),
-                           gains.segment(out_index, count));
+    CopyMegacoreCooTensors<CooT>(
+        absl::MakeConstSpan(sc_input.head, sc_input.end), dest_sc_offset,
+        num_sc_bits, max_row_id_exclusive,
+        embedding_ids.segment(out_index, count),
+        sample_ids.segment(out_index, count), gains.segment(out_index, count));
     out_index += count;
   };
 
   while (sc_inputs_end - sc_inputs_begin > 1) {
     auto min_sc_input = sc_inputs_begin;
-    int min_col_id = min_sc_input->head_col_id;
+    ColIdT min_col_id = min_sc_input->head_col_id;
     for (auto sc_input = min_sc_input + 1; sc_input != sc_inputs_end;
          ++sc_input) {
       if (sc_input->head_col_id < min_col_id) {
@@ -194,7 +207,7 @@ void FillMegacoreBucket(
       std::copy(min_sc_input + 1, sc_inputs_end, min_sc_input);
       --sc_inputs_end;
     } else {
-      const uint32_t emb_id = static_cast<uint32_t>(min_col_id) >> num_sc_bits;
+      const UColIdT emb_id = static_cast<UColIdT>(min_col_id) >> num_sc_bits;
       const int linearized_emb_id = dest_sc_offset + static_cast<int>(emb_id);
       // `min_sc_input->last_col_id != min_col_id`, so the run ends before
       // `*min_sc_input` is exhausted and no end check is needed.
@@ -218,8 +231,9 @@ void FillMegacoreBucket(
 
 // Fills the Megacore COO buffer for buckets `g` in `[bucket_begin, bucket_end)`
 // using the precomputed `plan`.
+template <typename CooT>
 void FillMegacoreBucketRange(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     const MegacoreFillPlan& plan, int bucket_begin, int bucket_end,
     int batch_size_per_sc, int rows_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
@@ -229,7 +243,7 @@ void FillMegacoreBucketRange(
   const int num_sc_bits = absl::countr_zero(static_cast<uint32_t>(num_scs));
   const int max_row_id_exclusive = batch_size_per_sc * num_sc_per_device;
 
-  absl::InlinedVector<absl::Span<const CooFormat>, kInlinedScPerDevice>
+  absl::InlinedVector<absl::Span<const CooT>, kInlinedScPerDevice>
       sc_coo_tensors;
   for (int g = bucket_begin; g < bucket_end; ++g) {
     const int coo_index = plan.bucket_coo_begin[g];
@@ -252,7 +266,7 @@ void FillMegacoreBucketRange(
     const int dest_sc = g & (num_sc_per_device - 1);
     const int dest_sc_offset = static_cast<int>(int64_t{dest_sc} * rows_per_sc);
     if (total_count == bucket_size) {
-      FillMegacoreBucket(
+      FillMegacoreBucket<CooT>(
           sc_coo_tensors, dest_sc_offset, num_sc_bits, max_row_id_exclusive,
           csr_arrays.embedding_ids.segment(coo_index, bucket_size),
           csr_arrays.sample_ids.segment(coo_index, bucket_size),
@@ -265,8 +279,9 @@ void FillMegacoreBucketRange(
     RowVectorXi embedding_ids(total_count);
     RowVectorXi sample_ids(total_count);
     RowVectorXf gains(total_count);
-    FillMegacoreBucket(sc_coo_tensors, dest_sc_offset, num_sc_bits,
-                       max_row_id_exclusive, embedding_ids, sample_ids, gains);
+    FillMegacoreBucket<CooT>(sc_coo_tensors, dest_sc_offset, num_sc_bits,
+                             max_row_id_exclusive, embedding_ids, sample_ids,
+                             gains);
     csr_arrays.embedding_ids.segment(coo_index, bucket_size) =
         embedding_ids.head(bucket_size);
     csr_arrays.sample_ids.segment(coo_index, bucket_size) =
@@ -277,8 +292,9 @@ void FillMegacoreBucketRange(
 
 }  // namespace
 
+template <typename CooT>
 tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     const int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name, MegacoreCsrOptions megacore_csr,
@@ -299,12 +315,12 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
 
   int total_coo_size = 0;
   for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
-    absl::Span<const CooFormat> coo_tensors =
+    absl::Span<const CooT> coo_tensors =
         grouped_coo_tensors(sc_id, /*bucket_id=*/0);
     total_coo_size += coo_tensors.size();
     absl::Span<int> offsets = absl::MakeSpan(plan->sc_offsets)
                                   .subspan(sc_id * (num_scs + 1), num_scs + 1);
-    FindGlobalScOffsets(coo_tensors, sc_mask, offsets);
+    FindGlobalScOffsets<CooT>(coo_tensors, sc_mask, offsets);
   }
 
   int coo_index = 0;
@@ -395,13 +411,30 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
                          task_idx),
             {{"batch_number", options.batch_number}});
       });
-      FillMegacoreBucketRange(grouped_coo_tensors, *plan, bucket_begin,
-                              bucket_end, batch_size_per_sc,
-                              megacore_csr.rows_per_sc, options, csr_arrays);
+      FillMegacoreBucketRange<CooT>(grouped_coo_tensors, *plan, bucket_begin,
+                                    bucket_end, batch_size_per_sc,
+                                    megacore_csr.rows_per_sc, options,
+                                    csr_arrays);
       count_down.CountDown();
     });
   }
   return count_down.AsRef();
 }
+
+template tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync<CooFormat>(
+    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    int batch_size_per_sc,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name, MegacoreCsrOptions megacore_csr,
+    internal::CsrArraysRefPerDevice csr_arrays);
+
+template tsl::AsyncValueRef<int>
+FillMegacoreLocalDeviceBufferAsync<CooFormatT<int64_t>>(
+    const DevicePartitionedCooTensorsT<CooFormatT<int64_t>>&
+        grouped_coo_tensors,
+    int batch_size_per_sc,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    absl::string_view stacked_table_name, MegacoreCsrOptions megacore_csr,
+    internal::CsrArraysRefPerDevice csr_arrays);
 
 }  // namespace jax_sc_embedding

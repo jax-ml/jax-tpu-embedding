@@ -565,6 +565,19 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // Hash function used for creating minibatching buckets.
   CooFormat::HashFn minibatching_bucketing_hash_fn = HighwayHash<int32_t>;
 
+  // Hash function used for creating minibatching buckets on 64-bit column IDs.
+  CooFormatT<int64_t>::HashFn minibatching_bucketing_hash_fn_64 =
+      HighwayHash<int64_t>;
+
+  template <typename ColIdT>
+  typename CooFormatT<ColIdT>::HashFn GetMinibatchingHashFn() const {
+    if constexpr (std::is_same_v<ColIdT, int64_t>) {
+      return minibatching_bucketing_hash_fn_64;
+    } else {
+      return minibatching_bucketing_hash_fn;
+    }
+  }
+
   // Callback to schedule async work. Since `absl::FunctionRef` is non-owning,
   // any custom callable provided must outlive the
   // `PreprocessSparseDenseMatmulInputOptions` instance.
@@ -727,8 +740,9 @@ struct MegacoreCsrOptions {
 };
 
 // Blocking version for testing only.
+template <typename CooT = CooFormat>
 void FillLocalDeviceBuffer(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
@@ -743,8 +757,9 @@ void FillLocalDeviceBuffer(
 // `[round_up(row_pointers[i - 1], 8), row_pointers[i])`. Alignment padding
 // between rows and all entries beyond the last aligned row have embedding and
 // sample IDs of INT_MAX and gains of 0.
+template <typename CooT = CooFormat>
 tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     int batch_size_per_sc, const BlockRow<int>& required_sc_buffer_sizes,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,

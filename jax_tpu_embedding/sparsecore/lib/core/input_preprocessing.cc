@@ -23,6 +23,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/base/nullability.h"  // from @com_google_absl
@@ -31,6 +32,7 @@
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
+#include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/str_join.h"  // from @com_google_absl
@@ -42,7 +44,6 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
-#include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sort_and_group_coo_tensors_impl.h"
 #include "xla/tsl/concurrency/async_value.h"  // from @xla
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
@@ -95,12 +96,13 @@ int64_t ComputeMaxEmbeddingId(const FeatureMetadataInStack& metadata,
 }
 
 // Extract the COO tensors for a single feature slice.
+template <typename ColIdT>
 void ExtractCooTensorsForSingleFeatureSlice(
     const FeatureMetadataInStack& metadata,
     absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const FeatureSliceInfo& slice_info,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    ExtractedCooTensorsPerSparseCore& extracted_coo_tensors) {
+    ExtractedCooTensorsPerSparseCoreT<ColIdT>& extracted_coo_tensors) {
   const int feature_index = metadata.feature_index;
   const std::unique_ptr<AbstractInputBatch>& curr_batch =
       input_batches[feature_index];
@@ -118,7 +120,7 @@ void ExtractCooTensorsForSingleFeatureSlice(
   const int64_t col_offset = metadata.col_offset;
   const int col_shift = metadata.col_shift;
   const int64_t max_embedding_id =
-      ComputeMaxEmbeddingId<int32_t>(metadata, options.GetNumScs());
+      ComputeMaxEmbeddingId<ColIdT>(metadata, options.GetNumScs());
 
   // In the case of feature stacking, we need to group all the COO tensors
   // at this stage (i.e., before the sorting later on).
@@ -129,7 +131,7 @@ void ExtractCooTensorsForSingleFeatureSlice(
       feature_index, slice_info.start_index, slice_info.end_index,
       slice_info.local_device_id, slice_info.feature_slice_id, row_offset,
       slice_info.batch_size_per_slice);
-  curr_batch->ExtractCooTensors(
+  curr_batch->ExtractCooTensorsInto(
       {
           .slice_start = slice_info.start_index,
           .slice_end = slice_info.end_index,
@@ -152,211 +154,42 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
       batch_size_for_device, stacked_table_name, num_sc_per_device);
 }
 
-// We consider a stack to have variable weights if any feature in the stack
-// has explicitly variable weights.
-bool StackHasVariableWeights(
-    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
-    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
-  for (const auto& metadata : stacked_table_metadata) {
-    if (input_batches[metadata.feature_index]->HasVariableWeights()) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Holds the state for processing a single stacked table across all local
-// devices. This includes extracted COO tensors, partitioned COO tensors,
-// CSR arrays, and statistics.
-struct TableState {
-  absl::string_view stacked_table_name;
-  absl::Span<const FeatureMetadataInStack> stacked_table_metadata;
-  bool has_variable_weights;
-  // Set iff Megacore CSR buffers are produced for this stacked table.
-  std::optional<MegacoreCsrOptions> megacore_csr;
-  int coo_buffer_size_per_device;
-  CsrArraysPerHost csr_arrays_per_host;
-  StatsPerHost stats_per_host;
-  int batch_size_for_device;
-  bool table_minibatching_required = false;
-  MinibatchingSplit table_minibatching_split = 0;
-  std::vector<ExtractedCooTensors> extracted_coo_tensors_per_device;
-  std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>>
-      device_sorting_results;
-
-  TableState(absl::string_view name,
-             absl::Span<const FeatureMetadataInStack> metadata,
-             bool has_variable_weights, bool enable_megacore_csr,
-             const PreprocessSparseDenseMatmulInputOptions& options,
-             int coo_buffer_size_per_device, Eigen::Ref<MatrixXi> row_pointers,
-             Eigen::Ref<MatrixXi> embedding_ids,
-             Eigen::Ref<MatrixXi> sample_ids, Eigen::Ref<MatrixXf> gains)
-      : stacked_table_name(name),
-        stacked_table_metadata(metadata),
-        has_variable_weights(has_variable_weights),
-        coo_buffer_size_per_device(coo_buffer_size_per_device),
-        csr_arrays_per_host(row_pointers, embedding_ids, sample_ids, gains),
-        stats_per_host(options.local_device_count, options.GetNumScs(),
-                       options.num_sc_per_device),
-        batch_size_for_device(0) {
-    if (enable_megacore_csr) {
-      int rows_per_sc = 0;
-      if (options.num_sc_per_device > 1) {
-        for (const auto& feature_metadata : stacked_table_metadata) {
-          CHECK(IsMaxColIdSpecified(feature_metadata.max_col_id) &&
-                *feature_metadata.max_col_id >= 0 &&
-                *feature_metadata.max_col_id < std::numeric_limits<int>::max())
-              << "max_col_id must be set to a non-negative value on "
-                 "FeatureMetadataInStack when enable_megacore_csr is true and "
-                 "num_sc_per_device > 1 (table: "
-              << stacked_table_name << ", feature: " << feature_metadata.name
-              << ").";
-          rows_per_sc = std::max<int>(
-              rows_per_sc, static_cast<int>(*feature_metadata.max_col_id) + 1);
-        }
-      }
-      megacore_csr = MegacoreCsrOptions{.rows_per_sc = rows_per_sc};
-    }
-    extracted_coo_tensors_per_device.resize(options.local_device_count);
-    device_sorting_results.resize(options.local_device_count);
-  }
-};
-
-template <typename SplitType>
-tsl::AsyncValueRef<DeviceSortingTaskResult>
-SortAndGroupCooTensorsForTableStateAsync(
-    TableState& state, int local_device,
-    const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::StatsPerDevice stats) {
-  if (state.has_variable_weights) {
-    return SortAndGroupCooTensorsPerLocalDeviceAsync<true, SplitType>(
-        state.extracted_coo_tensors_per_device[local_device],
-        state.stacked_table_name, state.stacked_table_metadata[0], options,
-        stats);
-  } else {
-    return SortAndGroupCooTensorsPerLocalDeviceAsync<false, SplitType>(
-        state.extracted_coo_tensors_per_device[local_device],
-        state.stacked_table_name, state.stacked_table_metadata[0], options,
-        stats);
-  }
-}
-
-// Extracts, sorts, and groups COO tensors for a single stacked table across
-// all local devices. This function populates
-// `state.extracted_coo_tensors_per_device` and
-// `state.partitioned_coo_tensors_per_device`.
-void ExtractSortAndGroupCooTensorsForTable(
-    TableState& state,
-    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+template <typename ColIdT>
+KeyLayout<ColIdT> ComputeKeyLayout(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options) {
-  tsl::profiler::TraceMe traceme([&] {
-    return tsl::profiler::TraceMeEncode(
-        absl::StrCat("ScheduleExtractSortGroup/", state.stacked_table_name),
-        {{"batch_number", options.batch_number}});
-  });
-  for (int local_device = 0; local_device < options.local_device_count;
-       ++local_device) {
-    // This extracts Coo tensors per SC in parallel by launching one async
-    // task per SC via async_task_scheduler within
-    // ExtractCooTensorsForAllFeaturesPerLocalDevice.
-    state.extracted_coo_tensors_per_device[local_device] =
-        internal::ExtractCooTensorsForAllFeaturesPerLocalDevice(
-            state.stacked_table_metadata, input_batches, local_device, options,
-            state.has_variable_weights);
-
-    internal::StatsPerDevice stats_per_device =
-        state.stats_per_host.GetStatsPerDevice(local_device);
-
-    // This sorts and groups Coo tensors per SC in parallel. Each sorting
-    // task waits for the corresponding SC extraction to finish before
-    // starting (dependency is handled in
-    // SortAndGroupCooTensorsPerLocalDeviceImpl via RunWhenReady).
-    state.device_sorting_results[local_device] =
-        SortAndGroupCooTensorsForTableStateAsync<bool>(
-            state, local_device, options, stats_per_device);
+  const uint32_t num_sc_bits = absl::countr_zero(options.GetNumScs());
+  if constexpr (std::is_same_v<ColIdT, int32_t>) {
+    return KeyLayout<int32_t>::Make(num_sc_bits);
+  } else {
+    const int64_t num_scs = options.GetNumScs();
+    int64_t max_local_emb_id = 0;
+    bool any_unspecified_max_col_id = false;
+    for (const auto& m : stacked_table_metadata) {
+      if (IsMaxColIdSpecified(m.max_col_id)) {
+        max_local_emb_id = std::max<int64_t>(max_local_emb_id, *m.max_col_id);
+      } else {
+        any_unspecified_max_col_id = true;
+      }
+      if (m.col_offset >= 0) {
+        max_local_emb_id =
+            std::max<int64_t>(max_local_emb_id, m.col_offset / num_scs);
+      }
+    }
+    if (any_unspecified_max_col_id) {
+      max_local_emb_id = std::numeric_limits<int32_t>::max() - 1;
+    }
+    return KeyLayout<int64_t>::Make(num_sc_bits, max_local_emb_id);
   }
 }
 
-void PostProcessTableState(TableState& state) {
-  state.stats_per_host.dropped_id_count = 0;
-  for (const auto& result_av : state.device_sorting_results) {
-    state.stats_per_host.dropped_id_count +=
-        result_av.get().total_dropped_id_count;
-    state.table_minibatching_required |=
-        result_av.get().table_minibatching_required;
-    state.table_minibatching_split |= result_av.get().table_minibatching_split;
-  }
-}
-
-// Creates minibatching buckets for a single stacked table across all local
-// devices. This function re-sorts and groups the extracted COO tensors
-// based on the minibatching split determined in a previous stage.
-// `state`: The TableState holding the COO tensors and statistics.
-// `options`: Preprocessing options.
-void CreateMinibatchingBucketsForTable(
-    TableState& state, const PreprocessSparseDenseMatmulInputOptions& options) {
-  tsl::profiler::TraceMe traceme([&] {
-    return tsl::profiler::TraceMeEncode(
-        absl::StrCat("ScheduleCreateMinibatchingBuckets/",
-                     state.stacked_table_name),
-        {{"batch_number", options.batch_number}});
-  });
-  state.stats_per_host.dropped_id_count = 0;
-  state.device_sorting_results.assign(
-      options.local_device_count,
-      tsl::AsyncValueRef<DeviceSortingTaskResult>());
-  absl::BlockingCounter counter(options.local_device_count);
-  for (int local_device = 0; local_device < options.local_device_count;
-       ++local_device) {
-    options.async_task_scheduler([&, local_device] {
-      // Note: We create a dummy stats object here because we don't want to
-      // overwrite the stats from the first pass, which are authoritative.
-      // The only stat we care about from this second pass is the number of
-      // dropped IDs.
-      auto dummy_stats_host = std::make_shared<StatsPerHost>(
-          /*local_device_count=*/1, options.GetNumScs(),
-          options.num_sc_per_device);
-      internal::StatsPerDevice dummy_stats =
-          dummy_stats_host->GetStatsPerDevice(0);
-      auto result_av =
-          SortAndGroupCooTensorsForTableStateAsync<MinibatchingSplit>(
-              state, local_device, options, dummy_stats);
-      state.device_sorting_results[local_device] = result_av;
-      // `dummy_stats_host` must be kept alive until `result_av` is
-      // ready, because `dummy_stats` (which is used in the async task
-      // that produces `result_av`) holds references to data owned by
-      // `dummy_stats_host`. Moving `dummy_stats_host` into this
-      // `AndThen` callback ensures its lifetime is extended until the
-      // async operation completes.
-      result_av.GetAsyncValue()->AndThen(
-          [dummy_stats_host = std::move(dummy_stats_host), &counter] {
-            counter.DecrementCount();
-          });
-    });
-  }
-  // Wait for all local devices to finish.
-  counter.Wait();
-}
-
-}  // namespace
-
-namespace internal {
-
-inline uint64_t Serialize(MinibatchingSplit value) { return value.to_ullong(); }
-inline MinibatchingSplit Deserialize(uint64_t value) {
-  return MinibatchingSplit(value);
-}
-
-inline bool Serialize(bool value) { return value; }
-inline bool Deserialize(bool value) { return value; }
-
-// Extract the COO tensors for all features.
-ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
+template <typename ColIdT>
+ExtractedCooTensorsT<ColIdT> ExtractCooTensorsForAllFeaturesPerLocalDeviceImpl(
     const absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     const int local_device_id,
     const PreprocessSparseDenseMatmulInputOptions& options,
-    bool has_variable_weights) {
+    bool has_variable_weights, KeyLayout<ColIdT> key_layout) {
   // Calculate the total batch size for this device across all features.
   int batch_size_for_device = 0;
   for (const auto& feature_metadata : stacked_table_metadata) {
@@ -378,9 +211,9 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
          "features stacked together (per feature slice).";
 
   // Initialize COO tensor structure and calculate batch size per slice.
-  ExtractedCooTensors extracted_coo_tensors(
+  ExtractedCooTensorsT<ColIdT> extracted_coo_tensors(
       options.num_sc_per_device, batch_size_for_device, has_variable_weights,
-      stacked_table_metadata[0].row_combiner);
+      stacked_table_metadata[0].row_combiner, key_layout);
   const int batch_size_per_slice =
       xla::CeilOfRatio(batch_size_for_device, feature_slices_per_device);
 
@@ -458,24 +291,294 @@ ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
                          "/SC", sc_id),
             {{"batch_number", options.batch_number}});
       });
-      ExtractedCooTensorsPerSparseCore coo_tensors_per_sc(
+      ExtractedCooTensorsPerSparseCoreT<ColIdT> coo_tensors_per_sc(
           batch_size_per_slice, has_variable_weights,
-          stacked_table_metadata[0].row_combiner,
-          absl::countr_zero(static_cast<uint32_t>(options.GetNumScs())));
+          stacked_table_metadata[0].row_combiner, key_layout);
       coo_tensors_per_sc.reserve(ids_per_sc[sc_id]);
       for (int feature_idx = 0; feature_idx < stacked_table_metadata.size();
            ++feature_idx) {
         const auto& slice =
             feature_slices[sc_id * stacked_table_metadata.size() + feature_idx];
-        ExtractCooTensorsForSingleFeatureSlice(*slice.metadata, input_batches,
-                                               slice.info, options,
-                                               coo_tensors_per_sc);
+        ExtractCooTensorsForSingleFeatureSlice(
+            *slice.metadata, input_batches, slice.info, options,
+            coo_tensors_per_sc);
       }
       av.emplace(std::move(coo_tensors_per_sc));
     });
   }
   return extracted_coo_tensors;
 }
+
+// We consider a stack to have variable weights if any feature in the stack
+// has explicitly variable weights.
+bool StackHasVariableWeights(
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata) {
+  for (const auto& metadata : stacked_table_metadata) {
+    if (input_batches[metadata.feature_index]->HasVariableWeights()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Bundles the ColIdT-parameterized per-table buffers (sorting key layout,
+// extracted per-SparseCore COO tensors, and per-device sorting tasks) behind
+// `TableExtractionAndSortingPipelineVariant` so `TableState` stays
+// non-templated while dispatching each stacked table to either the 32-bit or
+// 64-bit column ID pipeline.
+template <typename ColIdT>
+struct TableExtractionAndSortingPipeline {
+  using ColIdType = ColIdT;
+
+  KeyLayout<ColIdT> key_layout;
+  std::vector<ExtractedCooTensorsT<ColIdT>> extracted_coo_tensors_per_device;
+  std::vector<tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>>
+      device_sorting_results;
+
+  TableExtractionAndSortingPipeline(KeyLayout<ColIdT> key_layout,
+                                    int local_device_count)
+      : key_layout(key_layout),
+        extracted_coo_tensors_per_device(local_device_count),
+        device_sorting_results(local_device_count) {}
+};
+
+using TableExtractionAndSortingPipelineVariant =
+    std::variant<TableExtractionAndSortingPipeline<int32_t>,
+                 TableExtractionAndSortingPipeline<int64_t>>;
+
+// Holds the state for processing a single stacked table across all local
+// devices. This includes extracted COO tensors, partitioned COO tensors,
+// CSR arrays, and statistics.
+struct TableState {
+  absl::string_view stacked_table_name;
+  absl::Span<const FeatureMetadataInStack> stacked_table_metadata;
+  bool has_variable_weights;
+  // Set iff Megacore CSR buffers are produced for this stacked table.
+  std::optional<MegacoreCsrOptions> megacore_csr;
+  int coo_buffer_size_per_device;
+  CsrArraysPerHost csr_arrays_per_host;
+  StatsPerHost stats_per_host;
+  int batch_size_for_device;
+  bool table_minibatching_required = false;
+  MinibatchingSplit table_minibatching_split = 0;
+  TableExtractionAndSortingPipelineVariant pipeline;
+
+  TableState(absl::string_view name,
+             absl::Span<const FeatureMetadataInStack> metadata,
+             bool has_variable_weights,
+             TableExtractionAndSortingPipelineVariant pipeline,
+             bool enable_megacore_csr,
+             const PreprocessSparseDenseMatmulInputOptions& options,
+             int coo_buffer_size_per_device, Eigen::Ref<MatrixXi> row_pointers,
+             Eigen::Ref<MatrixXi> embedding_ids,
+             Eigen::Ref<MatrixXi> sample_ids, Eigen::Ref<MatrixXf> gains)
+      : stacked_table_name(name),
+        stacked_table_metadata(metadata),
+        has_variable_weights(has_variable_weights),
+        coo_buffer_size_per_device(coo_buffer_size_per_device),
+        csr_arrays_per_host(row_pointers, embedding_ids, sample_ids, gains),
+        stats_per_host(options.local_device_count, options.GetNumScs(),
+                       options.num_sc_per_device),
+        batch_size_for_device(0),
+        pipeline(std::move(pipeline)) {
+    if (enable_megacore_csr) {
+      int rows_per_sc = 0;
+      if (options.num_sc_per_device > 1) {
+        for (const auto& feature_metadata : stacked_table_metadata) {
+          CHECK(IsMaxColIdSpecified(feature_metadata.max_col_id) &&
+                *feature_metadata.max_col_id >= 0 &&
+                *feature_metadata.max_col_id < std::numeric_limits<int>::max())
+              << "max_col_id must be set to a non-negative value on "
+                 "FeatureMetadataInStack when enable_megacore_csr is true and "
+                 "num_sc_per_device > 1 (table: "
+              << stacked_table_name << ", feature: " << feature_metadata.name
+              << ").";
+          rows_per_sc = std::max<int>(
+              rows_per_sc, static_cast<int>(*feature_metadata.max_col_id) + 1);
+        }
+      }
+      megacore_csr = MegacoreCsrOptions{.rows_per_sc = rows_per_sc};
+    }
+  }
+};
+
+template <typename SplitType, typename ColIdT>
+tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>
+SortAndGroupCooTensorsForTablePipelineAsync(
+    const TableState& state, TableExtractionAndSortingPipeline<ColIdT>& pipe,
+    int local_device, const PreprocessSparseDenseMatmulInputOptions& options,
+    internal::StatsPerDevice stats) {
+  if (state.has_variable_weights) {
+    return SortAndGroupCooTensorsPerLocalDeviceAsync<true, SplitType>(
+        pipe.extracted_coo_tensors_per_device[local_device],
+        state.stacked_table_name, state.stacked_table_metadata[0], options,
+        stats);
+  } else {
+    return SortAndGroupCooTensorsPerLocalDeviceAsync<false, SplitType>(
+        pipe.extracted_coo_tensors_per_device[local_device],
+        state.stacked_table_name, state.stacked_table_metadata[0], options,
+        stats);
+  }
+}
+
+// Extracts, sorts, and groups COO tensors for a single stacked table across
+// all local devices.
+void ExtractSortAndGroupCooTensorsForTable(
+    TableState& state,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    const PreprocessSparseDenseMatmulInputOptions& options) {
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("ScheduleExtractSortGroup/", state.stacked_table_name),
+        {{"batch_number", options.batch_number}});
+  });
+  std::visit(
+      [&](auto& pipe) {
+        for (int local_device = 0; local_device < options.local_device_count;
+             ++local_device) {
+          // This extracts Coo tensors per SC in parallel by launching one async
+          // task per SC via async_task_scheduler within
+          // ExtractCooTensorsForAllFeaturesPerLocalDeviceImpl.
+          pipe.extracted_coo_tensors_per_device[local_device] =
+              ExtractCooTensorsForAllFeaturesPerLocalDeviceImpl(
+                  state.stacked_table_metadata, input_batches, local_device,
+                  options, state.has_variable_weights, pipe.key_layout);
+
+          internal::StatsPerDevice stats_per_device =
+              state.stats_per_host.GetStatsPerDevice(local_device);
+
+          // This sorts and groups Coo tensors per SC in parallel. Each sorting
+          // task waits for the corresponding SC extraction to finish before
+          // starting (dependency is handled in
+          // SortAndGroupCooTensorsPerLocalDeviceImpl via RunWhenReady).
+          pipe.device_sorting_results[local_device] =
+              SortAndGroupCooTensorsForTablePipelineAsync<bool>(
+                  state, pipe, local_device, options, stats_per_device);
+        }
+      },
+      state.pipeline);
+}
+
+void PostProcessTableState(TableState& state) {
+  state.stats_per_host.dropped_id_count = 0;
+  std::visit(
+      [&](const auto& pipe) {
+        for (const auto& result_av : pipe.device_sorting_results) {
+          state.stats_per_host.dropped_id_count +=
+              result_av.get().total_dropped_id_count;
+          state.table_minibatching_required |=
+              result_av.get().table_minibatching_required;
+          state.table_minibatching_split |=
+              result_av.get().table_minibatching_split;
+        }
+      },
+      state.pipeline);
+}
+
+void SchedulePostProcessTableState(TableState& state) {
+  std::visit(
+      [&state](const auto& pipe) {
+        tsl::RunWhenReady(absl::MakeConstSpan(pipe.device_sorting_results),
+                          [&state]() { PostProcessTableState(state); });
+      },
+      state.pipeline);
+}
+
+// Creates minibatching buckets for a single stacked table across all local
+// devices. This function re-sorts and groups the extracted COO tensors
+// based on the minibatching split determined in a previous stage.
+// `state`: The TableState holding the COO tensors and statistics.
+// `options`: Preprocessing options.
+void CreateMinibatchingBucketsForTable(
+    TableState& state, const PreprocessSparseDenseMatmulInputOptions& options) {
+  tsl::profiler::TraceMe traceme([&] {
+    return tsl::profiler::TraceMeEncode(
+        absl::StrCat("ScheduleCreateMinibatchingBuckets/",
+                     state.stacked_table_name),
+        {{"batch_number", options.batch_number}});
+  });
+  state.stats_per_host.dropped_id_count = 0;
+  std::visit(
+      [&](auto& pipe) {
+        using ColIdT = typename std::decay_t<decltype(pipe)>::ColIdType;
+        pipe.device_sorting_results.assign(
+            options.local_device_count,
+            tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>());
+        absl::BlockingCounter counter(options.local_device_count);
+        for (int local_device = 0; local_device < options.local_device_count;
+             ++local_device) {
+          options.async_task_scheduler([&, local_device] {
+            // Note: We create a dummy stats object here because we don't want
+            // to overwrite the stats from the first pass, which are
+            // authoritative. The only stat we care about from this second pass
+            // is the number of dropped IDs.
+            auto dummy_stats_host = std::make_shared<StatsPerHost>(
+                /*local_device_count=*/1, options.GetNumScs(),
+                options.num_sc_per_device);
+            internal::StatsPerDevice dummy_stats =
+                dummy_stats_host->GetStatsPerDevice(0);
+            auto result_av =
+                SortAndGroupCooTensorsForTablePipelineAsync<MinibatchingSplit>(
+                    state, pipe, local_device, options, dummy_stats);
+            pipe.device_sorting_results[local_device] = result_av;
+            // `dummy_stats_host` must be kept alive until `result_av` is
+            // ready, because `dummy_stats` (which is used in the async task
+            // that produces `result_av`) holds references to data owned by
+            // `dummy_stats_host`. Moving `dummy_stats_host` into this
+            // `AndThen` callback ensures its lifetime is extended until the
+            // async operation completes.
+            result_av.GetAsyncValue()->AndThen(
+                [dummy_stats_host = std::move(dummy_stats_host), &counter] {
+                  counter.DecrementCount();
+                });
+          });
+        }
+        // Wait for all local devices to finish.
+        counter.Wait();
+      },
+      state.pipeline);
+}
+
+}  // namespace
+
+namespace internal {
+
+inline uint64_t Serialize(MinibatchingSplit value) { return value.to_ullong(); }
+inline MinibatchingSplit Deserialize(uint64_t value) {
+  return MinibatchingSplit(value);
+}
+
+inline bool Serialize(bool value) { return value; }
+inline bool Deserialize(bool value) { return value; }
+
+// Extract the COO tensors for all features.
+template <typename ColIdT>
+ExtractedCooTensorsT<ColIdT> ExtractCooTensorsForAllFeaturesPerLocalDevice(
+    const absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    const int local_device_id,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    bool has_variable_weights) {
+  return ExtractCooTensorsForAllFeaturesPerLocalDeviceImpl<ColIdT>(
+      stacked_table_metadata, input_batches, local_device_id, options,
+      has_variable_weights,
+      ComputeKeyLayout<ColIdT>(stacked_table_metadata, options));
+}
+
+template ExtractedCooTensorsT<int32_t>
+ExtractCooTensorsForAllFeaturesPerLocalDevice<int32_t>(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    int local_device_id, const PreprocessSparseDenseMatmulInputOptions& options,
+    bool has_variable_weights);
+
+template ExtractedCooTensorsT<int64_t>
+ExtractCooTensorsForAllFeaturesPerLocalDevice<int64_t>(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    int local_device_id, const PreprocessSparseDenseMatmulInputOptions& options,
+    bool has_variable_weights);
 
 }  // namespace internal
 
@@ -562,14 +665,18 @@ void AsyncReduceOrEmplace(
 
 // Collects all device sorting results across the given table states into a
 // single vector.
-std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>>
-CollectDeviceSortingResults(absl::Span<const TableState> table_states) {
-  std::vector<tsl::AsyncValueRef<DeviceSortingTaskResult>>
-      device_sorting_results_av;
+std::vector<tsl::AsyncValue*> CollectDeviceSortingResults(
+    absl::Span<const TableState> table_states) {
+  std::vector<tsl::AsyncValue*> device_sorting_results_av;
   for (const auto& state : table_states) {
-    for (const auto& sorting_result_av : state.device_sorting_results) {
-      device_sorting_results_av.push_back(sorting_result_av);
-    }
+    std::visit(
+        [&](const auto& pipe) {
+          for (const auto& sorting_result_av : pipe.device_sorting_results) {
+            device_sorting_results_av.push_back(
+                sorting_result_av.GetAsyncValue());
+          }
+        },
+        state.pipeline);
   }
   return device_sorting_results_av;
 }
@@ -588,20 +695,25 @@ void SyncMinibatchingRequired(
   });
   DCHECK(options.IsHostMinibatchingEnabled());
 
-  auto device_sorting_results_av = CollectDeviceSortingResults(table_states);
+  std::vector<tsl::AsyncValue*> device_sorting_results_av =
+      CollectDeviceSortingResults(table_states);
 
   tsl::RunWhenReady(absl::MakeConstSpan(device_sorting_results_av), [=]() {
     bool local_minibatching_required = false;
     std::vector<std::string> tables_requiring_minibatching;
     for (const auto& state : table_states) {
-      for (const auto& sorting_result_av : state.device_sorting_results) {
-        if (sorting_result_av.get().table_minibatching_required) {
-          local_minibatching_required = true;
-          tables_requiring_minibatching.push_back(
-              std::string(state.stacked_table_name));
-          break;
-        }
-      }
+      std::visit(
+          [&](const auto& pipe) {
+            for (const auto& sorting_result_av : pipe.device_sorting_results) {
+              if (sorting_result_av.get().table_minibatching_required) {
+                local_minibatching_required = true;
+                tables_requiring_minibatching.push_back(
+                    std::string(state.stacked_table_name));
+                break;
+              }
+            }
+          },
+          state.pipeline);
     }
     if (!tables_requiring_minibatching.empty()) {
       LOG_EVERY_N_SEC(INFO, 300)
@@ -626,15 +738,20 @@ void SyncMinibatchingSplit(
     return tsl::profiler::TraceMeEncode(
         "SyncMinibatchingSplit", {{"batch_number", options.batch_number}});
   });
-  auto device_sorting_results_av = CollectDeviceSortingResults(table_states);
+  std::vector<tsl::AsyncValue*> device_sorting_results_av =
+      CollectDeviceSortingResults(table_states);
 
   tsl::RunWhenReady(absl::MakeConstSpan(device_sorting_results_av), [=]() {
     MinibatchingSplit local_minibatching_split = 0;
     for (const auto& state : table_states) {
-      for (const auto& sorting_result_av : state.device_sorting_results) {
-        local_minibatching_split |=
-            sorting_result_av.get().table_minibatching_split;
-      }
+      std::visit(
+          [&](const auto& pipe) {
+            for (const auto& sorting_result_av : pipe.device_sorting_results) {
+              local_minibatching_split |=
+                  sorting_result_av.get().table_minibatching_split;
+            }
+          },
+          state.pipeline);
     }
     AsyncReduceOrEmplace(options.batch_number * 2 + 1, local_minibatching_split,
                          options.all_reduce_interface, result_avr);
@@ -677,51 +794,57 @@ void FillDeviceBuffersForTable(
         absl::StrCat("ScheduleFillBuffer/", state.stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
-  for (int local_device = 0; local_device < options.local_device_count;
-       ++local_device) {
-    tsl::AsyncValueRef<DeviceSortingTaskResult>& sorting_result_av =
-        state.device_sorting_results[local_device];
-    // This continuation is scheduled when sorting for `local_device` completes.
-    sorting_result_av.AndThen([&, local_device, sorting_result_av,
-                               &state = state, global_minibatching_required,
-                               global_minibatching_split] {
-      state.batch_size_for_device =
-          state.extracted_coo_tensors_per_device[0].batch_size_for_device;
-      for (const auto& extracted_coo : state.extracted_coo_tensors_per_device) {
-        DCHECK_EQ(state.batch_size_for_device,
-                  extracted_coo.batch_size_for_device);
-      }
+  std::visit(
+      [&](auto& pipe) {
+        state.batch_size_for_device =
+            pipe.extracted_coo_tensors_per_device[0].batch_size_for_device;
+        for (const auto& extracted_coo :
+             pipe.extracted_coo_tensors_per_device) {
+          DCHECK_EQ(state.batch_size_for_device,
+                    extracted_coo.batch_size_for_device);
+        }
+        const int batch_size_per_sc = xla::CeilOfRatio(
+            state.batch_size_for_device, options.num_sc_per_device);
+        for (int local_device = 0; local_device < options.local_device_count;
+             ++local_device) {
+          auto& sorting_result_av = pipe.device_sorting_results[local_device];
+          // This continuation is scheduled when sorting for `local_device`
+          // completes.
+          sorting_result_av.AndThen(
+              [&state, &options, &counter, local_device, sorting_result_av,
+               batch_size_per_sc, global_minibatching_required,
+               global_minibatching_split] {
+                internal::CsrArraysRefPerDevice csr_arrays_per_device =
+                    state.csr_arrays_per_host.GetCsrArraysRefForDevice(
+                        local_device);
 
-      DevicePartitionedCooTensors& grouped_coo_tensors =
-          sorting_result_av.get().grouped_coo_tensors;
-      // If minibatching is required by any host, merge buckets
-      // according to the globally synchronized split.
-      if (options.IsHostMinibatchingEnabled() && global_minibatching_required) {
-        grouped_coo_tensors.Merge(global_minibatching_split);
-      }
+                const BlockRow<int>& required_sc_buffer_sizes =
+                    state.stats_per_host.GetStatsPerDevice(local_device)
+                        .required_buffer_size;
 
-      const int batch_size_per_sc = xla::CeilOfRatio(
-          state.batch_size_for_device, options.num_sc_per_device);
-      internal::CsrArraysRefPerDevice csr_arrays_per_device =
-          state.csr_arrays_per_host.GetCsrArraysRefForDevice(local_device);
+                auto& grouped_coo_tensors =
+                    sorting_result_av.get().grouped_coo_tensors;
+                if (options.IsHostMinibatchingEnabled() &&
+                    global_minibatching_required) {
+                  grouped_coo_tensors.Merge(global_minibatching_split);
+                }
+                tsl::AsyncValueRef<int> dropped_id_count_av =
+                    FillLocalDeviceBufferAsync(
+                        grouped_coo_tensors, batch_size_per_sc,
+                        required_sc_buffer_sizes, options,
+                        state.stacked_table_name, state.megacore_csr,
+                        csr_arrays_per_device);
 
-      const BlockRow<int>& required_sc_buffer_sizes =
-          state.stats_per_host.GetStatsPerDevice(local_device)
-              .required_buffer_size;
-
-      tsl::AsyncValueRef<int> dropped_id_count_av = FillLocalDeviceBufferAsync(
-          grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes,
-          options, state.stacked_table_name, state.megacore_csr,
-          csr_arrays_per_device);
-
-      dropped_id_count_av.AndThen(
-          [sorting_result_av, &counter, dropped_id_count_av]() {
-            sorting_result_av.get().total_dropped_id_count +=
-                dropped_id_count_av.get();
-            counter.DecrementCount();
-          });
-    });
-  }
+                dropped_id_count_av.AndThen(
+                    [sorting_result_av, &counter, dropped_id_count_av]() {
+                      sorting_result_av.get().total_dropped_id_count +=
+                          dropped_id_count_av.get();
+                      counter.DecrementCount();
+                    });
+              });
+        }
+      },
+      state.pipeline);
 }
 
 std::tuple<Eigen::Ref<MatrixXi>, Eigen::Ref<MatrixXi>, Eigen::Ref<MatrixXi>,
@@ -829,6 +952,120 @@ absl::Status ValidateLocalBatchSizeLimits(
   return absl::OkStatus();
 }
 
+// Validates per-feature column metadata for a stacked table and selects either
+// the 32-bit (`ColIdT = int32_t`) or 64-bit (`ColIdT = int64_t`) extraction and
+// sorting pipeline.
+absl::StatusOr<TableExtractionAndSortingPipelineVariant>
+ValidateStackMetadataAndBuildPipeline(
+    absl::string_view stacked_table_name,
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
+    const PreprocessSparseDenseMatmulInputOptions& options,
+    bool stack_has_weights, bool enable_megacore_csr) {
+  const int64_t num_scs = options.GetNumScs();
+  const uint32_t num_sc_bits =
+      absl::countr_zero(static_cast<uint32_t>(num_scs));
+
+  int64_t batch_size_for_device = 0;
+  int64_t max_local_emb_id = 0;
+  int64_t max_global_col_id = 0;
+  bool any_unspecified_max_col_id = false;
+  for (const auto& m : stacked_table_metadata) {
+    batch_size_for_device +=
+        input_batches[m.feature_index]->size() / options.local_device_count;
+    if (m.col_offset < 0) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "col_offset (%d) must be non-negative for feature '%s' in table "
+          "'%s'.",
+          m.col_offset, m.name, stacked_table_name));
+    }
+    if (m.col_offset % num_scs != 0) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "col_offset (%d) must be a multiple of num_scs (%d) for feature '%s' "
+          "in table '%s'.",
+          m.col_offset, num_scs, m.name, stacked_table_name));
+    }
+    if (m.col_offset / num_scs >= std::numeric_limits<int32_t>::max()) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "Per-SparseCore column offset (%d) for feature '%s' in table '%s' "
+          "exceeds the maximum supported int32 limit (%d).",
+          m.col_offset / num_scs, m.name, stacked_table_name,
+          std::numeric_limits<int32_t>::max() - 1));
+    }
+    if (m.max_col_id.has_value() && *m.max_col_id < 0) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "Invalid max_col_id (%d) for feature '%s' in table '%s'.",
+          *m.max_col_id, m.name, stacked_table_name));
+    }
+    if (IsMaxColIdSpecified(m.max_col_id)) {
+      if (*m.max_col_id >= std::numeric_limits<int32_t>::max()) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+            "Per-SparseCore shard vocabulary size (%u) for feature '%s' in "
+            "table '%s' exceeds the maximum supported int32 limit (%d).",
+            static_cast<uint64_t>(*m.max_col_id) + 1, m.name,
+            stacked_table_name, std::numeric_limits<int32_t>::max()));
+      }
+      if (enable_megacore_csr && options.num_sc_per_device > 1) {
+        const int64_t chip_vocab =
+            (*m.max_col_id + 1) * int64_t{options.num_sc_per_device};
+        if (chip_vocab > std::numeric_limits<int32_t>::max()) {
+          return absl::InvalidArgumentError(absl::StrFormat(
+              "Per-device Megacore vocabulary size (%d) for feature '%s' in "
+              "table '%s' exceeds the maximum supported int32 limit (%d).",
+              chip_vocab, m.name, stacked_table_name,
+              std::numeric_limits<int32_t>::max()));
+        }
+      }
+      max_local_emb_id = std::max<int64_t>(max_local_emb_id, *m.max_col_id);
+      max_global_col_id = std::max<int64_t>(
+          max_global_col_id, (*m.max_col_id + 1) * num_scs - 1);
+    } else {
+      any_unspecified_max_col_id = true;
+    }
+    max_local_emb_id =
+        std::max<int64_t>(max_local_emb_id, m.col_offset / num_scs);
+    max_global_col_id = std::max<int64_t>(max_global_col_id, m.col_offset);
+  }
+
+  if (max_global_col_id <= std::numeric_limits<int32_t>::max()) {
+    return TableExtractionAndSortingPipeline<int32_t>(
+        KeyLayout<int32_t>::Make(num_sc_bits), options.local_device_count);
+  }
+
+  for (const auto& m : stacked_table_metadata) {
+    if (IsMaxColIdSpecified(m.max_col_id) &&
+        m.col_offset / num_scs > *m.max_col_id) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "Per-SparseCore column offset (%d) exceeds max_col_id (%d) for "
+          "feature '%s' in table '%s'.",
+          m.col_offset / num_scs, *m.max_col_id, m.name, stacked_table_name));
+    }
+  }
+  if (any_unspecified_max_col_id) {
+    max_local_emb_id = std::numeric_limits<int32_t>::max() - 1;
+  }
+  const uint32_t local_id_bits = std::max<uint32_t>(
+      1, absl::bit_width(static_cast<uint64_t>(max_local_emb_id)));
+  if (num_sc_bits + local_id_bits >= KeyLayout<int64_t>::kBucketIdOffset) {
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "Stacked table '%s' requires %d SparseCore bits + %d local ID bits, "
+        "leaving no bits for batch/COO indexing in the 58-bit sorting key.",
+        stacked_table_name, num_sc_bits, local_id_bits));
+  }
+  const KeyLayout<int64_t> key_layout64 =
+      KeyLayout<int64_t>::Make(num_sc_bits, max_local_emb_id);
+  if (!stack_has_weights &&
+      batch_size_for_device - 1 >
+          static_cast<int64_t>(key_layout64.data_mask())) {
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "The total local batch size for device (%d) on table '%s' exceeds the "
+        "64-bit sorting key row_id limit (%d).",
+        batch_size_for_device, stacked_table_name, key_layout64.data_mask()));
+  }
+  return TableExtractionAndSortingPipeline<int64_t>(key_layout64,
+                                                    options.local_device_count);
+}
+
 }  // namespace
 
 void SparseDenseMatmulInputStats::merge(
@@ -880,6 +1117,15 @@ PreprocessSparseDenseMatmulInput(
           "Megacore CSR does not support host minibatching (table: ",
           stacked_table_name, "); use MinibatchingMode::kDevice."));
     }
+
+    absl::StatusOr<TableExtractionAndSortingPipelineVariant> pipeline =
+        ValidateStackMetadataAndBuildPipeline(
+            stacked_table_name, stacked_table_metadata, input_batches, options,
+            stack_has_weights, enable_megacore_csr);
+    if (!pipeline.ok()) {
+      return pipeline.status();
+    }
+
     const int row_pointers_size_per_device =
         ComputeRowPointersSizePerDevice(options, stacked_table_metadata);
     const int coo_buffer_size_per_device =
@@ -890,7 +1136,8 @@ PreprocessSparseDenseMatmulInput(
         coo_buffer_size_per_device, output_csr_arrays, out);
 
     table_states.emplace_back(stacked_table_name, stacked_table_metadata,
-                              stack_has_weights, enable_megacore_csr, options,
+                              stack_has_weights, std::move(*pipeline),
+                              enable_megacore_csr, options,
                               coo_buffer_size_per_device, row_pointers,
                               embedding_ids, sample_ids, gains);
   }
@@ -922,8 +1169,7 @@ PreprocessSparseDenseMatmulInput(
                              /* global_minibatching_split= */ 0);
 
   for (auto& state : table_states) {
-    tsl::RunWhenReady(absl::MakeConstSpan(state.device_sorting_results),
-                      [&state]() { PostProcessTableState(state); });
+    SchedulePostProcessTableState(state);
   }
 
   bool global_minibatching_required = false;
@@ -954,8 +1200,7 @@ PreprocessSparseDenseMatmulInput(
         CreateMinibatchingBucketsForTable(state, options);
       }
       for (auto& state : table_states) {
-        tsl::RunWhenReady(absl::MakeConstSpan(state.device_sorting_results),
-                          [&state]() { PostProcessTableState(state); });
+        SchedulePostProcessTableState(state);
       }
     }
 
@@ -985,10 +1230,14 @@ PreprocessSparseDenseMatmulInput(
   });
   for (auto& state : table_states) {
     state.stats_per_host.dropped_id_count = 0;
-    for (const auto& result_av : state.device_sorting_results) {
-      state.stats_per_host.dropped_id_count +=
-          result_av.get().total_dropped_id_count;
-    }
+    std::visit(
+        [&](const auto& pipe) {
+          for (const auto& result_av : pipe.device_sorting_results) {
+            state.stats_per_host.dropped_id_count +=
+                result_av.get().total_dropped_id_count;
+          }
+        },
+        state.pipeline);
     const int max_required_buffer_size_per_device =
         state.megacore_csr.has_value()
             ? state.stats_per_host.required_buffer_size.rowwise()

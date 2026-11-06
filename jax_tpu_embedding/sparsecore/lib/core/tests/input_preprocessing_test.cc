@@ -2361,5 +2361,575 @@ TEST(Int64InputBatchTest, IsMaxColIdSpecifiedHandlesNulloptAndLegacySentinel) {
       IsMaxColIdSpecified(int64_t{std::numeric_limits<int32_t>::max()} + 1));
 }
 
+TEST(Int64LargeVocabTest, SingleTable5BillionVocabProducesLocalInt32Ids) {
+  // 1 device, 4 SparseCores => 4 global SparseCores.
+  // 5B vocabulary => 1,250,000,000 rows per SparseCore (max_col_id = 1.25B-1).
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = false,
+  };
+
+  // Sample 0 (local SC 0, in_sc_sample 0):
+  //   - 0 -> global_sc 0, local_emb_id 0, gain 1.0
+  //   - 4,999,999,999 (twice) -> global_sc 3, local_emb_id 1,249,999,999,
+  //     deduplicated gain 2.0
+  // Sample 1 (local SC 1, in_sc_sample 0):
+  //   - 3,000,000,001 -> global_sc 1, local_emb_id 750,000,000, gain 1.0
+  // Sample 2 (local SC 2, in_sc_sample 0):
+  //   - 4,294,967,298 ((1LL << 32) + 2) -> global_sc 2,
+  //     local_emb_id 1,073,741,824, gain 1.0
+  // Sample 3 (local SC 3, in_sc_sample 0): empty.
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples({
+      {0, 4'999'999'999LL, 4'999'999'999LL},
+      {3'000'000'001LL},
+      {(1LL << 32) + 2},
+      {},
+  }));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_5b",
+                       {FeatureMetadataInStack(
+                           /*name=*/"feature_0", /*feature_index=*/0,
+                           /*max_ids_per_partition=*/8,
+                           /*max_unique_ids_per_partition=*/8,
+                           /*row_offset=*/0, /*col_offset=*/0,
+                           /*col_shift=*/0, /*batch_size=*/4,
+                           /*suggested_coo_buffer_size_per_device=*/128,
+                           RowCombiner::kSum,
+                           /*max_col_id=*/1'249'999'999LL)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("table_5b");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("table_5b");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("table_5b");
+  const MatrixXf& gains = output.lhs_gains.at("table_5b");
+
+  // 32 ints per SC segment (128 / 4).
+  // Local SC 0: partition 0 ends at 1, partition 1 at 8, partition 2 at 8,
+  //             partition 3 ends at 9 (padded to 16).
+  // Local SC 1: partition 0 at 0, partition 1 ends at 1 (padded to 8).
+  // Local SC 2: partition 0 at 0, partition 1 at 0, partition 2 ends at 1.
+  // Local SC 3: all partitions empty (0).
+  EXPECT_THAT(
+      absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+      ElementsAreArray({1, 8, 8, 9, 16, 16, 16, 16,  //
+                        0, 1, 8, 8, 8,  8,  8,  8,   //
+                        0, 0, 1, 8, 8,  8,  8,  8,   //
+                        0, 0, 0, 0, 0,  0,  0,  0}));
+
+  EXPECT_EQ(embedding_ids(0, 0), 0);
+  EXPECT_EQ(sample_ids(0, 0), 0);
+  EXPECT_FLOAT_EQ(gains(0, 0), 1.0f);
+
+  EXPECT_EQ(embedding_ids(0, 8), 1'249'999'999);
+  EXPECT_EQ(sample_ids(0, 8), 0);
+  EXPECT_FLOAT_EQ(gains(0, 8), 2.0f);
+
+  EXPECT_EQ(embedding_ids(0, 32), 750'000'000);
+  EXPECT_EQ(sample_ids(0, 32), 0);
+  EXPECT_FLOAT_EQ(gains(0, 32), 1.0f);
+
+  EXPECT_EQ(embedding_ids(0, 64), 1 << 30);
+  EXPECT_EQ(sample_ids(0, 64), 0);
+  EXPECT_FLOAT_EQ(gains(0, 64), 1.0f);
+}
+
+TEST(Int64LargeVocabTest,
+     StackedTablesExceedingUint32DeduplicateWithoutLow32BitAliasing) {
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = false,
+  };
+
+  // Feature 0 sample 0 contains ID 100 and (1LL << 32) + 100 (twice).
+  // Both map to global_sc 0 and have identical low 32 bits (100), so any
+  // 32-bit truncation in key generation or deduplication would falsely merge
+  // them.
+  // Feature 1 has col_offset = 4,000,000,000 and col_shift = 1; ID 3 shifts to
+  // (3 + 1) % 4 = 0, producing global col_id 4,000,000,000 -> global_sc 0,
+  // local_emb_id 1,000,000,000, in_sc_sample_id 1.
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples({
+      {100, (1LL << 32) + 100, (1LL << 32) + 100},
+      {},
+      {},
+      {},
+  }));
+  input_batches.push_back(CreateInputBatchFromSamples({
+      {3},
+      {},
+      {},
+      {},
+  }));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"stacked_6b",
+            {FeatureMetadataInStack(
+                 /*name=*/"feature_0", /*feature_index=*/0,
+                 /*max_ids_per_partition=*/8,
+                 /*max_unique_ids_per_partition=*/8,
+                 /*row_offset=*/0, /*col_offset=*/0,
+                 /*col_shift=*/0, /*batch_size=*/4,
+                 /*suggested_coo_buffer_size_per_device=*/128,
+                 RowCombiner::kSum,
+                 /*max_col_id=*/1'499'999'999LL),
+             FeatureMetadataInStack(
+                 /*name=*/"feature_1", /*feature_index=*/1,
+                 /*max_ids_per_partition=*/8,
+                 /*max_unique_ids_per_partition=*/8,
+                 /*row_offset=*/4, /*col_offset=*/4'000'000'000LL,
+                 /*col_shift=*/1, /*batch_size=*/4,
+                 /*suggested_coo_buffer_size_per_device=*/128,
+                 RowCombiner::kSum,
+                 /*max_col_id=*/1'499'999'999LL)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("stacked_6b");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("stacked_6b");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("stacked_6b");
+  const MatrixXf& gains = output.lhs_gains.at("stacked_6b");
+
+  // Local SC 0 partition 0 holds 3 sorted entries:
+  //   1) col_id = 100              -> local_emb_id = 25, sample 0, gain 1.0
+  //   2) col_id = 4,000,000,000    -> local_emb_id = 1,000,000,000, sample 1,
+  //                                   gain 1.0
+  //   3) col_id = (1LL << 32)+100  -> local_emb_id = (1 << 30) + 25, sample 0,
+  //                                   gain 2.0
+  ASSERT_EQ(row_pointers(0, 0), 3);
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 3),
+              ElementsAre(25, 1'000'000'000, (1 << 30) + 25));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data(), 3), ElementsAre(0, 1, 0));
+  EXPECT_THAT(absl::MakeConstSpan(gains.data(), 3),
+              ElementsAre(1.0f, 1.0f, 2.0f));
+}
+
+struct Int64CombinerGainCase {
+  std::string test_name;
+  RowCombiner combiner;
+  float expected_first_gain;
+  float expected_second_gain;
+};
+
+class Int64LargeVocabCombinerTest
+    : public ::testing::TestWithParam<
+          std::tuple<Int64CombinerGainCase, MinibatchingMode>> {};
+
+TEST_P(Int64LargeVocabCombinerTest, CombinersWithUniformWeights) {
+  const auto& [tc, minibatching_mode] = GetParam();
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = false,
+      .minibatching_mode = minibatching_mode,
+  };
+
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples(
+      {{4'800'000'000LL, 4'800'000'000LL, 4'800'000'004LL}, {}, {}, {}}));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_5b",
+                       {FeatureMetadataInStack(
+                           /*name=*/"feature_0", /*feature_index=*/0,
+                           /*max_ids_per_partition=*/8,
+                           /*max_unique_ids_per_partition=*/8,
+                           /*row_offset=*/0, /*col_offset=*/0,
+                           /*col_shift=*/0, /*batch_size=*/4,
+                           /*suggested_coo_buffer_size_per_device=*/128,
+                           tc.combiner,
+                           /*max_col_id=*/1'249'999'999LL)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  EXPECT_EQ(output.num_minibatches, 1);
+  ASSERT_EQ(output.lhs_row_pointers.at("table_5b")(0, 0), 2);
+  EXPECT_THAT(
+      absl::MakeConstSpan(output.lhs_embedding_ids.at("table_5b").data(), 2),
+      ElementsAre(1'200'000'000, 1'200'000'001));
+  EXPECT_NEAR(output.lhs_gains.at("table_5b")(0, 0), tc.expected_first_gain,
+              1e-6f);
+  EXPECT_NEAR(output.lhs_gains.at("table_5b")(0, 1), tc.expected_second_gain,
+              1e-6f);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Int64LargeVocabCombiners, Int64LargeVocabCombinerTest,
+    ::testing::Combine(
+        ::testing::Values(
+            Int64CombinerGainCase{"Sum", RowCombiner::kSum, 2.0f, 1.0f},
+            Int64CombinerGainCase{"Mean", RowCombiner::kMean, 2.0f / 3.0f,
+                                  1.0f / 3.0f},
+            Int64CombinerGainCase{"Sqrtn", RowCombiner::kSqrtn,
+                                  2.0f / std::sqrt(3.0f),
+                                  1.0f / std::sqrt(3.0f)}),
+        ::testing::Values(MinibatchingMode::kDisabled,
+                          MinibatchingMode::kHost,
+                          MinibatchingMode::kDevice)),
+    [](const ::testing::TestParamInfo<Int64LargeVocabCombinerTest::ParamType>&
+           info) {
+      const auto& tc = std::get<0>(info.param);
+      const MinibatchingMode mode = std::get<1>(info.param);
+      std::string mode_suffix;
+      switch (mode) {
+        case MinibatchingMode::kDisabled:
+          mode_suffix = "Disabled";
+          break;
+        case MinibatchingMode::kHost:
+          mode_suffix = "Host";
+          break;
+        case MinibatchingMode::kDevice:
+          mode_suffix = "Device";
+          break;
+      }
+      return absl::StrCat(tc.test_name, mode_suffix);
+    });
+
+TEST(Int64LargeVocabTest, HostAndDeviceMinibatchingSupport64BitColIds) {
+  // 1 device, 2 SparseCores => max_col_id = 2,000,000,000 (4B+2 global rows).
+  // Sample 0 has 4 distinct >3B IDs all mapping to SC 0, exceeding
+  // max_ids_per_partition = 2 under host minibatching.
+  std::vector<std::unique_ptr<AbstractInputBatch>> host_batches;
+  host_batches.push_back(CreateInputBatchFromSamples({
+      {3'000'000'000LL, 3'000'000'002LL, 3'000'000'004LL, 3'000'000'006LL},
+      {},
+  }));
+
+  const auto hash_fn_64 = [](int64_t col_id) -> int32_t {
+    return static_cast<int32_t>(((col_id - 3'000'000'000LL) / 2) * 16);
+  };
+  PreprocessSparseDenseMatmulInputOptions host_options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kHost,
+      .minibatching_bucketing_hash_fn_64 = hash_fn_64,
+  };
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      host_tables({{"table_4b",
+                    {FeatureMetadataInStack(
+                        /*name=*/"feature_0", /*feature_index=*/0,
+                        /*max_ids_per_partition=*/2,
+                        /*max_unique_ids_per_partition=*/2,
+                        /*row_offset=*/0, /*col_offset=*/0,
+                        /*col_shift=*/0, /*batch_size=*/2,
+                        /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+                        RowCombiner::kSum,
+                        /*max_col_id=*/2'000'000'000LL)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput host_output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(host_batches),
+                                       host_tables, host_options));
+  EXPECT_GT(host_output.num_minibatches, 1);
+  EXPECT_EQ(host_output.stats.dropped_id_count.at("table_4b"), 0);
+
+  // Device minibatching: keep partition limits >= observed IDs to avoid
+  // consuming the process-wide LOG_EVERY_N_SEC rate-limit token.
+  std::vector<std::unique_ptr<AbstractInputBatch>> device_batches;
+  device_batches.push_back(CreateInputBatchFromSamples({
+      {3'000'000'000LL, 3'000'000'002LL},
+      {3'000'000'001LL},
+  }));
+  PreprocessSparseDenseMatmulInputOptions device_options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      device_tables({{"table_4b",
+                      {FeatureMetadataInStack(
+                          /*name=*/"feature_0", /*feature_index=*/0,
+                          /*max_ids_per_partition=*/16,
+                          /*max_unique_ids_per_partition=*/16,
+                          /*row_offset=*/0, /*col_offset=*/0,
+                          /*col_shift=*/0, /*batch_size=*/2,
+                          /*suggested_coo_buffer_size_per_device=*/128,
+                          RowCombiner::kSum,
+                          /*max_col_id=*/2'000'000'000LL)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput device_output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(device_batches),
+                                       device_tables, device_options));
+  EXPECT_EQ(device_output.num_minibatches, 1);
+  EXPECT_THAT(
+      absl::MakeConstSpan(device_output.lhs_embedding_ids.at("table_4b").data(),
+                          2),
+      ElementsAre(1'500'000'000, 1'500'000'001));
+}
+
+TEST(Int64LargeVocabTest,
+     MegacoreCsrSupports5BillionGlobalVocabWhenChipVocabFitsInt32) {
+  // 4 global devices * 2 SCs/device = 8 global SCs.
+  // 5B global vocab => rows_per_sc = 625,000,000 (max_col_id = 624,999,999),
+  // chip vocab = 1,250,000,000 <= INT32_MAX.
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+
+  // Sample 0:
+  //   - 0 -> global_sc 0 (device 0, dest_sc 0), row_in_sc 0, lin_id = 0
+  //   - 4,999,999,999 -> global_sc 7 (device 3, dest_sc 1),
+  //     row_in_sc 624,999,999, lin_id = 1 * 625,000,000 + 624,999,999 =
+  //     1,249,999,999.
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples({
+      {0, 4'999'999'999LL},
+      {},
+  }));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"megacore_5b",
+                       {FeatureMetadataInStack(
+                           /*name=*/"feature_0", /*feature_index=*/0,
+                           /*max_ids_per_partition=*/16,
+                           /*max_unique_ids_per_partition=*/16,
+                           /*row_offset=*/0, /*col_offset=*/0,
+                           /*col_shift=*/0, /*batch_size=*/2,
+                           /*suggested_coo_buffer_size_per_device=*/128,
+                           RowCombiner::kSum,
+                           /*max_col_id=*/624'999'999LL,
+                           /*enable_megacore_csr=*/true)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("megacore_5b");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("megacore_5b");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("megacore_5b");
+  const MatrixXf& gains = output.lhs_gains.at("megacore_5b");
+
+  // 4 destination devices (padded to 8 row_pointers).
+  // Device 0: [0, 1) -> aligned to 8.
+  // Device 1: [8, 8).
+  // Device 2: [8, 8).
+  // Device 3: [8, 9) -> aligned to 16.
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), 8),
+              ElementsAre(1, 8, 8, 9, 16, 16, 16, 16));
+  EXPECT_EQ(embedding_ids(0, 0), 0);
+  EXPECT_EQ(sample_ids(0, 0), 0);
+  EXPECT_FLOAT_EQ(gains(0, 0), 1.0f);
+
+  EXPECT_EQ(embedding_ids(0, 8), 1'249'999'999);
+  EXPECT_EQ(sample_ids(0, 8), 0);
+  EXPECT_FLOAT_EQ(gains(0, 8), 1.0f);
+}
+
+TEST(Int64LargeVocabTest, TreatsInt32MaxSentinelAsUnspecifiedMaxColId) {
+  std::vector<std::unique_ptr<AbstractInputBatch>> batches;
+  batches.push_back(CreateInputBatchFromSamples({{0}, {}, {}, {}}));
+  const PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .sharding_strategy = ShardingStrategy::kMod,
+      .allow_id_dropping = true,
+  };
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>> tables(
+      {{"t",
+        {FeatureMetadataInStack(
+            "f0", 0, 8, 8, 0, 0, 0, 4, 64, RowCombiner::kSum,
+            /*max_col_id=*/std::numeric_limits<int32_t>::max())}}});
+
+  EXPECT_THAT(PreprocessSparseDenseMatmulInput(absl::MakeSpan(batches), tables,
+                                               options),
+              IsOk());
+}
+
+struct InvalidInt64ConfigCase {
+  std::string test_name;
+  PreprocessSparseDenseMatmulInputOptions options;
+  int num_samples;
+  FeatureMetadataInStack feature_metadata;
+  std::string expected_error_substr;
+};
+
+class InvalidInt64ConfigTest
+    : public ::testing::TestWithParam<InvalidInt64ConfigCase> {};
+
+TEST_P(InvalidInt64ConfigTest, RejectsInvalid64BitConfiguration) {
+  const InvalidInt64ConfigCase& tc = GetParam();
+  std::vector<std::vector<int64_t>> samples(tc.num_samples);
+  samples[0] = {0};
+  std::vector<std::unique_ptr<AbstractInputBatch>> batches;
+  batches.push_back(CreateInputBatchFromSamples(samples));
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>> tables(
+      {{"t", {tc.feature_metadata}}});
+
+  EXPECT_THAT(PreprocessSparseDenseMatmulInput(absl::MakeSpan(batches), tables,
+                                               tc.options),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr(tc.expected_error_substr)));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InvalidInt64Configurations, InvalidInt64ConfigTest,
+    ::testing::Values(
+        InvalidInt64ConfigCase{
+            "MaxColIdAboveInt32Max",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1,
+                .num_sc_per_device = 4,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/4,
+            FeatureMetadataInStack(
+                "f0", 0, 8, 8, 0, 0, 0, 4, 64, RowCombiner::kSum,
+                /*max_col_id=*/int64_t{std::numeric_limits<int32_t>::max()} +
+                    1),
+            "Per-SparseCore shard vocabulary size"},
+        InvalidInt64ConfigCase{
+            "MaxColIdInt64Max",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1,
+                .num_sc_per_device = 4,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/4,
+            FeatureMetadataInStack(
+                "f0", 0, 8, 8, 0, 0, 0, 4, 64, RowCombiner::kSum,
+                /*max_col_id=*/std::numeric_limits<int64_t>::max()),
+            "Per-SparseCore shard vocabulary size"},
+        InvalidInt64ConfigCase{
+            "ColOffsetNotMultipleOfNumScs",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1,
+                .num_sc_per_device = 4,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/4,
+            FeatureMetadataInStack("f0", 0, 8, 8, 0, /*col_offset=*/3, 0, 4, 64,
+                                   RowCombiner::kSum, /*max_col_id=*/100),
+            "must be a multiple of num_scs"},
+        InvalidInt64ConfigCase{
+            "PerScColOffsetOverflowsInt32",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1,
+                .num_sc_per_device = 4,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/4,
+            FeatureMetadataInStack(
+                "f0", 0, 8, 8, 0,
+                /*col_offset=*/int64_t{std::numeric_limits<int32_t>::max()} * 4,
+                0, 4, 64, RowCombiner::kSum, /*max_col_id=*/100),
+            "Per-SparseCore column offset"},
+        InvalidInt64ConfigCase{
+            "MegacorePerDeviceVocabExceedsInt32",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 2,
+                .num_sc_per_device = 2,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+                .minibatching_mode = MinibatchingMode::kDevice,
+            },
+            /*num_samples=*/2,
+            FeatureMetadataInStack("f0", 0, 16, 16, 0, 0, 0, 2, 64,
+                                   RowCombiner::kSum,
+                                   /*max_col_id=*/1'249'999'999LL,
+                                   /*enable_megacore_csr=*/true),
+            "Per-device Megacore vocabulary size"},
+        InvalidInt64ConfigCase{
+            "SortingKey58BitsExhausted",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1 << 26,
+                .num_sc_per_device = 2,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/2,
+            FeatureMetadataInStack(
+                "f0", 0, 8, 8, 0, 0, 0, 2, 64, RowCombiner::kSum,
+                /*max_col_id=*/std::numeric_limits<int32_t>::max() - 1),
+            "leaving no bits for batch/COO indexing"},
+        InvalidInt64ConfigCase{
+            "UniformWeightRowIdExceedsKeyBits",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1 << 24,
+                .num_sc_per_device = 2,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/6,
+            FeatureMetadataInStack(
+                "f0", 0, 8, 8, 0, 0, 0, 6, 64, RowCombiner::kSum,
+                /*max_col_id=*/std::numeric_limits<int32_t>::max() - 1),
+            "exceeds the 64-bit sorting key row_id limit"},
+        InvalidInt64ConfigCase{
+            "PerScColOffsetExceedsMaxColId",
+            PreprocessSparseDenseMatmulInputOptions{
+                .local_device_count = 1,
+                .global_device_count = 1,
+                .num_sc_per_device = 4,
+                .sc_simd_width = 8,
+                .hbm_word_size_in_4b = 8,
+            },
+            /*num_samples=*/4,
+            FeatureMetadataInStack("f0", 0, 8, 8, 0,
+                                   /*col_offset=*/6'000'000'000LL, 0, 4, 64,
+                                   RowCombiner::kSum,
+                                   /*max_col_id=*/1'249'999'999LL),
+            "exceeds max_col_id"}),
+    [](const ::testing::TestParamInfo<InvalidInt64ConfigTest::ParamType>&
+           info) { return info.param.test_name; });
 }  // namespace
 }  // namespace jax_sc_embedding

@@ -15,6 +15,7 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_MEGACORE_UTIL_H_
 
 #include "absl/strings/string_view.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
@@ -25,8 +26,9 @@ namespace jax_sc_embedding {
 // chip-level CSR buffer for a stacked table and returns the number of dropped
 // IDs. Megacore CSR does not support host minibatching, so there must be a
 // single minibatch.
+template <typename CooT = CooFormat>
 tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
-    const DevicePartitionedCooTensors& grouped_coo_tensors,
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
     int batch_size_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name, MegacoreCsrOptions megacore_csr,

@@ -14,6 +14,7 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -43,7 +44,8 @@ struct SparseDenseMatmulInputStats {
 };
 
 namespace internal {
-ExtractedCooTensors ExtractCooTensorsForAllFeaturesPerLocalDevice(
+template <typename ColIdT = int32_t>
+ExtractedCooTensorsT<ColIdT> ExtractCooTensorsForAllFeaturesPerLocalDevice(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,
     int local_device_id, const PreprocessSparseDenseMatmulInputOptions& options,

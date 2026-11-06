@@ -17,6 +17,7 @@
 #include <bitset>
 #include <climits>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -1270,6 +1271,85 @@ TEST(InputPreprocessingUtilTest, ValidateOptionsZeroHbmWordSizeIn4bFails) {
       .hbm_word_size_in_4b = 0,
   };
   EXPECT_FALSE(zero_word_size.Validate().ok());
+}
+
+TEST(InputPreprocessingUtilTest,
+     SortAndGroup64BitVariableWeightsAndFillLocalDeviceBuffer) {
+  std::vector<CooFormatT<int64_t>> coo_formats = {
+      CooFormatT<int64_t>(/*row_id=*/0, /*col_id=*/(int64_t{1} << 32) + 100,
+                          /*gain=*/2.0f),
+      CooFormatT<int64_t>(/*row_id=*/0, /*col_id=*/(int64_t{1} << 32) + 100,
+                          /*gain=*/4.0f),
+      CooFormatT<int64_t>(/*row_id=*/0, /*col_id=*/100, /*gain=*/0.5f),
+      CooFormatT<int64_t>(/*row_id=*/1, /*col_id=*/4'999'999'999LL,
+                          /*gain=*/3.0f),
+  };
+
+  ExtractedCooTensorsT<int64_t> extracted(
+      /*num_sc_per_device=*/4, /*batch_size_for_device=*/4, coo_formats);
+  ASSERT_TRUE(extracted.has_variable_weights());
+
+  FeatureMetadataInStack meta(
+      "table_5b", /*feature_index=*/0, /*max_ids_per_partition=*/8,
+      /*max_unique_ids_per_partition=*/8, /*row_offset=*/0, /*col_offset=*/0,
+      /*col_shift=*/0, /*batch_size=*/4,
+      /*suggested_coo_buffer_size_per_device=*/128, RowCombiner::kSum,
+      /*max_col_id=*/1'249'999'999LL);
+  PreprocessSparseDenseMatmulInputOptions opts{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+  };
+
+  bool minibatching_required = false;
+  StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
+                              /*num_sc_per_device=*/4);
+  internal::StatsPerDevice stats_per_device =
+      stats_per_host.GetStatsPerDevice(0);
+  DevicePartitionedCooTensorsT<CooFormatT<int64_t>> grouped =
+      SortAndGroupCooTensorsPerLocalDevice</*kHasVariableWeights=*/true>(
+          extracted, "table_5b", meta, opts, stats_per_device,
+          minibatching_required);
+
+  EXPECT_FALSE(minibatching_required);
+  EXPECT_EQ(stats_per_device.dropped_id_count, 0);
+  EXPECT_THAT(
+      grouped(/*local_sc_id=*/0, /*bucket_id=*/0),
+      ElementsAre(CooFormatT<int64_t>(0, 100, 0.5f),
+                  CooFormatT<int64_t>(0, (int64_t{1} << 32) + 100, 6.0f)));
+  EXPECT_THAT(grouped(/*local_sc_id=*/1, /*bucket_id=*/0),
+              ElementsAre(CooFormatT<int64_t>(1, 4'999'999'999LL, 3.0f)));
+
+  MatrixXi row_pointers(1, 32);
+  MatrixXi embedding_ids(1, 128);
+  MatrixXi sample_ids(1, 128);
+  MatrixXf gains(1, 128);
+  CsrArraysPerHost csr_arrays_per_host(row_pointers, embedding_ids, sample_ids,
+                                       gains);
+  internal::CsrArraysRefPerDevice csr_arrays =
+      csr_arrays_per_host.GetCsrArraysRefForDevice(0);
+
+  int dropped_static = 0;
+  FillLocalDeviceBuffer(grouped, /*batch_size_per_sc=*/1,
+                        stats_per_device.required_buffer_size, opts,
+                        /*stacked_table_name=*/"table_5b",
+                        /*megacore_csr=*/std::nullopt, csr_arrays,
+                        dropped_static);
+
+  EXPECT_EQ(dropped_static, 0);
+  EXPECT_EQ(csr_arrays.row_pointers[0], 2);
+  EXPECT_EQ(csr_arrays.embedding_ids[0], 25);
+  EXPECT_EQ(csr_arrays.embedding_ids[1], (1 << 30) + 25);
+  EXPECT_FLOAT_EQ(csr_arrays.gains[0], 0.5f);
+  EXPECT_FLOAT_EQ(csr_arrays.gains[1], 6.0f);
+
+  EXPECT_EQ(csr_arrays.row_pointers[11], 1);
+  EXPECT_EQ(csr_arrays.embedding_ids[32], 1'249'999'999);
+  EXPECT_EQ(csr_arrays.sample_ids[32], 0);
+  EXPECT_FLOAT_EQ(csr_arrays.gains[32], 3.0f);
 }
 
 }  // namespace

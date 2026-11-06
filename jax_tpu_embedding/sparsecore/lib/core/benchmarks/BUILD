@@ -24,6 +24,7 @@ cc_test(
     srcs = ["input_preprocessing_benchmark.cc"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
+        "//jax_tpu_embedding/sparsecore/lib/core:coo_format",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_core",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
         "//jax_tpu_embedding/sparsecore/lib/core:partitioned_coo_tensors",

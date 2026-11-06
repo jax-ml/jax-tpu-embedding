@@ -122,7 +122,6 @@ cc_library(
         ":all_reduce_interface",
         ":coo_format",
         ":input_preprocessing_util",
-        ":partitioned_coo_tensors",
         ":sort_and_group_coo_tensors_impl",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
