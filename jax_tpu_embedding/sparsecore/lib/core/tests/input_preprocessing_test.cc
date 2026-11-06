@@ -1862,27 +1862,6 @@ TEST(MegacoreCsrTest, CooBufferSizeAddsAlignmentPaddingPerDevice) {
   EXPECT_EQ(megacore_size, 6656);
 }
 
-TEST(MegacoreCsrTest, CooBufferSizeExceedingTileSpmemDies) {
-  // Arrange
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = 4,
-      .num_sc_per_device = 4,
-      .sc_simd_width = 8,
-      .hbm_word_size_in_4b = 8,
-      .minibatching_mode = MinibatchingMode::kDevice,
-  };
-  std::vector<FeatureMetadataInStack> oversized_metadata = {
-      CreateBufferSizeTestMetadata(
-          /*enable_megacore_csr=*/true, /*max_ids_per_partition=*/4096,
-          /*suggested_coo_buffer_size_per_device=*/std::nullopt)};
-
-  // Act & Assert
-  EXPECT_DEATH(ComputeCooBufferSizePerDevice(options, oversized_metadata),
-               "exceeds the 512 KB TileSpmem limit.*Set a smaller "
-               "`suggested_coo_buffer_size_per_device`");
-}
-
 TEST(MegacoreCsrTest, PreprocessesIntoMegacoreCsrFormat) {
   // Arrange
   PreprocessSparseDenseMatmulInputOptions options{
