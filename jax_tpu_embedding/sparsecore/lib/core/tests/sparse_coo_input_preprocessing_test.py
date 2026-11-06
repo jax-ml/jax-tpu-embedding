@@ -1509,5 +1509,190 @@ class MeanCombinerTest(parameterized.TestCase):
     )
 
 
+class SparseTensorInt64LargeVocabTest(parameterized.TestCase):
+
+  @parameterized.parameters(False, True)
+  def test_int64_sparse_coo_matches_dense_on_stacked_5b_table(
+      self, has_leading_dimension
+  ):
+    stack_name = "stacked_5b"
+    stacked_spec = embedding_spec.StackedTableSpec(
+        stack_name=stack_name,
+        stack_vocab_size=5_000_000_000,
+        stack_embedding_dim=8,
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+        combiner="mean",
+        total_sample_count=8,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        suggested_coo_buffer_size_per_device=128,
+    )
+    table_a = embedding_spec.TableSpec(
+        vocabulary_size=3_000_000_000,
+        embedding_dim=8,
+        initializer=lambda: np.zeros((1, 8), dtype=np.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+        combiner="mean",
+        name="table_a",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        _setting_in_stack=embedding_spec.TableSettingInStack(
+            stack_name=stack_name,
+            padded_vocab_size=3_000_000_000,
+            padded_embedding_dim=8,
+            row_offset_in_shard=0,
+            shard_rotation=0,
+        ),
+        _stacked_table_spec=stacked_spec,
+    )
+    table_b = embedding_spec.TableSpec(
+        vocabulary_size=2_000_000_000,
+        embedding_dim=8,
+        initializer=lambda: np.zeros((1, 8), dtype=np.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+        combiner="mean",
+        name="table_b",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        _setting_in_stack=embedding_spec.TableSettingInStack(
+            stack_name=stack_name,
+            padded_vocab_size=2_000_000_000,
+            padded_embedding_dim=8,
+            row_offset_in_shard=750_000_000,
+            shard_rotation=1,
+        ),
+        _stacked_table_spec=stacked_spec,
+    )
+    feat_a = embedding_spec.FeatureSpec(
+        table_spec=table_a,
+        input_shape=[4, 2],
+        output_shape=[4, 8],
+        name="feat_a",
+        _id_transformation=embedding_spec.FeatureIdTransformation(
+            row_offset=0, col_offset=0, col_shift=0
+        ),
+    )
+    feat_b = embedding_spec.FeatureSpec(
+        table_spec=table_b,
+        input_shape=[4, 2],
+        output_shape=[4, 8],
+        name="feat_b",
+        _id_transformation=embedding_spec.FeatureIdTransformation(
+            row_offset=4, col_offset=3_000_000_000, col_shift=1
+        ),
+    )
+
+    dense_a = np.array(
+        [
+            [0, 2_999_999_999],
+            [2_999_999_999, 2_999_999_999],
+            [1, 5],
+            [2, 6],
+        ],
+        dtype=np.int64,
+    )
+    dense_b = np.array(
+        [
+            [1_999_999_999, 0],
+            [1_500_000_000, 3],
+            [4, 8],
+            [7, 11],
+        ],
+        dtype=np.int64,
+    )
+    indices = np.array(
+        [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1], [3, 0], [3, 1]],
+        dtype=np.int64,
+    )
+    # Exercise both np.int64 ndarray values and Python list of >2**31 ints.
+    values_a = dense_a.reshape(-1)
+    sparse_b = SparseCooInput(
+        indices=indices,
+        values=[int(v) for v in dense_b.reshape(-1)],
+        dense_shape=np.array([4, 2], dtype=np.int64),
+    )
+
+    rp_sparse, eid_sparse, sid_sparse, g_sparse, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
+            [indices, sparse_b.indices],
+            [values_a, sparse_b.values],
+            [np.array([4, 2], dtype=np.int64), sparse_b.dense_shape],
+            [feat_a, feat_b],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+            has_leading_dimension=has_leading_dimension,
+            allow_id_dropping=False,
+        )
+    )
+    rp_raw, eid_raw, sid_raw, g_raw, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+            [dense_a, dense_b],
+            None,
+            [feat_a, feat_b],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+            has_leading_dimension=has_leading_dimension,
+            allow_id_dropping=False,
+        )
+    )
+
+    np.testing.assert_array_equal(rp_sparse[stack_name], rp_raw[stack_name])
+    assert_equal_coo = functools.partial(
+        test_utils.assert_equal_coo_buffer, 1, 4, rp_raw[stack_name]
+    )
+    assert_equal_coo(eid_sparse[stack_name], eid_raw[stack_name])
+    assert_equal_coo(sid_sparse[stack_name], sid_raw[stack_name])
+    assert_equal_coo(g_sparse[stack_name], g_raw[stack_name])
+
+  def test_empty_values_and_invalid_float_values(self):
+    empty_sparse = SparseCooInput(
+        indices=np.zeros((0, 2), dtype=np.int64),
+        values=[],
+        dense_shape=np.array([16, 16], dtype=np.int64),
+    )
+    rp, _, _, _, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
+            [empty_sparse.indices],
+            [empty_sparse.values],
+            [empty_sparse.dense_shape],
+            [SparseTensorInputPreprocessingTest.feature_spec],
+            local_device_count=4,
+            global_device_count=4,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+        )
+    )
+    np.testing.assert_array_equal(
+        rp[SparseTensorInputPreprocessingTest.stacked_name],
+        np.zeros_like(rp[SparseTensorInputPreprocessingTest.stacked_name]),
+    )
+
+    with self.assertRaisesRegex(
+        ValueError, "values must be a 1D int32 or int64"
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
+          [np.array([[0, 0]], dtype=np.int64)],
+          [np.array([1.0], dtype=np.float32)],
+          [np.array([16, 16], dtype=np.int64)],
+          [SparseTensorInputPreprocessingTest.feature_spec],
+          local_device_count=4,
+          global_device_count=4,
+          num_sc_per_device=4,
+          sc_simd_width=8,
+          hbm_word_size_in_4b=8,
+          sharding_strategy=ShardingStrategy.MOD,
+      )
+
+
 if __name__ == "__main__":
   absltest.main()

@@ -2126,5 +2126,211 @@ class MinibatchingNodeTest(absltest.TestCase):
       self.assertIsNotNone(all_reduce_interface)
 
 
+def _make_single_feature_spec(
+    vocab_size: int,
+    batch_size: int = 4,
+    combiner: str = "sum",
+    max_ids_per_partition: int = 16,
+) -> embedding_spec.FeatureSpec:
+  table_spec = embedding_spec.TableSpec(
+      vocabulary_size=vocab_size,
+      embedding_dim=8,
+      initializer=lambda: np.zeros((1, 8), dtype=np.float32),
+      optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+      combiner=combiner,
+      name="large_table",
+      max_ids_per_partition=max_ids_per_partition,
+      max_unique_ids_per_partition=max_ids_per_partition,
+      _setting_in_stack=embedding_spec.TableSettingInStack(
+          stack_name="large_table",
+          padded_vocab_size=vocab_size,
+          padded_embedding_dim=8,
+          row_offset_in_shard=0,
+          shard_rotation=0,
+      ),
+      _stacked_table_spec=embedding_spec.StackedTableSpec(
+          stack_name="large_table",
+          stack_vocab_size=vocab_size,
+          stack_embedding_dim=8,
+          optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+          combiner=combiner,
+          total_sample_count=batch_size,
+          max_ids_per_partition=max_ids_per_partition,
+          max_unique_ids_per_partition=max_ids_per_partition,
+          suggested_coo_buffer_size_per_device=128,
+      ),
+  )
+  return embedding_spec.FeatureSpec(
+      table_spec=table_spec,
+      input_shape=[batch_size, 2],
+      output_shape=[batch_size, 8],
+      name="large_feature",
+      _id_transformation=embedding_spec.FeatureIdTransformation(
+          row_offset=0,
+          col_offset=0,
+          col_shift=0,
+      ),
+  )
+
+
+class PybindInt64LargeVocabTest(parameterized.TestCase):
+
+  def test_dense_and_ragged_int64_on_5b_table(self):
+    feature_spec = _make_single_feature_spec(vocab_size=5_000_000_000)
+
+    dense_features = np.array(
+        [
+            [0, 4_999_999_999],
+            [4_999_999_999, 1 << 32],
+            [3_000_000_001, 3_000_000_001],
+            [2, 6],
+        ],
+        dtype=np.int64,
+    )
+    dense_weights = np.array(
+        [[1.0, 2.5], [1.5, 1.0], [3.0, 4.0], [1.0, 1.0]],
+        dtype=np.float32,
+    )
+    row_pointers, embedding_ids, sample_ids, gains, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+            [dense_features],
+            [dense_weights],
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+            has_leading_dimension=False,
+            allow_id_dropping=False,
+            batch_number=1,
+        )
+    )
+    self.assertEqual(embedding_ids["large_table"].dtype, np.int32)
+    # SC 0 (offset 0): 0 -> part 0 emb 0 (gain 1.0); 4,999,999,999 -> part 3
+    # emb 1,249,999,999 (gain 2.5).
+    self.assertEqual(row_pointers["large_table"][0], 1)
+    self.assertEqual(row_pointers["large_table"][3], 9)
+    self.assertEqual(embedding_ids["large_table"][0], 0)
+    self.assertEqual(embedding_ids["large_table"][8], 1_249_999_999)
+    self.assertAlmostEqual(gains["large_table"][8], 2.5)
+    # SC 1 (offset 32): (1 << 32) -> part 0 emb (1 << 30) (gain 1.0);
+    # 4,999,999,999 -> part 3 emb 1,249,999,999 (gain 1.5).
+    self.assertEqual(embedding_ids["large_table"][32], 1 << 30)
+    self.assertEqual(embedding_ids["large_table"][40], 1_249_999_999)
+    self.assertAlmostEqual(gains["large_table"][40], 1.5)
+    # SC 2 (offset 64): 3,000,000,001 (twice) -> part 1 emb 750,000,000
+    # (gain 7.0).
+    self.assertEqual(embedding_ids["large_table"][64], 750_000_000)
+    self.assertEqual(sample_ids["large_table"][64], 0)
+    self.assertAlmostEqual(gains["large_table"][64], 7.0)
+
+    # Ragged int64 with a leading empty row.
+    ragged_features = np.array(
+        [
+            np.array([], dtype=np.int64),
+            np.array([4_999_999_999, 4_999_999_999], dtype=np.int64),
+            np.array([1 << 32], dtype=np.int64),
+            np.array([0], dtype=np.int64),
+        ],
+        dtype=object,
+    )
+    rp_r, eid_r, sid_r, g_r, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+            [ragged_features],
+            None,
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+            has_leading_dimension=False,
+            allow_id_dropping=False,
+            batch_number=2,
+        )
+    )
+    self.assertEqual(rp_r["large_table"][0], 0)
+    # SC 1 (offset 32): 4,999,999,999 (twice) -> part 3 (first non-empty
+    # partition in SC 1) emb 1,249,999,999, gain 2.0.
+    self.assertEqual(rp_r["large_table"][11], 1)
+    self.assertEqual(eid_r["large_table"][32], 1_249_999_999)
+    self.assertEqual(sid_r["large_table"][32], 0)
+    self.assertAlmostEqual(g_r["large_table"][32], 2.0)
+    # SC 2 (offset 64): (1 << 32) -> part 0 emb (1 << 30).
+    self.assertEqual(eid_r["large_table"][64], 1 << 30)
+
+  def test_int64_inputs_on_small_table_match_int32(self):
+    feature_spec = _make_single_feature_spec(vocab_size=64)
+    features_i32 = np.array(
+        [[5, 18], [18, 0], [0, 20], [31, 3]], dtype=np.int32
+    )
+    features_i64 = features_i32.astype(np.int64)
+
+    rp_32, eid_32, sid_32, g_32, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+            [features_i32],
+            None,
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+            has_leading_dimension=False,
+            allow_id_dropping=False,
+        )
+    )
+    rp_64, eid_64, sid_64, g_64, *_ = (
+        pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+            [features_i64],
+            None,
+            [feature_spec],
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy=ShardingStrategy.MOD,
+            has_leading_dimension=False,
+            allow_id_dropping=False,
+        )
+    )
+    np.testing.assert_array_equal(rp_64["large_table"], rp_32["large_table"])
+    test_utils.assert_equal_coo_buffer(
+        1, 4, rp_32["large_table"], eid_64["large_table"], eid_32["large_table"]
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 4, rp_32["large_table"], sid_64["large_table"], sid_32["large_table"]
+    )
+    test_utils.assert_equal_coo_buffer(
+        1, 4, rp_32["large_table"], g_64["large_table"], g_32["large_table"]
+    )
+
+  @parameterized.parameters(4 * (1 << 31), 9_000_000_000)
+  def test_per_sc_vocab_exceeding_int32_raises_value_error(self, vocab_size):
+    # On 4 SCs, 4 * 2**31 gives rows_per_sc == 2**31 (max_col_id == INT32_MAX),
+    # which collides with PADDING_VALUE (2**31 - 1) and must be rejected.
+    feature_spec = _make_single_feature_spec(vocab_size=vocab_size)
+    features = np.zeros((4, 2), dtype=np.int64)
+    with self.assertRaisesRegex(
+        ValueError, "Per-SparseCore shard vocabulary size"
+    ):
+      pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
+          [features],
+          None,
+          [feature_spec],
+          local_device_count=1,
+          global_device_count=1,
+          num_sc_per_device=4,
+          sc_simd_width=8,
+          hbm_word_size_in_4b=8,
+          sharding_strategy=ShardingStrategy.MOD,
+      )
+
+
 if __name__ == "__main__":
   absltest.main()

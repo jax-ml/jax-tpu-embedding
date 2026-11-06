@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -53,7 +54,7 @@ namespace py = ::pybind11;
 
 namespace {
 absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
-GetStackedTableMetadata(py::list& feature_specs) {
+GetStackedTableMetadata(py::list& feature_specs, int64_t num_scs) {
   CHECK(PyGILState_Check());  // Requires GIL
   tsl::profiler::TraceMe t([] { return "GetStackedTableMetadata"; });
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
@@ -63,18 +64,19 @@ GetStackedTableMetadata(py::list& feature_specs) {
     const py::object& feature_transformation =
         feature_spec.attr("_id_transformation");
     const py::object& table_spec = feature_spec.attr("table_spec");
-    const int64_t max_col_id =
+    const int64_t table_vocab_size =
         py::cast<int64_t>(table_spec.attr("vocabulary_size"));
     const py::list& input_shape =
         feature_spec.attr("input_shape").cast<py::list>();
     const std::string feature_name =
         py::cast<std::string>(feature_spec.attr("name"));
     const int64_t batch_size = py::cast<int64_t>(input_shape[0]);
-    // The C++ preprocessing core relies on 32-bit indexing and the 26-bit
-    // row_id limit (67M) of the SparseCore COO key format. We allow the global
-    // batch_size here to exceed 32 bits (e.g., 3B), as long as the sharded
-    // local batch size per device remains within these limits. Validation of
-    // the local limits happens explicitly during preprocessing.
+    // The C++ preprocessing core relies on 32-bit shard-local indexing and the
+    // 26-bit row_id limit (67M) of the default SparseCore COO key format. We
+    // allow the global batch_size and vocabulary_size here to exceed 32 bits,
+    // as long as the sharded local batch size per device and per-SparseCore
+    // shard vocabulary size remain within limits. Validation of local limits
+    // happens explicitly during preprocessing.
     const py::object& stacked_table_spec =
         table_spec.attr("stacked_table_spec");
     if (stacked_table_spec.is_none()) {
@@ -84,7 +86,7 @@ GetStackedTableMetadata(py::list& feature_specs) {
     const std::string stacked_table_name = py::cast<std::string>(
         table_spec.attr("setting_in_stack").attr("stack_name"));
     int col_shift = 0;
-    int col_offset = 0;
+    int64_t col_offset = 0;
     int row_offset = 0;
     const int max_ids_per_partition =
         py::cast<int>(stacked_table_spec.attr("max_ids_per_partition"));
@@ -102,7 +104,25 @@ GetStackedTableMetadata(py::list& feature_specs) {
     if (!feature_transformation.is_none()) {
       row_offset = py::cast<int>(feature_transformation.attr("row_offset"));
       col_shift = py::cast<int>(feature_transformation.attr("col_shift"));
-      col_offset = py::cast<int>(feature_transformation.attr("col_offset"));
+      col_offset = py::cast<int64_t>(feature_transformation.attr("col_offset"));
+    }
+    int64_t stack_vocab_size = col_offset + table_vocab_size;
+    if (!stacked_table_spec.is_none() &&
+        py::hasattr(stacked_table_spec, "stack_vocab_size")) {
+      stack_vocab_size = std::max<int64_t>(
+          stack_vocab_size,
+          py::cast<int64_t>(stacked_table_spec.attr("stack_vocab_size")));
+    }
+    std::optional<int64_t> max_col_id = std::nullopt;
+    if (num_scs > 0) {
+      const int64_t rows_per_sc =
+          std::max<int64_t>(1, (stack_vocab_size + num_scs - 1) / num_scs);
+      max_col_id = rows_per_sc - 1;
+      // Avoid colliding with the legacy INT32_MAX "unspecified" sentinel when
+      // rows_per_sc == 2^31 (an invalid shard size that must fail validation).
+      if (*max_col_id == std::numeric_limits<int32_t>::max()) {
+        max_col_id = int64_t{std::numeric_limits<int32_t>::max()} + 1;
+      }
     }
     stacked_table_metadata[stacked_table_name].push_back(FeatureMetadataInStack(
         feature_name, i, max_ids_per_partition, max_unique_ids_per_partition,
@@ -142,12 +162,15 @@ py::tuple PyPreprocessSparseDenseMatmulInput(
       .batch_number = batch_number,
       .all_reduce_interface = all_reduce_interface,
   };
+  const int64_t num_scs = (global_device_count > 0 && num_sc_per_device > 0)
+                              ? int64_t{global_device_count} * num_sc_per_device
+                              : 0;
   // Get the stacked table metadata for each top level table.
   // The keys are stacked table names (or the table itself if not stacked) and
   // the values are a vector of StackedTableMetadata for each feature that is
   // mapped to the table.
   const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
-      stacked_tables = GetStackedTableMetadata(feature_specs);
+      stacked_tables = GetStackedTableMetadata(feature_specs, num_scs);
   PreprocessSparseDenseMatmulOutput out;
   absl::Status status;
   {
@@ -239,8 +262,11 @@ py::dict PyComputeCooBufferSizePerDevice(py::list feature_specs,
                                          int num_sc_per_device,
                                          int hbm_word_size_in_4b,
                                          MinibatchingMode minibatching_mode) {
+  const int64_t num_scs = (global_device_count > 0 && num_sc_per_device > 0)
+                              ? int64_t{global_device_count} * num_sc_per_device
+                              : 0;
   const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
-      stacked_tables = GetStackedTableMetadata(feature_specs);
+      stacked_tables = GetStackedTableMetadata(feature_specs, num_scs);
   py::dict result;
   for (const auto& [stack_name, metadata] : stacked_tables) {
     result[py::cast(stack_name)] = ComputeCooBufferSizePerDevice(
@@ -266,9 +292,26 @@ py::tuple PySparseCooPreprocessSparseDenseMatmulInput(
   for (int i = 0; i < indices.size(); ++i) {
     const std::string table_name =
         feature_specs[i].attr("table_spec").attr("name").cast<std::string>();
+    const bool was_numpy_array = py::isinstance<py::array>(values[i]);
+    py::array values_arr = py::array::ensure(values[i]);
+    if (!was_numpy_array && values_arr && values_arr.ndim() == 1 &&
+        values_arr.size() == 0 && values_arr.dtype().kind() != 'i') {
+      values_arr = py::array_t<int32_t>(0);
+    }
+    if (!values_arr || values_arr.ndim() != 1 ||
+        values_arr.dtype().kind() != 'i' ||
+        (values_arr.itemsize() != sizeof(int32_t) &&
+         values_arr.itemsize() != sizeof(int64_t))) {
+      py::set_error(
+          PyExc_ValueError,
+          "Sparse COO values must be a 1D int32 or int64 numpy array.");
+      throw py::error_already_set();
+    }
+    if (!(values_arr.flags() & py::array::c_style)) {
+      values_arr = py::array::ensure(values_arr, py::array::c_style);
+    }
     input_batches[i] = std::make_unique<PySparseCooInputBatch>(
-        indices[i].cast<py::array_t<int64_t>>(),
-        values[i].cast<py::array_t<int32_t>>(),
+        indices[i].cast<py::array_t<int64_t>>(), std::move(values_arr),
         dense_shapes[i].cast<py::array_t<int64_t>>(), table_name);
   }
   return PyPreprocessSparseDenseMatmulInput(

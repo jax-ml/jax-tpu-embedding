@@ -718,8 +718,10 @@ def preprocess_sparse_dense_matmul_input(
   Args:
     features: The input features for the current process. The features are
       expected to be Nested type (defined above). Concretely each leaf node
-      should be either a 2D numpy array or a 1D list or numpy array of numpy
-      arrays with dtype object (in the ragged tensor case).
+      should be either a 2D int32 or int64 numpy array or a 1D list or numpy
+      array of 1D int32 or int64 numpy arrays with dtype object (in the ragged
+      tensor case). Global vocabulary sizes may exceed int32 as long as each
+      SparseCore shard's vocabulary size is less than `2**31`.
     features_weights: The input feature weights. The structure must be identical
       to the features. If None, uniform weights (1.0) are assumed for all
       features.
@@ -842,10 +844,12 @@ def preprocess_sparse_dense_matmul_input_from_sparse_tensor(
       row-major order with strictly increasing column indices within each row
       (e.g., after `tf.sparse.reorder`). For instance, `indices=[[1,3], [2,4]]`
       indicates that elements at [1,3] and [2,4] have non-zero values.
-    values: A nested structure of 1-D int32 tensors, each with shape [N],
-      representing the embedding IDs corresponding to `indices`. For example,
-      with `indices=[[1,3], [2,4]]`, `values=[18, 3]` means the embedding ID at
-      [1,3] is 18 and at [2,4] is 3.
+    values: A nested structure of 1-D int32 or int64 tensors, each with shape
+      [N], representing the embedding IDs corresponding to `indices`. Global
+      vocabulary sizes may exceed int32 as long as each SparseCore shard's
+      vocabulary size is less than `2**31`. For example, with `indices=[[1,3],
+      [2,4]]`, `values=[18, 3]` means the embedding ID at [1,3] is 18 and at
+      [2,4] is 3.
     dense_shapes: A nested structure of 2-element 1-D int64 tensors, defining
       the dense shape of the sparse tensor. It specifies the number of elements
       in each dimension. For example, `dense_shape=[3,6]` represents a 3x6

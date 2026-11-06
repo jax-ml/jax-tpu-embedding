@@ -664,6 +664,116 @@ class PreprocessSparseDenseMatmulInputTest(parameterized.TestCase):
         expected_gains_b,
     )
 
+  def test_auto_stacked_5b_tables_with_int64_dense_and_sparse_tensor(self):
+    # Two 2.5B-row tables auto-stacked into a 5B-row stacked table across
+    # 4 global devices * 2 SCs/device = 8 global SCs (625M rows/SC per table,
+    # 1.25B rows/SC stacked < 2**31).
+    table_0 = embedding_spec.TableSpec(
+        vocabulary_size=2_500_000_000,
+        embedding_dim=8,
+        initializer=lambda: jnp.zeros((1, 8), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+        combiner="sum",
+        name="huge_table_0",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    table_1 = embedding_spec.TableSpec(
+        vocabulary_size=2_500_000_000,
+        embedding_dim=8,
+        initializer=lambda: jnp.zeros((1, 8), dtype=jnp.float32),
+        optimizer=embedding_spec.SGDOptimizerSpec(learning_rate=0.001),
+        combiner="sum",
+        name="huge_table_1",
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+    )
+    feature_specs = {
+        "f0": embedding_spec.FeatureSpec(
+            table_spec=table_0,
+            input_shape=[8, 2],
+            output_shape=[8, 8],
+            name="f0",
+        ),
+        "f1": embedding_spec.FeatureSpec(
+            table_spec=table_1,
+            input_shape=[8, 2],
+            output_shape=[8, 8],
+            name="f1",
+        ),
+    }
+    embedding.auto_stack_tables(
+        feature_specs,
+        global_device_count=4,
+        num_sc_per_device=2,
+    )
+    stack_spec = feature_specs["f0"].table_spec.stacked_table_spec
+    self.assertEqual(stack_spec.stack_vocab_size, 5_000_000_000)
+    stack_name = stack_spec.stack_name
+
+    # Local host owns 1 of the 4 global devices => local batch size = 2.
+    features = {
+        "f0": np.array([[0, 2_499_999_999], [8, 16]], dtype=np.int64),
+        "f1": np.array([[2_499_999_999, 0], [1, 9]], dtype=np.int64),
+    }
+    dense_out, _ = embedding.preprocess_sparse_dense_matmul_input(
+        features=features,
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=1,
+        global_device_count=4,
+        num_sc_per_device=2,
+        sc_simd_width=8,
+        hbm_word_size_in_4b=8,
+        sharding_strategy="MOD",
+    )
+
+    indices = np.array([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=np.int64)
+    sparse_out, _ = (
+        embedding.preprocess_sparse_dense_matmul_input_from_sparse_tensor(
+            indices={"f0": indices, "f1": indices},
+            values={
+                "f0": features["f0"].reshape(-1),
+                "f1": features["f1"].reshape(-1),
+            },
+            dense_shapes={
+                "f0": np.array([2, 2], dtype=np.int64),
+                "f1": np.array([2, 2], dtype=np.int64),
+            },
+            feature_specs=feature_specs,
+            local_device_count=1,
+            global_device_count=4,
+            num_sc_per_device=2,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            sharding_strategy="MOD",
+        )
+    )
+
+    self.assertEqual(dense_out.lhs_embedding_ids[stack_name].dtype, np.int32)
+    np.testing.assert_array_equal(
+        sparse_out.lhs_row_pointers[stack_name],
+        dense_out.lhs_row_pointers[stack_name],
+    )
+    assert_equal_coo = functools.partial(
+        test_utils.assert_equal_coo_buffer,
+        1,
+        2,
+        dense_out.lhs_row_pointers[stack_name],
+    )
+    assert_equal_coo(
+        sparse_out.lhs_embedding_ids[stack_name],
+        dense_out.lhs_embedding_ids[stack_name],
+    )
+    assert_equal_coo(
+        sparse_out.lhs_sample_ids[stack_name],
+        dense_out.lhs_sample_ids[stack_name],
+    )
+    assert_equal_coo(
+        sparse_out.lhs_gains[stack_name],
+        dense_out.lhs_gains[stack_name],
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

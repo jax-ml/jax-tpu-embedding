@@ -1001,6 +1001,83 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     np.testing.assert_array_equal(sample_ids, expected_sample_ids)
     np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
 
+  def test_supports_5b_global_vocab_with_int64_ids(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    features = np.array([[0, 4_999_999_999], [2, 6]], dtype=np.int64)
+    weights = np.ones_like(features, dtype=np.float32)
+
+    row_pointers, embedding_ids, sample_ids, gains = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            rows_per_sc=625_000_000,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+        )
+    )
+
+    self.assertEqual(embedding_ids.dtype, np.int32)
+    np.testing.assert_array_equal(
+        row_pointers, np.array([1, 9, 16, 18, 24, 24, 24, 24], dtype=np.int32)
+    )
+    self.assertEqual(embedding_ids[0], 0)
+    self.assertEqual(embedding_ids[8], 0)
+    self.assertEqual(embedding_ids[16], 0)
+    self.assertEqual(embedding_ids[17], 1_249_999_999)
+    self.assertEqual(sample_ids[17], 0)
+    self.assertEqual(gains[17], 1.0)
+
+
+class InputPreprocessingInt64LargeVocabTest(absltest.TestCase):
+
+  @override
+  def setUp(self):
+    super().setUp()
+    self.global_devices = np.array([MockDevice(id=i) for i in range(4)])
+
+  def test_int64_large_vocabulary_5b_ids(self):
+    mesh = jax.sharding.Mesh(self.global_devices[:1], "x")
+    features = np.array(
+        [
+            [0, 4_999_999_999],
+            [4_999_999_999, 1 << 32],
+            [1, 5],
+            [2, 6],
+        ],
+        dtype=np.int64,
+    )
+    weights = np.ones_like(features, dtype=np.float32)
+
+    row_pointers, embedding_ids, sample_ids, gains = (
+        input_preprocessing.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            num_sc_per_device=4,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+        )
+    )
+
+    self.assertEqual(embedding_ids.dtype, np.int32)
+    # Sample 0 (SC 0): 0 -> partition 0 emb 0; 4,999,999,999 -> partition 3
+    # emb 1,249,999,999.
+    self.assertEqual(row_pointers[0], 1)
+    self.assertEqual(row_pointers[3], 9)
+    self.assertEqual(embedding_ids[0], 0)
+    self.assertEqual(embedding_ids[8], 1_249_999_999)
+    self.assertEqual(sample_ids[8], 0)
+    self.assertEqual(gains[8], 1.0)
+    # Sample 1 (SC 1, starts at 64): (1 << 32) -> partition 0 emb (1 << 30);
+    # 4,999,999,999 -> partition 3 emb 1,249,999,999.
+    self.assertEqual(embedding_ids[64], 1 << 30)
+    self.assertEqual(embedding_ids[72], 1_249_999_999)
+
 
 if __name__ == "__main__":
   absltest.main()
