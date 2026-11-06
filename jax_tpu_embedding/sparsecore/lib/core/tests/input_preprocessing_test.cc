@@ -1231,7 +1231,7 @@ void ValidateMinibatchOrSparseCoreSlice(
 void RunPreprocessingOutputIsValidTest(
     absl::Span<const std::vector<std::vector<int64_t>>> samples_per_table,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
-    int global_device_count, int max_ids_per_partition,
+    int sc_simd_width, int global_device_count, int max_ids_per_partition,
     int max_unique_ids_per_partition, MinibatchingMode minibatching_mode) {
   // Max unique ids should be less than or equal to max ids.
   max_unique_ids_per_partition =
@@ -1253,6 +1253,23 @@ void RunPreprocessingOutputIsValidTest(
 
   CHECK_EQ(samples_per_table.size(), table_vocabs.size());
 
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = kGlobalDeviceCount,
+      .num_sc_per_device = num_sc_per_device,
+      .sc_simd_width = sc_simd_width,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = true,
+      .minibatching_mode = minibatching_mode,
+      .batch_number = 42};
+
+  int64_t total_padded_vocab = 0;
+  for (const int vocab : table_vocabs) {
+    total_padded_vocab +=
+        xla::RoundUpTo<int64_t>(vocab, options.sc_simd_width * kNumScs);
+  }
+  const int64_t table_shard_size = total_padded_vocab / kNumScs;
+
   std::vector<FeatureMetadataInStack> stacked_table_metadata;
   int64_t current_col_offset = 0;
   for (int i = 0; i < table_vocabs.size(); ++i) {
@@ -1261,33 +1278,21 @@ void RunPreprocessingOutputIsValidTest(
         /*feature_index=*/i, max_ids_per_partition,
         max_unique_ids_per_partition,
         /*row_offset=*/i * kBatchSize * kGlobalDeviceCount,
-        /*col_offset=*/static_cast<int>(current_col_offset),
+        /*col_offset=*/current_col_offset,
         /*col_shift=*/i % 4, kBatchSize,
         /*suggested_coo_buffer_size_per_device=*/std::nullopt,
-        RowCombiner::kSum, table_vocabs[i] - 1));
-    current_col_offset += xla::RoundUpTo(table_vocabs[i], 8 * kNumScs);
+        RowCombiner::kSum, table_shard_size - 1));
+    current_col_offset += xla::RoundUpTo<int64_t>(
+        table_vocabs[i], options.sc_simd_width * kNumScs);
   }
 
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"stacked_table", stacked_table_metadata}});
 
-  PreprocessSparseDenseMatmulInputOptions options{
-      .local_device_count = 1,
-      .global_device_count = kGlobalDeviceCount,
-      .num_sc_per_device = num_sc_per_device,
-      .sc_simd_width = 8,
-      .hbm_word_size_in_4b = 8,
-      .allow_id_dropping = true,
-      .minibatching_mode = minibatching_mode,
-      .batch_number = 42};
-
   TF_ASSERT_OK_AND_ASSIGN(
       PreprocessSparseDenseMatmulOutput output,
       PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                        stacked_tables, options));
-
-  const int64_t total_padded_vocab = current_col_offset;
-  const int64_t table_shard_size = total_padded_vocab / kNumScs;
 
   const MatrixXi& row_pointers = output.lhs_row_pointers.at("stacked_table");
   const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("stacked_table");
@@ -1340,7 +1345,7 @@ void PreprocessingOutputIsValidComplex(
         std::vector<std::vector<int64_t>>>
         samples_tuple,
     absl::Span<const int> table_vocabs, int num_sc_per_device,
-    int global_device_count, int max_ids_per_partition,
+    int sc_simd_width, int global_device_count, int max_ids_per_partition,
     int max_unique_ids_per_partition, MinibatchingMode minibatching_mode) {
   std::vector<std::vector<std::vector<int64_t>>> samples_vector;
   std::apply(
@@ -1349,8 +1354,9 @@ void PreprocessingOutputIsValidComplex(
       },
       samples_tuple);
   RunPreprocessingOutputIsValidTest(
-      samples_vector, table_vocabs, num_sc_per_device, global_device_count,
-      max_ids_per_partition, max_unique_ids_per_partition, minibatching_mode);
+      samples_vector, table_vocabs, num_sc_per_device, sc_simd_width,
+      global_device_count, max_ids_per_partition, max_unique_ids_per_partition,
+      minibatching_mode);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
@@ -1387,6 +1393,8 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
                                         400000000, 100000000}),
         // Domain for num_sc_per_device
         fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for sc_simd_width
+        fuzztest::ElementOf<int>({8, 16}),
         // Domain for global_device_count
         fuzztest::ElementOf<int>({1, 2, 4, 8, 16, 32, 64, 128}),
         // Domain for max_ids_per_partition
@@ -1401,14 +1409,15 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
 
 void PreprocessingOutputIsValidSimple(std::vector<std::vector<int64_t>> samples,
                                       absl::Span<const int> table_vocabs,
-                                      int num_sc_per_device,
+                                      int num_sc_per_device, int sc_simd_width,
                                       int global_device_count,
                                       int max_ids_per_partition,
                                       int max_unique_ids_per_partition,
                                       MinibatchingMode minibatching_mode) {
   RunPreprocessingOutputIsValidTest(
-      {samples}, table_vocabs, num_sc_per_device, global_device_count,
-      max_ids_per_partition, max_unique_ids_per_partition, minibatching_mode);
+      {samples}, table_vocabs, num_sc_per_device, sc_simd_width,
+      global_device_count, max_ids_per_partition, max_unique_ids_per_partition,
+      minibatching_mode);
 }
 
 FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
@@ -1422,6 +1431,8 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
         fuzztest::Just(std::vector<int>{10001}),
         // Domain for num_sc_per_device
         fuzztest::ElementOf<int>({1, 2, 4}),
+        // Domain for sc_simd_width
+        fuzztest::ElementOf<int>({8, 16}),
         // Domain for global_device_count
         fuzztest::ElementOf<int>({1, 2, 4}),
         // Domain for max_ids_per_partition
@@ -2278,6 +2289,76 @@ TEST(MegacoreCsrTest, DropsIdsMidMergeAcrossLocalScs) {
               ElementsAreArray(expected_sample_ids));
   EXPECT_THAT(absl::MakeConstSpan(gains.data(), gains.size()),
               ElementsAreArray(expected_gains));
+}
+
+struct Int64CooCombinerCase {
+  std::string test_name;
+  RowCombiner combiner;
+  float expected_two_id_gain;
+};
+
+class Int64InputBatchCombinerTest
+    : public ::testing::TestWithParam<Int64CooCombinerCase> {};
+
+TEST_P(Int64InputBatchCombinerTest, Extracts64BitCooWithShiftAndOffset) {
+  const Int64CooCombinerCase& tc = GetParam();
+  const int64_t col_offset = 4'000'000'000LL;  // Multiple of num_scs = 4.
+  const KeyLayout<int64_t> key_layout64 =
+      KeyLayout<int64_t>::Make(/*num_scs_bit=*/2,
+                               /*max_local_emb_id=*/2'249'999'999LL);
+  auto batch =
+      CreateInputBatchFromSamples({{0, 4'999'999'999LL}, {8}, {}, {}});
+
+  const AbstractInputBatch::ExtractCooTensorsOptions options{
+      .slice_start = 0,
+      .slice_end = 4,
+      .row_offset = 0,
+      .col_offset = col_offset,
+      .col_shift = 1,
+      .num_sc_per_device = 4,
+      .num_scs = 4,
+      .combiner = tc.combiner,
+      .max_embedding_id = 4'999'999'999LL,
+  };
+  ExtractedCooTensorsPerSparseCoreT<int64_t> coo(
+      /*batch_size_per_sc=*/4, /*has_variable_weights=*/false, tc.combiner,
+      key_layout64);
+  batch->ExtractCooTensorsInto<int64_t>(options, coo);
+
+  const std::vector<CooFormatT<int64_t>> extracted = coo.ToCooVector();
+  ASSERT_EQ(extracted.size(), 3);
+  // Sample 0, ID 0 -> shard (0 + 1) % 4 = 1, local 0 + col_offset.
+  EXPECT_EQ(extracted[0].row_id, 0);
+  EXPECT_EQ(extracted[0].col_id, col_offset + 1);
+  EXPECT_FLOAT_EQ(extracted[0].gain, tc.expected_two_id_gain);
+  // Sample 0, ID 4'999'999'999 -> shard (3 + 1) % 4 = 0,
+  // local (4'999'999'999 & ~3) + col_offset = 4'999'999'996 + col_offset.
+  EXPECT_EQ(extracted[1].row_id, 0);
+  EXPECT_EQ(extracted[1].col_id, col_offset + 4'999'999'996LL);
+  EXPECT_FLOAT_EQ(extracted[1].gain, tc.expected_two_id_gain);
+  // Sample 1, ID 8 -> shard (0 + 1) % 4 = 1, local 8 + col_offset.
+  EXPECT_EQ(extracted[2].row_id, 1);
+  EXPECT_EQ(extracted[2].col_id, col_offset + 9);
+  EXPECT_FLOAT_EQ(extracted[2].gain, 1.0f);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Int64InputBatchCombiners, Int64InputBatchCombinerTest,
+    ::testing::Values(
+        Int64CooCombinerCase{"Sum", RowCombiner::kSum, 1.0f},
+        Int64CooCombinerCase{"Mean", RowCombiner::kMean, 0.5f},
+        Int64CooCombinerCase{"Sqrtn", RowCombiner::kSqrtn,
+                             1.0f / std::sqrt(2.0f)}),
+    [](const ::testing::TestParamInfo<Int64InputBatchCombinerTest::ParamType>&
+           info) { return info.param.test_name; });
+
+TEST(Int64InputBatchTest, IsMaxColIdSpecifiedHandlesNulloptAndLegacySentinel) {
+  EXPECT_FALSE(IsMaxColIdSpecified(std::nullopt));
+  EXPECT_FALSE(IsMaxColIdSpecified(std::numeric_limits<int32_t>::max()));
+  EXPECT_TRUE(IsMaxColIdSpecified(0));
+  EXPECT_TRUE(IsMaxColIdSpecified(1'249'999'999LL));
+  EXPECT_TRUE(
+      IsMaxColIdSpecified(int64_t{std::numeric_limits<int32_t>::max()} + 1));
 }
 
 }  // namespace

@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -76,6 +77,23 @@ void AllocateOutputCsrBuffersIfNeeded(
   gains.resize(options.local_device_count, coo_buffer_size_per_device);
 }
 
+template <typename ColIdT>
+int64_t ComputeMaxEmbeddingId(const FeatureMetadataInStack& metadata,
+                              int64_t num_scs) {
+  int64_t max_global_col_id_for_feature;
+  if (IsMaxColIdSpecified(metadata.max_col_id)) {
+    max_global_col_id_for_feature = (*metadata.max_col_id + 1) * num_scs - 1;
+  } else if constexpr (std::is_same_v<ColIdT, int64_t>) {
+    max_global_col_id_for_feature =
+        int64_t{std::numeric_limits<int32_t>::max()} * num_scs - 1;
+  } else {
+    max_global_col_id_for_feature = std::min<int64_t>(
+        std::numeric_limits<int32_t>::max(),
+        int64_t{std::numeric_limits<int32_t>::max()} * num_scs - 1);
+  }
+  return max_global_col_id_for_feature - metadata.col_offset;
+}
+
 // Extract the COO tensors for a single feature slice.
 void ExtractCooTensorsForSingleFeatureSlice(
     const FeatureMetadataInStack& metadata,
@@ -97,8 +115,10 @@ void ExtractCooTensorsForSingleFeatureSlice(
   const int row_offset =
       slice_info.feature_slice_id * slice_info.batch_size_per_slice +
       row_offset_per_slice;
-  const int col_offset = metadata.col_offset;
+  const int64_t col_offset = metadata.col_offset;
   const int col_shift = metadata.col_shift;
+  const int64_t max_embedding_id =
+      ComputeMaxEmbeddingId<int32_t>(metadata, options.GetNumScs());
 
   // In the case of feature stacking, we need to group all the COO tensors
   // at this stage (i.e., before the sorting later on).
@@ -119,6 +139,7 @@ void ExtractCooTensorsForSingleFeatureSlice(
           .num_sc_per_device = options.num_sc_per_device,
           .num_scs = options.GetNumScs(),
           .combiner = metadata.row_combiner,
+          .max_embedding_id = max_embedding_id,
       },
       extracted_coo_tensors);
 }
@@ -182,14 +203,16 @@ struct TableState {
       int rows_per_sc = 0;
       if (options.num_sc_per_device > 1) {
         for (const auto& feature_metadata : stacked_table_metadata) {
-          CHECK(feature_metadata.max_col_id >= 0 &&
-                feature_metadata.max_col_id < std::numeric_limits<int>::max())
+          CHECK(IsMaxColIdSpecified(feature_metadata.max_col_id) &&
+                *feature_metadata.max_col_id >= 0 &&
+                *feature_metadata.max_col_id < std::numeric_limits<int>::max())
               << "max_col_id must be set to a non-negative value on "
                  "FeatureMetadataInStack when enable_megacore_csr is true and "
                  "num_sc_per_device > 1 (table: "
               << stacked_table_name << ", feature: " << feature_metadata.name
               << ").";
-          rows_per_sc = std::max(rows_per_sc, feature_metadata.max_col_id + 1);
+          rows_per_sc = std::max<int>(
+              rows_per_sc, static_cast<int>(*feature_metadata.max_col_id) + 1);
         }
       }
       megacore_csr = MegacoreCsrOptions{.rows_per_sc = rows_per_sc};

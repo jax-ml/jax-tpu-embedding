@@ -16,9 +16,12 @@
 #include <sys/types.h>
 
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <type_traits>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
@@ -35,7 +38,7 @@ class AbstractInputBatch {
     // Row offset to be added to the sample id.
     const int row_offset ABSL_REQUIRE_EXPLICIT_INIT;
     // Column offset to be added to the embedding id.
-    const int col_offset ABSL_REQUIRE_EXPLICIT_INIT;
+    const int64_t col_offset ABSL_REQUIRE_EXPLICIT_INIT;
     // Number of bits to shift the embedding id.
     const int col_shift ABSL_REQUIRE_EXPLICIT_INIT;
     // Number of sparse cores per device. Used to compute COO tensor counts per
@@ -45,6 +48,9 @@ class AbstractInputBatch {
     const uint32_t num_scs ABSL_REQUIRE_EXPLICIT_INIT;
     // Combiner to be used for the row.
     const RowCombiner combiner ABSL_REQUIRE_EXPLICIT_INIT;
+    // Maximum valid input embedding ID for this feature (inclusive), checked in
+    // debug builds for >32-bit integer input streams.
+    const int64_t max_embedding_id = std::numeric_limits<int64_t>::max();
   };
 
   // Returns the number of samples (e.g., rows) in this input batch.
@@ -66,6 +72,24 @@ class AbstractInputBatch {
   virtual void ExtractCooTensors(
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensorsPerSparseCore& extracted_coo_tensors) = 0;
+
+  virtual void ExtractCooTensors64(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<int64_t>& extracted_coo_tensors) {
+    LOG(FATAL) << "64-bit global column ID extraction is not implemented by "
+                  "this AbstractInputBatch subclass.";
+  }
+
+  template <typename ColIdT>
+  void ExtractCooTensorsInto(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<ColIdT>& extracted_coo_tensors) {
+    if constexpr (std::is_same_v<ColIdT, int64_t>) {
+      ExtractCooTensors64(options, extracted_coo_tensors);
+    } else {
+      ExtractCooTensors(options, extracted_coo_tensors);
+    }
+  }
 
   virtual ~AbstractInputBatch() = default;
 };

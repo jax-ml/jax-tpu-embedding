@@ -53,8 +53,16 @@ class NumpySparseInputBatch : public AbstractInputBatch {
       // performance benefit of reserving memory for them, so we underestimate
       // the number of IDs as 1 per sample.
       id_count_ = feature_.shape(0);
+      if (feature_.shape(0) > 0) {
+        auto rows = feature_.unchecked<py::object, 1>();
+        auto first_row = py::reinterpret_borrow<py::array>(rows(0));
+        is_int64_ = first_row.dtype().kind() == 'i' &&
+                    first_row.itemsize() == sizeof(int64_t);
+      }
     } else {
       id_count_ = feature_.shape(0) * feature_.shape(1);
+      is_int64_ = feature_.dtype().kind() == 'i' &&
+                  feature_.itemsize() == sizeof(int64_t);
     }
   }
 
@@ -78,12 +86,21 @@ class NumpySparseInputBatch : public AbstractInputBatch {
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensorsPerSparseCore& coo_tensors) override;
 
+  void ExtractCooTensors64(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<int64_t>& coo_tensors) override;
+
  private:
+  template <typename ColIdT>
+  void ExtractCooTensorsImpl(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<ColIdT>& coo_tensors);
   const py::array feature_;
   // NOTE: stored as optional<py::array> instead of py::object to avoid GIL
   // locking to cast to array every time.
   const std::optional<const py::array> weights_;
   int64_t id_count_;
+  bool is_int64_ = false;
 };
 
 }  // namespace jax_sc_embedding

@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -77,18 +78,23 @@ float ComputeWeightDivisor(RowCombiner combiner,
   }
 }
 
-template <typename ValuesStreamT, typename WeightsStreamT>
+template <typename ValuesStreamT, typename WeightsStreamT, typename ColIdT>
 void ProcessCooTensors(
     const AbstractInputBatch::ExtractCooTensorsOptions& options,
     ValuesStreamT& values_stream, WeightsStreamT& weights_stream,
-    ExtractedCooTensorsPerSparseCore& extracted_coo_tensors) {
+    ExtractedCooTensorsPerSparseCoreT<ColIdT>& extracted_coo_tensors) {
   CHECK(options.num_scs > 0 && (options.num_scs & (options.num_scs - 1)) == 0);
 
   const int num_scs_bit = std::log2(options.num_scs);
-  extracted_coo_tensors.key_layout_ =
-      KeyLayout<int32_t>::Make(static_cast<uint32_t>(num_scs_bit));
+  if constexpr (std::is_same_v<ColIdT, int32_t>) {
+    extracted_coo_tensors.key_layout_ =
+        KeyLayout<int32_t>::Make(static_cast<uint32_t>(num_scs_bit));
+  }
   const int batch_size_per_sc = extracted_coo_tensors.batch_size_per_sc_;
   CHECK_GT(batch_size_per_sc, 0);
+  const ColIdT col_offset = static_cast<ColIdT>(options.col_offset);
+  using ValueT =
+      std::decay_t<decltype(std::declval<ValuesStreamT&>().getRowSpan()[0])>;
 
   for (; values_stream.row() < options.slice_end;
        values_stream.NextRow(), weights_stream.NextRow()) {
@@ -116,26 +122,35 @@ void ProcessCooTensors(
     if constexpr (!is_unity_weights_stream_v<WeightsStreamT>) {
       const absl::Span<const float> weights = weights_stream.getRowSpan();
       for (int i = 0; i < num_cols; ++i) {
-        const int embedding_id = values[i];
+        const auto embedding_id = values[i];
         const float gain = weights[i] / divisor;
         DCHECK_GE(embedding_id, 0);
+        if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
+          DCHECK_LE(static_cast<int64_t>(embedding_id),
+                    options.max_embedding_id);
+        }
 
         extracted_coo_tensors.emplace_back_with_gain(
-            sample_id, embedding_id, gain, options.col_shift,
-            options.col_offset, num_scs_bit);
+            sample_id, static_cast<ColIdT>(embedding_id), gain,
+            options.col_shift, col_offset, num_scs_bit);
       }
     } else {
       for (int i = 0; i < num_cols; ++i) {
-        const int embedding_id = values[i];
+        const auto embedding_id = values[i];
         DCHECK_GE(embedding_id, 0);
+        if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
+          DCHECK_LE(static_cast<int64_t>(embedding_id),
+                    options.max_embedding_id);
+        }
 
-        extracted_coo_tensors.emplace_back(sample_id, embedding_id,
-                                           options.col_shift,
-                                           options.col_offset, num_scs_bit);
+        extracted_coo_tensors.emplace_back(
+            sample_id, static_cast<ColIdT>(embedding_id), options.col_shift,
+            col_offset, num_scs_bit);
       }
     }
   }
 }
+
 }  // namespace jax_sc_embedding
 
 #endif  // JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PROCESS_COO_TENSORS_IMPL_H_

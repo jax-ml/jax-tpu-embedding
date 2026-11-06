@@ -625,11 +625,11 @@ struct FeatureMetadataInStack {
   FeatureMetadataInStack() = delete;
   FeatureMetadataInStack(
       absl::string_view name, int feature_index, int max_ids_per_partition,
-      int max_unique_ids_per_partition, int row_offset, int col_offset,
+      int max_unique_ids_per_partition, int row_offset, int64_t col_offset,
       int col_shift, int64_t batch_size,
       std::optional<int> suggested_coo_buffer_size_per_device = std::nullopt,
       RowCombiner row_combiner = RowCombiner::kSum,
-      int max_col_id = std::numeric_limits<int>::max(),
+      std::optional<int64_t> max_col_id = std::nullopt,
       bool enable_megacore_csr = false)
       : name(name),
         feature_index(feature_index),
@@ -657,7 +657,7 @@ struct FeatureMetadataInStack {
   // Global row offset for this feature across all devices.
   int row_offset;
   // Global column offset for this feature across all devices.
-  int col_offset;
+  int64_t col_offset;
   int col_shift;
 
   // Process local batch size of the feature.
@@ -666,8 +666,8 @@ struct FeatureMetadataInStack {
   RowCombiner row_combiner;
 
   // The maximum valid physical row index in the stacked table on a SparseCore
-  // shard.
-  int max_col_id;
+  // shard, or `std::nullopt` when unspecified.
+  std::optional<int64_t> max_col_id;
 
   // Whether to produce Megacore (chip-level) CSR buffers instead of per-SC
   // CSR buffers for this stacked table.
@@ -675,6 +675,13 @@ struct FeatureMetadataInStack {
 
   bool operator==(const FeatureMetadataInStack& other) const = default;
 };
+
+// Returns true when `max_col_id` carries an explicit per-SC upper bound rather
+// than `std::nullopt` or the legacy `INT32_MAX` sentinel.
+inline bool IsMaxColIdSpecified(std::optional<int64_t> max_col_id) {
+  return max_col_id.has_value() &&
+         *max_col_id != std::numeric_limits<int32_t>::max();
+}
 
 // Returns the actual size of row pointers per device given the number of
 // minibatches.

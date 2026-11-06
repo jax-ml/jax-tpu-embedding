@@ -43,15 +43,17 @@ namespace py = ::pybind11;
 class PySparseCooInputBatch : public AbstractInputBatch {
  public:
   PySparseCooInputBatch(const py::array_t<int64_t>& indices,
-                        const py::array_t<int32_t>& values,
+                        const py::array& values,
                         const py::array_t<int64_t>& dense_shape,
                         const std::string table_name)
       : indices_(indices),
         values_(values),
         batch_size_(dense_shape.at(0)),
-        table_name_(std::move(table_name)) {
+        table_name_(std::move(table_name)),
+        is_int64_(false) {
     DCHECK(PyGILState_Check())
         << "Need GIL to create references to indices and values.";
+    is_int64_ = values_.itemsize() == sizeof(int64_t);
   }
 
   // Returns the number of samples in this input batch.
@@ -70,13 +72,22 @@ class PySparseCooInputBatch : public AbstractInputBatch {
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensorsPerSparseCore& coo_tensors) override;
 
+  void ExtractCooTensors64(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<int64_t>& coo_tensors) override;
+
  private:
+  template <typename ColIdT>
+  void ExtractCooTensorsImpl(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<ColIdT>& coo_tensors);
   // (N,2) array, sorted in row-major order (non-decreasing row_id, strictly
   // increasing col_id within each row).
   const py::array_t<int64_t> indices_;
-  const py::array_t<int32_t> values_;
+  const py::array values_;
   const int64_t batch_size_;
   const std::string table_name_;
+  bool is_int64_;
 };
 }  // namespace jax_sc_embedding
 

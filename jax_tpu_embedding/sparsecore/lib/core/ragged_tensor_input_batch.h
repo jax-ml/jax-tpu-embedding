@@ -111,6 +111,20 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
   void ExtractCooTensors(
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensorsPerSparseCore& coo_tensors) override {
+    ExtractCooTensorsImpl(options, coo_tensors);
+  }
+
+  void ExtractCooTensors64(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<int64_t>& coo_tensors) override {
+    ExtractCooTensorsImpl(options, coo_tensors);
+  }
+
+ private:
+  template <typename ColIdT>
+  void ExtractCooTensorsImpl(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<ColIdT>& coo_tensors) {
     SparseCsrInputBatchStream<EmbeddingIdT, EmbeddingIdsView, RowOffsetsView>
         values_stream(embedding_ids_, row_offsets_, options.slice_start,
                       options.slice_end, table_name_, max_vocab_id_);
@@ -119,7 +133,6 @@ class ABSL_ATTRIBUTE_VIEW RaggedTensorInputBatch : public AbstractInputBatch {
     ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
   }
 
- private:
   EmbeddingIdsView embedding_ids_;
   RowOffsetsView row_offsets_;
   absl::string_view table_name_;
@@ -164,6 +177,11 @@ class RaggedTensorInputBatchWithOwnedData : public AbstractInputBatch {
       const ExtractCooTensorsOptions& options,
       ExtractedCooTensorsPerSparseCore& coo_tensors) override {
     view_.ExtractCooTensors(options, coo_tensors);
+  }
+  void ExtractCooTensors64(
+      const ExtractCooTensorsOptions& options,
+      ExtractedCooTensorsPerSparseCoreT<int64_t>& coo_tensors) override {
+    view_.ExtractCooTensors64(options, coo_tensors);
   }
 
  private:

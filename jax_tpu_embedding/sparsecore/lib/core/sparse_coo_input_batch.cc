@@ -20,6 +20,7 @@
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
+#include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/process_coo_tensors_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/sparse_coo_input_stream_impl.h"
@@ -47,21 +48,51 @@ std::optional<int64_t> PySparseCooInputBatch::GetIdsCountInSlice(
   return end_idx - start_idx;
 }
 
-void PySparseCooInputBatch::ExtractCooTensors(
+namespace {
+
+template <typename ValueT, typename ColIdT>
+void ExtractSparseCooTensorsWithValueType(
+    const py::array_t<int64_t>& indices, const py::array& values,
+    const AbstractInputBatch::ExtractCooTensorsOptions& options,
+    ExtractedCooTensorsPerSparseCoreT<ColIdT>& coo_tensors) {
+  SparseCooInputBatchStream<ValueT,
+                            pybind11::detail::unchecked_reference<int64_t, 2>,
+                            pybind11::detail::unchecked_reference<ValueT, 1>>
+      values_stream(indices.unchecked<2>(), values.unchecked<ValueT, 1>(),
+                    options.slice_start, options.slice_end);
+  UnityWeightsStream weights_stream(values_stream);
+  ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+}
+
+}  // namespace
+
+template <typename ColIdT>
+void PySparseCooInputBatch::ExtractCooTensorsImpl(
     const ExtractCooTensorsOptions& options,
-    ExtractedCooTensorsPerSparseCore& coo_tensors) {
+    ExtractedCooTensorsPerSparseCoreT<ColIdT>& coo_tensors) {
   DCHECK(!PyGILState_Check());  // Does not require external GIL.
   tsl::profiler::TraceMe t(
       [&] { return absl::StrCat("ExtractCooTensors/", table_name_); });
 
-  SparseCooInputBatchStream<int32_t,
-                            pybind11::detail::unchecked_reference<int64_t, 2>,
-                            pybind11::detail::unchecked_reference<int32_t, 1>>
-      values_stream(indices_.unchecked<2>(), values_.unchecked<1>(),
-                    options.slice_start, options.slice_end);
-  UnityWeightsStream weights_stream(values_stream);
+  if (is_int64_) {
+    ExtractSparseCooTensorsWithValueType<int64_t>(indices_, values_, options,
+                                                  coo_tensors);
+  } else {
+    ExtractSparseCooTensorsWithValueType<int32_t>(indices_, values_, options,
+                                                  coo_tensors);
+  }
+}
 
-  ProcessCooTensors(options, values_stream, weights_stream, coo_tensors);
+void PySparseCooInputBatch::ExtractCooTensors(
+    const ExtractCooTensorsOptions& options,
+    ExtractedCooTensorsPerSparseCore& coo_tensors) {
+  ExtractCooTensorsImpl(options, coo_tensors);
+}
+
+void PySparseCooInputBatch::ExtractCooTensors64(
+    const ExtractCooTensorsOptions& options,
+    ExtractedCooTensorsPerSparseCoreT<int64_t>& coo_tensors) {
+  ExtractCooTensorsImpl(options, coo_tensors);
 }
 
 }  // namespace jax_sc_embedding
