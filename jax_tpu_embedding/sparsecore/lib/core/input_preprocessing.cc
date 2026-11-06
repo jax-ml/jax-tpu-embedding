@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <bitset>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -796,12 +795,12 @@ absl::Status ValidateLocalBatchSizeLimits(
     // instruction overhead, +34% wall time latency regression) due to the lack
     // of native SIMD 128-bit comparison instructions. Instead, we validate the
     // limit proactively.
-    if (batch_size_for_device > CooFormat::kDataMask) {
+    if (batch_size_for_device > KeyLayout<int32_t>::kDataMask) {
       return absl::InvalidArgumentError(absl::StrFormat(
           "The total local batch size for device (including stacked tables) "
           "exceeds the maximum limit supported by the SparseCore CooFormat "
           "sorting key (%d).",
-          CooFormat::kDataMask));
+          KeyLayout<int32_t>::kDataMask));
     }
   }
   return absl::OkStatus();

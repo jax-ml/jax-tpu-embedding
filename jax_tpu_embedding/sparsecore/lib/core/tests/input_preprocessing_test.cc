@@ -16,7 +16,9 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,7 +51,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/ragged_tensor_input_batch.h"
 #include "xla/tsl/concurrency/async_value_ref.h"  // from @xla
 #include "tsl/platform/env.h"  // from @tsl
-#include "tsl/platform/statusor.h"  // from @tsl
+#include "tsl/platform/statusor.h"  // from @tsl  // IWYU pragma: keep
 #include "tsl/platform/threadpool.h"  // from @tsl
 #include "xla/util.h"  // from @xla
 
@@ -549,8 +551,9 @@ class MinibatchingTest : public testing::TestWithParam<bool> {
 
           const auto hash_fn = [=](int col_id) { return bucket_id; };
 
-          keys.push_back(coo_format.GetGroupingKey(
-              num_scs_bit, index, IsMinibatchingEnabled(), hash_fn));
+          keys.push_back(KeyLayout<int32_t>::Make(num_scs_bit)
+                             .GetGroupingKey(coo_format.col_id, index,
+                                             IsMinibatchingEnabled(), hash_fn));
           ++index;
         }
       }
@@ -575,6 +578,68 @@ TEST(CooFormatTest, BucketIdCalculationIsCorrect) {
             HighwayHash(156) % CooFormat::kMaxMinibatchingBuckets);
 }
 
+TEST(CooFormatTest, CooFormat64ComputesColIdAndBucketId) {
+  const int64_t col_offset = 4'000'000'000LL;
+  const int64_t emb_id = 999'999'999LL;
+  // 4 SparseCores (num_scs_mod = 3, num_scs_bit = 2):
+  // (emb_id + 1) % 4 = 0, (emb_id // 4) * 4 = 999'999'996 => col_id =
+  // 4'999'999'996.
+  CooFormatT<int64_t> coo(/*row_id=*/7, /*embedding_id=*/emb_id,
+                          /*gain=*/0.25f, /*col_shift=*/1,
+                          /*col_offset=*/col_offset, /*num_scs_mod=*/3);
+  EXPECT_EQ(coo.row_id, 7);
+  EXPECT_EQ(coo.col_id, 4'999'999'996LL);
+  EXPECT_FLOAT_EQ(coo.gain, 0.25f);
+  EXPECT_EQ(coo.GetBucketId(),
+            HighwayHash<int64_t>(4'999'999'996LL) %
+                CooFormatT<int64_t>::kMaxMinibatchingBuckets);
+}
+
+TEST(CooFormatTest, KeyLayout64EncodesAndDecodesUnbucketedKey) {
+  const uint64_t col_id = 4'999'999'996ULL;
+  const KeyLayout<int64_t> layout = KeyLayout<int64_t>::Make(
+      /*num_scs_bit=*/2, /*max_local_emb_id=*/1'249'999'999LL);
+  const uint64_t key = layout.GetGroupingKey(col_id, /*data=*/42,
+                                             /*create_buckets=*/false);
+  EXPECT_EQ(KeyLayout<int64_t>::GetBucketIdFromKey(key), 0);
+  EXPECT_EQ(layout.GetColIdFromKey(key), col_id);
+  EXPECT_EQ(layout.GetDataFromKey(key), 42);
+}
+
+TEST(CooFormatTest, KeyLayout64UpdatesBucketIdInPlace) {
+  const uint64_t col_id = 4'999'999'996ULL;
+  const KeyLayout<int64_t> layout = KeyLayout<int64_t>::Make(
+      /*num_scs_bit=*/2, /*max_local_emb_id=*/1'249'999'999LL);
+  const uint64_t unbucketed = layout.GetGroupingKey(
+      col_id, /*data=*/42, /*create_buckets=*/false);
+  const uint64_t rebucketed =
+      KeyLayout<int64_t>::SetBucketIdInKey(unbucketed, 19);
+  EXPECT_EQ(KeyLayout<int64_t>::GetBucketIdFromKey(rebucketed), 19);
+  EXPECT_EQ(layout.GetColIdFromKey(rebucketed), col_id);
+  EXPECT_EQ(layout.GetDataFromKey(rebucketed), 42);
+}
+
+TEST(CooFormatTest, KeyLayout64PreservesBucketScColAndDataSortOrder) {
+  const KeyLayout<int64_t> layout = KeyLayout<int64_t>::Make(
+      /*num_scs_bit=*/2, /*max_local_emb_id=*/1'249'999'999LL);
+  // Ordering: bucket_id -> global_sc_id -> local_embedding_id -> data.
+  std::vector<uint64_t> ordered_keys;
+  uint64_t idx = 0;
+  for (uint32_t bucket_id : {0u, 5u, 63u}) {
+    const auto fixed_bucket_hash = [=](int64_t) { return bucket_id; };
+    for (uint64_t sc_id = 0; sc_id < 4; ++sc_id) {
+      for (uint64_t local_id : {0ULL, 100ULL, 1'249'999'999ULL}) {
+        const uint64_t col_id = (local_id << 2) | sc_id;
+        ordered_keys.push_back(layout.GetGroupingKey(
+            col_id, idx++, /*create_buckets=*/true, fixed_bucket_hash));
+      }
+    }
+  }
+  for (size_t i = 0; i + 1 < ordered_keys.size(); ++i) {
+    EXPECT_LT(ordered_keys[i], ordered_keys[i + 1]) << i;
+  }
+}
+
 // NOTE: We do not want to test for exact key value, since we only care about
 // the ordering.
 TEST_P(MinibatchingTest, KeysAreSorted) {
@@ -588,7 +653,7 @@ TEST_P(MinibatchingTest, KeysAreSorted) {
 TEST_P(MinibatchingTest, IndexFromKeyIsCorrect) {
   std::vector<uint64_t> keys = GenerateGroupingKeys();
   for (int i = 0; i < keys.size(); ++i) {
-    EXPECT_EQ(CooFormat::GetDataFromKey(keys[i]), i);
+    EXPECT_EQ(KeyLayout<int32_t>::GetDataFromKey(keys[i]), i);
   }
 }
 

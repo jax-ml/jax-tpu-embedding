@@ -16,13 +16,13 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iterator>
 #include <limits>
 #include <utility>
 #include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
+#include "absl/log/vlog_is_on.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
@@ -113,12 +113,12 @@ inline void LogIfDeviceMinibatchingRequired(
 
 inline void ValidateKeyCapacity(const int local_sc_id, const int key_count) {
   // Index = 0 to kDataMask giving us a count of kDataMask + 1.
-  if (key_count > 1 + CooFormat::kDataMask) {
+  if (key_count > 1 + KeyLayout<int32_t>::kDataMask) {
     LOG(ERROR) << absl::StrFormat(
         "Too many tensors for SparseCore #%d: got %d, limit: "
         "%d. Preprocessed output may not be reliable and cause undefined "
         "behavior.",
-        local_sc_id, key_count, CooFormat::kDataMask);
+        local_sc_id, key_count, KeyLayout<int32_t>::kDataMask);
   }
 }
 
@@ -255,17 +255,19 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   // capacity. This decision is sticky for all tensors with the same `col_id`
   // within the same bucket.
   bool dropping_current_unique_col_id = false;
-  const int num_sc_bits = context.num_sc_bits;
+  const KeyLayout<int32_t> key_layout =
+      KeyLayout<int32_t>::Make(static_cast<uint32_t>(context.num_sc_bits));
   for (const uint64_t key : context.keys) {
     // Step 1: Unpack key to get tensor coordinates.
     const uint32_t bucket_id =
-        kCreateBuckets ? CooFormat::GetBucketIdFromKey(key) : 0;
-    const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits);
+        kCreateBuckets ? KeyLayout<int32_t>::GetBucketIdFromKey(key) : 0;
+    const uint32_t col_id = key_layout.GetColIdFromKey(key);
     const uint32_t global_sc_id = col_id & (global_sc_count - 1);
+    const uint32_t data = KeyLayout<int32_t>::GetDataFromKey(key);
 
     const CooFormat coo_tensor =
         context.extracted_coo_tensors
-            .GetCooFormatWithGain<kHasVariableWeights, Combiner>(key, col_id);
+            .GetCooFormatWithGain<kHasVariableWeights, Combiner>(data, col_id);
     const uint32_t row_id = coo_tensor.row_id;
 
     // Step 2: Handle duplicates.
@@ -338,23 +340,27 @@ inline void GenerateKeysFromIds(
     const ExtractedCooTensorsPerSparseCore& extracted_coo_tensors,
     int num_sc_bits, bool kCreateBuckets, CooFormat::HashFn hash_fn,
     std::vector<uint64_t>& keys) {
+  const KeyLayout<int32_t> key_layout =
+      KeyLayout<int32_t>::Make(static_cast<uint32_t>(num_sc_bits));
   // Direct indexing with resize is faster than reserve + push_back
   // because it is more easily vectorized by the compiler.
   keys.resize(extracted_coo_tensors.size());
   for (uint32_t coo_index = 0; coo_index < extracted_coo_tensors.size();
        ++coo_index) {
-    keys[coo_index] = CooFormat::GetGroupingKey(
-        extracted_coo_tensors.ids[coo_index].col_id, coo_index, num_sc_bits,
-        kCreateBuckets, hash_fn);
+    keys[coo_index] = key_layout.GetGroupingKey(
+        extracted_coo_tensors.ids[coo_index].col_id, coo_index, kCreateBuckets,
+        hash_fn);
   }
 }
 
 inline void UpdateKeysWithBucketId(
     int num_sc_bits, CooFormat::HashFn hash_fn, std::vector<uint64_t>& keys) {
+  const KeyLayout<int32_t> key_layout =
+      KeyLayout<int32_t>::Make(static_cast<uint32_t>(num_sc_bits));
   for (uint64_t& key : keys) {
-    const uint32_t col_id = CooFormat::GetColIdFromKey(key, num_sc_bits);
+    const uint32_t col_id = key_layout.GetColIdFromKey(key);
     const uint32_t bucket_id = CooFormat::GetBucketId(col_id, hash_fn);
-    key = CooFormat::SetBucketIdInKey(key, bucket_id);
+    key = KeyLayout<int32_t>::SetBucketIdInKey(key, bucket_id);
   }
 }
 

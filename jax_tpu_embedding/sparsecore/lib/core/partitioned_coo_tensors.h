@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -32,10 +33,14 @@
 
 namespace jax_sc_embedding {
 
-class PartitionedCooTensors {
+template <typename CooT = CooFormat>
+class PartitionedCooTensorsT {
  public:
-  PartitionedCooTensors() : PartitionedCooTensors(0, 1) {}
-  PartitionedCooTensors(uint32_t global_sc_count, int bucket_count_per_sc = 1)
+  using UColIdT = std::make_unsigned_t<decltype(CooT::col_id)>;
+
+  PartitionedCooTensorsT() : PartitionedCooTensorsT(0, 1) {}
+  explicit PartitionedCooTensorsT(uint32_t global_sc_count,
+                                  int bucket_count_per_sc = 1)
       : coo_tensors_(nullptr),
         capacity_(0),
         size_(0),
@@ -44,13 +49,13 @@ class PartitionedCooTensors {
         bucket_offsets_(),
         curr_bucket_id_(0),
         merged_(false),
-        dedup_col_id_(std::numeric_limits<uint32_t>::max()),
+        dedup_col_id_(std::numeric_limits<UColIdT>::max()),
         dedup_row_id_(std::numeric_limits<uint32_t>::max()) {
     bucket_offsets_.reserve(1 + bucket_count_per_sc_);
     bucket_offsets_.push_back(0);
   }
 
-  PartitionedCooTensors(PartitionedCooTensors&& other) noexcept
+  PartitionedCooTensorsT(PartitionedCooTensorsT&& other) noexcept
       : coo_tensors_(std::move(other.coo_tensors_)),
         capacity_(std::exchange(other.capacity_, 0)),
         size_(std::exchange(other.size_, 0)),
@@ -62,7 +67,7 @@ class PartitionedCooTensors {
         dedup_col_id_(other.dedup_col_id_),
         dedup_row_id_(other.dedup_row_id_) {}
 
-  PartitionedCooTensors& operator=(PartitionedCooTensors&& other) noexcept {
+  PartitionedCooTensorsT& operator=(PartitionedCooTensorsT&& other) noexcept {
     if (this != &other) {
       coo_tensors_ = std::move(other.coo_tensors_);
       capacity_ = std::exchange(other.capacity_, 0);
@@ -77,35 +82,35 @@ class PartitionedCooTensors {
     }
     return *this;
   }
-  PartitionedCooTensors(const PartitionedCooTensors&) = delete;
-  PartitionedCooTensors& operator=(const PartitionedCooTensors&) = delete;
+  PartitionedCooTensorsT(const PartitionedCooTensorsT&) = delete;
+  PartitionedCooTensorsT& operator=(const PartitionedCooTensorsT&) = delete;
 
-  // Reserves space for `reserve_count` CooFormat tensors.
+  // Reserves space for `reserve_count` CooT tensors.
   // This method *must* be called exactly once before any calls to `Add`.
   void Reserve(int reserve_count) {
     CHECK_EQ(capacity_, 0);
     if (reserve_count == 0) {
       return;
     }
-    coo_tensors_ = std::unique_ptr<CooFormat[]>(new CooFormat[reserve_count]);
+    coo_tensors_ = std::unique_ptr<CooT[]>(new CooT[reserve_count]);
     capacity_ = reserve_count;
   }
 
-  inline void MergeWithLastCoo(const CooFormat& coo_tensor) {
+  void MergeWithLastCoo(const CooT& coo_tensor) {
     DCHECK_GT(size_, 0);
-    CooFormat& last = coo_tensors_[size_ - 1];
+    CooT& last = coo_tensors_[size_ - 1];
     DCHECK_EQ(last.row_id, coo_tensor.row_id);
     DCHECK_EQ(last.col_id, coo_tensor.col_id);
     last.gain += coo_tensor.gain;
   }
 
-  inline bool MaybeMerge(const CooFormat& coo_tensor) {
+  bool MaybeMerge(const CooT& coo_tensor) {
     // If col_id is the same, bucket_id must also be the same.
     // For fastest short-circuiting, check row_id first, as it's the last
     // component of the sort key and thus most likely to differ between
     // consecutive non-identical elements.
-    if (coo_tensor.row_id == dedup_row_id_ &&
-        coo_tensor.col_id == dedup_col_id_) {
+    if (static_cast<uint32_t>(coo_tensor.row_id) == dedup_row_id_ &&
+        static_cast<UColIdT>(coo_tensor.col_id) == dedup_col_id_) {
       MergeWithLastCoo(coo_tensor);
       return true;
     }
@@ -115,13 +120,13 @@ class PartitionedCooTensors {
   // Add Coo tensor for given SC and bucket. Similar to std::vector::push_back.
   // Force inlining to avoid function call overhead in hot loop.
   __attribute__((always_inline))
-  void Add(int target_bucket_id, const CooFormat& coo_tensor) {
+  void Add(int target_bucket_id, const CooT& coo_tensor) {
     AdvanceBucketOffsets(target_bucket_id);
 
     DCHECK_LT(size_, capacity_);
     coo_tensors_[size_++] = coo_tensor;
-    dedup_col_id_ = coo_tensor.col_id;
-    dedup_row_id_ = coo_tensor.row_id;
+    dedup_col_id_ = static_cast<UColIdT>(coo_tensor.col_id);
+    dedup_row_id_ = static_cast<uint32_t>(coo_tensor.row_id);
   }
 
   // Get size of COO tensors for given SC.
@@ -135,7 +140,7 @@ class PartitionedCooTensors {
   }
 
   // Get COO tensors for given SC and bucket.
-  absl::Span<const CooFormat> operator()(int bucket_id) const {
+  absl::Span<const CooT> operator()(int bucket_id) const {
     const int start_index = bucket_id;
     const int start_offset = bucket_offsets_[start_index];
     DCHECK_LT(start_index + 1, bucket_offsets_.size());
@@ -171,13 +176,14 @@ class PartitionedCooTensors {
     DCHECK_EQ(ptr_left_end, ptr_right) << "Must be contiguos buckets.";
     // COOs already have same local SC and bucket, only need to compare global
     // SC.
-    std::inplace_merge(
-        coo_tensors_.get() + ptr_left, coo_tensors_.get() + ptr_right,
-        coo_tensors_.get() + ptr_right_end,
-        [&global_sc_count](const CooFormat& a, const CooFormat& b) {
-          return (a.col_id & (global_sc_count - 1)) <
-                  (b.col_id & (global_sc_count - 1));
-        });
+    const UColIdT sc_mask = static_cast<UColIdT>(global_sc_count - 1);
+    std::inplace_merge(coo_tensors_.get() + ptr_left,
+                       coo_tensors_.get() + ptr_right,
+                       coo_tensors_.get() + ptr_right_end,
+                       [&sc_mask](const CooT& a, const CooT& b) {
+                         return (static_cast<UColIdT>(a.col_id) & sc_mask) <
+                                (static_cast<UColIdT>(b.col_id) & sc_mask);
+                       });
     // Combine into the right bucket (arbitrary choice).
     bucket_offsets_[i + 1] = ptr_left;
     bucket_offsets_[j] = ptr_left;
@@ -245,7 +251,7 @@ class PartitionedCooTensors {
   }
 
   // Flattened list of COO Tensors for all SCs.
-  std::unique_ptr<CooFormat[]> coo_tensors_;
+  std::unique_ptr<CooT[]> coo_tensors_;
   int capacity_;
   int size_;
   // Minibatching buckets per SC.
@@ -260,12 +266,15 @@ class PartitionedCooTensors {
   bool merged_;
   // For deduplication, we track the properties of the last ID that was *not*
   // dropped.
-  uint32_t dedup_col_id_;
+  UColIdT dedup_col_id_;
   uint32_t dedup_row_id_;
 };
 
-struct DevicePartitionedCooTensors {
-  std::vector<PartitionedCooTensors> grouped_coo_tensors;
+using PartitionedCooTensors = PartitionedCooTensorsT<CooFormat>;
+
+template <typename CooT = CooFormat>
+struct DevicePartitionedCooTensorsT {
+  std::vector<PartitionedCooTensorsT<CooT>> grouped_coo_tensors;
 
   void FillRemainingScBuckets() {
     for (auto& grouped_coo_tensor : grouped_coo_tensors) {
@@ -276,7 +285,7 @@ struct DevicePartitionedCooTensors {
   template <size_t N = CooFormat::kMaxMinibatchingBuckets>
   void Merge(const std::bitset<N - 1> split) {
     for (auto& grouped_coo_tensor : grouped_coo_tensors) {
-      grouped_coo_tensor.Merge<N>(split);
+      grouped_coo_tensor.template Merge<N>(split);
     }
   }
 
@@ -286,11 +295,11 @@ struct DevicePartitionedCooTensors {
     }
   }
 
-  absl::Span<const CooFormat> operator()(int local_sc_id, int bucket_id) const {
+  absl::Span<const CooT> operator()(int local_sc_id, int bucket_id) const {
     return grouped_coo_tensors[local_sc_id](bucket_id);
   }
 
-  void Add(int local_sc_id, int bucket_id, const CooFormat& coo_tensor) {
+  void Add(int local_sc_id, int bucket_id, const CooT& coo_tensor) {
     grouped_coo_tensors[local_sc_id].Add(bucket_id, coo_tensor);
   }
 
@@ -302,6 +311,8 @@ struct DevicePartitionedCooTensors {
     return grouped_coo_tensors[0].GetNumMinibatches();
   }
 };
+
+using DevicePartitionedCooTensors = DevicePartitionedCooTensorsT<CooFormat>;
 
 }  // namespace jax_sc_embedding
 

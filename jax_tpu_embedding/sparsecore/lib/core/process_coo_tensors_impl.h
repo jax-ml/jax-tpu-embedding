@@ -15,12 +15,13 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PROCESS_COO_TENSORS_IMPL_H_
 
 #include <cmath>
+#include <cstdint>
 #include <type_traits>
-#include <vector>
 
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
+#include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/unity_weights_stream_impl.h"
 
@@ -84,7 +85,8 @@ void ProcessCooTensors(
   CHECK(options.num_scs > 0 && (options.num_scs & (options.num_scs - 1)) == 0);
 
   const int num_scs_bit = std::log2(options.num_scs);
-  extracted_coo_tensors.num_sc_bits_ = num_scs_bit;
+  extracted_coo_tensors.key_layout_ =
+      KeyLayout<int32_t>::Make(static_cast<uint32_t>(num_scs_bit));
   const int batch_size_per_sc = extracted_coo_tensors.batch_size_per_sc_;
   CHECK_GT(batch_size_per_sc, 0);
 

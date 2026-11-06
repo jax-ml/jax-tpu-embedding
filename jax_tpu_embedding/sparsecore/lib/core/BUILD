@@ -271,6 +271,7 @@ cc_library(
     hdrs = ["process_coo_tensors_impl.h"],
     deps = [
         ":abstract_input_batch",
+        ":coo_format",
         ":input_preprocessing_util",
         ":unity_weights_stream",
         "@com_google_absl//absl/log:check",
@@ -327,6 +328,7 @@ cc_library(
         ":partitioned_coo_tensors",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/log:vlog_is_on",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
