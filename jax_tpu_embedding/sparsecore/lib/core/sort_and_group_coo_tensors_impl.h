@@ -41,6 +41,55 @@
 #include "tsl/profiler/lib/traceme.h"
 
 namespace jax_sc_embedding {
+
+// Grouping policy of one sort-and-group pass over the extracted COO tensors.
+// The pass decides at compile time whether minibatching buckets are created,
+// whether IDs exceeding `max_ids_per_partition` /
+// `max_unique_ids_per_partition` may be dropped, and whether a minibatching
+// split is computed, so the hot loops never consult
+// `PreprocessSparseDenseMatmulInputOptions` for the mode.
+enum class SortPass {
+  // Minibatching is disabled: IDs exceeding the limits are dropped when
+  // `allow_id_dropping` is set and are fatal otherwise.
+  kNoMinibatching,
+  // Device minibatching: limits are only logged, nothing is dropped, and a
+  // single bucket per SparseCore is produced.
+  kDeviceMinibatching,
+  // Host minibatching, first pass: checks whether any partition exceeds the
+  // limits. No buckets are created and no IDs are dropped.
+  kHostMinibatchingCheck,
+  // Host minibatching, second pass: groups IDs into hashed buckets, computes
+  // the minibatching split, and drops IDs exceeding the per-bucket limits.
+  kHostMinibatchingBucketed,
+};
+
+// Compile-time policies derived from a `SortPass`.
+template <SortPass kPass>
+struct SortPassTraits {
+  static constexpr bool kCreateBuckets =
+      kPass == SortPass::kHostMinibatchingBucketed;
+  static constexpr bool kDropIds =
+      kPass == SortPass::kNoMinibatching || kCreateBuckets;
+  static constexpr bool kComputeSplit =
+      kPass == SortPass::kHostMinibatchingCheck || kCreateBuckets;
+  // Host minibatching reports a boolean "minibatching required" from the first
+  // pass and the exact bucket split from the second.
+  using SplitType = std::conditional_t<kCreateBuckets, MinibatchingSplit, bool>;
+};
+
+// Returns the pass used for the first sort-and-group of a batch under `mode`.
+inline SortPass InitialSortPass(MinibatchingMode mode) {
+  switch (mode) {
+    case MinibatchingMode::kDisabled:
+      return SortPass::kNoMinibatching;
+    case MinibatchingMode::kDevice:
+      return SortPass::kDeviceMinibatching;
+    case MinibatchingMode::kHost:
+      return SortPass::kHostMinibatchingCheck;
+  }
+  LOG(FATAL) << "Invalid minibatching_mode: " << static_cast<int>(mode);
+}
+
 namespace internal {
 
 inline void ValidateMaxIdsOrDie(
@@ -209,6 +258,8 @@ struct LocalSparseCoreTensorGroupingContextT {
   const PreprocessSparseDenseMatmulInputOptions& options;
   const int32_t local_sc_id;
   const KeyLayout<ColIdT> key_layout;
+  // Whether IDs exceeding the per-partition limits are dropped in this pass.
+  const bool perform_id_dropping;
 
   // Outputs.
   PartitionedCooTensorsT<CooFormatT<ColIdT>>& grouped_coo_tensors;
@@ -246,18 +297,11 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   MatrixXi& kept_ids = context.kept_ids_per_sc_partition_per_bucket;
   MatrixXi& kept_unique_ids = context.kept_unique_ids_per_partition_per_bucket;
 
-  const bool allow_id_dropping = options.allow_id_dropping;
   const uint32_t global_sc_count = options.GetNumScs();
   const int max_ids_per_partition = feature_metadata.max_ids_per_partition;
   const int max_unique_ids_per_partition =
       feature_metadata.max_unique_ids_per_partition;
-
-  // We do NOT drop IDs when minibatching is enabled and we are in the
-  // first pass (`kCreateBuckets=false`), as we need to detect limit
-  // overflows to decide if minibatching is required (or for device
-  // minibatching, where ID dropping on max_ids/unique_ids is bypassed).
-  const bool can_drop_id = !options.IsMinibatchingEnabled() || kCreateBuckets;
-  const bool perform_id_dropping = allow_id_dropping && can_drop_id;
+  const bool perform_id_dropping = context.perform_id_dropping;
 
   UColIdT prev_col_id = std::numeric_limits<UColIdT>::max();
   uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
@@ -383,7 +427,7 @@ inline void UpdateKeysWithBucketId(KeyLayout<ColIdT> key_layout,
 }  // namespace internal
 
 // Sorts and groups the provided COO tensors in this hierarchy: Local SC ->
-// Minibatching Bucket -> Global SC.
+// Minibatching Bucket -> Global SC, following the policies of `kPass`.
 //
 // NOTE: Although `extracted_coo_tensors` is taken by const reference, the
 // per-SparseCore `keys` it refers to (through `AsyncValueRef`) are sorted in
@@ -396,8 +440,7 @@ inline void UpdateKeysWithBucketId(KeyLayout<ColIdT> key_layout,
 //
 // TODO(b/469153631): Break this function down into smaller ones. Aggregation
 // could be a separate function.
-template <bool kHasVariableWeights = false, bool kCreateBuckets,
-          typename SplitType, typename ColIdT>
+template <bool kHasVariableWeights = false, SortPass kPass, typename ColIdT>
 tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>
 SortAndGroupCooTensorsPerLocalDeviceImpl(
     const ExtractedCooTensorsT<ColIdT>& extracted_coo_tensors,
@@ -406,6 +449,9 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice& stats) {
   using CooT = CooFormatT<ColIdT>;
+  using Traits = SortPassTraits<kPass>;
+  using SplitType = typename Traits::SplitType;
+  constexpr bool kCreateBuckets = Traits::kCreateBuckets;
   tsl::profiler::TraceMe t([&] {
     return tsl::profiler::TraceMeEncode(
         absl::StrCat("ScheduleSortAndGroupCooTensors/", stacked_table_name),
@@ -424,16 +470,11 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   const int max_ids_per_partition = feature_metadata.max_ids_per_partition;
   const int max_unique_ids_per_partition =
       feature_metadata.max_unique_ids_per_partition;
-  // This function can be called in two passes for minibatching. The logic for
-  // stats collection and ID dropping depends on the pass.
-  //
-  // Pass 1: Check if minibatching is required (`kCreateBuckets` is false).
-  // - No IDs are dropped.
-  // - Stats are collected on all observed IDs to compute splits.
-  //
-  // Pass 2: Create buckets (`kCreateBuckets` is true).
-  // - A dummy stats object is used (stats are not re-computed).
-  // - IDs may be dropped if they exceed capacity.
+  // Host minibatching runs this function twice. The first pass
+  // (`kHostMinibatchingCheck`) drops nothing and collects stats on all
+  // observed IDs to decide whether minibatching is required. The second pass
+  // (`kHostMinibatchingBucketed`) receives a dummy stats object, since the
+  // first-pass stats are authoritative, and may drop IDs exceeding capacity.
 
   // Partition COO tensors among SparseCores for the local device (based on row
   // id).
@@ -546,6 +587,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                     .options = options,
                     .local_sc_id = local_sc_id,
                     .key_layout = key_layout,
+                    .perform_id_dropping =
+                        options.allow_id_dropping && Traits::kDropIds,
                     .grouped_coo_tensors = grouped_coo_tensors,
                     .ids_per_sc_partition_per_bucket =
                         ids_per_sc_partition_per_bucket,
@@ -609,23 +652,23 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             const int32_t observed_max_unique_ids_per_bucket =
                 unique_ids_per_partition_per_bucket.maxCoeff();
 
-            if (options.IsHostMinibatchingEnabled()) {
+            if constexpr (Traits::kComputeSplit) {
               internal::UpdateMinibatchingSplit(
                   ids_per_sc_partition_per_bucket,
                   unique_ids_per_partition_per_bucket, global_sc_count,
                   max_ids_per_partition, max_unique_ids_per_partition,
                   task_split);
             }
-            // Only validate if creating minibatching buckets or when
-            // minibatching is disabled, not when checking if minibatching is
-            // required (or when device minibatching is enabled).
-            if (!options.IsMinibatchingEnabled() || kCreateBuckets) {
+            // Limits are only enforced in passes that drop IDs. Device
+            // minibatching logs them, and the host detection pass reports them
+            // through the split instead.
+            if constexpr (Traits::kDropIds) {
               internal::ValidateMaxIdsOrDie(
                   observed_max_ids_per_bucket,
                   observed_max_unique_ids_per_bucket, max_ids_per_partition,
                   max_unique_ids_per_partition, stacked_table_name,
                   options.allow_id_dropping);
-            } else if (options.IsDeviceMinibatchingEnabled()) {
+            } else if constexpr (kPass == SortPass::kDeviceMinibatching) {
               internal::LogIfDeviceMinibatchingRequired(
                   observed_max_ids_per_bucket,
                   observed_max_unique_ids_per_bucket, max_ids_per_partition,
@@ -655,7 +698,6 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   tsl::RunWhenReady(
       absl::MakeConstSpan(task_results),
       [task_results = std::move(task_results), device_result, stats,
-       enable_host_minibatching = options.IsHostMinibatchingEnabled(),
        num_sc_per_device]() mutable {
         tsl::profiler::TraceMe t("MergeSortingTaskResults");
         std::vector<PartitionedCooTensorsT<CooT>> parts;
@@ -683,7 +725,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
           stats.required_buffer_size = stats.required_buffer_size.cwiseMax(
               res_stats.required_buffer_size);
 
-          if (enable_host_minibatching) {
+          if constexpr (Traits::kComputeSplit) {
             minibatching_split_agg |= res.split_val;
           }
         }
@@ -708,33 +750,46 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   return device_result;
 }
 
-// Dispatches to `SortAndGroupCooTensorsPerLocalDeviceImpl` with bucket creation
-// enabled only for host minibatching. As with the implementation, the
-// per-SparseCore keys in `extracted_coo_tensors` are sorted in place.
-template <bool kHasVariableWeights = false, typename SplitType, typename ColIdT>
+// Dispatches `SortAndGroupCooTensorsPerLocalDeviceImpl` on the runtime `pass`.
+// As with the implementation, the per-SparseCore keys in
+// `extracted_coo_tensors` are sorted in place.
+template <bool kHasVariableWeights = false, typename ColIdT>
 tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>
 SortAndGroupCooTensorsPerLocalDeviceAsync(
     const ExtractedCooTensorsT<ColIdT>& extracted_coo_tensors,
     absl::string_view stacked_table_name,
     const FeatureMetadataInStack& feature_metadata,
-    const PreprocessSparseDenseMatmulInputOptions& options,
+    const PreprocessSparseDenseMatmulInputOptions& options, SortPass pass,
     internal::StatsPerDevice stats) {
-  const bool create_buckets = options.IsHostMinibatchingEnabled() &&
-                              std::is_same_v<SplitType, MinibatchingSplit>;
-  if (create_buckets) {
-    return SortAndGroupCooTensorsPerLocalDeviceImpl<
-        kHasVariableWeights, /*kCreateBuckets=*/true, SplitType>(
-        extracted_coo_tensors, stacked_table_name, feature_metadata, options,
-        stats);
-  } else {
-    return SortAndGroupCooTensorsPerLocalDeviceImpl<
-        kHasVariableWeights, /*kCreateBuckets=*/false, SplitType>(
-        extracted_coo_tensors, stacked_table_name, feature_metadata, options,
-        stats);
+  switch (pass) {
+    case SortPass::kNoMinibatching:
+      return SortAndGroupCooTensorsPerLocalDeviceImpl<
+          kHasVariableWeights, SortPass::kNoMinibatching>(
+          extracted_coo_tensors, stacked_table_name, feature_metadata, options,
+          stats);
+    case SortPass::kDeviceMinibatching:
+      return SortAndGroupCooTensorsPerLocalDeviceImpl<
+          kHasVariableWeights, SortPass::kDeviceMinibatching>(
+          extracted_coo_tensors, stacked_table_name, feature_metadata, options,
+          stats);
+    case SortPass::kHostMinibatchingCheck:
+      return SortAndGroupCooTensorsPerLocalDeviceImpl<
+          kHasVariableWeights, SortPass::kHostMinibatchingCheck>(
+          extracted_coo_tensors, stacked_table_name, feature_metadata, options,
+          stats);
+    case SortPass::kHostMinibatchingBucketed:
+      return SortAndGroupCooTensorsPerLocalDeviceImpl<
+          kHasVariableWeights, SortPass::kHostMinibatchingBucketed>(
+          extracted_coo_tensors, stacked_table_name, feature_metadata, options,
+          stats);
   }
+  LOG(FATAL) << "Invalid SortPass: " << static_cast<int>(pass);
 }
 
-// Blocking version for test only.
+// Blocking version for test only. `SplitType` selects the host minibatching
+// pass: `MinibatchingSplit` requests the bucket-creating second pass under
+// `MinibatchingMode::kHost`, and `bool` the initial pass of the configured
+// mode.
 template <bool kHasVariableWeights = false, typename SplitType, typename ColIdT>
 DevicePartitionedCooTensorsT<CooFormatT<ColIdT>>
 SortAndGroupCooTensorsPerLocalDevice(
@@ -743,10 +798,14 @@ SortAndGroupCooTensorsPerLocalDevice(
     const FeatureMetadataInStack& feature_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::StatsPerDevice& stats, SplitType& minibatching_split) {
+  const SortPass pass = (std::is_same_v<SplitType, MinibatchingSplit> &&
+                         options.IsHostMinibatchingEnabled())
+                            ? SortPass::kHostMinibatchingBucketed
+                            : InitialSortPass(options.minibatching_mode);
   tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>> av =
-      SortAndGroupCooTensorsPerLocalDeviceAsync<kHasVariableWeights, SplitType>(
+      SortAndGroupCooTensorsPerLocalDeviceAsync<kHasVariableWeights>(
           extracted_coo_tensors, stacked_table_name, feature_metadata, options,
-          stats);
+          pass, stats);
   tsl::BlockUntilReady(av);
   DeviceSortingTaskResultT<ColIdT> result = std::move(av.get());
   stats.dropped_id_count = result.total_dropped_id_count;

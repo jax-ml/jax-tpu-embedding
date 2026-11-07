@@ -360,8 +360,6 @@ struct TableState {
   CsrArraysPerHost csr_arrays_per_host;
   StatsPerHost stats_per_host;
   int batch_size_for_device;
-  bool table_minibatching_required = false;
-  MinibatchingSplit table_minibatching_split = 0;
   TableExtractionAndSortingPipelineVariant pipeline;
 
   TableState(absl::string_view name,
@@ -403,22 +401,24 @@ struct TableState {
   }
 };
 
-template <typename SplitType, typename ColIdT>
+// Sorts and groups one local device of `state` with `pass`, selecting the
+// variable-weights instantiation from `state.has_variable_weights`.
+template <typename ColIdT>
 tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>
 SortAndGroupCooTensorsForTablePipelineAsync(
     const TableState& state, TableExtractionAndSortingPipeline<ColIdT>& pipe,
     int local_device, const PreprocessSparseDenseMatmulInputOptions& options,
-    internal::StatsPerDevice stats) {
+    SortPass pass, internal::StatsPerDevice stats) {
   if (state.has_variable_weights) {
-    return SortAndGroupCooTensorsPerLocalDeviceAsync<true, SplitType>(
+    return SortAndGroupCooTensorsPerLocalDeviceAsync<true>(
         pipe.extracted_coo_tensors_per_device[local_device],
         state.stacked_table_name, state.stacked_table_metadata[0], options,
-        stats);
+        pass, std::move(stats));
   } else {
-    return SortAndGroupCooTensorsPerLocalDeviceAsync<false, SplitType>(
+    return SortAndGroupCooTensorsPerLocalDeviceAsync<false>(
         pipe.extracted_coo_tensors_per_device[local_device],
         state.stacked_table_name, state.stacked_table_metadata[0], options,
-        stats);
+        pass, std::move(stats));
   }
 }
 
@@ -453,34 +453,11 @@ void ExtractSortAndGroupCooTensorsForTable(
           // starting (dependency is handled in
           // SortAndGroupCooTensorsPerLocalDeviceImpl via RunWhenReady).
           pipe.device_sorting_results[local_device] =
-              SortAndGroupCooTensorsForTablePipelineAsync<bool>(
-                  state, pipe, local_device, options, stats_per_device);
+              SortAndGroupCooTensorsForTablePipelineAsync(
+                  state, pipe, local_device, options,
+                  InitialSortPass(options.minibatching_mode),
+                  std::move(stats_per_device));
         }
-      },
-      state.pipeline);
-}
-
-void PostProcessTableState(TableState& state) {
-  state.stats_per_host.dropped_id_count = 0;
-  std::visit(
-      [&](const auto& pipe) {
-        for (const auto& result_av : pipe.device_sorting_results) {
-          state.stats_per_host.dropped_id_count +=
-              result_av.get().total_dropped_id_count;
-          state.table_minibatching_required |=
-              result_av.get().table_minibatching_required;
-          state.table_minibatching_split |=
-              result_av.get().table_minibatching_split;
-        }
-      },
-      state.pipeline);
-}
-
-void SchedulePostProcessTableState(TableState& state) {
-  std::visit(
-      [&state](const auto& pipe) {
-        tsl::RunWhenReady(absl::MakeConstSpan(pipe.device_sorting_results),
-                          [&state]() { PostProcessTableState(state); });
       },
       state.pipeline);
 }
@@ -498,6 +475,7 @@ void CreateMinibatchingBucketsForTable(
                      state.stacked_table_name),
         {{"batch_number", options.batch_number}});
   });
+  DCHECK(options.IsHostMinibatchingEnabled());
   state.stats_per_host.dropped_id_count = 0;
   std::visit(
       [&](auto& pipe) {
@@ -518,9 +496,9 @@ void CreateMinibatchingBucketsForTable(
                 options.num_sc_per_device);
             internal::StatsPerDevice dummy_stats =
                 dummy_stats_host->GetStatsPerDevice(0);
-            auto result_av =
-                SortAndGroupCooTensorsForTablePipelineAsync<MinibatchingSplit>(
-                    state, pipe, local_device, options, dummy_stats);
+            auto result_av = SortAndGroupCooTensorsForTablePipelineAsync(
+                state, pipe, local_device, options,
+                SortPass::kHostMinibatchingBucketed, std::move(dummy_stats));
             pipe.device_sorting_results[local_device] = result_av;
             // `dummy_stats_host` must be kept alive until `result_av` is
             // ready, because `dummy_stats` (which is used in the async task
@@ -1168,10 +1146,6 @@ PreprocessSparseDenseMatmulInput(
                              /* global_minibatching_required= */ false,
                              /* global_minibatching_split= */ 0);
 
-  for (auto& state : table_states) {
-    SchedulePostProcessTableState(state);
-  }
-
   bool global_minibatching_required = false;
   if (options.IsHostMinibatchingEnabled()) {
     tsl::profiler::TraceMe traceme([&] {
@@ -1198,9 +1172,6 @@ PreprocessSparseDenseMatmulInput(
       });
       for (auto& state : table_states) {
         CreateMinibatchingBucketsForTable(state, options);
-      }
-      for (auto& state : table_states) {
-        SchedulePostProcessTableState(state);
       }
     }
 
