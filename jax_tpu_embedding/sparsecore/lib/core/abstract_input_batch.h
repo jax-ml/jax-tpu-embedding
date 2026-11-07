@@ -21,7 +21,6 @@
 #include <type_traits>
 
 #include "absl/base/attributes.h"  // from @com_google_absl
-#include "absl/log/log.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/input_preprocessing_util.h"
 
 namespace jax_sc_embedding {
@@ -75,10 +74,7 @@ class AbstractInputBatch {
 
   virtual void ExtractCooTensors64(
       const ExtractCooTensorsOptions& options,
-      ExtractedCooTensorsPerSparseCoreT<int64_t>& extracted_coo_tensors) {
-    LOG(FATAL) << "64-bit global column ID extraction is not implemented by "
-                  "this AbstractInputBatch subclass.";
-  }
+      ExtractedCooTensorsPerSparseCoreT<int64_t>& extracted_coo_tensors) = 0;
 
   template <typename ColIdT>
   void ExtractCooTensorsInto(
