@@ -13,8 +13,8 @@
 # limitations under the License.
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_python//python:proto.bzl", "py_proto_library")
+load("@rules_python//python:py_library.bzl", "py_library")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -31,8 +31,9 @@ py_proto_library(
     deps = [":embedding_spec_proto"],
 )
 
-pytype_strict_library(
+py_library(
     name = "proto",
     srcs = ["__init__.py"],
+    type_checking = True,
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
 )
