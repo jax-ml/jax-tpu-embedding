@@ -11,19 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_test.bzl", "py_test")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//visibility:private"],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "version_test",
     srcs = ["version_test.py"],
     data = ["//jax_tpu_embedding/sparsecore:version"],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore",
         pypi_requirement("absl/testing:absltest"),
