@@ -12,18 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = CORE_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "test_utils",
     srcs = ["test_utils.py"],
+    type_checking = True,
     deps = [pypi_requirement("numpy")],
 )
 
@@ -88,7 +90,7 @@ cc_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "input_preprocessing_test",
     srcs = [
         "input_preprocessing_test.py",
@@ -96,6 +98,7 @@ pytype_strict_contrib_test(
     env = {
         "JAX_PLATFORMS": "cpu",
     },
+    type_checking = True,
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/core:constants",
@@ -107,7 +110,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "pybind_input_preprocessing_test",
     srcs = [
         "pybind_input_preprocessing_test.py",
@@ -115,6 +118,7 @@ pytype_strict_contrib_test(
     env = {
         "JAX_PLATFORMS": "cpu",
     },
+    type_checking = True,
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/core",
@@ -130,12 +134,13 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "sparse_coo_input_preprocessing_test",
     srcs = [
         "sparse_coo_input_preprocessing_test.py",
     ],
     shard_count = 10,
+    type_checking = True,
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",

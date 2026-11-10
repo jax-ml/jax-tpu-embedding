@@ -11,9 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -50,7 +50,7 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "jax_sc_shakespeare_jit",
     srcs = ["jax_sc_shakespeare_jit.py"],
     args = [
@@ -59,6 +59,7 @@ pytype_strict_binary(
     ],
     main = "jax_sc_shakespeare_jit.py",
     tags = ["oss_exclude"],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:model",
@@ -232,7 +233,7 @@ filegroup(
     visibility = ["//jax_tpu_embedding/sparsecore/lib/flax/nnx:__pkg__"],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "jax_sc_shakespeare_jit_flax_nnx",
     srcs = ["jax_sc_shakespeare_jit_flax_nnx.py"],
     args = [
@@ -241,6 +242,7 @@ pytype_strict_binary(
     ],
     main = "jax_sc_shakespeare_jit_flax_nnx.py",
     tags = ["oss_exclude"],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:config",
         "//jax_tpu_embedding/sparsecore/examples/models/shakespeare:flax_nnx_model",
