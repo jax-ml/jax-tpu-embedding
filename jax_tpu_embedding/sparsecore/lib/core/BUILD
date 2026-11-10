@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_python//python:py_library.bzl", "py_library")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pybind11.bzl", "pybind_extension", "pybind_library")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -165,11 +165,12 @@ pybind_extension(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "input_preprocessing",
     srcs = [
         "input_preprocessing.py",
     ],
+    type_checking = True,
     deps = [
         ":constants",
         ":pybind_input_preprocessing",
@@ -179,11 +180,12 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "input_preprocessing_megacore",
     srcs = [
         "input_preprocessing_megacore.py",
     ],
+    type_checking = True,
     deps = [
         ":input_preprocessing",
         ":pybind_input_preprocessing",
@@ -193,15 +195,16 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "constants",
     srcs = [
         "constants.py",
     ],
+    type_checking = True,
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "core",
     srcs = ["__init__.py"],
     # C++ dependencies must go in "data".
@@ -210,6 +213,7 @@ pytype_strict_library(
         ":input_preprocessing_threads",  # buildcleaner: keep
         ":input_preprocessing_util",  # buildcleaner: keep
     ],
+    type_checking = True,
     visibility = [
         "//jax_tpu_embedding/sparsecore/lib:__pkg__",
         "//jax_tpu_embedding/sparsecore/lib/core:__subpackages__",
@@ -361,9 +365,10 @@ cc_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "pybind_input_preprocessing_pyi",
-    pytype_srcs = ["pybind_input_preprocessing.pyi"],
+    pyi_srcs = ["pybind_input_preprocessing.pyi"],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("numpy"),
