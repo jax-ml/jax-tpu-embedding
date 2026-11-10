@@ -11,31 +11,33 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_library.bzl", "py_library")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = EXTERNAL_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "dataset",
     srcs = [
         "dataset.py",
     ],
+    type_checking = True,
     deps = [
         pypi_requirement("absl/logging"),
         pypi_requirement("numpy"),
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "model",
     srcs = [
         "model.py",
     ],
+    type_checking = True,
     deps = [
         pypi_requirement("flax:core"),
         pypi_requirement("jax"),
@@ -43,11 +45,12 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "flax_model",
     srcs = [
         "flax_model.py",
     ],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/linen:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -57,11 +60,12 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "flax_nnx_model",
     srcs = [
         "flax_nnx_model.py",
     ],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/nnx:embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -71,9 +75,10 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "config",
     srcs = ["config.py"],
+    type_checking = True,
     deps = [
         ":dataset",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",

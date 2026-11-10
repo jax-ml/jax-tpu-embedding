@@ -11,8 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_library.bzl", "py_library")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -20,9 +20,10 @@ package(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "flax",
     srcs = ["__init__.py"],
+    type_checking = True,
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/flax/linen",  # buildcleaner: keep

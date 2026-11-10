@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("@rules_python//python:py_library.bzl", "py_library")
 
 # copybara:uncomment load("//tools/build_defs/testing:bzl_library.bzl", "bzl_library")
 load(":configure_file.bzl", "configure_file")
@@ -51,12 +51,13 @@ configure_file(
     template = "version.py.in",
 )
 
-pytype_strict_library(
+py_library(
     name = "sparsecore",
     srcs = [
         "__init__.py",
         ":version",
     ],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib",  # buildcleaner: keep
         "//jax_tpu_embedding/sparsecore/utils",  # buildcleaner: keep

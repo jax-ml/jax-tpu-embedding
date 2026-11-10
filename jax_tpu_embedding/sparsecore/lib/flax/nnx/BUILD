@@ -11,12 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load(
     "//third_party/bazel/python:pytype.bzl",
-    "pytype_strict_binary",
-    "pytype_strict_library",
     pytype_strict_test = "pytype_strict_contrib_test",
 )
 
@@ -25,11 +25,12 @@ package(
     default_visibility = EXTERNAL_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "embed",
     srcs = [
         "embed.py",
     ],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -41,9 +42,10 @@ pytype_strict_library(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "checkpoint_utils",
     srcs = ["checkpoint_utils.py"],
+    type_checking = True,
     deps = [
         ":embed",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -60,9 +62,10 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "nnx",
     srcs = ["__init__.py"],
+    type_checking = True,
     visibility = [
         "//jax_tpu_embedding/sparsecore/lib:__pkg__",
         "//jax_tpu_embedding/sparsecore/lib/flax:__pkg__",
@@ -74,9 +77,10 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "offline_converter_lib",
     srcs = ["offline_converter.py"],
+    type_checking = True,
     deps = [
         ":checkpoint_utils",
         "//jax_tpu_embedding/sparsecore/utils",
@@ -88,10 +92,11 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "offline_converter",
     srcs = ["offline_converter.py"],
     main = "offline_converter.py",
+    type_checking = True,
     deps = [
         ":checkpoint_utils",
         "//jax_tpu_embedding/sparsecore/utils",

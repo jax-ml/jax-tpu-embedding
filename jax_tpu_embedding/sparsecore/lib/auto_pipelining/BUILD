@@ -11,26 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_library.bzl", "py_library")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
 )
 
-pytype_strict_library(
+py_library(
     name = "utils",
     srcs = ["utils.py"],
+    type_checking = True,
     deps = [
         pypi_requirement("jax"),
         pypi_requirement("jax/extend"),
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "decompose",
     srcs = ["decompose.py"],
+    type_checking = True,
     deps = [
         ":preprocess",
         ":utils",
@@ -39,18 +41,20 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "preprocess",
     srcs = ["preprocess.py"],
+    type_checking = True,
     deps = [
         ":utils",
         pypi_requirement("jax/extend"),
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "auto_pipelining",
     srcs = ["auto_pipelining.py"],
+    type_checking = True,
     deps = [
         ":decompose",
         pypi_requirement("etils/epath"),
