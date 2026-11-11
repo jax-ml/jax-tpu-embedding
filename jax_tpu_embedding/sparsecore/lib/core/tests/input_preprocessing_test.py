@@ -757,6 +757,65 @@ class InputPreprocessingMinibatchingTest(absltest.TestCase):
     with self.subTest(name="GainsEquality"):
       np.testing.assert_allclose(gains, expected_gains, atol=1e-6)
 
+  def test_device_minibatching_validates_aligned_sum_per_sc(self):
+    mesh = jax.sharding.Mesh(self.global_devices[:1], "x")
+    # 2 SparseCores (num_scs = 2), hbm_word_size_in_4b = 8.
+    # max_ids_per_partition = 8 => max_aligned_ids = 16.
+    # Single batch of 2 samples: sample 0 on SC 0 has 12 IDs on Partition 0
+    # (> 8 per-partition limit), Partition 1 is empty => aligned sum = 16 <= 16.
+    features = [[[i * 2 for i in range(12)], []]]
+    weights = [[[1.0] * 12, []]]
+    row_pointers, col_ids, _, _ = (
+        input_preprocessing.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            num_sc_per_device=2,
+            sc_simd_width=8,
+            hbm_word_size_in_4b=8,
+            max_ids_per_partition=8,
+            max_unique_ids_per_partition=8,
+            minibatching_mode=input_preprocessing.MinibatchingMode.DEVICE,
+        )
+    )
+    np.testing.assert_array_equal(
+        row_pointers[:8], np.array([12, 16, 16, 16, 16, 16, 16, 16])
+    )
+    np.testing.assert_array_equal(col_ids[:12], np.arange(12, dtype=np.int32))
+
+    # Adding 1 ID on Partition 1 pushes aligned sum to 16 + 8 = 24 > 16 (even
+    # though raw sum is 13 <= 16) and raises ValueError.
+    overflow_features = [[[i * 2 for i in range(12)] + [1], []]]
+    overflow_weights = [[[1.0] * 13, []]]
+    with self.assertRaisesRegex(
+        ValueError, "SparseCore 0 has too many aligned ids"
+    ):
+      input_preprocessing.preprocess_sparse_dense_matmul_input(
+          overflow_features,
+          overflow_weights,
+          mesh,
+          num_sc_per_device=2,
+          sc_simd_width=8,
+          hbm_word_size_in_4b=8,
+          max_ids_per_partition=8,
+          max_unique_ids_per_partition=16,
+          minibatching_mode=input_preprocessing.MinibatchingMode.DEVICE,
+      )
+    with self.assertRaisesRegex(
+        ValueError, "SparseCore 0 has too many aligned unique ids"
+    ):
+      input_preprocessing.preprocess_sparse_dense_matmul_input(
+          overflow_features,
+          overflow_weights,
+          mesh,
+          num_sc_per_device=2,
+          sc_simd_width=8,
+          hbm_word_size_in_4b=8,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=8,
+          minibatching_mode=input_preprocessing.MinibatchingMode.DEVICE,
+      )
+
 
 class InputPreprocessingMegacoreTest(absltest.TestCase):
 

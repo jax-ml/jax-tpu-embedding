@@ -545,10 +545,10 @@ struct PreprocessSparseDenseMatmulInputOptions {
   // Whether to allow dropping embedding IDs if the buffer size is exceeded.
   const bool allow_id_dropping = true;
   // The mini-batching mode to use (kDisabled, kHost, or kDevice).
-  // If kDevice, goes through the minibatching path while ignoring
-  // max_ids/unique_ids limits during grouping/deduplication, skips host
-  // all-reduce to always produce 1 minibatch, but still drops IDs if the COO
-  // buffer size is exceeded.
+  // If kDevice, skips bucketization and host all-reduce to always produce 1
+  // minibatch while enforcing per-SparseCore aligned ID and unique-ID sums
+  // across partitions (and dropping excess IDs if the static COO buffer size is
+  // exceeded).
   const MinibatchingMode minibatching_mode = MinibatchingMode::kDisabled;
 
   // The batch number should be a sequential counter that is unique for each
@@ -748,7 +748,7 @@ void FillLocalDeviceBuffer(
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound);
+    int& dropped_id_count_static_bound, bool has_dropped_ids = false);
 
 // Returns the number of dropped IDs. If `megacore_csr` is set, fills a single
 // chip-level CSR buffer whose embedding IDs are linearized as
@@ -764,7 +764,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
-    internal::CsrArraysRefPerDevice csr_arrays);
+    internal::CsrArraysRefPerDevice csr_arrays, bool has_dropped_ids = false);
 
 }  // namespace jax_sc_embedding
 

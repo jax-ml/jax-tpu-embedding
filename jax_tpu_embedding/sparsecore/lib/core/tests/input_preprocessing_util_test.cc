@@ -27,6 +27,8 @@
 #include <gtest/gtest.h>
 #include "fuzztest/fuzztest.h"
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/base/log_severity.h"  // from @com_google_absl
+#include "absl/log/scoped_mock_log.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "Eigen/Core"  // from @eigen_archive
 #include "jax_tpu_embedding/sparsecore/lib/core/coo_format.h"
@@ -1350,6 +1352,33 @@ TEST(InputPreprocessingUtilTest,
   EXPECT_EQ(csr_arrays.embedding_ids[32], 1'249'999'999);
   EXPECT_EQ(csr_arrays.sample_ids[32], 0);
   EXPECT_FLOAT_EQ(csr_arrays.gains[32], 3.0f);
+}
+
+TEST(InputPreprocessingUtilTest,
+     LogIfDeviceMinibatchingRequiredEmitsRateLimitedWarnings) {
+  absl::ScopedMockLog mock_log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(
+      mock_log,
+      Log(absl::LogSeverity::kWarning, _,
+          testing::HasSubstr(
+              "Device minibatching required for table: table_0 observed max "
+              "ids per partition: 10")))
+      .Times(testing::AtMost(1));
+  EXPECT_CALL(
+      mock_log,
+      Log(absl::LogSeverity::kWarning, _,
+          testing::HasSubstr(
+              "Device minibatching required for table: table_0 observed max "
+              "unique ids per partition: 6")))
+      .Times(testing::AtMost(1));
+  mock_log.StartCapturingLogs();
+  internal::LogIfDeviceMinibatchingRequired(
+      /*observed_max_ids_per_partition=*/10,
+      /*observed_max_unique_ids_per_partition=*/6,
+      /*max_ids_per_partition=*/5,
+      /*max_unique_ids_per_partition=*/2,
+      /*stacked_table_name=*/"table_0");
+  mock_log.StopCapturingLogs();
 }
 
 }  // namespace

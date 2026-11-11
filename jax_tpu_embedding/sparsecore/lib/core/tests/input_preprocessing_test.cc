@@ -29,12 +29,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "fuzztest/fuzztest.h"
-#include "absl/base/log_severity.h"  // from @com_google_absl
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
-#include "absl/log/scoped_mock_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -1012,12 +1010,13 @@ TEST_F(MinibatchingCountTest, MinibatchSyncKeysAreDisjoint) {
 
 TEST_F(MinibatchingCountTest,
        DeviceMinibatchingIgnoresMaxIdsAndProducesOneMinibatch) {
-  // Arrange: reduce max_ids and max_unique_ids to smaller than input count.
-  // With host minibatching, this would produce >1 minibatches.
-  // With minibatching disabled and allow_id_dropping=false, this would DIE
-  // in ValidateMaxIdsOrDie. But with
-  // minibatching_mode=MinibatchingMode::kDevice, max_ids/unique_ids check is
-  // ignored, 1 minibatch is produced, and 0 IDs are dropped.
+  // Arrange: reduce per-partition max_ids and max_unique_ids below individual
+  // partition counts while keeping the aligned per-SparseCore budget
+  // (RoundUpTo(9, 8) * 4 = 64) above the observed aligned sum across
+  // partitions (24 + 8 + 8 + 8 = 48 IDs, 16 + 8 + 8 + 8 = 40 unique IDs).
+  // Host minibatching produces >1 minibatches and disabled mode with
+  // allow_id_dropping=false dies, whereas device minibatching produces 1
+  // minibatch with 0 dropped IDs.
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 1,
       .global_device_count = 1,
@@ -1028,10 +1027,10 @@ TEST_F(MinibatchingCountTest,
       .minibatching_mode = MinibatchingMode::kDevice,
   };
 
-  stacked_table_metadata_[0].max_ids_per_partition = 5;
-  stacked_table_metadata_[0].max_unique_ids_per_partition = 2;
-  stacked_table_metadata_[1].max_ids_per_partition = 5;
-  stacked_table_metadata_[1].max_unique_ids_per_partition = 6;
+  stacked_table_metadata_[0].max_ids_per_partition = 9;
+  stacked_table_metadata_[0].max_unique_ids_per_partition = 9;
+  stacked_table_metadata_[1].max_ids_per_partition = 9;
+  stacked_table_metadata_[1].max_unique_ids_per_partition = 9;
 
   auto input_batches =
       CreateInputBatches(/*max_ids_per_partitions=*/{10, 20},
@@ -1042,33 +1041,250 @@ TEST_F(MinibatchingCountTest,
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
 
-  absl::ScopedMockLog mock_log(absl::MockLogDefault::kIgnoreUnexpected);
-  EXPECT_CALL(
-      mock_log,
-      Log(absl::LogSeverity::kWarning, testing::_,
-          testing::HasSubstr(
-              "Device minibatching required for table: table_0 observed max "
-              "ids per partition:")))
-      .Times(testing::AtLeast(1));
-  EXPECT_CALL(
-      mock_log,
-      Log(absl::LogSeverity::kWarning, testing::_,
-          testing::HasSubstr(
-              "Device minibatching required for table: table_0 observed max "
-              "unique ids per partition:")))
-      .Times(testing::AtLeast(1));
-  mock_log.StartCapturingLogs();
-
   // Act
   TF_ASSERT_OK_AND_ASSIGN(
       PreprocessSparseDenseMatmulOutput output,
       PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                        stacked_tables, options));
-  mock_log.StopCapturingLogs();
 
   // Assert
   EXPECT_EQ(output.num_minibatches, 1);
   EXPECT_EQ(output.stats.dropped_id_count.at("table_0"), 0);
+  EXPECT_GT(output.stats.max_ids_per_partition.at("table_0").maxCoeff(), 9);
+  EXPECT_GT(output.stats.max_unique_ids_per_partition.at("table_0").maxCoeff(),
+            9);
+}
+
+TEST_F(MinibatchingCountTest,
+       DeviceMinibatchingDropsIdsWhenAlignedIdSumExceeded) {
+  // 2 SparseCores (num_scs = 2), hbm_word_size_in_4b = 8.
+  // max_ids_per_partition = 8 => max_aligned_ids_per_sc = 8 * 2 = 16.
+  // SC 0 (sample 0..1): 9 IDs in partition 0 and 5 IDs in partition 1.
+  //   Raw sum = 14 <= 16, but aligned sum = RoundUpTo(9, 8) + RoundUpTo(5, 8)
+  //   = 16 + 8 = 24 > 16!
+  //   Partition 0 keeps all 9 IDs (consuming all 16 aligned slots); partition 1
+  //   drops all 5 IDs.
+  // SC 1 (sample 2..3): 3 IDs in partition 0 and 2 IDs in partition 1
+  //   (aligned sum = 8 + 8 = 16 <= 16, 0 dropped).
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = true,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples({
+      {0, 2, 4, 6, 8, 10, 12, 14, 16},  // SC 0, sample 0: 9 IDs on partition 0
+      {1, 3, 5, 7, 9},                  // SC 0, sample 1: 5 IDs on partition 1
+      {0, 2, 4},                        // SC 1, sample 0: 3 IDs on partition 0
+      {1, 3},                           // SC 1, sample 1: 2 IDs on partition 1
+  }));
+
+  const std::vector<FeatureMetadataInStack> metadata = {FeatureMetadataInStack(
+      /*name=*/"feature_0", /*feature_index=*/0,
+      /*max_ids_per_partition=*/8,
+      /*max_unique_ids_per_partition=*/16,
+      /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/4,
+      /*suggested_coo_buffer_size_per_device=*/64)};
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_0", metadata}});
+
+  // Pre-populate output buffers with sentinel values to ensure SC 1 packs
+  // directly at SC 0's post-drop aligned end (16) rather than its pre-drop
+  // required buffer size (24).
+  MatrixXi row_pointers = MatrixXi::Constant(
+      1, ComputeRowPointersSizePerDevice(options, metadata), 777);
+  const int coo_size = ComputeCooBufferSizePerDevice(options, metadata);
+  MatrixXi embedding_ids = MatrixXi::Constant(1, coo_size, 777);
+  MatrixXi sample_ids = MatrixXi::Constant(1, coo_size, 777);
+  MatrixXf gains = MatrixXf::Constant(1, coo_size, 777.0f);
+  OutputCsrArrays output_csr_arrays;
+  output_csr_arrays.lhs_row_pointers.insert(
+      {"table_0",
+       Eigen::Map<MatrixXi>(row_pointers.data(), 1, row_pointers.cols())});
+  output_csr_arrays.lhs_embedding_ids.insert(
+      {"table_0", Eigen::Map<MatrixXi>(embedding_ids.data(), 1, coo_size)});
+  output_csr_arrays.lhs_sample_ids.insert(
+      {"table_0", Eigen::Map<MatrixXi>(sample_ids.data(), 1, coo_size)});
+  output_csr_arrays.lhs_gains.insert(
+      {"table_0", Eigen::Map<MatrixXf>(gains.data(), 1, coo_size)});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options,
+                                       &output_csr_arrays));
+
+  EXPECT_EQ(output.num_minibatches, 1);
+  EXPECT_EQ(output.stats.dropped_id_count.at("table_0"), 5);
+  // Pre-drop required buffer sizes are preserved for FDO reporting.
+  EXPECT_THAT(
+      absl::MakeConstSpan(output.stats.required_buffer_sizes.at("table_0")),
+      ElementsAre(24, 16));
+
+  // Active row_pointers (2 SCs * 8 per bucket = 16):
+  // SC 0: P0=[0, 9), P1=[16, 16), padded=[16..16]
+  // SC 1: P0=[16, 19), P1=[24, 26), padded=[32..32]
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), 16),
+              ElementsAre(9, 16, 16, 16, 16, 16, 16, 16,  // SC 0
+                          19, 26, 32, 32, 32, 32, 32, 32  // SC 1
+                          ));
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data(), 32),
+              ElementsAre(0, 1, 2, 3, 4, 5, 6, 7,  // SC 0 P0 [0..8)
+                          8, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX, INT_MAX,  // SC 0 P0 [8..16)
+                          0, 1, 2, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX,  // SC 1 P0 [16..24)
+                          0, 1, INT_MAX, INT_MAX, INT_MAX, INT_MAX, INT_MAX,
+                          INT_MAX  // SC 1 P1 [24..32)
+                          ));
+  for (int idx : {9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23, 26, 27, 28, 29,
+                  30, 31}) {
+    EXPECT_EQ(sample_ids(0, idx), INT_MAX) << idx;
+    EXPECT_TRUE(std::isnan(gains(0, idx))) << idx;
+  }
+}
+
+TEST_F(MinibatchingCountTest,
+       DeviceMinibatchingDropsIdsWhenAlignedUniqueIdSumExceeded) {
+  // 2 SparseCores (num_scs = 2), hbm_word_size_in_4b = 8.
+  // max_ids_per_partition = 32 (max_aligned_ids_per_sc = 64).
+  // max_unique_ids_per_partition = 8 (max_aligned_unique_ids_per_sc = 16).
+  // SC 0 (samples 0..2):
+  //   Partition 0 has 17 unique col_ids {0, 2, ..., 32}:
+  //   - col_ids 0..28 (15 unique IDs) appear once in sample 0.
+  //   - 16th unique col_id (30) appears twice in sample 0 (gain=2) and once in
+  //     samples 1 and 2 -> all kept (aligned unique IDs = 16).
+  //   - 17th unique col_id (32) appears twice in sample 0 and once in sample 1
+  //     -> all 3 input occurrences dropped!
+  //   Partition 1 has col_id 1 in sample 2 -> dropped (16 + 1 > 16)!
+  // SC 1 (samples 3..5): col_id 0 in sample 3, col_id 1 in sample 4 (kept).
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = true,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+
+  std::vector<int64_t> sc0_row0;
+  for (int i = 0; i < 15; ++i) {
+    sc0_row0.push_back(i * 2);
+  }
+  sc0_row0.insert(sc0_row0.end(), {30, 30, 32, 32});
+
+  std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+  input_batches.push_back(CreateInputBatchFromSamples({
+      sc0_row0,  // SC 0, local row 0
+      {30, 32},  // SC 0, local row 1
+      {30, 1},   // SC 0, local row 2
+      {0},       // SC 1, local row 0
+      {1},       // SC 1, local row 1
+      {},        // SC 1, local row 2
+  }));
+
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables({{"table_0",
+                       {FeatureMetadataInStack(
+                           /*name=*/"feature_0", /*feature_index=*/0,
+                           /*max_ids_per_partition=*/32,
+                           /*max_unique_ids_per_partition=*/8,
+                           /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                           /*batch_size=*/6,
+                           /*suggested_coo_buffer_size_per_device=*/128)}}});
+
+  TF_ASSERT_OK_AND_ASSIGN(
+      PreprocessSparseDenseMatmulOutput output,
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                       stacked_tables, options));
+
+  EXPECT_EQ(output.num_minibatches, 1);
+  // Dropped: 3 occurrences of col_id 32 + 1 occurrence of col_id 1 = 4.
+  EXPECT_EQ(output.stats.dropped_id_count.at("table_0"), 4);
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("table_0");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("table_0");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("table_0");
+  const MatrixXf& gains = output.lhs_gains.at("table_0");
+
+  // SC 0 P0 kept 15 + 3 = 18 COO entries ([0..18), aligned to 24), P1 empty
+  // (whereas pre-drop required_buffer_size[0] is 24 + 8 = 32).
+  // SC 1 P0 kept 1 entry ([24..25), aligned to 32), P1 kept 1 entry ([32..33)).
+  EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), 16),
+              ElementsAre(18, 24, 24, 24, 24, 24, 24, 24,  // SC 0
+                          25, 33, 40, 40, 40, 40, 40, 40   // SC 1
+                          ));
+  // Verify the 3 retained entries for the 16th unique col_id (emb_id = 15).
+  EXPECT_THAT(absl::MakeConstSpan(embedding_ids.data() + 15, 3),
+              ElementsAre(15, 15, 15));
+  EXPECT_THAT(absl::MakeConstSpan(sample_ids.data() + 15, 3),
+              ElementsAre(0, 1, 2));
+  EXPECT_FLOAT_EQ(gains(0, 15), 2.0f);
+  EXPECT_FLOAT_EQ(gains(0, 16), 1.0f);
+  EXPECT_FLOAT_EQ(gains(0, 17), 1.0f);
+  // Verify SC 1 entries at indices 24 and 32.
+  EXPECT_EQ(embedding_ids(0, 24), 0);
+  EXPECT_EQ(sample_ids(0, 24), 0);
+  EXPECT_EQ(embedding_ids(0, 32), 0);
+  EXPECT_EQ(sample_ids(0, 32), 1);
+}
+
+TEST_F(MinibatchingCountTest,
+       DeviceMinibatchingDiesWhenAllowIdDroppingFalseAndSumExceeded) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 1,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+
+  // Case 1: Aligned ID sum (16 + 8 = 24) exceeds max_aligned_ids_per_sc (16).
+  std::vector<std::unique_ptr<AbstractInputBatch>> id_overflow_batches;
+  id_overflow_batches.push_back(CreateInputBatchFromSamples({
+      {0, 2, 4, 6, 8, 10, 12, 14, 16},
+      {1},
+      {},
+      {},
+  }));
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      id_overflow_tables(
+          {{"table_0",
+            {FeatureMetadataInStack("feature_0", 0,
+                                    /*max_ids_per_partition=*/8,
+                                    /*max_unique_ids_per_partition=*/16, 0, 0,
+                                    0, 4, 64)}}});
+  EXPECT_DEATH(
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(id_overflow_batches),
+                                       id_overflow_tables, options)
+          .IgnoreError(),
+      "Observed aligned ids per SparseCore: 24.*is greater than the max "
+      "aligned ids per SparseCore: 16");
+
+  // Case 2: Aligned unique-ID sum (24) exceeds max_aligned_unique_ids_per_sc
+  // (16) while aligned ID sum (24) fits within max_aligned_ids_per_sc (32).
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      unique_overflow_tables(
+          {{"table_0",
+            {FeatureMetadataInStack("feature_0", 0,
+                                    /*max_ids_per_partition=*/16,
+                                    /*max_unique_ids_per_partition=*/8, 0, 0, 0,
+                                    4, 64)}}});
+  EXPECT_DEATH(
+      PreprocessSparseDenseMatmulInput(absl::MakeSpan(id_overflow_batches),
+                                       unique_overflow_tables, options)
+          .IgnoreError(),
+      "Observed aligned unique ids per SparseCore: 24.*is greater than the max "
+      "aligned unique ids per SparseCore: 16");
 }
 
 TEST_F(MinibatchingCountTest,
@@ -1076,7 +1292,7 @@ TEST_F(MinibatchingCountTest,
   // Arrange: minibatching_mode=MinibatchingMode::kDevice,
   // allow_id_dropping=false, but set suggested_coo_buffer_size_per_device
   // smaller than the number of IDs. Buffer size exceeding should still cause ID
-  // dropping!
+  // dropping and produce a well-formed CSR-wrapped COO!
   const int kNumScPerDevice = 4;
   const int kHbmWordSizeIn4b = 8;
   const int kAlignment = kHbmWordSizeIn4b * kNumScPerDevice;
@@ -1090,9 +1306,6 @@ TEST_F(MinibatchingCountTest,
       .minibatching_mode = MinibatchingMode::kDevice,
   };
 
-  // Keep partition limits above observed IDs so only buffer capacity is
-  // exceeded (and to avoid triggering the process-wide LOG_EVERY_N_SEC warning
-  // in LogIfDeviceMinibatchingRequired).
   stacked_table_metadata_[0].max_ids_per_partition = 256;
   stacked_table_metadata_[0].max_unique_ids_per_partition = 256;
   // Restrict COO buffer size to minimum aligned size (32).
@@ -1101,12 +1314,16 @@ TEST_F(MinibatchingCountTest,
   stacked_table_metadata_[1].max_unique_ids_per_partition = 256;
   stacked_table_metadata_[1].suggested_coo_buffer_size_per_device = kAlignment;
 
-  // Create inputs with 80 and 90 IDs, which will exceed the 32 buffer capacity.
+  // Create inputs with 80 and 90 IDs per SC, exceeding the 32 buffer capacity.
   auto input_batches =
       CreateInputBatches(/*max_ids_per_partitions=*/{80, 90},
                          /*max_unique_ids_per_partitions=*/{80, 90},
                          /*global_sc_count=*/4,
                          /*local_sc_count=*/4);
+  int64_t total_input_ids = 0;
+  for (const auto& batch : input_batches) {
+    total_input_ids += batch->id_count();
+  }
 
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables({{"table_0", stacked_table_metadata_}});
@@ -1118,8 +1335,42 @@ TEST_F(MinibatchingCountTest,
                                        stacked_tables, options));
 
   // Assert
-  EXPECT_EQ(output.num_minibatches, 1);
+  ASSERT_EQ(output.num_minibatches, 1);
   EXPECT_GT(output.stats.dropped_id_count.at("table_0"), 0);
+
+  const MatrixXi& row_pointers = output.lhs_row_pointers.at("table_0");
+  const MatrixXi& embedding_ids = output.lhs_embedding_ids.at("table_0");
+  const MatrixXi& sample_ids = output.lhs_sample_ids.at("table_0");
+  const MatrixXf& gains = output.lhs_gains.at("table_0");
+  ASSERT_EQ(embedding_ids.cols(), kAlignment);
+
+  const int active_row_pointers =
+      GetActualRowPointersSizePerDevice(options, output.num_minibatches);
+  int start_index = 0;
+  int64_t total_present_ids = 0;
+  for (int i = 0; i < active_row_pointers; ++i) {
+    const int end_index = row_pointers(0, i);
+    ASSERT_GE(end_index, start_index) << "row_pointer " << i;
+    ASSERT_LE(end_index, embedding_ids.cols()) << "row_pointer " << i;
+    for (int j = start_index; j < end_index; ++j) {
+      EXPECT_GE(embedding_ids(0, j), 0);
+      EXPECT_NE(embedding_ids(0, j), INT_MAX);
+      EXPECT_GE(sample_ids(0, j), 0);
+      EXPECT_LT(sample_ids(0, j), 8);
+      EXPECT_FALSE(std::isnan(gains(0, j)));
+      total_present_ids += static_cast<int64_t>(gains(0, j));
+    }
+    const int next_start = xla::RoundUpTo(end_index, kHbmWordSizeIn4b);
+    ASSERT_LE(next_start, embedding_ids.cols());
+    for (int j = end_index; j < next_start; ++j) {
+      EXPECT_EQ(embedding_ids(0, j), INT_MAX);
+      EXPECT_EQ(sample_ids(0, j), INT_MAX);
+      EXPECT_TRUE(std::isnan(gains(0, j)));
+    }
+    start_index = next_start;
+  }
+  EXPECT_EQ(total_present_ids + output.stats.dropped_id_count.at("table_0"),
+            total_input_ids);
 }
 
 TEST_F(MinibatchingCountTest, InvalidMinibatchingModeReturnsError) {
@@ -1197,7 +1448,19 @@ void ValidateMinibatchOrSparseCoreSlice(
     const Eigen::Ref<const RowVectorXf>& gains_slice,
     int64_t total_padded_vocab, int batch_size_per_sc,
     int max_ids_per_partition, int max_unique_ids_per_partition,
-    int64_t& total_ids_in_slice, int hbm_word_size_in_4b) {
+    int64_t& total_ids_in_slice, int hbm_word_size_in_4b,
+    MinibatchingMode minibatching_mode = MinibatchingMode::kDisabled,
+    int row_pointers_size_per_bucket = 0, int num_scs = 0) {
+  const int64_t max_aligned_ids_per_sc =
+      xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size_in_4b) *
+      num_scs;
+  const int64_t max_aligned_unique_ids_per_sc =
+      xla::RoundUpTo<int64_t>(max_unique_ids_per_partition,
+                              hbm_word_size_in_4b) *
+      num_scs;
+  int64_t aligned_ids_in_sc = 0;
+  int64_t aligned_unique_ids_in_sc = 0;
+
   int32_t start_index = 0;
   for (int i = 0; i < row_pointers_slice.size(); ++i) {
     int end_index = row_pointers_slice(i);
@@ -1221,10 +1484,36 @@ void ValidateMinibatchOrSparseCoreSlice(
       // total ids.
       total_ids_in_slice += static_cast<int64_t>(gain);
       unique_ids.insert(embedding_id);
-      ASSERT_LE(ids_count, max_ids_per_partition);
-      ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
+      if (minibatching_mode != MinibatchingMode::kDevice) {
+        ASSERT_LE(ids_count, max_ids_per_partition);
+        ASSERT_LE(unique_ids.size(), max_unique_ids_per_partition);
+      }
     }
-    start_index = xla::RoundUpTo(end_index, hbm_word_size_in_4b);
+    const int32_t next_start_index =
+        xla::RoundUpTo(end_index, hbm_word_size_in_4b);
+    ASSERT_LE(next_start_index, embedding_ids_slice.size());
+    for (int j = end_index; j < next_start_index; ++j) {
+      EXPECT_EQ(embedding_ids_slice(j), INT_MAX);
+      EXPECT_EQ(sample_ids_slice(j), INT_MAX);
+      EXPECT_TRUE(std::isnan(gains_slice(j)));
+    }
+    if (minibatching_mode == MinibatchingMode::kDevice) {
+      const int bucket_row = i % row_pointers_size_per_bucket;
+      if (bucket_row >= num_scs) {
+        EXPECT_EQ(ids_count, 0);
+      }
+      aligned_ids_in_sc +=
+          xla::RoundUpTo<int64_t>(ids_count, hbm_word_size_in_4b);
+      aligned_unique_ids_in_sc +=
+          xla::RoundUpTo<int64_t>(unique_ids.size(), hbm_word_size_in_4b);
+      if (bucket_row + 1 == row_pointers_size_per_bucket) {
+        ASSERT_LE(aligned_ids_in_sc, max_aligned_ids_per_sc);
+        ASSERT_LE(aligned_unique_ids_in_sc, max_aligned_unique_ids_per_sc);
+        aligned_ids_in_sc = 0;
+        aligned_unique_ids_in_sc = 0;
+      }
+    }
+    start_index = next_start_index;
   }
 }
 
@@ -1306,14 +1595,16 @@ void RunPreprocessingOutputIsValidTest(
 
   int64_t total_present_ids = 0;
   if (options.IsMinibatchingEnabled()) {
-    const int32_t row_pointers_size = num_minibatches *
-                                      options.GetRowPointersSizePerBucket() *
-                                      num_sc_per_device;
+    const int row_pointers_size_per_bucket =
+        options.GetRowPointersSizePerBucket();
+    const int32_t row_pointers_size =
+        num_minibatches * row_pointers_size_per_bucket * num_sc_per_device;
     ValidateMinibatchOrSparseCoreSlice(
         row_pointers.row(0).head(row_pointers_size), embedding_ids.row(0),
         sample_ids.row(0), gains.row(0), table_shard_size, batch_size_per_sc,
         max_ids_per_partition, max_unique_ids_per_partition, total_present_ids,
-        options.hbm_word_size_in_4b);
+        options.hbm_word_size_in_4b, options.minibatching_mode,
+        row_pointers_size_per_bucket, kNumScs);
   } else {
     const int coo_buffer_size_per_sc = embedding_ids.cols() / num_sc_per_device;
     const int row_pointers_size_per_bucket =
@@ -1405,6 +1696,7 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidComplex)
         fuzztest::ElementOf({
             MinibatchingMode::kDisabled,
             MinibatchingMode::kHost,
+            MinibatchingMode::kDevice,
         }));
 
 void PreprocessingOutputIsValidSimple(std::vector<std::vector<int64_t>> samples,
@@ -1443,6 +1735,7 @@ FUZZ_TEST(InputPreprocessingFuzzTest, PreprocessingOutputIsValidSimple)
         fuzztest::ElementOf({
             MinibatchingMode::kDisabled,
             MinibatchingMode::kHost,
+            MinibatchingMode::kDevice,
         }));
 
 void StatsValidationTest(std::vector<std::vector<int64_t>> samples,
@@ -2078,6 +2371,58 @@ TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
   EXPECT_THAT(absl::MakeConstSpan(gains.data(), 16),
               ElementsAre(1.0f, 2.0f, 1.0f, _, _, _, _, _, 1.0f, 1.0f, _, _, _,
                           _, _, _));
+}
+
+TEST(MegacoreCsrTest, DeviceMinibatchingExemptsFromPerScAlignedIdLimits) {
+  // 4 global SparseCores (2 devices * 2 SCs/device), hbm_word_size_in_4b = 8.
+  // With max_ids_per_partition = 1 and max_unique_ids_per_partition = 1, a
+  // non-Megacore table caps each SparseCore at RoundUpTo(1, 8) * 4 = 32 aligned
+  // slots. Place 9 distinct IDs on global_sc_id 0, 9 on global_sc_id 1, and 1
+  // on global_sc_id 2 in sample 0 so SparseCore 0 uses 16 + 16 + 8 = 40 > 32
+  // aligned ID and unique-ID slots, exercising both enable_megacore_csr guards.
+  std::vector<int64_t> sample_0;
+  for (int i = 0; i < 9; ++i) {
+    sample_0.push_back(i * 4);
+    sample_0.push_back(i * 4 + 1);
+  }
+  sample_0.push_back(2);
+
+  const absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/1,
+                /*max_unique_ids_per_partition=*/1,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/2,
+                /*suggested_coo_buffer_size_per_device=*/std::nullopt,
+                RowCombiner::kSum, /*max_col_id=*/99,
+                /*enable_megacore_csr=*/true)}}});
+
+  for (const bool allow_id_dropping : {false, true}) {
+    std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+    input_batches.push_back(CreateInputBatchFromSamples({sample_0, {}}));
+    PreprocessSparseDenseMatmulInputOptions options{
+        .local_device_count = 1,
+        .global_device_count = 2,
+        .num_sc_per_device = 2,
+        .sc_simd_width = 8,
+        .hbm_word_size_in_4b = 8,
+        .allow_id_dropping = allow_id_dropping,
+        .minibatching_mode = MinibatchingMode::kDevice,
+    };
+
+    TF_ASSERT_OK_AND_ASSIGN(
+        PreprocessSparseDenseMatmulOutput output,
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         stacked_tables, options));
+    EXPECT_EQ(output.num_minibatches, 1);
+    EXPECT_EQ(output.stats.dropped_id_count.at("megacore_table"), 0);
+    const MatrixXi& row_pointers = output.lhs_row_pointers.at("megacore_table");
+    EXPECT_THAT(absl::MakeConstSpan(row_pointers.data(), row_pointers.size()),
+                ElementsAreArray({18, 25, 32, 32, 32, 32, 32, 32}));
+  }
 }
 
 TEST(MegacoreCsrTest, RejectsHostMinibatching) {

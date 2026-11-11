@@ -112,8 +112,40 @@ def _validate_partition_map(
     partition_map: PartitionMap,
     max_ids_per_partition: int,
     max_unique_ids_per_partition: int,
+    *,
+    minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
+    num_scs: int = 1,
+    num_sc_per_device: int = 1,
+    hbm_word_size_in_4b: int = 8,
 ) -> None:
-  """Validates that the partition does not exceed the maximum number of IDs or unique IDs."""
+  """Validates that partitions or SparseCores do not exceed ID or unique-ID limits."""
+  if minibatching_mode == MinibatchingMode.DEVICE:
+    max_aligned_ids = (
+        _round_up(max_ids_per_partition, hbm_word_size_in_4b) * num_scs
+    )
+    max_aligned_unique_ids = (
+        _round_up(max_unique_ids_per_partition, hbm_word_size_in_4b) * num_scs
+    )
+    for local_sc_id in range(num_sc_per_device):
+      aligned_ids = 0
+      aligned_unique_ids = 0
+      for global_sc_id in range(num_scs):
+        partition_data = partition_map.get((local_sc_id, global_sc_id), [])
+        unique_ids = {col_id for ((col_id, _), _) in partition_data}
+        aligned_ids += _round_up(len(partition_data), hbm_word_size_in_4b)
+        aligned_unique_ids += _round_up(len(unique_ids), hbm_word_size_in_4b)
+      if aligned_ids > max_aligned_ids:
+        raise ValueError(
+            f"SparseCore {local_sc_id} has too many aligned ids across"
+            f" partitions. {aligned_ids} > {max_aligned_ids}."
+        )
+      if aligned_unique_ids > max_aligned_unique_ids:
+        raise ValueError(
+            f"SparseCore {local_sc_id} has too many aligned unique ids across"
+            f" partitions. {aligned_unique_ids} > {max_aligned_unique_ids}."
+        )
+    return
+
   for partition_data in partition_map.values():
     unique_ids = {col_id for ((col_id, _), _) in partition_data}
 
@@ -418,7 +450,13 @@ def preprocess_sparse_dense_matmul_input(
   ]
   for partitions in all_partitions:
     _validate_partition_map(
-        partitions, max_ids_per_partition, max_unique_ids_per_partition
+        partitions,
+        max_ids_per_partition,
+        max_unique_ids_per_partition,
+        minibatching_mode=minibatching_mode,
+        num_scs=num_scs,
+        num_sc_per_device=num_sc_per_device,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
     )
 
   ##############################################################################

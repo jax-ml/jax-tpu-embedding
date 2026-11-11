@@ -800,8 +800,8 @@ void FillDeviceBuffersForTable(
                     state.stats_per_host.GetStatsPerDevice(local_device)
                         .required_buffer_size;
 
-                auto& grouped_coo_tensors =
-                    sorting_result_av.get().grouped_coo_tensors;
+                auto& sorting_result = sorting_result_av.get();
+                auto& grouped_coo_tensors = sorting_result.grouped_coo_tensors;
                 if (options.IsHostMinibatchingEnabled() &&
                     global_minibatching_required) {
                   grouped_coo_tensors.Merge(global_minibatching_split);
@@ -811,7 +811,9 @@ void FillDeviceBuffersForTable(
                         grouped_coo_tensors, batch_size_per_sc,
                         required_sc_buffer_sizes, options,
                         state.stacked_table_name, state.megacore_csr,
-                        csr_arrays_per_device);
+                        csr_arrays_per_device,
+                        /*has_dropped_ids=*/
+                        sorting_result.total_dropped_id_count > 0);
 
                 dropped_id_count_av.AndThen(
                     [sorting_result_av, &counter, dropped_id_count_av]() {

@@ -437,7 +437,7 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
-    internal::CsrArraysRefPerDevice csr_arrays) {
+    internal::CsrArraysRefPerDevice csr_arrays, const bool has_dropped_ids) {
   tsl::profiler::TraceMe t([&] {
     return tsl::profiler::TraceMeEncode(
         absl::StrCat("ScheduleFillLocalDeviceBuffer/", stacked_table_name),
@@ -482,7 +482,12 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
         tsl::MakeUnconstructedAsyncValueRef<int>());
   }
 
-  if (num_minibatches_per_sc == 1) {
+  // Serialize segment offsets on the slow path when there are multiple
+  // minibatches per SparseCore or when deduplication dropped IDs (so pre-drop
+  // `required_sc_buffer_sizes` exceeds the retained COO count).
+  const bool serialize_segments =
+      num_minibatches_per_sc > 1 || (is_minibatching && has_dropped_ids);
+  if (!serialize_segments) {
     int current_coo_begin = 0;
     for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
       coo_begins[sc_id].emplace(current_coo_begin);
@@ -550,9 +555,9 @@ tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync(
                          options.hbm_word_size_in_4b, csr_arrays);
           }
           // We could compute per minibatch buffer size, but we serialize the
-          // filling for multiple (>1) minibatches instead. Also because it lies
-          // on the slow path anyways.
-          if (num_minibatches_per_sc > 1 && segment_idx + 1 < total_segments) {
+          // filling for multiple (>1) minibatches or post-drop segments
+          // instead. Also because it lies on the slow path anyways.
+          if (serialize_segments && segment_idx + 1 < total_segments) {
             coo_begins[segment_idx + 1].emplace(coo_begin);
           }
         });
@@ -593,10 +598,10 @@ void FillLocalDeviceBuffer(
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound) {
+    int& dropped_id_count_static_bound, const bool has_dropped_ids) {
   tsl::AsyncValueRef<int> dropped_id_count = FillLocalDeviceBufferAsync(
       grouped_coo_tensors, batch_size_per_sc, required_sc_buffer_sizes, options,
-      stacked_table_name, megacore_csr, csr_arrays);
+      stacked_table_name, megacore_csr, csr_arrays, has_dropped_ids);
   tsl::BlockUntilReady(dropped_id_count);
   dropped_id_count_static_bound += dropped_id_count.get();
 }
@@ -607,7 +612,7 @@ template tsl::AsyncValueRef<int> FillLocalDeviceBufferAsync<CooFormat>(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
-    internal::CsrArraysRefPerDevice csr_arrays);
+    internal::CsrArraysRefPerDevice csr_arrays, bool has_dropped_ids);
 
 template tsl::AsyncValueRef<int>
 FillLocalDeviceBufferAsync<CooFormatT<int64_t>>(
@@ -617,7 +622,7 @@ FillLocalDeviceBufferAsync<CooFormatT<int64_t>>(
     const PreprocessSparseDenseMatmulInputOptions& options,
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
-    internal::CsrArraysRefPerDevice csr_arrays);
+    internal::CsrArraysRefPerDevice csr_arrays, bool has_dropped_ids);
 
 template void FillLocalDeviceBuffer<CooFormat>(
     const DevicePartitionedCooTensors& grouped_coo_tensors,
@@ -626,7 +631,7 @@ template void FillLocalDeviceBuffer<CooFormat>(
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound);
+    int& dropped_id_count_static_bound, bool has_dropped_ids);
 
 template void FillLocalDeviceBuffer<CooFormatT<int64_t>>(
     const DevicePartitionedCooTensorsT<CooFormatT<int64_t>>&
@@ -636,7 +641,7 @@ template void FillLocalDeviceBuffer<CooFormatT<int64_t>>(
     absl::string_view stacked_table_name,
     std::optional<MegacoreCsrOptions> megacore_csr,
     internal::CsrArraysRefPerDevice& csr_arrays,
-    int& dropped_id_count_static_bound);
+    int& dropped_id_count_static_bound, bool has_dropped_ids);
 
 absl::Status PreprocessSparseDenseMatmulInputOptions::Validate() const {
   if (sharding_strategy != ShardingStrategy::kMod) {

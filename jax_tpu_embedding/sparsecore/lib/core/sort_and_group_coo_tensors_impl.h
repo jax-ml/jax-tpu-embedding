@@ -52,8 +52,9 @@ enum class SortPass {
   // Minibatching is disabled: IDs exceeding the limits are dropped when
   // `allow_id_dropping` is set and are fatal otherwise.
   kNoMinibatching,
-  // Device minibatching: limits are only logged, nothing is dropped, and a
-  // single bucket per SparseCore is produced.
+  // Device minibatching: caps per-SparseCore aligned ID and unique-ID sums
+  // across partitions (unless Megacore CSR is enabled), logs per-partition
+  // overflows, and produces a single bucket per SparseCore.
   kDeviceMinibatching,
   // Host minibatching, first pass: checks whether any partition exceeds the
   // limits. No buckets are created and no IDs are dropped.
@@ -68,6 +69,8 @@ template <SortPass kPass>
 struct SortPassTraits {
   static constexpr bool kCreateBuckets =
       kPass == SortPass::kHostMinibatchingBucketed;
+  static constexpr bool kDeviceMinibatching =
+      kPass == SortPass::kDeviceMinibatching;
   static constexpr bool kDropIds =
       kPass == SortPass::kNoMinibatching || kCreateBuckets;
   static constexpr bool kComputeSplit =
@@ -136,6 +139,52 @@ inline void ValidateMaxIdsOrDie(
                     "batch size.";
     }
   }
+}
+
+inline void ValidateDeviceMinibatchingMaxIdsOrDie(
+    const int64_t observed_aligned_ids_per_sc,
+    const MatrixXi& unique_ids_per_partition_per_bucket,
+    const int32_t max_ids_per_partition,
+    const int32_t max_unique_ids_per_partition, const uint32_t global_sc_count,
+    const int32_t hbm_word_size_in_4b,
+    const absl::string_view stacked_table_name, const bool allow_id_dropping) {
+  const int64_t max_aligned_ids_per_sc =
+      xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size_in_4b) *
+      int64_t{global_sc_count};
+  const int64_t max_aligned_unique_ids_per_sc =
+      xla::RoundUpTo<int64_t>(max_unique_ids_per_partition,
+                              hbm_word_size_in_4b) *
+      int64_t{global_sc_count};
+  const int64_t observed_aligned_unique_ids_per_sc =
+      unique_ids_per_partition_per_bucket.col(0)
+          .array()
+          .unaryExpr([hbm_word_size_in_4b](int val) {
+            return xla::RoundUpTo<int64_t>(val, hbm_word_size_in_4b);
+          })
+          .sum();
+  const auto validate_limit = [&](const int64_t observed, const int64_t limit,
+                                  const absl::string_view kind,
+                                  const absl::string_view param_name) {
+    if (observed <= limit) return;
+    if (allow_id_dropping) {
+      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
+                   << " observed aligned " << kind << " per SparseCore: "
+                   << observed << " is greater than the max aligned " << kind
+                   << " per SparseCore: " << limit;
+    } else {
+      LOG(FATAL) << "Observed aligned " << kind << " per SparseCore: "
+                 << observed << " for table: " << stacked_table_name
+                 << " is greater than the max aligned " << kind
+                 << " per SparseCore: " << limit
+                 << ". Use `allow_id_dropping` or increase `" << param_name
+                 << "`. You could also try to reduce the batch size.";
+    }
+  };
+  validate_limit(observed_aligned_ids_per_sc, max_aligned_ids_per_sc, "ids",
+                 "max_ids_per_partition");
+  validate_limit(observed_aligned_unique_ids_per_sc,
+                 max_aligned_unique_ids_per_sc, "unique ids",
+                 "max_unique_ids_per_partition");
 }
 
 inline void LogIfDeviceMinibatchingRequired(
@@ -258,7 +307,7 @@ struct LocalSparseCoreTensorGroupingContextT {
   const PreprocessSparseDenseMatmulInputOptions& options;
   const int32_t local_sc_id;
   const KeyLayout<ColIdT> key_layout;
-  // Whether IDs exceeding the per-partition limits are dropped in this pass.
+  // Whether IDs exceeding the capacity limits are dropped in this pass.
   const bool perform_id_dropping;
 
   // Outputs.
@@ -275,9 +324,10 @@ using LocalSparseCoreTensorGroupingContext =
     LocalSparseCoreTensorGroupingContextT<int32_t>;
 
 template <bool kHasVariableWeights, bool kCreateBuckets, RowCombiner Combiner,
-          typename ColIdT>
+          bool kDeviceMinibatching = false, typename ColIdT>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContextT<ColIdT> context) {
+  static_assert(!kCreateBuckets || !kDeviceMinibatching);
   using CooT = CooFormatT<ColIdT>;
   using UColIdT = std::make_unsigned_t<ColIdT>;
   tsl::profiler::TraceMe group_traceme([&] {
@@ -302,6 +352,22 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   const int max_unique_ids_per_partition =
       feature_metadata.max_unique_ids_per_partition;
   const bool perform_id_dropping = context.perform_id_dropping;
+
+  const int64_t hbm_word_size = options.hbm_word_size_in_4b;
+  const int64_t hbm_word_mask = hbm_word_size - 1;
+  const int64_t max_aligned_ids_per_sc =
+      kDeviceMinibatching
+          ? xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size) *
+                int64_t{global_sc_count}
+          : 0;
+  const int64_t max_aligned_unique_ids_per_sc =
+      kDeviceMinibatching
+          ? xla::RoundUpTo<int64_t>(max_unique_ids_per_partition,
+                                    hbm_word_size) *
+                int64_t{global_sc_count}
+          : 0;
+  int64_t aligned_kept_ids = 0;
+  int64_t aligned_kept_unique_ids = 0;
 
   UColIdT prev_col_id = std::numeric_limits<UColIdT>::max();
   uint32_t prev_row_id = std::numeric_limits<uint32_t>::max();
@@ -358,13 +424,31 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     if (!perform_id_dropping) {
       grouped_coo_tensors.Add(bucket_id, coo_tensor);
     } else {
-      // Check limits.
-      const bool exceeds_ids_limit =
-          (kept_ids(global_sc_id, bucket_id) + 1) > max_ids_per_partition;
-      if (is_new_col) {
-        dropping_current_unique_col_id =
-            (kept_unique_ids(global_sc_id, bucket_id) + 1) >
-            max_unique_ids_per_partition;
+      bool exceeds_ids_limit;
+      bool starts_new_ids_word = false;
+      bool starts_new_unique_word = false;
+      if (kDeviceMinibatching) {
+        starts_new_ids_word =
+            (kept_ids(global_sc_id, bucket_id) & hbm_word_mask) == 0;
+        exceeds_ids_limit =
+            starts_new_ids_word &&
+            (aligned_kept_ids + hbm_word_size) > max_aligned_ids_per_sc;
+        if (is_new_col) {
+          starts_new_unique_word =
+              (kept_unique_ids(global_sc_id, bucket_id) & hbm_word_mask) == 0;
+          dropping_current_unique_col_id =
+              starts_new_unique_word &&
+              (aligned_kept_unique_ids + hbm_word_size) >
+                  max_aligned_unique_ids_per_sc;
+        }
+      } else {
+        exceeds_ids_limit =
+            (kept_ids(global_sc_id, bucket_id) + 1) > max_ids_per_partition;
+        if (is_new_col) {
+          dropping_current_unique_col_id =
+              (kept_unique_ids(global_sc_id, bucket_id) + 1) >
+              max_unique_ids_per_partition;
+        }
       }
 
       // Drop/Keep ID.
@@ -373,12 +457,16 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
         ++stats.dropped_id_count;
       } else {
         grouped_coo_tensors.Add(bucket_id, coo_tensor);
-      }
-
-      // Update kept counts.
-      kept_ids(global_sc_id, bucket_id) += 1;
-      if (is_new_col) {
-        kept_unique_ids(global_sc_id, bucket_id) += 1;
+        if (starts_new_ids_word) {
+          aligned_kept_ids += hbm_word_size;
+        }
+        kept_ids(global_sc_id, bucket_id) += 1;
+        if (is_new_col) {
+          if (starts_new_unique_word) {
+            aligned_kept_unique_ids += hbm_word_size;
+          }
+          kept_unique_ids(global_sc_id, bucket_id) += 1;
+        }
       }
     }
 
@@ -578,6 +666,11 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             MatrixXi unique_ids_per_partition_per_bucket =
                 MatrixXi::Zero(global_sc_count, bucket_count);
 
+            // Megacore CSR is exempt from per-SparseCore partition-sum ID
+            // capping.
+            const bool can_drop_id = Traits::kDeviceMinibatching
+                                         ? !feature_metadata.enable_megacore_csr
+                                         : Traits::kDropIds;
             const internal::LocalSparseCoreTensorGroupingContextT<ColIdT>
                 context = {
                     .keys = keys,
@@ -588,7 +681,7 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                     .local_sc_id = local_sc_id,
                     .key_layout = key_layout,
                     .perform_id_dropping =
-                        options.allow_id_dropping && Traits::kDropIds,
+                        options.allow_id_dropping && can_drop_id,
                     .grouped_coo_tensors = grouped_coo_tensors,
                     .ids_per_sc_partition_per_bucket =
                         ids_per_sc_partition_per_bucket,
@@ -606,18 +699,18 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             switch (context.feature_metadata.row_combiner) {
               case RowCombiner::kSum:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum>(
-                    context);
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum,
+                    Traits::kDeviceMinibatching>(context);
                 break;
               case RowCombiner::kMean:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean>(
-                    context);
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean,
+                    Traits::kDeviceMinibatching>(context);
                 break;
               case RowCombiner::kSqrtn:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn>(
-                    context);
+                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn,
+                    Traits::kDeviceMinibatching>(context);
                 break;
             }
 
@@ -659,16 +752,26 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                   max_ids_per_partition, max_unique_ids_per_partition,
                   task_split);
             }
-            // Limits are only enforced in passes that drop IDs. Device
-            // minibatching logs them, and the host detection pass reports them
-            // through the split instead.
+            // Per-partition limits are enforced in passes that drop IDs per
+            // partition. Device minibatching validates the aligned sum across
+            // partitions per SparseCore (unless Megacore CSR is enabled) and
+            // logs per-partition overflows, while the host detection pass
+            // reports overflows through the split instead.
             if constexpr (Traits::kDropIds) {
               internal::ValidateMaxIdsOrDie(
                   observed_max_ids_per_bucket,
                   observed_max_unique_ids_per_bucket, max_ids_per_partition,
                   max_unique_ids_per_partition, stacked_table_name,
                   options.allow_id_dropping);
-            } else if constexpr (kPass == SortPass::kDeviceMinibatching) {
+            } else if constexpr (Traits::kDeviceMinibatching) {
+              if (!feature_metadata.enable_megacore_csr) {
+                internal::ValidateDeviceMinibatchingMaxIdsOrDie(
+                    stats.required_buffer_size[local_sc_id],
+                    unique_ids_per_partition_per_bucket, max_ids_per_partition,
+                    max_unique_ids_per_partition, global_sc_count,
+                    options.hbm_word_size_in_4b, stacked_table_name,
+                    options.allow_id_dropping);
+              }
               internal::LogIfDeviceMinibatchingRequired(
                   observed_max_ids_per_bucket,
                   observed_max_unique_ids_per_bucket, max_ids_per_partition,

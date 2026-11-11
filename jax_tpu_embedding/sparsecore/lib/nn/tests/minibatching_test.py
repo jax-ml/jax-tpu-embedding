@@ -304,16 +304,67 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.assertIn("table_a", stats.id_drop_counters)
     self.assertGreater(stats.id_drop_counters["table_a"], 0)
 
+  def _assert_valid_device_csr(self, preprocessed_input):
+    num_devices = jax.device_count()
+    num_scs = self.num_sc_per_device * num_devices
+    simd_width = utils.sparsecore_simd_width(self.devices[0])
+    word_size = utils.hbm_word_size_in_4b(self.devices[0])
+    row_ptrs_per_bucket = max(num_scs, word_size, simd_width)
+    active_row_ptrs = row_ptrs_per_bucket * self.num_sc_per_device
+
+    row_ptrs_all = np.asarray(
+        preprocessed_input.lhs_row_pointers["table_a"]
+    ).reshape(num_devices, -1)
+    emb_ids_all = np.asarray(
+        preprocessed_input.lhs_embedding_ids["table_a"]
+    ).reshape(num_devices, -1)
+    sample_ids_all = np.asarray(
+        preprocessed_input.lhs_sample_ids["table_a"]
+    ).reshape(num_devices, -1)
+    gains_all = np.asarray(preprocessed_input.lhs_gains["table_a"]).reshape(
+        num_devices, -1
+    )
+
+    for dev in range(num_devices):
+      start = 0
+      coo_len = emb_ids_all.shape[1]
+      for i in range(active_row_ptrs):
+        end = int(row_ptrs_all[dev, i])
+        self.assertGreaterEqual(end, start)
+        self.assertLessEqual(end, coo_len)
+        if end > start:
+          self.assertTrue(np.all(emb_ids_all[dev, start:end] >= 0))
+          self.assertTrue(np.all(emb_ids_all[dev, start:end] < 2**31 - 1))
+          self.assertTrue(np.all(sample_ids_all[dev, start:end] >= 0))
+          self.assertFalse(np.any(np.isnan(gains_all[dev, start:end])))
+        next_start = ((end + word_size - 1) // word_size) * word_size
+        self.assertLessEqual(next_start, coo_len)
+        if next_start > end:
+          self.assertTrue(np.all(emb_ids_all[dev, end:next_start] == 2**31 - 1))
+          self.assertTrue(
+              np.all(sample_ids_all[dev, end:next_start] == 2**31 - 1)
+          )
+          self.assertTrue(np.all(np.isnan(gains_all[dev, end:next_start])))
+        start = next_start
+
   def test_single_host_device_minibatching_ignores_max_ids(self):
     assert self.feature_spec.table_spec.stacked_table_spec is not None
+    num_scs = self.num_sc_per_device * jax.device_count()
     self.feature_spec.table_spec.stacked_table_spec = (
         self.feature_spec.table_spec.stacked_table_spec.replace(
-            max_ids_per_partition=1, max_unique_ids_per_partition=1
+            max_ids_per_partition=2, max_unique_ids_per_partition=2
         )
     )
 
-    inputs = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=8
+    # Skew all lookups onto partition 0 (multiples of num_scs) so partition 0
+    # exceeds per-partition limits (4 unique IDs > 2) while the aligned sum
+    # across partitions per SparseCore stays within round_up(2, 8) * num_scs.
+    inputs = np.array(
+        [
+            np.array([0, num_scs, 2 * num_scs, 3 * num_scs], dtype=np.int32)
+            for _ in range(self.feature_spec.input_shape[0])
+        ],
+        dtype=object,
     )
 
     preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
@@ -328,14 +379,52 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     )
     self.assertTrue((preprocessed_input.num_minibatches == 1).all())
     self.assertEqual(stats.id_drop_counters.get("table_a", 0), 0)
+    self._assert_valid_device_csr(preprocessed_input)
+
+  def test_single_host_device_minibatching_sum_exceeded_drops_ids(self):
+    assert self.feature_spec.table_spec.stacked_table_spec is not None
+    num_scs = self.num_sc_per_device * jax.device_count()
+    self.feature_spec.table_spec.stacked_table_spec = (
+        self.feature_spec.table_spec.stacked_table_spec.replace(
+            max_ids_per_partition=8, max_unique_ids_per_partition=8
+        )
+    )
+
+    # Place > (8 * num_scs) distinct IDs on sample 0 so SC 0 exceeds both the
+    # aligned ID sum and aligned unique-ID sum across partitions.
+    max_aligned_per_sc = 8 * num_scs
+    overflow_sample = np.arange(max_aligned_per_sc + 12, dtype=np.int32)
+    inputs = np.array(
+        [overflow_sample]
+        + [
+            np.array([0], dtype=np.int32)
+            for _ in range(self.feature_spec.input_shape[0] - 1)
+        ],
+        dtype=object,
+    )
+
+    preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
+        features=[inputs],
+        features_weights=None,
+        feature_specs=[self.feature_spec],
+        local_device_count=jax.device_count(),
+        global_device_count=jax.device_count(),
+        batch_number=42,
+        minibatching_mode=embedding.MinibatchingMode.DEVICE,
+        allow_id_dropping=True,
+    )
+    self.assertTrue((preprocessed_input.num_minibatches == 1).all())
+    self.assertGreater(stats.id_drop_counters["table_a"], 0)
+    self._assert_valid_device_csr(preprocessed_input)
 
   def test_single_host_device_minibatching_buffer_exceeded_drops_ids(self):
     assert self.feature_spec.table_spec.stacked_table_spec is not None
-    alignment = 8 * self.num_sc_per_device
+    word_size = utils.hbm_word_size_in_4b(self.devices[0])
+    alignment = word_size * self.num_sc_per_device
     self.feature_spec.table_spec.stacked_table_spec = (
         self.feature_spec.table_spec.stacked_table_spec.replace(
-            max_ids_per_partition=16,
-            max_unique_ids_per_partition=16,
+            max_ids_per_partition=256,
+            max_unique_ids_per_partition=256,
             suggested_coo_buffer_size_per_device=alignment,
         )
     )
@@ -345,7 +434,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
         self.feature_spec, input_shape=[batch_size, 1]
     )
     inputs = _generate_random_inputs(
-        feature=self.feature_spec, max_sample_size=8
+        feature=self.feature_spec, max_sample_size=8, seed=2025
     )
 
     preprocessed_input, stats = embedding.preprocess_sparse_dense_matmul_input(
@@ -361,6 +450,7 @@ class SingleHostMinibatchingTest(absltest.TestCase):
     self.assertTrue((preprocessed_input.num_minibatches == 1).all())
     self.assertIn("table_a", stats.id_drop_counters)
     self.assertGreater(stats.id_drop_counters["table_a"], 0)
+    self._assert_valid_device_csr(preprocessed_input)
 
   def _lookup(self, preprocessed_input, embedding_vars):
     return embedding.tpu_sparse_dense_matmul(

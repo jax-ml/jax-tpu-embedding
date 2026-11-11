@@ -107,9 +107,12 @@ Alternatively, you can configure device-side minibatching by passing
 ``minibatching_mode=embedding.MinibatchingMode.DEVICE`` (or ``"DEVICE"``) to
 ``preprocess_sparse_dense_matmul_input``. In device-side minibatching mode, host
 preprocessing skips bucketization, cross-host AllReduce synchronization, and
-``max_ids_per_partition`` / ``max_unique_ids_per_partition`` validation, producing
-a single minibatch from the host while allocating minibatch-sized COO buffers so
-that minibatching can be performed on the device.
+individual per-partition ``max_ids_per_partition`` / ``max_unique_ids_per_partition``
+checks, producing a single minibatch while still enforcing per-SparseCore HBM-word-aligned
+aggregate ID and unique-ID limits across partitions when Megacore CSR is disabled
+(bounded by ``round_up(max_ids_per_partition, hbm_word_size_in_4b) * num_partitions``
+and ``round_up(max_unique_ids_per_partition, hbm_word_size_in_4b) * num_partitions``;
+excess IDs are dropped when ``allow_id_dropping=True`` and fail fatally when ``False``).
 
 Performance Considerations
 --------------------------
