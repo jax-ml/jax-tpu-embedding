@@ -133,6 +133,37 @@ pytype_strict_contrib_test(
     ],
 )
 
+# copybara:uncomment_begin(internal)
+# # Not exported: the test enables FDO statistic calculation with an internal TPU
+# # compiler flag.
+# pytype_strict_contrib_test(
+#     name = "tpu_sparse_dense_matmul_fdo_statistics_test",
+#     srcs = [
+#         "tpu_sparse_dense_matmul_fdo_statistics_test.py",
+#     ],
+#     args = [
+#         # TPU chip configuration,
+#         "--xla_tpu_sc_enable_fdo_statistic_calculation=true",
+#     ],
+#     main = "tpu_sparse_dense_matmul_fdo_statistics_test.py",
+#     tags = [
+#         "exclusive-if-local",
+#         "requires-tpu",
+#     ],
+#     deps = [
+#         ":test_utils",
+#         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+#         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+#         "//jax_tpu_embedding/sparsecore/utils",
+#         "//third_party/jax:tpu_support",
+#         pypi_requirement("absl/testing:absltest"),
+#         pypi_requirement("absl/testing:parameterized"),
+#         pypi_requirement("jax"),
+#         pypi_requirement("numpy"),
+#     ],
+# )
+# copybara:uncomment_end
+
 pytype_strict_contrib_test(
     name = "tpu_sparse_dense_matmul_grad_test",
     srcs = [

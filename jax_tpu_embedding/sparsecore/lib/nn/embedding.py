@@ -190,6 +190,72 @@ class SparseDenseMatmulInputStats:
     )
 
 
+class DeviceFdoStatistics(NamedTuple):
+  """FDO statistics computed on the device by `tpu_sparse_dense_matmul`.
+
+  On each device, a value is the maximum of the statistic over the device's
+  SparseCores. Use :func:`device_fdo_statistics_to_input_stats` to reduce them
+  on the host for an FDO client.
+
+  Attributes:
+    max_ids_per_partition: Mapping of stacked table name to the observed
+      maximum total IDs per partition, as defined in
+      :class:`SparseDenseMatmulInputStats`.
+    max_unique_ids_per_partition: Mapping of stacked table name to the observed
+      maximum unique IDs per partition, as defined in
+      :class:`SparseDenseMatmulInputStats`.
+  """
+
+  max_ids_per_partition: dict[str, jax.Array]
+  max_unique_ids_per_partition: dict[str, jax.Array]
+
+
+def device_fdo_statistics_to_input_stats(
+    device_statistics: DeviceFdoStatistics,
+) -> SparseDenseMatmulInputStats:
+  """Reduces device FDO statistics on this host for an FDO client.
+
+  Each statistic is reduced to its maximum over the devices of this host. The
+  result only sets `max_ids_per_partition` and `max_unique_ids_per_partition`,
+  and can be passed to `FDOClient.record` or `update_preprocessing_parameters`.
+
+  Args:
+    device_statistics: The FDO statistics returned by `tpu_sparse_dense_matmul`
+      with `enable_fdo_statistics=True`.
+
+  Returns:
+    The statistics, with a single value per stacked table: the maximum over the
+    devices of this host.
+  """
+
+  def host_max(value: jax.Array | np.ndarray) -> np.ndarray:
+    if isinstance(value, jax.Array):
+      # Only the shards on this host's devices are addressable, so this also
+      # works when the array spans several hosts.
+      local_values = jax.device_get(
+          [shard.data for shard in value.addressable_shards]
+      )
+    else:
+      local_values = [value]
+    return np.array(
+        [max(int(np.max(v)) for v in local_values)], dtype=np.int32
+    )
+
+  def to_host_max(
+      statistics: Mapping[str, jax.Array | np.ndarray],
+  ) -> dict[str, np.ndarray]:
+    return {name: host_max(value) for name, value in statistics.items()}
+
+  return SparseDenseMatmulInputStats(
+      max_ids_per_partition=to_host_max(
+          device_statistics.max_ids_per_partition
+      ),
+      max_unique_ids_per_partition=to_host_max(
+          device_statistics.max_unique_ids_per_partition
+      ),
+  )
+
+
 class PreprocessedInput(struct.PyTreeNode):
   """The result of preprocessing input for sparse dense matmul.
 
@@ -1182,7 +1248,9 @@ def tpu_sparse_dense_matmul(
     enable_minibatching: bool = False,
     perform_unstacking: bool = True,
     use_activation_unstack_primitive: bool = False,
-) -> Nested[jax.Array]:
+    enable_fdo_statistics: bool = False,
+    hbm_word_size_in_4b: int | None = None,
+) -> Nested[jax.Array] | tuple[Nested[jax.Array], DeviceFdoStatistics]:
   """Computes the sparse dense matmul.
 
   This function can be used with jax.jit and/or shard_map or as a complete
@@ -1204,13 +1272,26 @@ def tpu_sparse_dense_matmul(
       the results. If False, returns raw stacked activations.
     use_activation_unstack_primitive: If True, uses the new activation unstack
       primitive. Defaults to False.
+    enable_fdo_statistics: If True, the forward pass also computes the FDO
+      statistics on the device, and the function returns them together with
+      the activations. With `enable_minibatching`, the statistics require a
+      single minibatch per step, i.e. device minibatching
+      (`MinibatchingMode.DEVICE`), which the TPU compiler checks at runtime.
+      FDO statistic calculation must be enabled in the TPU compiler, otherwise
+      compilation fails. Defaults to False.
+    hbm_word_size_in_4b: The HBM word size in 4-byte words, used to size the FDO
+      statistics outputs. Only used if `enable_fdo_statistics` is True. If
+      `None`, it will be set to the HBM word size in 4-byte words on the current
+      host machine.
 
   Returns:
-    The activations structure with the same structure as feature_specs.
+    The activations structure with the same structure as feature_specs. If
+    `enable_fdo_statistics` is True, a tuple of the activations and the
+    `DeviceFdoStatistics`.
 
   Raises:
-    ValueError: The input arrays and tuples are not of the expected structure or
-      the sharding strategy is not supported.
+    ValueError: The input arrays and tuples are not of the expected structure,
+      or the sharding strategy is not supported.
 
   Examples:
     Example invocation::
@@ -1270,6 +1351,14 @@ def tpu_sparse_dense_matmul(
   )
 
   activations = {}
+  max_ids_per_partition = {}
+  max_unique_ids_per_partition = {}
+  # Each FDO statistic output holds one HBM word per SparseCore.
+  fdo_statistics_size = 0
+  if enable_fdo_statistics:
+    fdo_statistics_size = num_sc_per_device * _get_hbm_word_size_in_4b(
+        hbm_word_size_in_4b
+    )
   for stacked_table_name in stacked_table_specs:
     row_pointer = lhs_row_pointers[stacked_table_name]
     embedding_id = lhs_embedding_ids[stacked_table_name]
@@ -1277,23 +1366,43 @@ def tpu_sparse_dense_matmul(
     gain = lhs_gains[stacked_table_name]
     embedding_variable = embedding_variables[stacked_table_name]
     stacked_table = stacked_table_specs[stacked_table_name]
-    activations[stacked_table.stack_name] = (
-        sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_primitive.bind(
-            row_pointer,
-            embedding_id,
-            sample_id,
-            gain,
-            num_minibatches,
-            embedding_variable.table,
-            device_batch_size=stacked_table.total_sample_count
-            // global_device_count,
-            max_ids_per_partition=stacked_table.max_ids_per_partition,
-            max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
-            sharding_strategy=sharding_strategy_val,
-            quantization_config=stacked_table.quantization_config,
-            enable_minibatching=enable_minibatching,
-            table_name=stacked_table.stack_name,
+    operands = (
+        row_pointer,
+        embedding_id,
+        sample_id,
+        gain,
+        num_minibatches,
+        embedding_variable.table,
+    )
+    params = dict(
+        device_batch_size=stacked_table.total_sample_count
+        // global_device_count,
+        max_ids_per_partition=stacked_table.max_ids_per_partition,
+        max_unique_ids_per_partition=stacked_table.max_unique_ids_per_partition,
+        sharding_strategy=sharding_strategy_val,
+        quantization_config=stacked_table.quantization_config,
+        enable_minibatching=enable_minibatching,
+        table_name=stacked_table.stack_name,
+    )
+    if not enable_fdo_statistics:
+      activations[stacked_table.stack_name] = (
+          sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_primitive.bind(
+              *operands, **params
+          )
+      )
+      continue
+    activation, max_ids, max_unique_ids = (
+        sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive.bind(
+            *operands, fdo_statistics_size=fdo_statistics_size, **params
         )
+    )
+    activations[stacked_table.stack_name] = activation
+    # The maximum over the array is the maximum over this device's SparseCores.
+    max_ids_per_partition[stacked_table.stack_name] = jnp.max(
+        max_ids, keepdims=True
+    )
+    max_unique_ids_per_partition[stacked_table.stack_name] = jnp.max(
+        max_unique_ids, keepdims=True
     )
 
   if perform_unstacking:
@@ -1306,6 +1415,11 @@ def tpu_sparse_dense_matmul(
         use_activation_unstack_primitive=use_activation_unstack_primitive,
     )
 
+  if enable_fdo_statistics:
+    return activations, DeviceFdoStatistics(
+        max_ids_per_partition=max_ids_per_partition,
+        max_unique_ids_per_partition=max_unique_ids_per_partition,
+    )
   return activations
 
 

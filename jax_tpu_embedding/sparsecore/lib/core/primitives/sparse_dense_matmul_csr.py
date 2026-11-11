@@ -135,8 +135,6 @@ def _tpu_sparse_dense_matmul_csr_lowering(
     table_name: str | None = None,
 ) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_csr."""
-  (out_aval,) = ctx.avals_out
-
   constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
   embedding_table_type = ir.RankedTensorType(embedding_table.type)
   if embedding_table_type.rank > 1:
@@ -199,7 +197,10 @@ def _tpu_sparse_dense_matmul_csr_lowering(
 
   results = jax.ffi.ffi_lowering(
       call_target,
-      result_types=[mlir.aval_to_ir_type(ctx.module_context, out_aval)],
+      result_types=[
+          mlir.aval_to_ir_type(ctx.module_context, aval)
+          for aval in ctx.avals_out
+      ],
       api_version=1,
       backend_config=backend_config,
       skip_ffi_layout_processing=True,
@@ -209,4 +210,71 @@ def _tpu_sparse_dense_matmul_csr_lowering(
 
 mlir.register_lowering(
     tpu_sparse_dense_matmul_csr_primitive, _tpu_sparse_dense_matmul_csr_lowering
+)
+
+
+# Define the sparse dense matmul primitive that also returns FDO statistics.
+#
+# It returns `[activations, max_ids, max_unique_ids]`. Each FDO statistic holds
+# one HBM word per SparseCore of the device, and every element in a
+# SparseCore's word holds the same value: the maximum, over the partitions the
+# SparseCore sends IDs to, of the number of IDs (or of unique IDs) sent to that
+# partition. With minibatching, the TPU compiler requires a single minibatch
+# per step (device minibatching) and checks it at runtime.
+#
+# The TPU compiler infers the statistics outputs from the number of results, so
+# the backend config is the same as for `tpu_sparse_dense_matmul_csr_primitive`.
+# FDO statistic calculation must be enabled in the TPU compiler, otherwise
+# compilation fails.
+tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive = (
+    jex.core.Primitive("sparse_dense_matmul_csr_with_fdo_statistics")
+)
+tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive.multiple_results = (
+    True
+)
+
+
+tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive.def_impl(
+    functools.partial(
+        xla.apply_primitive,
+        tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive,
+    )
+)
+
+
+def _tpu_sparse_dense_matmul_csr_with_fdo_statistics_abstract_eval(
+    *args: core.ShapedArray,
+    fdo_statistics_size: int,
+    **kwargs: Any,
+) -> list[core.ShapedArray]:
+  """Abstract eval for sdmm_csr with FDO statistics."""
+  if fdo_statistics_size <= 0:
+    raise ValueError(
+        f"`fdo_statistics_size` must be positive, got {fdo_statistics_size}."
+    )
+  activations = _tpu_sparse_dense_matmul_csr_abstract_eval(*args, **kwargs)
+  fdo_statistic = core.ShapedArray((fdo_statistics_size,), dtype=jnp.int32)
+  return [activations, fdo_statistic, fdo_statistic]
+
+
+tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive.def_abstract_eval(
+    _tpu_sparse_dense_matmul_csr_with_fdo_statistics_abstract_eval
+)
+
+
+def _tpu_sparse_dense_matmul_csr_with_fdo_statistics_lowering(
+    ctx: mlir.LoweringRuleContext,
+    *args: ir.BlockArgument,
+    fdo_statistics_size: int,
+    **kwargs: Any,
+) -> Sequence[ir.Value]:
+  """Lowering for tpu_sparse_dense_matmul_csr with FDO statistics."""
+  # The statistics outputs are already in `ctx.avals_out`.
+  del fdo_statistics_size
+  return _tpu_sparse_dense_matmul_csr_lowering(ctx, *args, **kwargs)
+
+
+mlir.register_lowering(
+    tpu_sparse_dense_matmul_csr_with_fdo_statistics_primitive,
+    _tpu_sparse_dense_matmul_csr_with_fdo_statistics_lowering,
 )
