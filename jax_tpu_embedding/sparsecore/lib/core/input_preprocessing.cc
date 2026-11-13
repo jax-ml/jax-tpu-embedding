@@ -396,7 +396,20 @@ struct TableState {
               rows_per_sc, static_cast<int>(*feature_metadata.max_col_id) + 1);
         }
       }
-      megacore_csr = MegacoreCsrOptions{.rows_per_sc = rows_per_sc};
+      const int max_ids_per_device = static_cast<int>(std::min<int64_t>(
+          int64_t{MaxIdsPerPartitionForStackedTables(stacked_table_metadata)} *
+              options.num_sc_per_device,
+          std::numeric_limits<int>::max()));
+      const int max_unique_ids_per_device = static_cast<int>(std::min<int64_t>(
+          int64_t{MaxUniqueIdsPerPartitionForStackedTables(
+              stacked_table_metadata)} *
+              options.num_sc_per_device,
+          std::numeric_limits<int>::max()));
+      megacore_csr = MegacoreCsrOptions{
+          .rows_per_sc = rows_per_sc,
+          .max_ids_per_device = max_ids_per_device,
+          .max_unique_ids_per_device = max_unique_ids_per_device,
+      };
     }
   }
 };

@@ -95,52 +95,6 @@ inline SortPass InitialSortPass(MinibatchingMode mode) {
 
 namespace internal {
 
-inline void ValidateMaxIdsOrDie(
-    const int32_t observed_max_ids_per_partition,
-    const int32_t observed_max_unique_ids_per_partition,
-    const int32_t max_ids_per_partition,
-    const int32_t max_unique_ids_per_partition,
-    const absl::string_view stacked_table_name, const bool allow_id_dropping) {
-  // If id dropping is allowed, we log a warning if the observed max ids per
-  // partition is greater than the set max ids per partition.
-  if (observed_max_ids_per_partition > max_ids_per_partition) {
-    if (allow_id_dropping) {
-      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
-                   << " observed max ids per partition: "
-                   << observed_max_ids_per_partition
-                   << " is greater than the set max ids per partition: "
-                   << max_ids_per_partition;
-    } else {
-      LOG(FATAL) << "Observed max ids per partition: "
-                 << observed_max_ids_per_partition
-                 << " for table: " << stacked_table_name
-                 << " is greater than the set max ids per partition: "
-                 << max_ids_per_partition
-                 << ". Use `allow_id_dropping` or increase the "
-                    "`max_ids_per_partition`. You could also try to reduce the "
-                    "batch size.";
-    }
-  }
-  if (observed_max_unique_ids_per_partition > max_unique_ids_per_partition) {
-    if (allow_id_dropping) {
-      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
-                   << " observed max unique ids per partition: "
-                   << observed_max_unique_ids_per_partition
-                   << " is greater than the set max unique ids per partition: "
-                   << max_unique_ids_per_partition;
-    } else {
-      LOG(FATAL) << "Observed max unique ids per partition: "
-                 << observed_max_unique_ids_per_partition
-                 << " for table: " << stacked_table_name
-                 << " is greater than the set max unique ids per partition: "
-                 << max_unique_ids_per_partition
-                 << ". Use `allow_id_dropping` or increase the "
-                    "`max_ids_per_partition`. You could also try to reduce the "
-                    "batch size.";
-    }
-  }
-}
-
 inline void ValidateDeviceMinibatchingMaxIdsOrDie(
     const int64_t observed_aligned_ids_per_sc,
     const MatrixXi& unique_ids_per_partition_per_bucket,
@@ -185,29 +139,6 @@ inline void ValidateDeviceMinibatchingMaxIdsOrDie(
   validate_limit(observed_aligned_unique_ids_per_sc,
                  max_aligned_unique_ids_per_sc, "unique ids",
                  "max_unique_ids_per_partition");
-}
-
-inline void LogIfDeviceMinibatchingRequired(
-    const int32_t observed_max_ids_per_partition,
-    const int32_t observed_max_unique_ids_per_partition,
-    const int32_t max_ids_per_partition,
-    const int32_t max_unique_ids_per_partition,
-    const absl::string_view stacked_table_name) {
-  if (observed_max_ids_per_partition > max_ids_per_partition) {
-    LOG_EVERY_N_SEC(WARNING, 300) << "Device minibatching required for table: "
-                 << stacked_table_name << " observed max ids per partition: "
-                 << observed_max_ids_per_partition
-                 << " is greater than the set max ids per partition: "
-                 << max_ids_per_partition;
-  }
-  if (observed_max_unique_ids_per_partition > max_unique_ids_per_partition) {
-    LOG_EVERY_N_SEC(WARNING, 300) << "Device minibatching required for table: "
-                 << stacked_table_name
-                 << " observed max unique ids per partition: "
-                 << observed_max_unique_ids_per_partition
-                 << " is greater than the set max unique ids per partition: "
-                 << max_unique_ids_per_partition;
-  }
 }
 
 inline void ValidateKeyCapacity(const int local_sc_id, const size_t key_count,
@@ -666,11 +597,10 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             MatrixXi unique_ids_per_partition_per_bucket =
                 MatrixXi::Zero(global_sc_count, bucket_count);
 
-            // Megacore CSR is exempt from per-SparseCore partition-sum ID
-            // capping.
-            const bool can_drop_id = Traits::kDeviceMinibatching
-                                         ? !feature_metadata.enable_megacore_csr
-                                         : Traits::kDropIds;
+            // Megacore CSR is exempt from per-SparseCore ID capping.
+            const bool can_drop_id =
+                !feature_metadata.enable_megacore_csr &&
+                (Traits::kDropIds || Traits::kDeviceMinibatching);
             const internal::LocalSparseCoreTensorGroupingContextT<ColIdT>
                 context = {
                     .keys = keys,
@@ -752,30 +682,28 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                   max_ids_per_partition, max_unique_ids_per_partition,
                   task_split);
             }
-            // Per-partition limits are enforced in passes that drop IDs per
-            // partition. Device minibatching validates the aligned sum across
-            // partitions per SparseCore (unless Megacore CSR is enabled) and
-            // logs per-partition overflows, while the host detection pass
-            // reports overflows through the split instead.
-            if constexpr (Traits::kDropIds) {
-              internal::ValidateMaxIdsOrDie(
-                  observed_max_ids_per_bucket,
-                  observed_max_unique_ids_per_bucket, max_ids_per_partition,
-                  max_unique_ids_per_partition, stacked_table_name,
-                  options.allow_id_dropping);
-            } else if constexpr (Traits::kDeviceMinibatching) {
-              if (!feature_metadata.enable_megacore_csr) {
+            // Per-partition and per-SparseCore limits are enforced when
+            // Megacore CSR is disabled; Megacore CSR checks per-device limits
+            // when filling the merged buffer.
+            if (!feature_metadata.enable_megacore_csr) {
+              if constexpr (Traits::kDropIds) {
+                internal::ValidateMaxIdsOrDie(
+                    observed_max_ids_per_bucket,
+                    observed_max_unique_ids_per_bucket, max_ids_per_partition,
+                    max_unique_ids_per_partition, stacked_table_name,
+                    options.allow_id_dropping);
+              } else if constexpr (Traits::kDeviceMinibatching) {
                 internal::ValidateDeviceMinibatchingMaxIdsOrDie(
                     stats.required_buffer_size[local_sc_id],
                     unique_ids_per_partition_per_bucket, max_ids_per_partition,
                     max_unique_ids_per_partition, global_sc_count,
                     options.hbm_word_size_in_4b, stacked_table_name,
                     options.allow_id_dropping);
+                internal::LogIfDeviceMinibatchingRequired(
+                    observed_max_ids_per_bucket,
+                    observed_max_unique_ids_per_bucket, max_ids_per_partition,
+                    max_unique_ids_per_partition, stacked_table_name);
               }
-              internal::LogIfDeviceMinibatchingRequired(
-                  observed_max_ids_per_bucket,
-                  observed_max_unique_ids_per_bucket, max_ids_per_partition,
-                  max_unique_ids_per_partition, stacked_table_name);
             }
 
             total_dropped += stats.dropped_id_count;

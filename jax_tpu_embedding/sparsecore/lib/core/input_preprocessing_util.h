@@ -32,6 +32,7 @@
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/functional/function_ref.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
+#include "absl/log/log.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -435,6 +436,74 @@ struct StatsPerDevice {
   int dropped_id_count;
 };
 
+template <bool kPerDevice = false>
+inline void ValidateMaxIdsOrDie(
+    const int32_t observed_max_ids,
+    const int32_t observed_max_unique_ids, const int32_t max_ids,
+    const int32_t max_unique_ids, const absl::string_view stacked_table_name,
+    const bool allow_id_dropping) {
+  constexpr absl::string_view kUnit = kPerDevice ? "device" : "partition";
+  // If id dropping is allowed, we log a warning if the observed max ids is
+  // greater than the set max ids.
+  if (observed_max_ids > max_ids) {
+    if (allow_id_dropping) {
+      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
+                   << " observed max ids per " << kUnit << ": "
+                   << observed_max_ids
+                   << " is greater than the set max ids per " << kUnit << ": "
+                   << max_ids;
+    } else {
+      LOG(FATAL) << "Observed max ids per " << kUnit << ": " << observed_max_ids
+                 << " for table: " << stacked_table_name
+                 << " is greater than the set max ids per " << kUnit << ": "
+                 << max_ids
+                 << ". Use `allow_id_dropping` or increase the "
+                    "`max_ids_per_partition`. You could also try to reduce the "
+                    "batch size.";
+    }
+  }
+  if (observed_max_unique_ids > max_unique_ids) {
+    if (allow_id_dropping) {
+      LOG(WARNING) << "Allowing ID dropping for table: " << stacked_table_name
+                   << " observed max unique ids per " << kUnit << ": "
+                   << observed_max_unique_ids
+                   << " is greater than the set max unique ids per " << kUnit
+                   << ": " << max_unique_ids;
+    } else {
+      LOG(FATAL) << "Observed max unique ids per " << kUnit << ": "
+                 << observed_max_unique_ids
+                 << " for table: " << stacked_table_name
+                 << " is greater than the set max unique ids per " << kUnit
+                 << ": " << max_unique_ids
+                 << ". Use `allow_id_dropping` or increase the "
+                    "`max_unique_ids_per_partition`. You could also try to "
+                    "reduce the batch size.";
+    }
+  }
+}
+
+template <bool kPerDevice = false>
+inline void LogIfDeviceMinibatchingRequired(
+    const int32_t observed_max_ids,
+    const int32_t observed_max_unique_ids, const int32_t max_ids,
+    const int32_t max_unique_ids, const absl::string_view stacked_table_name) {
+  constexpr absl::string_view kUnit = kPerDevice ? "device" : "partition";
+  if (observed_max_ids > max_ids) {
+    LOG_EVERY_N_SEC(WARNING, 300)
+        << "Device minibatching required for table: " << stacked_table_name
+        << " observed max ids per " << kUnit << ": " << observed_max_ids
+        << " is greater than the set max ids per " << kUnit << ": " << max_ids;
+  }
+  if (observed_max_unique_ids > max_unique_ids) {
+    LOG_EVERY_N_SEC(WARNING, 300)
+        << "Device minibatching required for table: " << stacked_table_name
+        << " observed max unique ids per " << kUnit << ": "
+        << observed_max_unique_ids
+        << " is greater than the set max unique ids per " << kUnit << ": "
+        << max_unique_ids;
+  }
+}
+
 }  // namespace internal
 
 struct CsrArraysPerHost {
@@ -729,6 +798,9 @@ int ComputeCooBufferSizePerDevice(
 int MaxIdsPerPartitionForStackedTables(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
+int MaxUniqueIdsPerPartitionForStackedTables(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
+
 std::optional<int> SuggestedCooBufferSizeForStackedTables(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata);
 
@@ -736,7 +808,10 @@ std::optional<int> SuggestedCooBufferSizeForStackedTables(
 struct MegacoreCsrOptions {
   // Row stride used to linearize embedding IDs as
   // `dest_sc * rows_per_sc + row_in_sc`. Unused if `num_sc_per_device == 1`.
-  int rows_per_sc;
+  int rows_per_sc = 0;
+  // Per-device limits (`max_*_ids_per_partition * num_sc_per_device`).
+  int max_ids_per_device = std::numeric_limits<int>::max();
+  int max_unique_ids_per_device = std::numeric_limits<int>::max();
 };
 
 // Blocking version for testing only.

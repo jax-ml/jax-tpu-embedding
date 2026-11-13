@@ -79,16 +79,16 @@ void FindGlobalScOffsets(absl::Span<const CooT> coo_tensors, uint32_t sc_mask,
   }
 }
 
-// Precomputed per-bucket offsets for parallel Megacore CSR buffer filling.
+// Precomputed per-partition offsets for parallel Megacore CSR buffer filling.
 struct MegacoreFillPlan {
   // Flat array of size `num_sc_per_device * (num_scs + 1)`.
-  // `sc_offsets[sc_id * (num_scs + 1) + g]` is the starting index of bucket `g`
-  // in `grouped_coo_tensors(sc_id, 0)`.
+  // `sc_offsets[sc_id * (num_scs + 1) + g]` is the starting index of partition
+  // `g` in `grouped_coo_tensors(sc_id, 0)`.
   std::vector<int> sc_offsets;
-  // Output COO buffer range `[bucket_coo_begin[g], bucket_coo_end[g])` for each
-  // `global_sc_id` `g` in `[0, num_scs)`.
-  std::vector<int> bucket_coo_begin;
-  std::vector<int> bucket_coo_end;
+  // Output COO buffer range `[partition_coo_begin[g], partition_coo_end[g])`
+  // for each `global_sc_id` `g` in `[0, num_scs)`.
+  std::vector<int> partition_coo_begin;
+  std::vector<int> partition_coo_end;
 };
 
 // Copies sorted `coo_tensors` for a single SparseCore into the output CSR
@@ -116,10 +116,11 @@ void CopyMegacoreCooTensors(absl::Span<const CooT> coo_tensors,
 }
 
 // The unmerged remainder `[head, end)` of one local SparseCore's COO tensors in
-// `FillMegacoreBucket`. `head_col_id` caches `head->col_id` for the min-scan,
-// and `last_col_id` caches `(end - 1)->col_id` to detect the last run.
+// `FillMegacorePartition`. `head_col_id` caches `head->col_id` for the
+// min-scan, and `last_col_id` caches `(end - 1)->col_id` to detect the last
+// run.
 template <typename CooT>
-struct ScBucketInput {
+struct ScPartitionInput {
   using ColIdT = decltype(CooT::col_id);
   typename absl::Span<const CooT>::const_iterator head;
   typename absl::Span<const CooT>::const_iterator end;
@@ -127,14 +128,58 @@ struct ScBucketInput {
   ColIdT last_col_id;
 };
 
+// Counts how many elements of partition `g` fit within `max_elements` and
+// `max_unique_ids`, adding the number of distinct `col_id`s consumed to
+// `device_unique_ids`.
+template <typename CooT>
+int CountMegacorePartitionElements(
+    const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
+    const MegacoreFillPlan& plan, int g, int num_scs, int num_sc_per_device,
+    int max_elements, int max_unique_ids, int& device_unique_ids) {
+  using ColIdT = decltype(CooT::col_id);
+  absl::InlinedVector<absl::Span<const CooT>, kInlinedScPerDevice> sc_spans;
+  for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
+    const int offset_base = sc_id * (num_scs + 1) + g;
+    const int begin = plan.sc_offsets[offset_base];
+    const int count = plan.sc_offsets[offset_base + 1] - begin;
+    if (count > 0) {
+      sc_spans.push_back(
+          grouped_coo_tensors(sc_id, /*bucket_id=*/0).subspan(begin, count));
+    }
+  }
+
+  int written = 0;
+  while (written < max_elements && device_unique_ids < max_unique_ids) {
+    ColIdT min_col_id = 0;
+    bool found = false;
+    for (absl::Span<const CooT> span : sc_spans) {
+      if (!span.empty() && (!found || span.front().col_id < min_col_id)) {
+        min_col_id = span.front().col_id;
+        found = true;
+      }
+    }
+    if (!found) {
+      break;
+    }
+    ++device_unique_ids;
+    for (absl::Span<const CooT>& span : sc_spans) {
+      while (!span.empty() && span.front().col_id == min_col_id) {
+        span.remove_prefix(1);
+        ++written;
+      }
+    }
+  }
+  return std::min(written, max_elements);
+}
+
 // Performs a k-way merge of the non-empty per-local-SC `sc_coo_tensors` for a
-// single `global_sc_id` bucket into the output CSR slice (`embedding_ids`,
+// single `global_sc_id` partition into the output CSR slice (`embedding_ids`,
 // `sample_ids`, `gains`).
 //
 // Each element of `sc_coo_tensors` is already sorted by `(col_id, row_id)`, and
 // `sc_coo_tensors` is ordered by `local_sc_id` (which partitions `row_id` into
 // disjoint contiguous ranges `[sc_id * batch_size_per_sc, (sc_id + 1) *
-// batch_size_per_sc)`). All elements in this bucket share the same
+// batch_size_per_sc)`). All elements in this partition share the same
 // `global_sc_id` in the low `num_sc_bits` bits of `col_id`, so comparing raw
 // `col_id` values is equivalent to comparing `emb_id = col_id >> num_sc_bits`,
 // and ties in `col_id` naturally resolve to the lowest `local_sc_id` (smallest
@@ -143,19 +188,18 @@ struct ScBucketInput {
 // The output slice must hold exactly the total number of elements across
 // `sc_coo_tensors`, so the merge needs no bounds checks.
 template <typename CooT>
-void FillMegacoreBucket(absl::Span<const absl::Span<const CooT>> sc_coo_tensors,
-                        int dest_sc_offset, int num_sc_bits,
-                        int max_row_id_exclusive,
-                        Eigen::Ref<RowVectorXi> embedding_ids,
-                        Eigen::Ref<RowVectorXi> sample_ids,
-                        Eigen::Ref<RowVectorXf> gains) {
+void FillMegacorePartition(
+    absl::Span<const absl::Span<const CooT>> sc_coo_tensors, int dest_sc_offset,
+    int num_sc_bits, int max_row_id_exclusive,
+    Eigen::Ref<RowVectorXi> embedding_ids, Eigen::Ref<RowVectorXi> sample_ids,
+    Eigen::Ref<RowVectorXf> gains) {
   using ColIdT = decltype(CooT::col_id);
   using UColIdT = std::make_unsigned_t<ColIdT>;
   Eigen::Index out_index = 0;
   DCHECK_EQ(sample_ids.size(), embedding_ids.size());
   DCHECK_EQ(gains.size(), embedding_ids.size());
 
-  absl::InlinedVector<ScBucketInput<CooT>, kInlinedScPerDevice> sc_inputs;
+  absl::InlinedVector<ScPartitionInput<CooT>, kInlinedScPerDevice> sc_inputs;
   Eigen::Index total_count = 0;
   for (absl::Span<const CooT> coo_tensors : sc_coo_tensors) {
     sc_inputs.push_back({.head = coo_tensors.begin(),
@@ -171,7 +215,7 @@ void FillMegacoreBucket(absl::Span<const absl::Span<const CooT>> sc_coo_tensors,
   auto sc_inputs_end = sc_inputs.end();
 
   // Copies the remainder of `sc_input` to the output.
-  auto copy_remainder = [&](const ScBucketInput<CooT>& sc_input) {
+  auto copy_remainder = [&](const ScPartitionInput<CooT>& sc_input) {
     const Eigen::Index count = sc_input.end - sc_input.head;
     CopyMegacoreCooTensors<CooT>(
         absl::MakeConstSpan(sc_input.head, sc_input.end), dest_sc_offset,
@@ -229,12 +273,12 @@ void FillMegacoreBucket(absl::Span<const absl::Span<const CooT>> sc_coo_tensors,
   copy_remainder(*sc_inputs_begin);
 }
 
-// Fills the Megacore COO buffer for buckets `g` in `[bucket_begin, bucket_end)`
-// using the precomputed `plan`.
+// Fills the Megacore COO buffer for partitions `g` in
+// `[partition_begin, partition_end)` using the precomputed `plan`.
 template <typename CooT>
-void FillMegacoreBucketRange(
+void FillMegacorePartitionRange(
     const DevicePartitionedCooTensorsT<CooT>& grouped_coo_tensors,
-    const MegacoreFillPlan& plan, int bucket_begin, int bucket_end,
+    const MegacoreFillPlan& plan, int partition_begin, int partition_end,
     int batch_size_per_sc, int rows_per_sc,
     const PreprocessSparseDenseMatmulInputOptions& options,
     internal::CsrArraysRefPerDevice& csr_arrays) {
@@ -245,10 +289,10 @@ void FillMegacoreBucketRange(
 
   absl::InlinedVector<absl::Span<const CooT>, kInlinedScPerDevice>
       sc_coo_tensors;
-  for (int g = bucket_begin; g < bucket_end; ++g) {
-    const int coo_index = plan.bucket_coo_begin[g];
-    const int bucket_size = plan.bucket_coo_end[g] - coo_index;
-    if (bucket_size == 0) {
+  for (int g = partition_begin; g < partition_end; ++g) {
+    const int coo_index = plan.partition_coo_begin[g];
+    const int partition_size = plan.partition_coo_end[g] - coo_index;
+    if (partition_size == 0) {
       continue;
     }
     sc_coo_tensors.clear();
@@ -265,28 +309,31 @@ void FillMegacoreBucketRange(
     }
     const int dest_sc = g & (num_sc_per_device - 1);
     const int dest_sc_offset = static_cast<int>(int64_t{dest_sc} * rows_per_sc);
-    if (total_count == bucket_size) {
-      FillMegacoreBucket<CooT>(
+    if (total_count == partition_size) {
+      FillMegacorePartition<CooT>(
           sc_coo_tensors, dest_sc_offset, num_sc_bits, max_row_id_exclusive,
-          csr_arrays.embedding_ids.segment(coo_index, bucket_size),
-          csr_arrays.sample_ids.segment(coo_index, bucket_size),
-          csr_arrays.gains.segment(coo_index, bucket_size));
+          csr_arrays.embedding_ids.segment(coo_index, partition_size),
+          csr_arrays.sample_ids.segment(coo_index, partition_size),
+          csr_arrays.gains.segment(coo_index, partition_size));
       continue;
     }
-    // The static COO buffer is full and IDs are dropped, which truncates at
-    // most one bucket. `FillMegacoreBucket` needs room for the whole bucket, so
-    // merge it into scratch buffers and keep its first `bucket_size` elements.
+    // Either a per-device row limit (`max_ids_per_device` or
+    // `max_unique_ids_per_device`) or the static COO buffer limit was reached
+    // and IDs are dropped. `FillMegacorePartition` needs room for the whole
+    // partition, so merge it into scratch buffers and keep its first
+    // `partition_size` elements.
     RowVectorXi embedding_ids(total_count);
     RowVectorXi sample_ids(total_count);
     RowVectorXf gains(total_count);
-    FillMegacoreBucket<CooT>(sc_coo_tensors, dest_sc_offset, num_sc_bits,
-                             max_row_id_exclusive, embedding_ids, sample_ids,
-                             gains);
-    csr_arrays.embedding_ids.segment(coo_index, bucket_size) =
-        embedding_ids.head(bucket_size);
-    csr_arrays.sample_ids.segment(coo_index, bucket_size) =
-        sample_ids.head(bucket_size);
-    csr_arrays.gains.segment(coo_index, bucket_size) = gains.head(bucket_size);
+    FillMegacorePartition<CooT>(sc_coo_tensors, dest_sc_offset, num_sc_bits,
+                                max_row_id_exclusive, embedding_ids, sample_ids,
+                                gains);
+    csr_arrays.embedding_ids.segment(coo_index, partition_size) =
+        embedding_ids.head(partition_size);
+    csr_arrays.sample_ids.segment(coo_index, partition_size) =
+        sample_ids.head(partition_size);
+    csr_arrays.gains.segment(coo_index, partition_size) =
+        gains.head(partition_size);
   }
 }
 
@@ -301,6 +348,8 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
     internal::CsrArraysRefPerDevice csr_arrays) {
   DCHECK_GT(batch_size_per_sc, 0);
   DCHECK(options.num_sc_per_device == 1 || megacore_csr.rows_per_sc > 0);
+  DCHECK_GT(megacore_csr.max_ids_per_device, 0);
+  DCHECK_GT(megacore_csr.max_unique_ids_per_device, 0);
   DCHECK_EQ(grouped_coo_tensors.GetNumMinibatches(), 1);
 
   const int num_scs = options.GetNumScs();
@@ -310,8 +359,8 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
 
   auto plan = std::make_shared<MegacoreFillPlan>();
   plan->sc_offsets.resize(num_sc_per_device * (num_scs + 1));
-  plan->bucket_coo_begin.resize(num_scs);
-  plan->bucket_coo_end.resize(num_scs);
+  plan->partition_coo_begin.resize(num_scs);
+  plan->partition_coo_end.resize(num_scs);
 
   int total_coo_size = 0;
   for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
@@ -323,27 +372,90 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
     FindGlobalScOffsets<CooT>(coo_tensors, sc_mask, offsets);
   }
 
+  const int max_ids_per_device = options.allow_id_dropping
+                                     ? megacore_csr.max_ids_per_device
+                                     : std::numeric_limits<int>::max();
+  const int max_unique_ids_per_device =
+      options.allow_id_dropping ? megacore_csr.max_unique_ids_per_device
+                                : std::numeric_limits<int>::max();
+  // In device minibatching without ID dropping, unique IDs are neither capped
+  // nor fatal, so skip the extra k-way merge count.
+  const bool check_unique_ids =
+      options.allow_id_dropping ||
+      options.GetMinibatchingMode() != MinibatchingMode::kDevice;
+  int observed_max_ids_per_device = 0;
+  int observed_max_unique_ids_per_device = 0;
   int coo_index = 0;
   int processed = 0;
   int g = 0;
+  absl::InlinedVector<int, kInlinedScPerDevice> partition_counts(
+      num_sc_per_device);
   for (int device_id = 0; device_id < options.global_device_count;
        ++device_id) {
-    for (int dest_sc = 0; dest_sc < num_sc_per_device; ++dest_sc, ++g) {
-      int bucket_count = 0;
+    int device_ids = 0;
+    for (int dest_sc = 0; dest_sc < num_sc_per_device; ++dest_sc) {
+      const int partition_g = device_id * num_sc_per_device + dest_sc;
+      int partition_count = 0;
       for (int sc_id = 0; sc_id < num_sc_per_device; ++sc_id) {
-        const int offset_base = sc_id * (num_scs + 1) + g;
-        bucket_count +=
+        const int offset_base = sc_id * (num_scs + 1) + partition_g;
+        partition_count +=
             plan->sc_offsets[offset_base + 1] - plan->sc_offsets[offset_base];
       }
-      plan->bucket_coo_begin[g] = coo_index;
-      const int written = std::min(bucket_count, coo_end - coo_index);
+      partition_counts[dest_sc] = partition_count;
+      device_ids += partition_count;
+    }
+
+    // TODO: Skip per-device capping in MinibatchingMode::kDevice once device
+    // minibatching is supported for Megacore CSR.
+    const int row_end_limit = static_cast<int>(
+        std::min<int64_t>(coo_end, int64_t{coo_index} + max_ids_per_device));
+    int device_unique_ids = 0;
+    for (int dest_sc = 0; dest_sc < num_sc_per_device; ++dest_sc, ++g) {
+      plan->partition_coo_begin[g] = coo_index;
+      const int max_elements = row_end_limit - coo_index;
+      int written = 0;
+      if (partition_counts[dest_sc] > 0) {
+        if (!check_unique_ids ||
+            device_ids <= megacore_csr.max_unique_ids_per_device) {
+          written = std::min(partition_counts[dest_sc], max_elements);
+        } else if (max_elements > 0 || !options.allow_id_dropping) {
+          const int count_limit = options.allow_id_dropping
+                                      ? max_elements
+                                      : partition_counts[dest_sc];
+          written = std::min(
+              max_elements,
+              CountMegacorePartitionElements<CooT>(
+                  grouped_coo_tensors, *plan, g, num_scs, num_sc_per_device,
+                  count_limit, max_unique_ids_per_device, device_unique_ids));
+        }
+      }
       coo_index += written;
       processed += written;
-      plan->bucket_coo_end[g] = coo_index;
+      plan->partition_coo_end[g] = coo_index;
+    }
+    if (!options.allow_id_dropping) {
+      observed_max_ids_per_device =
+          std::max(observed_max_ids_per_device, device_ids);
+      observed_max_unique_ids_per_device =
+          std::max(observed_max_unique_ids_per_device, device_unique_ids);
     }
     csr_arrays.row_pointers[device_id] = coo_index;
     AlignMegacoreCooBuffer(coo_index, coo_end, options.hbm_word_size_in_4b,
                            csr_arrays);
+  }
+  if (!options.allow_id_dropping) {
+    if (options.GetMinibatchingMode() == MinibatchingMode::kDevice) {
+      internal::LogIfDeviceMinibatchingRequired</*kPerDevice=*/true>(
+          observed_max_ids_per_device, /*observed_max_unique_ids=*/0,
+          megacore_csr.max_ids_per_device,
+          megacore_csr.max_unique_ids_per_device, stacked_table_name);
+    } else {
+      internal::ValidateMaxIdsOrDie</*kPerDevice=*/true>(
+          observed_max_ids_per_device, observed_max_unique_ids_per_device,
+          megacore_csr.max_ids_per_device,
+          megacore_csr.max_unique_ids_per_device, stacked_table_name,
+          /*allow_id_dropping=*/false);
+    }
   }
   for (int row_index = options.global_device_count;
        row_index < csr_arrays.row_pointers.size(); ++row_index) {
@@ -363,8 +475,9 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
   int dropped_id_count = 0;
   if (processed < total_coo_size) {
     LOG_EVERY_N(WARNING, 100)
-        << "The static buffer is too small for the current batch. IDs will be "
-           "dropped! Megacore COO buffer size: "
+        << "The static buffer is too small or device ID limits were exceeded "
+           "for the current batch. IDs will be dropped! Megacore COO buffer "
+           "size: "
         << coo_end << ", total number of input COOs: " << total_coo_size
         << ", while currently processed only: " << processed;
     dropped_id_count = total_coo_size - processed;
@@ -376,34 +489,36 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
 
   const int max_tasks = options.num_sc_per_device;
   absl::InlinedVector<std::pair<int, int>, kInlinedScPerDevice> task_ranges;
-  int current_bucket = 0;
-  for (int task_id = 1; task_id <= max_tasks && current_bucket < num_scs;
+  int current_partition = 0;
+  for (int task_id = 1; task_id <= max_tasks && current_partition < num_scs;
        ++task_id) {
-    int next_bucket = num_scs;
+    int next_partition = num_scs;
     if (task_id < max_tasks) {
       const int target_coo =
           (static_cast<int64_t>(coo_index) * task_id) / max_tasks;
-      const auto it = absl::c_lower_bound(plan->bucket_coo_end, target_coo);
-      next_bucket = std::max<int>(
-          current_bucket, static_cast<int>(it - plan->bucket_coo_end.begin()));
-      if (next_bucket < num_scs &&
-          (next_bucket == current_bucket ||
-           plan->bucket_coo_end[next_bucket] - target_coo <=
-               target_coo - plan->bucket_coo_begin[next_bucket])) {
-        ++next_bucket;
+      const auto it =
+          absl::c_lower_bound(plan->partition_coo_end, target_coo);
+      next_partition = std::max<int>(
+          current_partition,
+          static_cast<int>(it - plan->partition_coo_end.begin()));
+      if (next_partition < num_scs &&
+          (next_partition == current_partition ||
+           plan->partition_coo_end[next_partition] - target_coo <=
+               target_coo - plan->partition_coo_begin[next_partition])) {
+        ++next_partition;
       }
     }
-    if (plan->bucket_coo_begin[current_bucket] <
-        plan->bucket_coo_end[next_bucket - 1]) {
-      task_ranges.push_back({current_bucket, next_bucket});
+    if (plan->partition_coo_begin[current_partition] <
+        plan->partition_coo_end[next_partition - 1]) {
+      task_ranges.push_back({current_partition, next_partition});
     }
-    current_bucket = next_bucket;
+    current_partition = next_partition;
   }
 
   tsl::CountDownAsyncValueRef<int> count_down(task_ranges.size(),
                                               dropped_id_count);
   for (int task_idx = 0; task_idx < task_ranges.size(); ++task_idx) {
-    const auto [bucket_begin, bucket_end] = task_ranges[task_idx];
+    const auto [partition_begin, partition_end] = task_ranges[task_idx];
     options.async_task_scheduler([=, &grouped_coo_tensors]() mutable {
       tsl::profiler::TraceMe traceme([&] {
         return tsl::profiler::TraceMeEncode(
@@ -411,10 +526,9 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
                          task_idx),
             {{"batch_number", options.batch_number}});
       });
-      FillMegacoreBucketRange<CooT>(grouped_coo_tensors, *plan, bucket_begin,
-                                    bucket_end, batch_size_per_sc,
-                                    megacore_csr.rows_per_sc, options,
-                                    csr_arrays);
+      FillMegacorePartitionRange<CooT>(
+          grouped_coo_tensors, *plan, partition_begin, partition_end,
+          batch_size_per_sc, megacore_csr.rows_per_sc, options, csr_arrays);
       count_down.CountDown();
     });
   }

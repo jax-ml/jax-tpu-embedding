@@ -91,14 +91,16 @@ TEST(InputPreprocessingUtilTest, MaxIdsPerPartitionForStackedTables) {
   stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_0",
       /*feature_index=*/0, /*max_ids_per_partition=*/16,
-      /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
+      /*max_unique_ids_per_partition=*/8, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/8));
   stacked_table_metadata.push_back(FeatureMetadataInStack(
       /*name=*/"table_1",
       /*feature_index=*/1, /*max_ids_per_partition=*/16,
-      /*max_unique_ids_per_partition=*/16, /*row_offset=*/0,
+      /*max_unique_ids_per_partition=*/8, /*row_offset=*/0,
       /*col_offset=*/0, /*col_shift=*/0, /*batch_size=*/8));
   EXPECT_EQ(MaxIdsPerPartitionForStackedTables(stacked_table_metadata), 16);
+  EXPECT_EQ(MaxUniqueIdsPerPartitionForStackedTables(stacked_table_metadata),
+            8);
 }
 
 TEST(InputPreprocessingUtilTest, ComputeCooBufferSize) {
