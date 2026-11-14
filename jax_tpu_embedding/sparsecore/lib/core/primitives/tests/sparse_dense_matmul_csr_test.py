@@ -395,11 +395,13 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
   @parameterized.named_parameters(
       # 8 floats is the HBM word size. 5 and 21 are not multiples of it, and
       # exercise the sub-word and multi-word-with-remainder cases respectively.
-      dict(testcase_name="dim_8", emb_size=8),
-      dict(testcase_name="dim_5", emb_size=5),
-      dict(testcase_name="dim_21", emb_size=21),
+      dict(testcase_name="dim_8", emb_size=8, dtype=jnp.float32),
+      dict(testcase_name="dim_5", emb_size=5, dtype=jnp.float32),
+      dict(testcase_name="dim_21", emb_size=21, dtype=jnp.float32),
+      dict(testcase_name="dim_48_bfloat16", emb_size=48, dtype=jnp.bfloat16),
+      dict(testcase_name="dim_64_bfloat16", emb_size=64, dtype=jnp.bfloat16),
   )
-  def test_sc_emb_forward_pass(self, emb_size: int):
+  def test_sc_emb_forward_pass(self, emb_size: int, dtype: jnp.dtype):
     # TODO(b/573251627): Remove once OSS CI uses libtpu >= 0.0.50. Older
     # releases may not support feature widths that aren't a multiple of 8.
     if emb_size % 8 != 0 and not _is_libtpu_at_least((0, 0, 50)):
@@ -422,7 +424,9 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
         hbm_word_size_in_4b=self.hbm_word_size_in_4b,
     )
     # Define and shard an embedding table with the parameterized width.
-    emb_table = test_utils.row_id_initializer((self.vocab_size, emb_size))
+    emb_table = test_utils.row_id_initializer(
+        (self.vocab_size, emb_size), dtype=dtype
+    )
     emb_table_sharded = utils.shard_emb_table(
         emb_table,
         num_devices=len(self.global_devices),
@@ -448,9 +452,10 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
     # row i of the table is filled with i, so the activation for a sample is
     # its id repeated emb_size times.
     expected_emb_activations = np.tile(
-        self.input_tensor.astype(np.float32), (1, emb_size)
+        self.input_tensor.astype(dtype), (1, emb_size)
     )
 
+    self.assertEqual(emb_activations.dtype, dtype)
     np.testing.assert_equal(emb_activations, expected_emb_activations)
 
   def test_sc_emb_forward_pass_lowering_has_table_name(self):
@@ -832,6 +837,100 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
         # Fails if absmax quantization isn't applied.
         self.assertFalse(
             np.allclose(activations_dynamic, activations_unquant, atol=1e-3)
+        )
+
+  def test_sc_emb_forward_pass_bfloat16_invalid_configs(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_local_embedding_ids,
+        lhs_local_sample_ids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
+    )
+
+    with self.subTest("1d_bfloat16"):
+      emb_table_1d = utils.shard_emb_table(
+          jnp.arange(self.vocab_size, dtype=jnp.bfloat16),
+          num_devices=len(self.global_devices),
+          num_sc_per_device=self.num_sc_per_device,
+      )
+      with self.assertRaisesRegex(
+          ValueError, "1D embedding tables are not supported for bfloat16"
+      ):
+        self.tpu_sparse_dense_matmul_csr(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,
+            emb_table_1d[0],
+            device_batch_size=self.batch_size // self.num_chips,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            sharding_strategy=1,
+            quantization_config=None,
+            enable_minibatching=False,
+        )
+
+    with self.subTest("non_16_multiple_width_bfloat16"):
+      emb_table_dim8 = utils.shard_emb_table(
+          test_utils.row_id_initializer(
+              (self.vocab_size, 8), dtype=jnp.bfloat16
+          ),
+          num_devices=len(self.global_devices),
+          num_sc_per_device=self.num_sc_per_device,
+      )
+      with self.assertRaisesRegex(ValueError, "multiple of 16"):
+        self.tpu_sparse_dense_matmul_csr(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,
+            emb_table_dim8[0],
+            device_batch_size=self.batch_size // self.num_chips,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            sharding_strategy=1,
+            quantization_config=None,
+            enable_minibatching=False,
+        )
+
+    with self.subTest("quantization_with_bfloat16"):
+      emb_table_dim16 = utils.shard_emb_table(
+          test_utils.row_id_initializer(
+              (self.vocab_size, 16), dtype=jnp.bfloat16
+          ),
+          num_devices=len(self.global_devices),
+          num_sc_per_device=self.num_sc_per_device,
+      )
+      with self.assertRaisesRegex(
+          ValueError, "Quantization is not supported for bfloat16"
+      ):
+        self.tpu_sparse_dense_matmul_csr(
+            lhs_row_pointers,
+            lhs_local_embedding_ids,
+            lhs_local_sample_ids,
+            lhs_gains,
+            1,
+            emb_table_dim16[0],
+            device_batch_size=self.batch_size // self.num_chips,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            sharding_strategy=1,
+            quantization_config=embedding_spec.FixedQuantizationConfig(
+                min_value=0.0, max_value=15.0, num_buckets=256
+            ),
+            enable_minibatching=False,
         )
 
 

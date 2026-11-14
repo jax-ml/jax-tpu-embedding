@@ -81,10 +81,15 @@ def maybe_clip_params(
   return hlo.minimum(max_bound, x)
 
 
-def ensure_dtype(check: Any, expected_type: Any, object_name: str):
-  if check.dtype != expected_type:
+def ensure_dtype(
+    check: Any, expected_type: Any | tuple[Any, ...], object_name: str
+):
+  expected = (
+      expected_type if isinstance(expected_type, tuple) else (expected_type,)
+  )
+  if check.dtype not in expected:
     raise ValueError(
-        f"{object_name} must have type {expected_type!r}, got {check.dtype!r}"
+        f"{object_name} must have type in {expected!r}, got {check.dtype!r}"
     )
 
 
@@ -112,6 +117,7 @@ def validate_abstract_eval_params(
     sharding_strategy: int,
     min_value: float | None = None,
     max_value: float | None = None,
+    allowed_embedding_table_dtypes: Any | tuple[Any, ...] = np.float32,
 ):
   """Validate parameters common to all sparsecore grad primitives."""
   ensure_dtype(lhs_row_pointers, np.int32, "lhs_row_pointers")
@@ -123,7 +129,9 @@ def validate_abstract_eval_params(
       np.int32,
       "num_minibatches_per_physical_sparse_core",
   )
-  ensure_dtype(embedding_table, np.float32, "embedding_table")
+  ensure_dtype(
+      embedding_table, allowed_embedding_table_dtypes, "embedding_table"
+  )
   ensure_dtype(activations_grad, np.float32, "activations_grad")
   ensure_dim(lhs_row_pointers, 1, "lhs_row_pointers")
   ensure_dim(embedding_table, (1, 2), "embedding_table")
