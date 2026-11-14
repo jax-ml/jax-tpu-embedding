@@ -1081,28 +1081,73 @@ def _get_activation_for_feature(
   return einops.rearrange(feature_slice, "f b1 ... -> (f b1) ...")
 
 
+def _resolve_formatting_dtype(
+    out_dtype: DTypeLike | None,
+) -> jnp.dtype | None:
+  """Validates and normalizes `out_dtype` for unstacking or stacking."""
+  if out_dtype is None:
+    return None
+  dtype = jnp.dtype(out_dtype)
+  if dtype not in (jnp.float32, jnp.bfloat16):
+    raise ValueError(
+        f"Unsupported out_dtype {dtype}. Only float32 and bfloat16 are"
+        " supported."
+    )
+  return dtype
+
+
 def _unstack_activations_default(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
     num_sc_per_device: int,
+    out_dtype: DTypeLike | None = None,
 ) -> Nested[jax.Array]:
   """Unstacks activations using the legacy method."""
+  resolved_dtype = _resolve_formatting_dtype(out_dtype)
+  referenced_stacks = dict.fromkeys(
+      feature.table_spec.stacked_table_spec.stack_name
+      for feature in jax.tree.leaves(feature_specs)
+  )
+  for stack_name in referenced_stacks:
+    stacked_activation = activations[stack_name]
+    if resolved_dtype is not None and stacked_activation.dtype != jnp.float32:
+      raise ValueError(
+          f"Stacked activation for {stack_name} must have dtype float32 when"
+          f" out_dtype is specified, got {stacked_activation.dtype}."
+      )
+    if stacked_activation.dtype not in (jnp.float32, jnp.bfloat16):
+      raise ValueError(
+          f"Stacked activation for {stack_name} must have dtype float32 or"
+          f" bfloat16, got {stacked_activation.dtype}."
+      )
   get_activation_for = functools.partial(
       _get_activation_for_feature,
       activations=activations,
       global_device_count=global_device_count,
       num_feature_slices_per_device=num_sc_per_device,
   )
-  return jax.tree_util.tree_map(get_activation_for, feature_specs)
+  unstacked = jax.tree_util.tree_map(get_activation_for, feature_specs)
+  if resolved_dtype is not None:
+    unstacked = jax.tree.map(
+        lambda x: (
+            x.astype(resolved_dtype) if x.dtype != resolved_dtype else x
+        ),
+        unstacked,
+    )
+  return unstacked
 
 
 def _unstack_activations_with_primitive(
     activations: dict[str, jax.Array],
     feature_specs: Nested[embedding_spec.FeatureSpec],
     global_device_count: int,
+    out_dtype: DTypeLike | None = None,
 ) -> Nested[jax.Array]:
   """Unstacks activations using the activation unstack primitive."""
+  resolved_dtype = _resolve_formatting_dtype(out_dtype) or jnp.dtype(
+      jnp.float32
+  )
   flat_feature_specs, treedef = jax.tree.flatten(feature_specs)
 
   updated_activations = [None] * len(flat_feature_specs)
@@ -1142,6 +1187,7 @@ def _unstack_activations_with_primitive(
         stacked_table_activation,
         per_feature_batch_sizes=per_feature_batch_sizes,
         per_feature_dims=per_feature_dims,
+        out_dtype=resolved_dtype,
     )
 
     for feature_index, feature_activation in zip(
@@ -1158,15 +1204,23 @@ def unstack_embedding_activations(
     global_device_count: int,
     num_sc_per_device: int,
     use_activation_unstack_primitive: bool = False,
+    out_dtype: DTypeLike | None = None,
 ) -> Nested[jax.Array]:
   """Unstacks the activations to match the feature specs."""
   if use_activation_unstack_primitive:
     return _unstack_activations_with_primitive(
-        activations, feature_specs, global_device_count
+        activations,
+        feature_specs,
+        global_device_count,
+        out_dtype=out_dtype,
     )
   else:
     return _unstack_activations_default(
-        activations, feature_specs, global_device_count, num_sc_per_device
+        activations,
+        feature_specs,
+        global_device_count,
+        num_sc_per_device,
+        out_dtype=out_dtype,
     )
 
 
@@ -1182,6 +1236,7 @@ def tpu_sparse_dense_matmul(
     enable_minibatching: bool = False,
     perform_unstacking: bool = True,
     use_activation_unstack_primitive: bool = False,
+    out_dtype: DTypeLike | None = None,
 ) -> Nested[jax.Array]:
   """Computes the sparse dense matmul.
 
@@ -1204,6 +1259,8 @@ def tpu_sparse_dense_matmul(
       the results. If False, returns raw stacked activations.
     use_activation_unstack_primitive: If True, uses the new activation unstack
       primitive. Defaults to False.
+    out_dtype: Optional output dtype (`float32` or `bfloat16`) for unstacked
+      activations. Cannot be set when `perform_unstacking` is False.
 
   Returns:
     The activations structure with the same structure as feature_specs.
@@ -1237,6 +1294,12 @@ def tpu_sparse_dense_matmul(
           embedding_variables,
       )
   """
+
+  if out_dtype is not None and not perform_unstacking:
+    raise ValueError(
+        "out_dtype cannot be specified when perform_unstacking is False."
+    )
+  _resolve_formatting_dtype(out_dtype)
 
   if isinstance(preprocessed_inputs, SparseDenseMatmulInput):
     warnings.warn(
@@ -1304,6 +1367,7 @@ def tpu_sparse_dense_matmul(
         global_device_count,
         num_sc_per_device,
         use_activation_unstack_primitive=use_activation_unstack_primitive,
+        out_dtype=out_dtype,
     )
 
   return activations
@@ -1352,8 +1416,37 @@ def stack_embedding_gradients(
     num_sc_per_device: int,
     global_device_count: int | None = None,
     use_gradient_stacking_primitive: bool = False,
+    out_dtype: DTypeLike | None = None,
 ) -> Mapping[str, jax.Array]:
-  """Stacks the gradients for update to embedding variables."""
+  """Stacks the gradients for update to embedding variables.
+
+  Args:
+    activation_gradients: Per-feature gradients matching `feature_specs`.
+    feature_specs: Feature specifications for the embedding lookup.
+    num_sc_per_device: Number of SparseCores per device.
+    global_device_count: Total number of devices across the job. Required when
+      `use_gradient_stacking_primitive` is True.
+    use_gradient_stacking_primitive: If True, lowers gradient stacking to the
+      fused custom call primitive (which always outputs `float32`).
+    out_dtype: Optional output dtype (`float32` or `bfloat16`). When `None`,
+      `use_gradient_stacking_primitive=True` returns `float32` and `False`
+      preserves the input gradient dtype. When specified,
+      `use_gradient_stacking_primitive=True` requires `float32`, while `False`
+      casts the stacked gradients to `out_dtype`.
+
+  Returns:
+    Mapping from stacked table name to stacked gradient array.
+  """
+  resolved_out_dtype = _resolve_formatting_dtype(out_dtype)
+  if (
+      use_gradient_stacking_primitive
+      and resolved_out_dtype is not None
+      and resolved_out_dtype != jnp.float32
+  ):
+    raise ValueError(
+        "use_gradient_stacking_primitive=True only supports float32"
+        f" out_dtype, got {resolved_out_dtype}."
+    )
   stacked_table_to_features: dict[
       str, list[tuple[embedding_spec.FeatureSpec, jax.Array]]
   ] = collections.defaultdict(list)
@@ -1375,6 +1468,18 @@ def stack_embedding_gradients(
   for stacked_table_name, stacked_features in stacked_table_to_features.items():
     stacked_features.sort(key=lambda x: x[0].id_transformation.row_offset)
 
+    raw_gradients = [gradient for _, gradient in stacked_features]
+    expected_dtype = raw_gradients[0].dtype
+    if expected_dtype not in (jnp.float32, jnp.bfloat16):
+      raise ValueError(
+          f"Gradients for stacked table {stacked_table_name} must have dtype"
+          f" float32 or bfloat16, got {expected_dtype}."
+      )
+    if any(g.dtype != expected_dtype for g in raw_gradients):
+      raise ValueError(
+          f"All feature gradients in stacked table {stacked_table_name} must"
+          f" have the same dtype, got {[g.dtype for g in raw_gradients]}."
+      )
     gradients = [
         _prepare_gradient_for_stacking(gradient, feature, num_sc_per_device)
         for feature, gradient in stacked_features
@@ -1411,14 +1516,19 @@ def stack_embedding_gradients(
         )
         stacked_table_to_gradients[stacked_table_name].append(gradient)
 
-      # Concatenate along batch dimension.
-      result[stacked_table_name] = jax.lax.concatenate(
-          stacked_table_to_gradients[stacked_table_name], dimension=1
+      # Concatenate along batch dimension and merge the slice dimension.
+      stacked_gradient = einops.rearrange(
+          jax.lax.concatenate(
+              stacked_table_to_gradients[stacked_table_name], dimension=1
+          ),
+          "f b ... -> (f b) ...",
       )
-      # Merge the feature slice dimension with the batch dimension.
-      result[stacked_table_name] = einops.rearrange(
-          result[stacked_table_name], "f b ... -> (f b) ..."
-      )
+      if (
+          resolved_out_dtype is not None
+          and stacked_gradient.dtype != resolved_out_dtype
+      ):
+        stacked_gradient = stacked_gradient.astype(resolved_out_dtype)
+      result[stacked_table_name] = stacked_gradient
 
   return result
 
@@ -1533,6 +1643,7 @@ def tpu_sparse_dense_matmul_grad(
         num_sc_per_device,
         global_device_count,
         use_gradient_stacking_primitive,
+        out_dtype=jnp.float32,
     )
   else:
     assert isinstance(activation_gradients, Mapping)
@@ -1557,6 +1668,12 @@ def tpu_sparse_dense_matmul_grad(
     gain = lhs_gains[stacked_table_name]
     embedding_variable = embedding_variables[stacked_table_name]
     activation_gradient = gradients[stacked_table_name]
+    if not perform_stacking and activation_gradient.dtype != jnp.float32:
+      raise ValueError(
+          "Pre-stacked activation_gradients must have dtype float32 when"
+          f" perform_stacking is False, got {activation_gradient.dtype} for"
+          f" table {stacked_table_name}."
+      )
     stack_table_spec = stacked_table_specs[stacked_table_name]
     hyper_params = stack_table_spec.optimizer.get_hyperparameters(step)
     # The MLIR computation symbol names need to be different. We attach the

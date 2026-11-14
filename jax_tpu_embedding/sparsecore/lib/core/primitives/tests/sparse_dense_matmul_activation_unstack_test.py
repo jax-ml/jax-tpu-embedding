@@ -21,12 +21,16 @@ custom call.
 from typing import override
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_activation_unstack
+from jax_tpu_embedding.sparsecore.lib.core.primitives import (
+    sparse_dense_matmul_activation_unstack as activation_unstack,
+)
+import numpy as np
 
 
-class SparseDenseMatmulActivationUnstackTest(absltest.TestCase):
+class SparseDenseMatmulActivationUnstackTest(parameterized.TestCase):
 
   @override
   def setUp(self):
@@ -35,75 +39,244 @@ class SparseDenseMatmulActivationUnstackTest(absltest.TestCase):
     self.dim_1 = 32
     self.batch_size_2 = 256
     self.dim_2 = 64
-    # Ensure input shape is consistent with outputs for functional testing.
-    # Input rows = num_sc * (batch_size_1 + batch_size_2). Assuming num_sc=1.
     self.input_rows = self.batch_size_1 + self.batch_size_2
     self.input_dim = max(self.dim_1, self.dim_2)
     self.input_shape = (self.input_rows, self.input_dim)
     self.per_feature_batch_sizes = (self.batch_size_1, self.batch_size_2)
     self.per_feature_dims = (self.dim_1, self.dim_2)
 
+    self.primitive = (
+        activation_unstack.tpu_sparse_dense_matmul_activation_unstack_primitive
+    )
     self.unstack_primitive = jax.named_call(
-        sparse_dense_matmul_activation_unstack.tpu_sparse_dense_matmul_activation_unstack_primitive.bind,
+        self.primitive.bind,
         name="tpu_sparse_dense_matmul_activation_unstack",
     )
 
-  def test_abstract_eval(self):
-    def fun(x):
-      return self.unstack_primitive(
-          x,
-          per_feature_batch_sizes=self.per_feature_batch_sizes,
-          per_feature_dims=self.per_feature_dims,
-      )
-
-    out_avals = jax.eval_shape(fun, jnp.zeros(self.input_shape))
+  @parameterized.named_parameters(
+      ("default", None, jnp.float32),
+      ("float32", jnp.float32, jnp.float32),
+      ("bfloat16", jnp.bfloat16, jnp.bfloat16),
+      ("bfloat16_str", "bfloat16", jnp.bfloat16),
+  )
+  def test_abstract_eval(self, out_dtype, expected_dtype):
+    kwargs = {} if out_dtype is None else {"out_dtype": out_dtype}
+    out_avals = jax.eval_shape(
+        lambda x: self.unstack_primitive(
+            x,
+            per_feature_batch_sizes=self.per_feature_batch_sizes,
+            per_feature_dims=self.per_feature_dims,
+            **kwargs,
+        ),
+        jnp.zeros(self.input_shape, dtype=jnp.float32),
+    )
 
     self.assertLen(out_avals, 2)
     self.assertEqual(out_avals[0].shape, (self.batch_size_1, self.dim_1))
-    self.assertEqual(out_avals[0].dtype, jnp.float32)
+    self.assertEqual(out_avals[0].dtype, expected_dtype)
     self.assertEqual(out_avals[1].shape, (self.batch_size_2, self.dim_2))
-    self.assertEqual(out_avals[1].dtype, jnp.float32)
+    self.assertEqual(out_avals[1].dtype, expected_dtype)
 
-  def test_functional_correctness(self):
-    # Mock implementation that assumes sequential unstacking.
+  @parameterized.named_parameters(
+      ("default", None, "f32"),
+      ("float32", jnp.float32, "f32"),
+      ("bfloat16", jnp.bfloat16, "bf16"),
+  )
+  def test_mlir_lowering(self, out_dtype, ir_elem_type):
+    kwargs = {} if out_dtype is None else {"out_dtype": out_dtype}
+    lowered = jax.jit(
+        lambda x: self.unstack_primitive(
+            x,
+            per_feature_batch_sizes=self.per_feature_batch_sizes,
+            per_feature_dims=self.per_feature_dims,
+            **kwargs,
+        )
+    ).lower(jnp.zeros(self.input_shape, dtype=jnp.float32))
+    mlir_ir = str(lowered.compiler_ir())
+
+    self.assertIn("SparseActivationsUnstackInterleaved", mlir_ir)
+    self.assertIn("tensor<384x64xf32>", mlir_ir)
+    self.assertIn(f"tensor<128x32x{ir_elem_type}>", mlir_ir)
+    self.assertIn(f"tensor<256x64x{ir_elem_type}>", mlir_ir)
+
+  @parameterized.named_parameters(
+      ("float32", jnp.float32),
+      ("bfloat16", jnp.bfloat16),
+  )
+  def test_functional_correctness(self, out_dtype):
     def impl(
         stacked_activations,
         *,
         per_feature_batch_sizes,
         per_feature_dims,
+        out_dtype=jnp.float32,
     ):
+      dtype = jnp.dtype(out_dtype)
       activations = []
       start = 0
       for batch_size, dim in zip(per_feature_batch_sizes, per_feature_dims):
         end = start + batch_size
-        activations.append(stacked_activations[start:end, :dim])
+        activations.append(stacked_activations[start:end, :dim].astype(dtype))
         start = end
       return tuple(activations)
 
-    sparse_dense_matmul_activation_unstack.tpu_sparse_dense_matmul_activation_unstack_primitive.def_impl(
-        impl
+    self.addCleanup(self.primitive.def_impl, self.primitive.impl)
+    self.primitive.def_impl(impl)
+
+    input_data = (
+        jnp.arange(self.input_rows * self.input_dim, dtype=jnp.float32).reshape(
+            self.input_rows, self.input_dim
+        )
+        * 0.125
     )
-
-    input_data = jnp.arange(
-        self.input_rows * self.input_dim, dtype=jnp.float32
-    ).reshape(self.input_rows, self.input_dim)
-
     outputs = self.unstack_primitive(
         input_data,
         per_feature_batch_sizes=self.per_feature_batch_sizes,
         per_feature_dims=self.per_feature_dims,
+        out_dtype=out_dtype,
     )
 
     self.assertLen(outputs, 2)
+    self.assertEqual(outputs[0].dtype, out_dtype)
+    self.assertEqual(outputs[1].dtype, out_dtype)
+    np.testing.assert_array_equal(
+        outputs[0],
+        input_data[: self.batch_size_1, : self.dim_1].astype(out_dtype),
+    )
+    np.testing.assert_array_equal(
+        outputs[1],
+        input_data[self.batch_size_1 :, : self.dim_2].astype(out_dtype),
+    )
 
-    # Verify outputs match sequential slicing
-    expected_1 = input_data[0 : self.batch_size_1, : self.dim_1]
-    expected_2 = input_data[
-        self.batch_size_1 : self.batch_size_1 + self.batch_size_2, : self.dim_2
-    ]
-
-    self.assertTrue(jnp.array_equal(outputs[0], expected_1))
-    self.assertTrue(jnp.array_equal(outputs[1], expected_2))
+  @parameterized.named_parameters(
+      (
+          "unsupported_out_dtype_f16",
+          (384, 64),
+          jnp.float32,
+          (128, 256),
+          (32, 64),
+          jnp.float16,
+          "Unsupported out_dtype",
+      ),
+      (
+          "unsupported_out_dtype_i32",
+          (384, 64),
+          jnp.float32,
+          (128, 256),
+          (32, 64),
+          jnp.int32,
+          "Unsupported out_dtype",
+      ),
+      (
+          "bf16_input_with_bf16_out",
+          (384, 64),
+          jnp.bfloat16,
+          (128, 256),
+          (32, 64),
+          jnp.bfloat16,
+          "stacked_activations must have dtype float32",
+      ),
+      (
+          "bf16_input_with_f32_out",
+          (384, 64),
+          jnp.bfloat16,
+          (128, 256),
+          (32, 64),
+          jnp.float32,
+          "stacked_activations must have dtype float32",
+      ),
+      (
+          "rank_1_input",
+          (384,),
+          jnp.float32,
+          (128, 256),
+          (32, 64),
+          jnp.float32,
+          "stacked_activations must be rank 2",
+      ),
+      (
+          "rank_3_input",
+          (1, 384, 64),
+          jnp.float32,
+          (128, 256),
+          (32, 64),
+          jnp.float32,
+          "stacked_activations must be rank 2",
+      ),
+      (
+          "empty_metadata",
+          (384, 64),
+          jnp.float32,
+          (),
+          (),
+          jnp.float32,
+          "must be non-empty and have matching lengths",
+      ),
+      (
+          "mismatched_metadata_lengths",
+          (384, 64),
+          jnp.float32,
+          (128,),
+          (32, 64),
+          jnp.float32,
+          "must be non-empty and have matching lengths",
+      ),
+      (
+          "non_positive_batch_size",
+          (256, 64),
+          jnp.float32,
+          (0, 256),
+          (32, 64),
+          jnp.float32,
+          "must be positive",
+      ),
+      (
+          "non_positive_feature_dim",
+          (384, 64),
+          jnp.float32,
+          (128, 256),
+          (0, 64),
+          jnp.float32,
+          "must be positive",
+      ),
+      (
+          "row_sum_mismatch",
+          (300, 64),
+          jnp.float32,
+          (128, 256),
+          (32, 64),
+          jnp.float32,
+          "Sum of per_feature_batch_sizes",
+      ),
+      (
+          "feature_dim_exceeds_stacked_cols",
+          (384, 48),
+          jnp.float32,
+          (128, 256),
+          (32, 64),
+          jnp.float32,
+          "Max of per_feature_dims",
+      ),
+  )
+  def test_abstract_eval_validation_errors(
+      self,
+      in_shape,
+      in_dtype,
+      batch_sizes,
+      feature_dims,
+      out_dtype,
+      expected_error,
+  ):
+    with self.assertRaisesRegex(ValueError, expected_error):
+      jax.eval_shape(
+          lambda x: self.unstack_primitive(
+              x,
+              per_feature_batch_sizes=batch_sizes,
+              per_feature_dims=feature_dims,
+              out_dtype=out_dtype,
+          ),
+          jnp.zeros(in_shape, dtype=in_dtype),
+      )
 
 
 if __name__ == "__main__":

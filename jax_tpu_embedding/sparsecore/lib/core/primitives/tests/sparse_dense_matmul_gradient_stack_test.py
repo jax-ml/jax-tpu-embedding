@@ -21,12 +21,16 @@ custom call.
 from typing import override
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
-from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_gradient_stack
+from jax_tpu_embedding.sparsecore.lib.core.primitives import (
+    sparse_dense_matmul_gradient_stack as gradient_stack,
+)
+import numpy as np
 
 
-class SparseDenseMatmulGradientStackTest(absltest.TestCase):
+class SparseDenseMatmulGradientStackTest(parameterized.TestCase):
 
   @override
   def setUp(self):
@@ -35,60 +39,183 @@ class SparseDenseMatmulGradientStackTest(absltest.TestCase):
     self.dim_1 = 32
     self.batch_size_2 = 256
     self.dim_2 = 32
-
     self.stacked_batch_size = self.batch_size_1 + self.batch_size_2
     self.stacked_feature_dim = 32
 
-    self.grad1 = jnp.zeros((self.batch_size_1, self.dim_1), dtype=jnp.float32)
-    self.grad2 = jnp.zeros((self.batch_size_2, self.dim_2), dtype=jnp.float32)
-
+    self.primitive = (
+        gradient_stack.tpu_sparse_dense_matmul_gradient_stack_primitive
+    )
     self.stack_primitive = jax.named_call(
-        sparse_dense_matmul_gradient_stack.tpu_sparse_dense_matmul_gradient_stack_primitive.bind,
+        self.primitive.bind,
         name="tpu_sparse_dense_matmul_gradient_stack",
     )
 
-  def test_abstract_eval(self):
-    def fun(g1, g2):
-      return self.stack_primitive(
-          g1,
-          g2,
-          stacked_batch_size=self.stacked_batch_size,
-          stacked_feature_dim=self.stacked_feature_dim,
-      )
-
-    out_aval = jax.eval_shape(fun, self.grad1, self.grad2)
+  @parameterized.named_parameters(
+      ("float32", jnp.float32),
+      ("bfloat16", jnp.bfloat16),
+  )
+  def test_abstract_eval(self, in_dtype):
+    g1 = jnp.zeros((self.batch_size_1, self.dim_1), dtype=in_dtype)
+    g2 = jnp.zeros((self.batch_size_2, self.dim_2), dtype=in_dtype)
+    out_aval = jax.eval_shape(
+        lambda x, y: self.stack_primitive(
+            x,
+            y,
+            stacked_batch_size=self.stacked_batch_size,
+            stacked_feature_dim=self.stacked_feature_dim,
+        ),
+        g1,
+        g2,
+    )
 
     self.assertEqual(
         out_aval.shape, (self.stacked_batch_size, self.stacked_feature_dim)
     )
     self.assertEqual(out_aval.dtype, jnp.float32)
 
-  def test_functional_correctness(self):
-    # Mock implementation that assumes sequential stacking
+  @parameterized.named_parameters(
+      ("float32", jnp.float32, "f32"),
+      ("bfloat16", jnp.bfloat16, "bf16"),
+  )
+  def test_mlir_lowering(self, in_dtype, ir_elem_type):
+    g1 = jnp.zeros((self.batch_size_1, self.dim_1), dtype=in_dtype)
+    g2 = jnp.zeros((self.batch_size_2, self.dim_2), dtype=in_dtype)
+    lowered = jax.jit(
+        lambda x, y: self.stack_primitive(
+            x,
+            y,
+            stacked_batch_size=self.stacked_batch_size,
+            stacked_feature_dim=self.stacked_feature_dim,
+        )
+    ).lower(g1, g2)
+    mlir_ir = str(lowered.compiler_ir())
+
+    self.assertIn("SparseGradientsStackInterleaved", mlir_ir)
+    self.assertIn(f"tensor<128x32x{ir_elem_type}>", mlir_ir)
+    self.assertIn(f"tensor<256x32x{ir_elem_type}>", mlir_ir)
+    self.assertIn("tensor<384x32xf32>", mlir_ir)
+
+  @parameterized.named_parameters(
+      ("float32", jnp.float32),
+      ("bfloat16", jnp.bfloat16),
+  )
+  def test_functional_correctness(self, in_dtype):
     def impl(
         *unstacked_gradients,
         stacked_batch_size,
         stacked_feature_dim,
     ):
-      del stacked_batch_size
-      del stacked_feature_dim
-      return jnp.concatenate(unstacked_gradients, axis=0)
+      del stacked_batch_size, stacked_feature_dim
+      return jnp.concatenate(unstacked_gradients, axis=0).astype(jnp.float32)
 
-    sparse_dense_matmul_gradient_stack.tpu_sparse_dense_matmul_gradient_stack_primitive.def_impl(
-        impl
-    )
+    self.addCleanup(self.primitive.def_impl, self.primitive.impl)
+    self.primitive.def_impl(impl)
 
-    g1 = jnp.ones((self.batch_size_1, self.dim_1), dtype=jnp.float32)
-    g2 = jnp.ones((self.batch_size_2, self.dim_2), dtype=jnp.float32) * 2
-
+    g1 = jnp.ones((self.batch_size_1, self.dim_1), dtype=in_dtype)
+    g2 = jnp.ones((self.batch_size_2, self.dim_2), dtype=in_dtype) * 2
     output = self.stack_primitive(
-        g1, g2,
+        g1,
+        g2,
         stacked_batch_size=self.stacked_batch_size,
         stacked_feature_dim=self.stacked_feature_dim,
     )
 
-    expected = jnp.concatenate([g1, g2], axis=0)
-    self.assertTrue(jnp.array_equal(output, expected))
+    expected = jnp.concatenate([g1, g2], axis=0).astype(jnp.float32)
+    self.assertEqual(output.dtype, jnp.float32)
+    np.testing.assert_array_equal(output, expected)
+
+  @parameterized.named_parameters(
+      (
+          "empty_inputs",
+          (),
+          384,
+          32,
+          "unstacked_gradients must be non-empty",
+      ),
+      (
+          "rank_1_input",
+          (((128,), jnp.bfloat16), ((256, 32), jnp.bfloat16)),
+          384,
+          32,
+          "Each unstacked gradient must be rank 2",
+      ),
+      (
+          "rank_3_input",
+          (((1, 128, 32), jnp.bfloat16), ((256, 32), jnp.bfloat16)),
+          384,
+          32,
+          "Each unstacked gradient must be rank 2",
+      ),
+      (
+          "unsupported_dtype_f16",
+          (((128, 32), jnp.float16), ((256, 32), jnp.float16)),
+          384,
+          32,
+          "Unsupported unstacked gradient dtype",
+      ),
+      (
+          "unsupported_dtype_i32",
+          (((128, 32), jnp.int32), ((256, 32), jnp.int32)),
+          384,
+          32,
+          "Unsupported unstacked gradient dtype",
+      ),
+      (
+          "mixed_f32_bf16",
+          (((128, 32), jnp.float32), ((256, 32), jnp.bfloat16)),
+          384,
+          32,
+          "All unstacked_gradients must have the same dtype",
+      ),
+      (
+          "mixed_bf16_f32",
+          (((128, 32), jnp.bfloat16), ((256, 32), jnp.float32)),
+          384,
+          32,
+          "All unstacked_gradients must have the same dtype",
+      ),
+      (
+          "non_positive_stacked_batch",
+          (((128, 32), jnp.float32),),
+          0,
+          32,
+          "must be positive",
+      ),
+      (
+          "non_positive_stacked_dim",
+          (((128, 32), jnp.float32),),
+          128,
+          0,
+          "must be positive",
+      ),
+      (
+          "row_sum_mismatch",
+          (((128, 32), jnp.bfloat16), ((256, 32), jnp.bfloat16)),
+          300,
+          32,
+          "Sum of unstacked gradient rows",
+      ),
+      (
+          "feature_dim_exceeds_stacked_dim",
+          (((128, 32), jnp.bfloat16), ((256, 32), jnp.bfloat16)),
+          384,
+          16,
+          "Max unstacked gradient columns",
+      ),
+  )
+  def test_abstract_eval_validation_errors(
+      self, input_specs, stacked_batch, stacked_dim, expected_error
+  ):
+    inputs = [jnp.zeros(shape, dtype=dt) for shape, dt in input_specs]
+    with self.assertRaisesRegex(ValueError, expected_error):
+      jax.eval_shape(
+          lambda *xs: self.stack_primitive(
+              *xs,
+              stacked_batch_size=stacked_batch,
+              stacked_feature_dim=stacked_dim,
+          ),
+          *inputs,
+      )
 
 
 if __name__ == "__main__":

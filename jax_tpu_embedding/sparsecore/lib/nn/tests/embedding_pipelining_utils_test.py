@@ -351,6 +351,91 @@ class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
     )
     np.testing.assert_array_equal(zeros, np.zeros(spec.shape, np.float32))
 
+  @parameterized.product(
+      init_fn=[
+          embedding_pipelining_utils.get_initial_state_shapes,
+          embedding_pipelining_utils.get_initial_state,
+      ],
+      bad_carry=["embedding_activations", "embedding_gradients"],
+  )
+  def test_initial_state_rejects_bfloat16_carries(self, init_fn, bad_carry):
+    kwargs = _get_initial_state_kwargs(sharded=False)
+    if bad_carry == "embedding_activations":
+      kwargs["sc_fwd_function"] = lambda s, _: (s.astype(jnp.bfloat16), None)
+    else:
+      kwargs["tc_function"] = lambda a, d, t, sc_fwd_aux=None: (
+          a.astype(jnp.bfloat16),
+          jnp.zeros((), jnp.float32),
+          t,
+          None,
+      )
+    with self.assertRaisesRegex(
+        ValueError,
+        f"SparseCore pipelining requires float32 stacked {bad_carry}",
+    ):
+      init_fn(**kwargs)
+
+  @parameterized.named_parameters(
+      ("sc_fwd_bf16", "sc_fwd", "embedding_activations"),
+      ("tc_grad_bf16", "tc_grad", "embedding_gradients"),
+      ("state_carry_bf16", "state_carry", "embedding_activations"),
+  )
+  def test_step_rejects_bfloat16_carries(self, mode, expected_field):
+    kwargs = _get_initial_state_kwargs(sharded=False)
+    state = embedding_pipelining_utils.get_initial_state(**kwargs)
+    sc_fwd = _sc_fwd_fn
+    tc_fn = _tc_fn
+    if mode == "sc_fwd":
+      sc_fwd = lambda sparse_inputs, embedding_variables: (
+          sparse_inputs.astype(jnp.bfloat16),
+          None,
+      )
+    elif mode == "tc_grad":
+
+      def bf16_tc_fn(
+          embedding_activations, dense_inputs, train_state, sc_fwd_aux=None
+      ):
+        _, out, new_state, aux = _tc_fn(
+            embedding_activations, dense_inputs, train_state, sc_fwd_aux
+        )
+        return embedding_activations.astype(jnp.bfloat16), out, new_state, aux
+
+      tc_fn = bf16_tc_fn
+    else:
+      bf16_act = state.last_step_inputs.embedding_activations.astype(
+          jnp.bfloat16
+      )
+      state = state.replace(
+          last_step_inputs=state.last_step_inputs.replace(
+              embedding_activations=bf16_act
+          )
+      )
+
+    def sc_bwd_fn(
+        sparse_inputs, embedding_gradients, embedding_variables, tc_aux=None
+    ):
+      del sparse_inputs, embedding_gradients, tc_aux
+      return embedding_variables, None
+
+    with self.assertRaisesRegex(
+        ValueError,
+        f"SparseCore pipelining requires float32 stacked {expected_field}",
+    ):
+      jax.jit(
+          functools.partial(
+              embedding_pipelining_utils.step,
+              sc_fwd_function=sc_fwd,
+              tc_function=tc_fn,
+              sc_bwd_function=sc_bwd_fn,
+              fake_tc_step=False,
+          )
+      )(
+          kwargs["pipeline_input"],
+          kwargs["tc_train_state"],
+          kwargs["embedding_variables"],
+          state,
+      )
+
 
 if __name__ == "__main__":
   absltest.main()
