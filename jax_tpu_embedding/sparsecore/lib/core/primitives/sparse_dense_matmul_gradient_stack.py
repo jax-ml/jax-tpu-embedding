@@ -45,7 +45,41 @@ def _tpu_sparse_dense_matmul_gradient_stack_abstract_eval(
     stacked_feature_dim: int,
 ) -> core.ShapedArray:
   """Abstract evaluation for tpu_sparse_dense_matmul_gradient_stack."""
-  del unstacked_gradients
+  if not unstacked_gradients:
+    raise ValueError("unstacked_gradients must be non-empty.")
+  expected_dtype = unstacked_gradients[0].dtype
+  if expected_dtype not in (jnp.float32, jnp.bfloat16):
+    raise ValueError(
+        f"Unsupported unstacked gradient dtype {expected_dtype}. Only float32"
+        " and bfloat16 are supported."
+    )
+  for gradient in unstacked_gradients:
+    if gradient.ndim != 2:
+      raise ValueError(
+          f"Each unstacked gradient must be rank 2, got shape {gradient.shape}."
+      )
+    if gradient.dtype != expected_dtype:
+      raise ValueError(
+          "All unstacked_gradients must have the same dtype, got"
+          f" {[g.dtype for g in unstacked_gradients]}."
+      )
+  if stacked_batch_size <= 0 or stacked_feature_dim <= 0:
+    raise ValueError(
+        "stacked_batch_size and stacked_feature_dim must be positive, got"
+        f" ({stacked_batch_size}, {stacked_feature_dim})."
+    )
+  total_rows = sum(gradient.shape[0] for gradient in unstacked_gradients)
+  if total_rows != stacked_batch_size:
+    raise ValueError(
+        "Sum of unstacked gradient rows must equal stacked_batch_size, got"
+        f" {total_rows} vs {stacked_batch_size}."
+    )
+  max_cols = max(gradient.shape[1] for gradient in unstacked_gradients)
+  if max_cols > stacked_feature_dim:
+    raise ValueError(
+        "Max unstacked gradient columns cannot exceed stacked_feature_dim, got"
+        f" {max_cols} vs {stacked_feature_dim}."
+    )
   return core.ShapedArray(
       (stacked_batch_size, stacked_feature_dim), dtype=jnp.float32
   )

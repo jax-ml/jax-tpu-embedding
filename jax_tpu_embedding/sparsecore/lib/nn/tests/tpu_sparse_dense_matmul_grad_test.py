@@ -2011,6 +2011,182 @@ class TpuSparseDenseMatmulGradTest(parameterized.TestCase):
         rtol=1e-6,
     )
 
+  @parameterized.parameters(False, True)
+  def test_tpu_sparse_dense_matmul_grad_bfloat16(
+      self, use_gradient_stacking_primitive: bool
+  ):
+    devices = jax.devices()[:2]
+    num_devices = len(devices)
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    mesh = jax.sharding.Mesh(devices, "x")
+    self.table_spec_a.initializer = (
+        lambda _, shape: test_utils.element_id_initializer(shape)
+    )
+    self.table_spec_b.initializer = (
+        lambda _, shape: test_utils.element_id_initializer(shape, offset=100)
+    )
+    feature_specs = {
+        "feature_spec_a": self.feature_spec_a,
+        "feature_spec_b": self.feature_spec_b,
+    }
+    embedding.auto_stack_tables(
+        feature_specs,
+        global_device_count=num_devices,
+        num_sc_per_device=num_sc_per_device,
+    )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_b": self.input_tensor_table_b,
+        },
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=num_devices,
+        global_device_count=num_devices,
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        batch_number=42,
+    )
+    embedding_variables = embedding.init_embedding_variables(
+        jax.random.key(0),
+        (self.table_spec_a, self.table_spec_b),
+        NamedSharding(mesh, P("x", None)),
+        num_sc_per_device,
+        bypass_mesh_check=True,
+    )
+    activations_grad_bf16 = {
+        "feature_spec_a": (
+            (
+                test_utils.element_id_initializer(
+                    (_BATCH_SIZE, _DIM_A), offset=1
+                )
+                * 0.13
+            ).astype(jnp.bfloat16)
+        ),
+        "feature_spec_b": (
+            (
+                test_utils.element_id_initializer(
+                    (_BATCH_SIZE, _DIM_B), offset=1
+                )
+                * 0.27
+            ).astype(jnp.bfloat16)
+        ),
+    }
+
+    def jit_sharded(fn):
+      return jax.jit(
+          jax.shard_map(
+              fn,
+              mesh=mesh,
+              in_specs=(P("x"), P("x"), P("x", None)),
+              out_specs=P("x", None),
+              check_vma=False,
+          )
+      )
+
+    grad_update = jit_sharded(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul_grad,
+            feature_specs=feature_specs,
+            sharding_strategy="MOD",
+            global_device_count=num_devices,
+            use_gradient_stacking_primitive=use_gradient_stacking_primitive,
+        )
+    )(activations_grad_bf16, preprocessed_inputs, embedding_variables)
+
+    def ref_fn(grads_bf16, sparse_in, emb_vars):
+      stacked_bf16 = embedding.stack_embedding_gradients(
+          grads_bf16,
+          feature_specs=feature_specs,
+          num_sc_per_device=num_sc_per_device,
+          global_device_count=num_devices,
+          use_gradient_stacking_primitive=False,
+      )
+      stacked_f32 = jax.tree.map(lambda x: x.astype(jnp.float32), stacked_bf16)
+      return embedding.tpu_sparse_dense_matmul_grad(
+          stacked_f32,
+          sparse_in,
+          emb_vars,
+          feature_specs=feature_specs,
+          sharding_strategy="MOD",
+          perform_stacking=False,
+      )
+
+    ref_update = jit_sharded(ref_fn)(
+        activations_grad_bf16, preprocessed_inputs, embedding_variables
+    )
+
+    updated_table = grad_update["table_a_table_b"].table
+    initial_table = embedding_variables["table_a_table_b"].table
+    self.assertEqual(updated_table.dtype, jnp.float32)
+    self.assertFalse(np.array_equal(updated_table, initial_table))
+    np.testing.assert_array_equal(
+        updated_table, ref_update["table_a_table_b"].table
+    )
+
+  def test_grad_rejects_bfloat16_prestacked_gradients(self):
+    feature_specs = {"feature_spec_a": self.feature_spec_a}
+    embedding.prepare_feature_specs_for_training(
+        feature_specs, global_device_count=1, num_sc_per_device=4
+    )
+    preprocessed_inputs = (
+        embedding.eval_preprocess_sparse_dense_matmul_input_shape(
+            feature_specs,
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+        )
+    )
+    padded_dim = table_stacking._next_largest_multiple(_DIM_A, 8)
+    emb_vars = {
+        "table_a": embedding.EmbeddingVariables(
+            table=jnp.zeros((_VOC_A, padded_dim), dtype=jnp.float32), slot=()
+        )
+    }
+    with self.assertRaisesRegex(
+        ValueError, "Pre-stacked activation_gradients must have dtype float32"
+    ):
+      embedding.tpu_sparse_dense_matmul_grad(
+          {"table_a": jnp.ones((_BATCH_SIZE, padded_dim), dtype=jnp.bfloat16)},
+          preprocessed_inputs,
+          emb_vars,
+          feature_specs=feature_specs,
+          num_sc_per_device=4,
+          perform_stacking=False,
+      )
+
+  @parameterized.named_parameters(
+      ("mixed_default", jnp.float32, jnp.bfloat16, False, None, "same dtype"),
+      ("mixed_prim", jnp.float32, jnp.bfloat16, True, None, "same dtype"),
+      ("f16_default", jnp.float16, jnp.float16, False, None, "float32 or"),
+      ("f16_prim", jnp.float16, jnp.float16, True, None, "float32 or"),
+      ("prim_bf16_out", jnp.bfloat16, jnp.bfloat16, True, jnp.bfloat16, "only"),
+      ("f16_out", jnp.bfloat16, jnp.bfloat16, False, jnp.float16, "out_dtype"),
+  )
+  def test_stack_gradients_validation_errors(
+      self, dtype_a, dtype_b, use_primitive, out_dtype, expected_error
+  ):
+    feature_specs = {
+        "feature_spec_a": self.feature_spec_a,
+        "feature_spec_b": self.feature_spec_b,
+    }
+    embedding.auto_stack_tables(
+        feature_specs, global_device_count=2, num_sc_per_device=4
+    )
+    grads = {
+        "feature_spec_a": jnp.ones((_BATCH_SIZE // 2, _DIM_A), dtype=dtype_a),
+        "feature_spec_b": jnp.ones((_BATCH_SIZE // 2, _DIM_B), dtype=dtype_b),
+    }
+    with self.assertRaisesRegex(ValueError, expected_error):
+      embedding.stack_embedding_gradients(
+          grads,
+          feature_specs=feature_specs,
+          num_sc_per_device=4,
+          global_device_count=2,
+          use_gradient_stacking_primitive=use_primitive,
+          out_dtype=out_dtype,
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -650,6 +650,21 @@ def _apply_sharding(sharding, shapes):
 
 
 # Initial state: get_initial_state materializes get_initial_state_shapes.
+def _validate_sc_pipeline_carry_dtype(tree, name: str) -> None:
+  """Validates that SparseCore pipeline carry leaves have dtype float32."""
+  for leaf in jax.tree.leaves(tree):
+    if isinstance(leaf, (jax.ShapeDtypeStruct, jax.core.ShapedArray)):
+      dtype = leaf.dtype
+    else:
+      dtype = jax.typeof(leaf).dtype
+    if dtype != jnp.float32:
+      raise ValueError(
+          f'SparseCore pipelining requires float32 stacked {name}, got'
+          f' {dtype}. Convert activations or gradients in the TensorCore'
+          ' stage instead.'
+      )
+
+
 def get_initial_state_shapes(
     pipeline_input: CurrentStepInput[_SparseInput, _DenseInput],
     tc_train_state: _TcTrainState,
@@ -726,6 +741,7 @@ def get_initial_state_shapes(
   emb_act_shapes, sc_fwd_aux_shapes = jax.eval_shape(
       sc_fwd_function, sparse_inputs, embedding_variables
   )
+  _validate_sc_pipeline_carry_dtype(emb_act_shapes, 'embedding_activations')
   sc_fwd_aux = jax.tree.map(_zeros_like_shape, sc_fwd_aux_shapes)
   emb_act = jax.tree.map(sc_init_fn, emb_act_shapes)
   if pipeline_output_sharding is not None:
@@ -737,6 +753,7 @@ def get_initial_state_shapes(
     emb_grads_shapes, output_shapes, _, aux_shapes = _eval_shape(
         tc_function, emb_act, dense_inputs, tc_train_state, sc_fwd_aux
     )
+  _validate_sc_pipeline_carry_dtype(emb_grads_shapes, 'embedding_gradients')
   aux = jax.tree.map(_zeros_like_shape, aux_shapes)
 
   return PipelineState(
@@ -925,6 +942,14 @@ def step(
     A tuple of (pipeline_output, auxiliary output from SC BWD, updated
     train_state, updated embedding_variables, updated pipeline_state).
   """
+  _validate_sc_pipeline_carry_dtype(
+      pipeline_state.last_step_inputs.embedding_activations,
+      'embedding_activations',
+  )
+  _validate_sc_pipeline_carry_dtype(
+      pipeline_state.step_before_last_step_inputs.embedding_gradients,
+      'embedding_gradients',
+  )
   # Step i-2/SC bwd
   # NOTE: this at step 1 uses zero emb gradients from TC, so will be effectively
   #   same as no-op, however with optimizer that use slot variables, this will
@@ -945,6 +970,7 @@ def step(
         embedding_variables,
         # ^ # use newer embedding variables from step i-2 SC bwd
     )
+  _validate_sc_pipeline_carry_dtype(emb_act, 'embedding_activations')
 
   # Step i-1/TC fwd/bwd
   with jax.named_scope('pipelined_tc'):
@@ -962,6 +988,7 @@ def step(
           tc_train_state,
           pipeline_state.placeholder_tc_aux,
       )
+  _validate_sc_pipeline_carry_dtype(emb_grad, 'embedding_gradients')
 
   pipeline_state = pipeline_state.replace(
       pipeline_step=pipeline_state.pipeline_step + 1,

@@ -23,6 +23,7 @@ import jax.numpy as jnp
 from jax.sharding import NamedSharding  # pylint: disable=g-importing-member
 from jax.sharding import PartitionSpec as P  # pylint: disable=g-importing-member
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
+from jax_tpu_embedding.sparsecore.lib.nn import embedding_pipelining_utils
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
 from jax_tpu_embedding.sparsecore.lib.nn.tests import test_utils
 from jax_tpu_embedding.sparsecore.utils import utils
@@ -1579,6 +1580,414 @@ class TpuSparseDenseMatmulTest(parameterized.TestCase, absltest.TestCase):
     np.testing.assert_allclose(
         activations[feature_name], expected_activations, rtol=1e-5, atol=1e-5
     )
+
+  def _setup_two_chip_stacked_a_aa(self):
+    devices = jax.devices()[:2]
+    num_sc_per_device = utils.num_sparsecores_per_device(devices[0])
+    mesh = jax.sharding.Mesh(devices, "x")
+    feature_specs = {
+        "feature_spec_a": self.feature_spec_a,
+        "feature_spec_aa": self.feature_spec_aa,
+    }
+    embedding.auto_stack_tables(
+        feature_specs,
+        global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
+    )
+    preprocessed_inputs, _ = embedding.preprocess_sparse_dense_matmul_input(
+        {
+            "feature_spec_a": self.input_tensor,
+            "feature_spec_aa": self.input_tensor,
+        },
+        features_weights=None,
+        feature_specs=feature_specs,
+        local_device_count=len(devices),
+        global_device_count=len(devices),
+        num_sc_per_device=num_sc_per_device,
+        sharding_strategy="MOD",
+        batch_number=42,
+    )
+    return devices, mesh, num_sc_per_device, feature_specs, preprocessed_inputs
+
+  @parameterized.parameters(False, True)
+  def test_sparse_dense_matmul_bfloat16_out_dtype(
+      self, use_activation_unstack_primitive: bool
+  ):
+    devices, mesh, num_sc_per_device, feature_specs, preprocessed_inputs = (
+        self._setup_two_chip_stacked_a_aa()
+    )
+    table_0 = test_utils.element_id_initializer((64, 8), offset=1) * 0.137
+    table_1 = test_utils.element_id_initializer((64, 8), offset=100) * 0.271
+    embedding_variables = {
+        "table_a_table_aa": embedding.EmbeddingVariables(
+            table=_create_embedding_variable_for_jit(
+                [VariableInfo((64, 8), 0), VariableInfo((64, 8), 100)],
+                devices,
+                mesh,
+                emb_tables=[table_0, table_1],
+            ),
+            slot=(),
+        )
+    }
+
+    def shard_jit(fn, in_specs):
+      return jax.jit(
+          jax.shard_map(
+              fn,
+              mesh=mesh,
+              in_specs=in_specs,
+              out_specs=P("x"),
+              check_vma=False,
+          )
+      )
+
+    def make_matmul_fn(
+        use_primitive: bool = False,
+        out_dtype=None,
+        perform_unstacking: bool = True,
+    ):
+      return shard_jit(
+          functools.partial(
+              embedding.tpu_sparse_dense_matmul,
+              feature_specs=feature_specs,
+              global_device_count=mesh.size,
+              sharding_strategy="MOD",
+              perform_unstacking=perform_unstacking,
+              use_activation_unstack_primitive=use_primitive,
+              out_dtype=out_dtype,
+          ),
+          in_specs=(P("x"), P("x", None)),
+      )
+
+    ref_f32 = make_matmul_fn()(preprocessed_inputs, embedding_variables)
+    bf16_matmul = make_matmul_fn(
+        use_primitive=use_activation_unstack_primitive,
+        out_dtype=jnp.bfloat16,
+    )
+
+    if use_activation_unstack_primitive:
+      lowered = bf16_matmul.lower(preprocessed_inputs, embedding_variables)
+      self.assertIn("SparseActivationsUnstackInterleaved", lowered.as_text())
+      self.assertIn("tensor<8x6xbf16>", lowered.as_text())
+      self.assertIn("bf16[8,6]", lowered.compile().as_text())
+
+    act_bf16 = bf16_matmul(preprocessed_inputs, embedding_variables)
+    stacked_f32 = make_matmul_fn(perform_unstacking=False)(
+        preprocessed_inputs, embedding_variables
+    )
+    unstacked_bf16 = shard_jit(
+        functools.partial(
+            embedding.unstack_embedding_activations,
+            feature_specs=feature_specs,
+            global_device_count=mesh.size,
+            num_sc_per_device=num_sc_per_device,
+            use_activation_unstack_primitive=use_activation_unstack_primitive,
+            out_dtype=jnp.bfloat16,
+        ),
+        in_specs=(P("x"),),
+    )(stacked_f32)
+
+    for name in ("feature_spec_a", "feature_spec_aa"):
+      expected = ref_f32[name].astype(jnp.bfloat16)
+      self.assertEqual(act_bf16[name].dtype, jnp.bfloat16)
+      self.assertEqual(act_bf16[name].shape, (16, 6))
+      np.testing.assert_array_equal(act_bf16[name], expected)
+      self.assertEqual(unstacked_bf16[name].dtype, jnp.bfloat16)
+      np.testing.assert_array_equal(unstacked_bf16[name], expected)
+
+  @parameterized.parameters(False, True)
+  def test_activation_out_dtype_validation_errors(
+      self, use_activation_unstack_primitive: bool
+  ):
+    feature_specs = {"feature_spec_a": self.feature_spec_a}
+    embedding.prepare_feature_specs_for_training(
+        feature_specs, global_device_count=1, num_sc_per_device=4
+    )
+    preprocessed_inputs = (
+        embedding.eval_preprocess_sparse_dense_matmul_input_shape(
+            feature_specs,
+            local_device_count=1,
+            global_device_count=1,
+            num_sc_per_device=4,
+        )
+    )
+    embedding_variables = {
+        "table_a": embedding.EmbeddingVariables(
+            table=jnp.zeros((32, 8), dtype=jnp.float32), slot=()
+        )
+    }
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "out_dtype cannot be specified when perform_unstacking is False",
+    ):
+      embedding.tpu_sparse_dense_matmul(
+          preprocessed_inputs,
+          embedding_variables,
+          feature_specs=feature_specs,
+          global_device_count=1,
+          perform_unstacking=False,
+          use_activation_unstack_primitive=use_activation_unstack_primitive,
+          out_dtype=jnp.bfloat16,
+      )
+
+    with self.assertRaisesRegex(ValueError, "float32"):
+      embedding.unstack_embedding_activations(
+          {"table_a": jnp.zeros((16, 8), dtype=jnp.bfloat16)},
+          feature_specs=feature_specs,
+          global_device_count=1,
+          num_sc_per_device=4,
+          use_activation_unstack_primitive=use_activation_unstack_primitive,
+          out_dtype=jnp.bfloat16,
+      )
+
+    with self.assertRaisesRegex(ValueError, "Unsupported out_dtype"):
+      embedding.unstack_embedding_activations(
+          {"table_a": jnp.zeros((16, 8), dtype=jnp.float32)},
+          feature_specs=feature_specs,
+          global_device_count=1,
+          num_sc_per_device=4,
+          use_activation_unstack_primitive=use_activation_unstack_primitive,
+          out_dtype=jnp.float16,
+      )
+
+    with self.assertRaisesRegex(ValueError, "Unsupported out_dtype"):
+      embedding.tpu_sparse_dense_matmul(
+          preprocessed_inputs,
+          embedding_variables,
+          feature_specs=feature_specs,
+          global_device_count=1,
+          use_activation_unstack_primitive=use_activation_unstack_primitive,
+          out_dtype=jnp.float16,
+      )
+
+    unstacked = embedding.unstack_embedding_activations(
+        {
+            "table_a": jnp.zeros((16, 8), dtype=jnp.float32),
+            "unused_stack": jnp.zeros((16, 8), dtype=jnp.float16),
+        },
+        feature_specs=feature_specs,
+        global_device_count=1,
+        num_sc_per_device=4,
+        use_activation_unstack_primitive=use_activation_unstack_primitive,
+        out_dtype=jnp.bfloat16,
+    )
+    self.assertEqual(jax.tree.leaves(unstacked)[0].dtype, jnp.bfloat16)
+
+  def test_pipelined_step_bfloat16_tc_with_float32_sc_carry(self):
+    self.table_spec_a.optimizer = embedding_spec.SGDOptimizerSpec(
+        learning_rate=0.05
+    )
+    self.table_spec_aa.optimizer = embedding_spec.SGDOptimizerSpec(
+        learning_rate=0.05
+    )
+    devices, mesh, num_sc_per_device, feature_specs, preprocessed_inputs = (
+        self._setup_two_chip_stacked_a_aa()
+    )
+    pd, pe = P("x"), P("x", None)
+    data_sharding = NamedSharding(mesh, pd)
+    replicated_sharding = NamedSharding(mesh, P())
+    emb_layout = utils.embedding_table_format(mesh, pe)
+
+    initial_table = _create_embedding_variable_for_jit(
+        [VariableInfo((64, 8), 0), VariableInfo((64, 8), 100)], devices, mesh
+    )
+    initial_emb_vars = jax.device_put(
+        {
+            "table_a_table_aa": embedding.EmbeddingVariables(
+                table=initial_table, slot=()
+            )
+        },
+        emb_layout,
+    )
+    initial_tc_params = jax.device_put(
+        (jnp.arange(24, dtype=jnp.float32).reshape(6, 4) * 0.05).astype(
+            jnp.bfloat16
+        ),
+        replicated_sharding,
+    )
+    pipeline_input = jax.device_put(
+        embedding_pipelining_utils.CurrentStepInput(
+            sparse_inputs=preprocessed_inputs,
+            dense_inputs=jnp.full((16, 4), 0.5, dtype=jnp.bfloat16),
+        ),
+        data_sharding,
+    )
+    pipeline_state_sharding = (
+        embedding_pipelining_utils.get_pipeline_state_sharding(
+            pipeline_state_cls=embedding_pipelining_utils.PipelineState,
+            dense_input_sharding=data_sharding,
+            sparse_input_sharding=data_sharding,
+            pipeline_output_sharding=replicated_sharding,
+            tc_aux_sharding=replicated_sharding,
+        )
+    )
+
+    sc_fwd_matmul = jax.shard_map(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul,
+            feature_specs=feature_specs,
+            global_device_count=mesh.size,
+            sharding_strategy="MOD",
+            perform_unstacking=False,
+        ),
+        mesh=mesh,
+        in_specs=(pd, pe),
+        out_specs=pd,
+        check_vma=False,
+    )
+    sc_bwd_grad = jax.shard_map(
+        functools.partial(
+            embedding.tpu_sparse_dense_matmul_grad,
+            feature_specs=feature_specs,
+            sharding_strategy="MOD",
+            perform_stacking=False,
+        ),
+        mesh=mesh,
+        in_specs=(pd, pd, pe),
+        out_specs=pe,
+        check_vma=False,
+    )
+    sc_fwd_fn = lambda sparse_inputs, embedding_variables: (
+        sc_fwd_matmul(sparse_inputs, embedding_variables),
+        None,
+    )
+
+    def sc_bwd_fn(
+        sparse_inputs, embedding_gradients, embedding_variables, tc_aux=None
+    ):
+      del tc_aux
+      return (
+          sc_bwd_grad(embedding_gradients, sparse_inputs, embedding_variables),
+          None,
+      )
+
+    def run_pipeline(use_primitive: bool):
+      def tc_fn(
+          embedding_activations, dense_inputs, train_state, sc_fwd_aux=None
+      ):
+        del sc_fwd_aux
+        unstacked_bf16 = jax.shard_map(
+            functools.partial(
+                embedding.unstack_embedding_activations,
+                feature_specs=feature_specs,
+                global_device_count=mesh.size,
+                num_sc_per_device=num_sc_per_device,
+                use_activation_unstack_primitive=use_primitive,
+                out_dtype=jnp.bfloat16,
+            ),
+            mesh=mesh,
+            in_specs=(pd,),
+            out_specs=pd,
+            check_vma=False,
+        )(embedding_activations)
+
+        def loss_fn(params, acts):
+          pred = (
+              acts["feature_spec_a"] @ params + acts["feature_spec_aa"] @ params
+          )
+          return jnp.mean(((pred - dense_inputs) ** 2).astype(jnp.float32))
+
+        loss, (param_grad, feature_grads_bf16) = jax.value_and_grad(
+            loss_fn, argnums=(0, 1)
+        )(train_state, unstacked_bf16)
+        stacked_grads_f32 = jax.shard_map(
+            functools.partial(
+                embedding.stack_embedding_gradients,
+                feature_specs=feature_specs,
+                num_sc_per_device=num_sc_per_device,
+                global_device_count=mesh.size,
+                use_gradient_stacking_primitive=use_primitive,
+                out_dtype=jnp.float32,
+            ),
+            mesh=mesh,
+            in_specs=(pd,),
+            out_specs=pd,
+            check_vma=False,
+        )(feature_grads_bf16)
+        new_train_state = (
+            train_state.astype(jnp.float32)
+            - 0.01 * param_grad.astype(jnp.float32)
+        ).astype(jnp.bfloat16)
+        return stacked_grads_f32, loss, new_train_state, None
+
+      pipeline_state = jax.device_put(
+          embedding_pipelining_utils.get_initial_state(
+              pipeline_input=pipeline_input,
+              tc_train_state=initial_tc_params,
+              embedding_variables=initial_emb_vars,
+              sc_fwd_function=sc_fwd_fn,
+              tc_function=tc_fn,
+              dense_input_sharding=data_sharding,
+              sparse_input_sharding=data_sharding,
+              pipeline_output_sharding=replicated_sharding,
+          ),
+          pipeline_state_sharding,
+      )
+      jitted_step = jax.jit(
+          lambda p_in, tc_s, emb_v, p_s, fake_tc: (
+              embedding_pipelining_utils.step(
+                  p_in,
+                  tc_s,
+                  emb_v,
+                  p_s,
+                  sc_fwd_fn,
+                  tc_fn,
+                  sc_bwd_fn,
+                  fake_tc_step=fake_tc,
+              )
+          ),
+          in_shardings=(
+              data_sharding,
+              replicated_sharding,
+              emb_layout,
+              pipeline_state_sharding,
+          ),
+          out_shardings=(
+              replicated_sharding,
+              replicated_sharding,
+              replicated_sharding,
+              emb_layout,
+              pipeline_state_sharding,
+          ),
+          static_argnums=(4,),
+      )
+
+      num_steps = 2
+      tc_state, emb_vars, valid_losses = initial_tc_params, initial_emb_vars, []
+      for step_i in range(
+          embedding_pipelining_utils.get_pipeline_train_steps(num_steps)
+      ):
+        fake_tc = not embedding_pipelining_utils.is_output_valid(
+            step_i, num_steps
+        )
+        loss_out, _, tc_state, emb_vars, pipeline_state = jitted_step(
+            pipeline_input, tc_state, emb_vars, pipeline_state, fake_tc
+        )
+        self.assertEqual(
+            pipeline_state.last_step_inputs.embedding_activations[
+                "table_a_table_aa"
+            ].dtype,
+            jnp.float32,
+        )
+        self.assertEqual(
+            pipeline_state.step_before_last_step_inputs.embedding_gradients[
+                "table_a_table_aa"
+            ].dtype,
+            jnp.float32,
+        )
+        if not fake_tc:
+          valid_losses.append(loss_out)
+      return valid_losses, tc_state, emb_vars["table_a_table_aa"].table
+
+    losses_default, state_default, table_default = run_pipeline(False)
+    losses_prim, state_prim, table_prim = run_pipeline(True)
+
+    self.assertLen(losses_default, 2)
+    self.assertFalse(np.array_equal(table_default, initial_table))
+    np.testing.assert_array_equal(losses_prim, losses_default)
+    np.testing.assert_array_equal(state_prim, state_default)
+    np.testing.assert_array_equal(table_prim, table_default)
 
 
 if __name__ == "__main__":

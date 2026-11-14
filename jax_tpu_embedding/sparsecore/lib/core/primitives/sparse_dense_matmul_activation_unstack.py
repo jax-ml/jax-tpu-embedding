@@ -45,14 +45,54 @@ def _tpu_sparse_dense_matmul_activation_unstack_abstract_eval(
     *,
     per_feature_batch_sizes: tuple[int, ...],
     per_feature_dims: tuple[int, ...],
+    out_dtype: jax.typing.DTypeLike = jnp.float32,
 ) -> Sequence[core.ShapedArray]:
   """Abstract evaluation for tpu_sparse_dense_matmul_activation_unstack."""
-  del stacked_activations
+  if stacked_activations.ndim != 2:
+    raise ValueError(
+        "stacked_activations must be rank 2, got shape"
+        f" {stacked_activations.shape}."
+    )
+  if stacked_activations.dtype != jnp.float32:
+    raise ValueError(
+        "stacked_activations must have dtype float32, got"
+        f" {stacked_activations.dtype}."
+    )
+  dtype = jnp.dtype(out_dtype)
+  if dtype not in (jnp.float32, jnp.bfloat16):
+    raise ValueError(
+        f"Unsupported out_dtype {dtype}. Only float32 and bfloat16 are"
+        " supported."
+    )
+  if not per_feature_batch_sizes or len(per_feature_batch_sizes) != len(
+      per_feature_dims
+  ):
+    raise ValueError(
+        "per_feature_batch_sizes and per_feature_dims must be non-empty and"
+        f" have matching lengths, got {per_feature_batch_sizes} and"
+        f" {per_feature_dims}."
+    )
+  if any(b <= 0 for b in per_feature_batch_sizes) or any(
+      d <= 0 for d in per_feature_dims
+  ):
+    raise ValueError(
+        "per_feature_batch_sizes and per_feature_dims must be positive, got"
+        f" {per_feature_batch_sizes} and {per_feature_dims}."
+    )
+  if sum(per_feature_batch_sizes) != stacked_activations.shape[0]:
+    raise ValueError(
+        "Sum of per_feature_batch_sizes must equal stacked_activations rows,"
+        f" got {sum(per_feature_batch_sizes)} vs"
+        f" {stacked_activations.shape[0]}."
+    )
+  if max(per_feature_dims) > stacked_activations.shape[1]:
+    raise ValueError(
+        "Max of per_feature_dims cannot exceed stacked_activations columns,"
+        f" got {max(per_feature_dims)} vs {stacked_activations.shape[1]}."
+    )
   activations = []
   for batch_size, feature_dim in zip(per_feature_batch_sizes, per_feature_dims):
-    activations.append(
-        core.ShapedArray((batch_size, feature_dim), dtype=jnp.float32)
-    )
+    activations.append(core.ShapedArray((batch_size, feature_dim), dtype=dtype))
   return tuple(activations)
 
 
@@ -67,13 +107,14 @@ def _tpu_sparse_dense_matmul_activation_unstack_lowering(
     *,
     per_feature_batch_sizes: tuple[int, ...],
     per_feature_dims: tuple[int, ...],
+    out_dtype: jax.typing.DTypeLike = jnp.float32,
 ) -> Sequence[ir.Value]:
   """Lowering for tpu_sparse_dense_matmul_activation_unstack."""
-
+  ir_type = mlir.dtype_to_ir_type(jnp.dtype(out_dtype))
   result_types = [
       ir.RankedTensorType.get(
           [batch_size, feature_dim],
-          ir.F32Type.get(),
+          ir_type,
       )
       for batch_size, feature_dim in zip(
           per_feature_batch_sizes, per_feature_dims

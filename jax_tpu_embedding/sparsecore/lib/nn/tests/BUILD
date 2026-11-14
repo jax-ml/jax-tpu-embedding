@@ -123,6 +123,7 @@ pytype_strict_contrib_test(
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_pipelining_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         "//jax_tpu_embedding/sparsecore/utils",
         "//third_party/jax:tpu_support",
