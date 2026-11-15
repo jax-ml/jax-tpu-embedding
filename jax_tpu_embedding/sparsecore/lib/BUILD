@@ -11,16 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("@rules_python//python:py_library.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
 )
 
-pytype_strict_library(
+py_library(
     name = "lib",
     srcs = ["__init__.py"],
+    type_checking = True,
     visibility = ["//jax_tpu_embedding/sparsecore:__pkg__"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/auto_pipelining",  # buildcleaner: keep

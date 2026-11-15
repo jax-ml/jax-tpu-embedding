@@ -11,21 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS", "EXTERNAL_USERS", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary", "pytype_strict_contrib_test", "pytype_strict_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//visibility:private"],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "preprocess_sparse_dense_matmul_input_test",
     srcs = [
         "preprocess_sparse_dense_matmul_input_test.py",
     ],
     env = {"JAX_PLATFORMS": "cpu"},
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/core/tests:test_utils",
@@ -38,9 +41,10 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "preprocess_input_benchmarks",
     srcs = ["preprocess_input_benchmarks.py"],
+    type_checking = True,
     visibility = CORE_USERS,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
@@ -57,7 +61,7 @@ pytype_strict_binary(
 # Verify that the benchmarks run for small values of (#features, #samples).
 #
 # (Uses default value for num_features and num_samples ignoring the args below.)
-pytype_strict_contrib_test(
+py_test(
     name = "preprocess_input_benchmarks_test",
     srcs = ["preprocess_input_benchmarks.py"],
     args = [
@@ -66,6 +70,7 @@ pytype_strict_contrib_test(
     ],
     env = {"JAX_PLATFORMS": "cpu"},
     main = "preprocess_input_benchmarks.py",
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:pybind_input_preprocessing",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -78,10 +83,11 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "test_utils",
     testonly = 1,
     srcs = ["test_utils.py"],
+    type_checking = True,
     visibility = EXTERNAL_USERS,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
@@ -92,10 +98,11 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "test_utils_test",
     srcs = ["test_utils_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
+    type_checking = True,
     deps = [
         ":test_utils",
         pypi_requirement("absl/testing:absltest"),
@@ -106,7 +113,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "tpu_sparse_dense_matmul_test",
     srcs = [
         "tpu_sparse_dense_matmul_test.py",
@@ -120,6 +127,7 @@ pytype_strict_contrib_test(
         "exclusive-if-local",
         "requires-tpu",
     ],
+    type_checking = True,
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -133,7 +141,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "tpu_sparse_dense_matmul_grad_test",
     srcs = [
         "tpu_sparse_dense_matmul_grad_test.py",
@@ -147,6 +155,7 @@ pytype_strict_contrib_test(
         "exclusive-if-local",
         "requires-tpu",
     ],
+    type_checking = True,
     deps = [
         ":test_utils",
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
@@ -202,10 +211,11 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "embedding_spec_test",
     srcs = ["embedding_spec_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_momentum",
@@ -237,10 +247,11 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "custom_optimizer_lowering_test",
     srcs = ["custom_optimizer_lowering_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:custom_optimizer_lowering",
         pypi_requirement("absl/testing:absltest"),
@@ -249,10 +260,11 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "embedding_pipelining_utils_test",
     srcs = ["embedding_pipelining_utils_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_pipelining_utils",
         pypi_requirement("absl/testing:absltest"),
