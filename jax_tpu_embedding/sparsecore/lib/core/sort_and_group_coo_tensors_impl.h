@@ -24,7 +24,6 @@
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
 #include "absl/log/vlog_is_on.h"  // from @com_google_absl
-#include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
@@ -478,14 +477,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
   });
   const int num_sc_per_device = options.num_sc_per_device;
   const uint32_t global_sc_count = options.GetNumScs();
-  const uint32_t num_sc_bits = absl::bit_width(global_sc_count - 1);
-  const KeyLayout<ColIdT> key_layout = [&] {
-    if constexpr (std::is_same_v<ColIdT, int32_t>) {
-      return KeyLayout<int32_t>::Make(num_sc_bits);
-    } else {
-      return extracted_coo_tensors.key_layout_;
-    }
-  }();
+  const KeyLayout<ColIdT> key_layout = extracted_coo_tensors.key_layout_;
+  DCHECK_EQ(key_layout.num_scs_bit(), GetNumScBits(global_sc_count));
   const int max_ids_per_partition = feature_metadata.max_ids_per_partition;
   const int max_unique_ids_per_partition =
       feature_metadata.max_unique_ids_per_partition;

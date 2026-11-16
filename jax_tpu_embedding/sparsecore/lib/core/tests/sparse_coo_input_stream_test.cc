@@ -183,14 +183,16 @@ TEST_P(SparseCooVsCsrStreamEquivalenceTest,
   };
 
   ExtractedCooTensorsPerSparseCore coo_extracted(
-      /*batch_size_per_sc=*/8, /*has_variable_weights=*/false, combiner);
+      /*batch_size_per_sc=*/8, /*has_variable_weights=*/false, combiner,
+      KeyLayout<int32_t>::Make(GetNumScBits(options.num_scs)));
   SparseCooInputBatchStream<int32_t, TestIndices2DView,
                             absl::Span<const int32_t>>
       coo_stream(indices_view, values_view, slice_start, slice_end);
   UnityWeightsStream coo_weights(coo_stream);
 
   ExtractedCooTensorsPerSparseCore csr_extracted(
-      /*batch_size_per_sc=*/8, /*has_variable_weights=*/false, combiner);
+      /*batch_size_per_sc=*/8, /*has_variable_weights=*/false, combiner,
+      KeyLayout<int32_t>::Make(GetNumScBits(options.num_scs)));
   SparseCsrInputBatchStream<int32_t, absl::Span<const int32_t>,
                             absl::Span<const int64_t>>
       csr_stream(values_view, row_ptrs_view, slice_start, slice_end);

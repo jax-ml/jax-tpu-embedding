@@ -182,6 +182,19 @@ struct KeyLayoutBase {
 
 }  // namespace internal
 
+// Returns the number of low `col_id` bits that hold the global SparseCore ID,
+// i.e. log2 of the total SparseCore count `num_scs`. `num_scs` must be a
+// positive power of two. This is the single source of truth for the SC bit
+// count used to build `KeyLayout` and to split `col_id` into SC and local IDs.
+template <typename IntT>
+inline IntT GetNumScBits(IntT num_scs) {
+  static_assert(std::is_integral_v<IntT>);
+  using UIntT = std::make_unsigned_t<IntT>;
+  DCHECK(num_scs > 0 && absl::has_single_bit(static_cast<UIntT>(num_scs)))
+      << "num_scs: " << num_scs;
+  return static_cast<IntT>(absl::countr_zero(static_cast<UIntT>(num_scs)));
+}
+
 // Compile-time-selected 64-bit VQSort key layout parameterized on ColIdT.
 // `KeyLayout<int32_t>` uses fixed constant bit shifts for 32-bit column IDs,
 // whereas `KeyLayout<int64_t>` dynamically splits the 58 non-bucket bits
@@ -212,6 +225,10 @@ class KeyLayout<int32_t> : public internal::KeyLayoutBase {
   }
 
   constexpr uint32_t num_scs_bit() const { return num_scs_bit_; }
+  // Returns the mask selecting the global SparseCore ID bits of a `col_id`.
+  constexpr uint32_t num_scs_mask() const {
+    return (uint32_t{1} << num_scs_bit_) - 1;
+  }
   constexpr uint32_t data_mask() const { return kDataMask; }
 
   uint64_t GetGroupingKey(uint32_t col_id, uint32_t data, bool create_buckets,
@@ -281,6 +298,8 @@ class KeyLayout<int64_t> : public internal::KeyLayoutBase {
   }
 
   constexpr uint32_t num_scs_bit() const { return num_scs_bit_; }
+  // Returns the mask selecting the global SparseCore ID bits of a `col_id`.
+  constexpr uint64_t num_scs_mask() const { return num_scs_mask_; }
   constexpr uint64_t local_id_mask() const { return local_id_mask_; }
   constexpr uint64_t data_mask() const { return data_mask_val_; }
 

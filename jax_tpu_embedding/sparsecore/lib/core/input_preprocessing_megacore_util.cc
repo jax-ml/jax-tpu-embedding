@@ -25,7 +25,6 @@
 #include "absl/container/inlined_vector.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/log/log.h"  // from @com_google_absl
-#include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -284,7 +283,7 @@ void FillMegacorePartitionRange(
     internal::CsrArraysRefPerDevice& csr_arrays) {
   const int num_scs = options.GetNumScs();
   const int num_sc_per_device = options.num_sc_per_device;
-  const int num_sc_bits = absl::countr_zero(static_cast<uint32_t>(num_scs));
+  const int num_sc_bits = GetNumScBits(num_scs);
   const int max_row_id_exclusive = batch_size_per_sc * num_sc_per_device;
 
   absl::InlinedVector<absl::Span<const CooT>, kInlinedScPerDevice>

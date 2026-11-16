@@ -15,10 +15,12 @@
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PROCESS_COO_TENSORS_IMPL_H_
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
 
+#include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/abstract_input_batch.h"
@@ -78,23 +80,33 @@ float ComputeWeightDivisor(RowCombiner combiner,
   }
 }
 
+// Appends the COO tensors for rows `[values_stream.row(), options.slice_end)`
+// to `extracted_coo_tensors`, sharding column IDs with the tensor's stored
+// `key_layout_` and computing gains according to `options.combiner`.
 template <typename ValuesStreamT, typename WeightsStreamT, typename ColIdT>
 void ProcessCooTensors(
     const AbstractInputBatch::ExtractCooTensorsOptions& options,
     ValuesStreamT& values_stream, WeightsStreamT& weights_stream,
     ExtractedCooTensorsPerSparseCoreT<ColIdT>& extracted_coo_tensors) {
   CHECK(options.num_scs > 0 && (options.num_scs & (options.num_scs - 1)) == 0);
+  // The caller builds `extracted_coo_tensors` with the stacked table's
+  // `KeyLayout`, which must shard over the same SparseCore count.
+  DCHECK_EQ(extracted_coo_tensors.key_layout_.num_scs_bit(),
+            GetNumScBits(options.num_scs));
 
-  const int num_scs_bit = std::log2(options.num_scs);
-  if constexpr (std::is_same_v<ColIdT, int32_t>) {
-    extracted_coo_tensors.key_layout_ =
-        KeyLayout<int32_t>::Make(static_cast<uint32_t>(num_scs_bit));
-  }
   const int batch_size_per_sc = extracted_coo_tensors.batch_size_per_sc_;
   CHECK_GT(batch_size_per_sc, 0);
   const ColIdT col_offset = static_cast<ColIdT>(options.col_offset);
+  const int col_shift = options.col_shift;
   using ValueT =
       std::decay_t<decltype(std::declval<ValuesStreamT&>().getRowSpan()[0])>;
+  using CooT = CooFormatT<ColIdT>;
+  using UColIdT = std::make_unsigned_t<ColIdT>;
+  // Local copies of the key layout and SparseCore mask: unlike the members of
+  // `extracted_coo_tensors`, they cannot alias the vectors appended to below,
+  // so they stay in registers across the per-ID `push_back` calls.
+  const KeyLayout<ColIdT> key_layout = extracted_coo_tensors.key_layout_;
+  const int num_scs_mod = static_cast<int>(key_layout.num_scs_mask());
 
   for (; values_stream.row() < options.slice_end;
        values_stream.NextRow(), weights_stream.NextRow()) {
@@ -118,34 +130,34 @@ void ProcessCooTensors(
       divisor = ComputeWeightDivisor(options.combiner, weights_stream);
     }
 
-    const auto values = values_stream.getRowSpan();  // template-dependent type.
+    const absl::Span<const ValueT> values = values_stream.getRowSpan();
+    DCHECK_EQ(values.size(), static_cast<size_t>(num_cols));
+    if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
+      DCHECK(absl::c_all_of(values, [&](ValueT embedding_id) {
+        return static_cast<int64_t>(embedding_id) <= options.max_embedding_id;
+      }));
+    }
     if constexpr (!is_unity_weights_stream_v<WeightsStreamT>) {
+      DCHECK(extracted_coo_tensors.has_variable_weights());
       const absl::Span<const float> weights = weights_stream.getRowSpan();
-      for (int i = 0; i < num_cols; ++i) {
-        const auto embedding_id = values[i];
-        const float gain = weights[i] / divisor;
-        DCHECK_GE(embedding_id, 0);
-        if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
-          DCHECK_LE(static_cast<int64_t>(embedding_id),
-                    options.max_embedding_id);
-        }
-
-        extracted_coo_tensors.emplace_back_with_gain(
-            sample_id, static_cast<ColIdT>(embedding_id), gain,
-            options.col_shift, col_offset, num_scs_bit);
+      DCHECK_EQ(values.size(), weights.size());
+      for (size_t i = 0; i < values.size(); ++i) {
+        DCHECK_GE(values[i], 0);
+        extracted_coo_tensors.ids.push_back(
+            {.col_id = CooT::GetColId(static_cast<ColIdT>(values[i]),
+                                      col_shift, col_offset, num_scs_mod),
+             .row_id = sample_id});
+        extracted_coo_tensors.gains.push_back(weights[i] / divisor);
       }
     } else {
-      for (int i = 0; i < num_cols; ++i) {
-        const auto embedding_id = values[i];
+      DCHECK(!extracted_coo_tensors.has_variable_weights());
+      for (const ValueT embedding_id : values) {
         DCHECK_GE(embedding_id, 0);
-        if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
-          DCHECK_LE(static_cast<int64_t>(embedding_id),
-                    options.max_embedding_id);
-        }
-
-        extracted_coo_tensors.emplace_back(
-            sample_id, static_cast<ColIdT>(embedding_id), options.col_shift,
-            col_offset, num_scs_bit);
+        const ColIdT col_id = CooT::GetColId(static_cast<ColIdT>(embedding_id),
+                                             col_shift, col_offset, num_scs_mod);
+        extracted_coo_tensors.keys.push_back(key_layout.GetGroupingKey(
+            static_cast<UColIdT>(col_id), static_cast<UColIdT>(sample_id),
+            /*create_buckets=*/false));
       }
     }
   }

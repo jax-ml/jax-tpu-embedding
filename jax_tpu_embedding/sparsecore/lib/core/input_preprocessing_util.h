@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <bitset>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -175,37 +174,7 @@ struct ExtractedCooTensorsPerSparseCoreT {
     }
   }
 
-  ExtractedCooTensorsPerSparseCoreT(int batch_size_per_sc,
-                                    bool has_variable_weights,
-                                    RowCombiner combiner, int num_sc_bits = 0)
-      : ExtractedCooTensorsPerSparseCoreT(
-            batch_size_per_sc, has_variable_weights, combiner,
-            KeyLayout<ColIdT>::Make(static_cast<uint32_t>(num_sc_bits))) {}
-
   bool has_variable_weights() const { return has_variable_weights_; }
-
-  void emplace_back(int row_id, ColIdT embedding_id, int col_shift,
-                    ColIdT col_offset, int num_scs_bit) {
-    DCHECK(!has_variable_weights_);
-    DCHECK_EQ(key_layout_.num_scs_bit(), static_cast<uint32_t>(num_scs_bit));
-    const int num_scs_mod = (1 << num_scs_bit) - 1;
-    const ColIdT col_id =
-        CooT::GetColId(embedding_id, col_shift, col_offset, num_scs_mod);
-    this->keys.push_back(key_layout_.GetGroupingKey(
-        static_cast<UColIdT>(col_id), static_cast<UColIdT>(row_id),
-        /*create_buckets=*/false));
-  }
-
-  void emplace_back_with_gain(int row_id, ColIdT embedding_id, float gain,
-                              int col_shift, ColIdT col_offset,
-                              int num_scs_bit) {
-    DCHECK(has_variable_weights_);
-    const int num_scs_mod = (1 << num_scs_bit) - 1;
-    this->ids.push_back({.col_id = CooT::GetColId(embedding_id, col_shift,
-                                                  col_offset, num_scs_mod),
-                         .row_id = row_id});
-    this->gains.push_back(gain);
-  }
 
   size_t size() const {
     return has_variable_weights_ ? ids.size() : keys.size();
@@ -338,10 +307,12 @@ struct ExtractedCooTensorsT {
     per_sc_tensors_av.reserve(num_sc_per_device);
     int batch_size_per_sc =
         num_sc_per_device > 0 ? batch_size_for_device / num_sc_per_device : 0;
-    const int num_sc_bits =
-        num_sc_per_device > 0 ? std::log2(num_sc_per_device) : 0;
-    key_layout_ = KeyLayout<ColIdT>::Make(static_cast<uint32_t>(num_sc_bits),
-                                          max_col_id >> num_sc_bits);
+    const uint32_t num_sc_bits =
+        num_sc_per_device > 0
+            ? GetNumScBits(static_cast<uint32_t>(num_sc_per_device))
+            : 0;
+    key_layout_ =
+        KeyLayout<ColIdT>::Make(num_sc_bits, max_col_id >> num_sc_bits);
     for (int i = 0; i < num_sc_per_device; ++i) {
       per_sc_tensors_av.push_back(
           tsl::MakeUnconstructedAsyncValueRef<

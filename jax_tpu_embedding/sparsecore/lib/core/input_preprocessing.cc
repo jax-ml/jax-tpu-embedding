@@ -154,32 +154,41 @@ void CheckDeviceBatchSize(int batch_size_for_device, int num_sc_per_device,
       batch_size_for_device, stacked_table_name, num_sc_per_device);
 }
 
+// Returns the largest per-SparseCore (local) embedding ID that the stacked
+// table can produce, which sizes the local ID field of `KeyLayout<int64_t>`. It
+// covers each feature's `max_col_id` and per-SC column offset, and falls back
+// to the int32 limit when any feature leaves `max_col_id` unspecified.
+int64_t ComputeMaxLocalEmbeddingId(
+    absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
+    int64_t num_scs) {
+  int64_t max_local_emb_id = 0;
+  for (const FeatureMetadataInStack& m : stacked_table_metadata) {
+    if (!m.max_col_id.has_value() || !IsMaxColIdSpecified(m.max_col_id)) {
+      return std::numeric_limits<int32_t>::max() - 1;
+    }
+    max_local_emb_id = std::max<int64_t>(max_local_emb_id, *m.max_col_id);
+    if (m.col_offset >= 0) {
+      max_local_emb_id =
+          std::max<int64_t>(max_local_emb_id, m.col_offset / num_scs);
+    }
+  }
+  return max_local_emb_id;
+}
+
+// Returns the sort `KeyLayout` for a stacked table without validating its
+// metadata. `ValidateStackMetadataAndBuildPipeline` builds the same layout
+// after validation.
 template <typename ColIdT>
 KeyLayout<ColIdT> ComputeKeyLayout(
     absl::Span<const FeatureMetadataInStack> stacked_table_metadata,
     const PreprocessSparseDenseMatmulInputOptions& options) {
-  const uint32_t num_sc_bits = absl::countr_zero(options.GetNumScs());
+  const uint32_t num_sc_bits = GetNumScBits(options.GetNumScs());
   if constexpr (std::is_same_v<ColIdT, int32_t>) {
     return KeyLayout<int32_t>::Make(num_sc_bits);
   } else {
-    const int64_t num_scs = options.GetNumScs();
-    int64_t max_local_emb_id = 0;
-    bool any_unspecified_max_col_id = false;
-    for (const auto& m : stacked_table_metadata) {
-      if (IsMaxColIdSpecified(m.max_col_id)) {
-        max_local_emb_id = std::max<int64_t>(max_local_emb_id, *m.max_col_id);
-      } else {
-        any_unspecified_max_col_id = true;
-      }
-      if (m.col_offset >= 0) {
-        max_local_emb_id =
-            std::max<int64_t>(max_local_emb_id, m.col_offset / num_scs);
-      }
-    }
-    if (any_unspecified_max_col_id) {
-      max_local_emb_id = std::numeric_limits<int32_t>::max() - 1;
-    }
-    return KeyLayout<int64_t>::Make(num_sc_bits, max_local_emb_id);
+    return KeyLayout<int64_t>::Make(
+        num_sc_bits, ComputeMaxLocalEmbeddingId(stacked_table_metadata,
+                                                options.GetNumScs()));
   }
 }
 
@@ -947,7 +956,8 @@ absl::Status ValidateLocalBatchSizeLimits(
 
 // Validates per-feature column metadata for a stacked table and selects either
 // the 32-bit (`ColIdT = int32_t`) or 64-bit (`ColIdT = int64_t`) extraction and
-// sorting pipeline.
+// sorting pipeline. The pipeline's `KeyLayout` comes from `ComputeKeyLayout`
+// once the metadata is known to fit the selected key width.
 absl::StatusOr<TableExtractionAndSortingPipelineVariant>
 ValidateStackMetadataAndBuildPipeline(
     absl::string_view stacked_table_name,
@@ -956,13 +966,9 @@ ValidateStackMetadataAndBuildPipeline(
     const PreprocessSparseDenseMatmulInputOptions& options,
     bool stack_has_weights, bool enable_megacore_csr) {
   const int64_t num_scs = options.GetNumScs();
-  const uint32_t num_sc_bits =
-      absl::countr_zero(static_cast<uint32_t>(num_scs));
 
   int64_t batch_size_for_device = 0;
-  int64_t max_local_emb_id = 0;
   int64_t max_global_col_id = 0;
-  bool any_unspecified_max_col_id = false;
   for (const auto& m : stacked_table_metadata) {
     batch_size_for_device +=
         input_batches[m.feature_index]->size() / options.local_device_count;
@@ -1009,20 +1015,16 @@ ValidateStackMetadataAndBuildPipeline(
               std::numeric_limits<int32_t>::max()));
         }
       }
-      max_local_emb_id = std::max<int64_t>(max_local_emb_id, *m.max_col_id);
       max_global_col_id = std::max<int64_t>(
           max_global_col_id, (*m.max_col_id + 1) * num_scs - 1);
-    } else {
-      any_unspecified_max_col_id = true;
     }
-    max_local_emb_id =
-        std::max<int64_t>(max_local_emb_id, m.col_offset / num_scs);
     max_global_col_id = std::max<int64_t>(max_global_col_id, m.col_offset);
   }
 
   if (max_global_col_id <= std::numeric_limits<int32_t>::max()) {
     return TableExtractionAndSortingPipeline<int32_t>(
-        KeyLayout<int32_t>::Make(num_sc_bits), options.local_device_count);
+        ComputeKeyLayout<int32_t>(stacked_table_metadata, options),
+        options.local_device_count);
   }
 
   for (const auto& m : stacked_table_metadata) {
@@ -1034,11 +1036,10 @@ ValidateStackMetadataAndBuildPipeline(
           m.col_offset / num_scs, *m.max_col_id, m.name, stacked_table_name));
     }
   }
-  if (any_unspecified_max_col_id) {
-    max_local_emb_id = std::numeric_limits<int32_t>::max() - 1;
-  }
+  const uint32_t num_sc_bits = GetNumScBits(options.GetNumScs());
   const uint32_t local_id_bits = std::max<uint32_t>(
-      1, absl::bit_width(static_cast<uint64_t>(max_local_emb_id)));
+      1, absl::bit_width(static_cast<uint64_t>(
+             ComputeMaxLocalEmbeddingId(stacked_table_metadata, num_scs))));
   if (num_sc_bits + local_id_bits >= KeyLayout<int64_t>::kBucketIdOffset) {
     return absl::InvalidArgumentError(absl::StrFormat(
         "Stacked table '%s' requires %d SparseCore bits + %d local ID bits, "
@@ -1046,7 +1047,7 @@ ValidateStackMetadataAndBuildPipeline(
         stacked_table_name, num_sc_bits, local_id_bits));
   }
   const KeyLayout<int64_t> key_layout64 =
-      KeyLayout<int64_t>::Make(num_sc_bits, max_local_emb_id);
+      ComputeKeyLayout<int64_t>(stacked_table_metadata, options);
   if (!stack_has_weights &&
       batch_size_for_device - 1 >
           static_cast<int64_t>(key_layout64.data_mask())) {

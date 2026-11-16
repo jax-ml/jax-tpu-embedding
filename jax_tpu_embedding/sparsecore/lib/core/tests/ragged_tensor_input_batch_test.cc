@@ -29,16 +29,22 @@ namespace {
 
 using ::testing::ElementsAre;
 
+// Every test below extracts with `num_scs = 4`, so the per-SparseCore tensors
+// must carry the matching key layout.
+constexpr KeyLayout<int32_t> kKeyLayout =
+    KeyLayout<int32_t>::Make(/*num_scs_bit=*/2);
+
 TEST(RaggedTensorInputBatchTest, SliceTestWithSumCombiner) {
   // Input: (0, 0), (0, 1), (0, 2), (1, 0), (2, 0), (3, 2)
   RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
       ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
 
-  ExtractedCooTensorsPerSparseCore extracted_1(4, false, RowCombiner::kSum);
-  ExtractedCooTensorsPerSparseCore extracted_2(2, false, RowCombiner::kSum);
-  ExtractedCooTensorsPerSparseCore extracted_3(
-      2, false,
-      RowCombiner::kSum);  // row_offset=16
+  ExtractedCooTensorsPerSparseCore extracted_1(4, false, RowCombiner::kSum,
+                                               kKeyLayout);
+  ExtractedCooTensorsPerSparseCore extracted_2(2, false, RowCombiner::kSum,
+                                               kKeyLayout);
+  ExtractedCooTensorsPerSparseCore extracted_3(2, false, RowCombiner::kSum,
+                                               kKeyLayout);  // row_offset=16
 
   ragged_tensor_feature_input.ExtractCooTensors(
       {
@@ -95,7 +101,8 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
   RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
       ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
 
-  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kMean);
+  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kMean,
+                                             kKeyLayout);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -117,7 +124,8 @@ TEST(RaggedTensorInputBatchTest, SliceTestWithMeanCombiner) {
 TEST(RaggedTensorInputBatchTest, SliceTestWithSqrtnCombiner) {
   RaggedTensorInputBatchWithOwnedData<int64_t, int32_t>
       ragged_tensor_feature_input({0, 1, 2, 0, 0, 2}, {0, 3, 4, 5, 6});
-  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kSqrtn);
+  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kSqrtn,
+                                             kKeyLayout);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,
@@ -147,7 +155,8 @@ TEST(RaggedTensorInputBatchTest,
   RaggedTensorInputBatch ragged_tensor_feature_input(
       absl::MakeConstSpan(embedding_ids), row_offsets);
 
-  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kSum);
+  ExtractedCooTensorsPerSparseCore extracted(4, false, RowCombiner::kSum,
+                                             kKeyLayout);
   ragged_tensor_feature_input.ExtractCooTensors(
       {
           .slice_start = 0,

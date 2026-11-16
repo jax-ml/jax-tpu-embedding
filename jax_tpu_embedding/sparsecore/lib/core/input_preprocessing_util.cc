@@ -193,8 +193,7 @@ int FillBufferSegment(const BufferFillingOptions<CooT>& options,
 
   using UColIdT = std::make_unsigned_t<decltype(CooT::col_id)>;
   const UColIdT sc_mask = static_cast<UColIdT>(options.num_scs - 1);
-  const int num_sc_bits =
-      absl::countr_zero(static_cast<uint32_t>(options.num_scs));
+  const int num_sc_bits = GetNumScBits(options.num_scs);
 
   int processed = 0;
   for (const CooT& coo_tensor : options.coo_tensors) {
