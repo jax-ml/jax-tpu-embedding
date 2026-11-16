@@ -134,6 +134,7 @@ pytype_strict_contrib_test(
 
 pytype_strict_contrib_test(
     name = "sparse_coo_input_preprocessing_test",
+    timeout = "short",
     srcs = [
         "sparse_coo_input_preprocessing_test.py",
     ],
