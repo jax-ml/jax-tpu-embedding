@@ -351,6 +351,54 @@ class EmbeddingPipeliningUtilsTest(parameterized.TestCase):
     )
     np.testing.assert_array_equal(zeros, np.zeros(spec.shape, np.float32))
 
+  def test_zeros_like_shape_keeps_layout_format(self):
+    mesh = jax.sharding.Mesh(np.array(jax.devices()), ("x",))
+    sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("x"))
+    device_layout = layout.Layout(major_to_minor=(1, 0), tiling=())
+    spec = jax.ShapeDtypeStruct(
+        (2 * len(jax.devices()), 8),
+        jnp.float32,
+        sharding=layout.Format(device_layout, sharding),
+        weak_type=True,
+    )
+
+    zeros = embedding_pipelining_utils._zeros_like_shape(spec)
+
+    self.assertEqual(
+        zeros,
+        jax.ShapeDtypeStruct(spec.shape, spec.dtype, sharding=spec.format),
+    )
+
+  def test_as_shape_dtype_struct_of_tracer_under_mesh_has_no_sharding(self):
+    mesh = jax.sharding.Mesh(np.array(jax.devices()), ("x",))
+    specs = []
+
+    def record_spec(x):
+      specs.append(embedding_pipelining_utils._as_shape_dtype_struct(x))
+      return x
+
+    with jax.set_mesh(mesh):
+      jax.jit(record_spec)(jnp.zeros((4, 8), jnp.float32))
+
+    self.assertEqual(specs, [jax.ShapeDtypeStruct((4, 8), jnp.float32)])
+
+  def test_zeros_from_shape_with_scalar_layout_format(self):
+    mesh = jax.sharding.Mesh(np.array(jax.devices()), ("x",))
+    replicated = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
+    spec = jax.ShapeDtypeStruct(
+        (),
+        jnp.float32,
+        sharding=layout.Format(
+            layout.Layout(major_to_minor=(), tiling=()), replicated
+        ),
+    )
+
+    zeros = embedding_pipelining_utils._zeros_from_shape(spec)
+
+    self.assertIsInstance(zeros, jax.Array)
+    self.assertEqual(jax.typeof(zeros).shape, ())
+    np.testing.assert_array_equal(zeros, np.float32(0))
+
 
 if __name__ == "__main__":
   absltest.main()

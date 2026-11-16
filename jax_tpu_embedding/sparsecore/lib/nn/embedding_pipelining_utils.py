@@ -64,6 +64,7 @@ _P = ParamSpec('_P')
 _PlaceholderSharding: TypeAlias = jax.sharding.Sharding | layout.Format
 # A pipeline input, or its abstract value.
 _InputLeaf: TypeAlias = jax.typing.ArrayLike | jax.ShapeDtypeStruct
+_InputLeafT = TypeVar('_InputLeafT', bound=_InputLeaf)
 
 
 # Stage function protocols.
@@ -427,44 +428,26 @@ def get_default_sc_bwd_function(
 
 
 # Placeholders. Each concrete initializer is next to its abstract value.
-def _replace_shape_dtype_struct(
-    obj: jax.ShapeDtypeStruct, **kwargs
-) -> jax.ShapeDtypeStruct:
-  """Replaces the attributes of a ShapeDtypeStruct with the given values."""
-  new_kwargs = {
-      'shape': obj.shape,
-      'dtype': obj.dtype,
-      'sharding': obj.sharding,
-      'weak_type': obj.weak_type,
-  }
-  new_kwargs.update(kwargs)
-  return jax.ShapeDtypeStruct(**new_kwargs)
-
-
 def _as_shape_dtype_struct(x: _InputLeaf) -> jax.ShapeDtypeStruct:
   """Returns the abstract value of `x` as an argument of `jax.jit`.
+
+  It is `jax.ShapeDtypeStruct.like(x)`, except that it returns a
+  `jax.ShapeDtypeStruct` itself: `like` would drop its layout. Like `like`, it
+  gives no sharding to an uncommitted array, a NumPy array or a Python scalar,
+  which have no sharding that `jax.jit` must keep. Neither has a tracer, but
+  under `jax.set_mesh` `like` would give it the sharding of its abstract value.
 
   Args:
     x: An array, a tracer, a Python scalar or a `jax.ShapeDtypeStruct`.
 
   Returns:
-    The abstract value of `x`, with the sharding of a committed array.
+    The abstract value of `x`, with the format of a committed array.
   """
   if isinstance(x, jax.ShapeDtypeStruct):
     return x
-  aval = jax.typeof(x)
-  # A tracer, an uncommitted array, a NumPy array and a Python scalar have no
-  # sharding that `jax.jit` must keep.
-  sharding = None
-  if (
-      isinstance(x, jax.Array)
-      and not isinstance(x, jax.core.Tracer)
-      and x.committed
-  ):
-    sharding = x.sharding
-  return jax.ShapeDtypeStruct(
-      aval.shape, aval.dtype, sharding=sharding, weak_type=aval.weak_type
-  )
+  if isinstance(x, jax.core.Tracer):
+    return jax.ShapeDtypeStruct.like(x).update(sharding=None)
+  return jax.ShapeDtypeStruct.like(x)
 
 
 def _is_kept_input(sharding: _PlaceholderSharding, x: _InputLeaf) -> bool:
@@ -518,32 +501,47 @@ def _zeros_like_shape(x: _InputLeaf) -> jax.ShapeDtypeStruct:
   """
   value = _as_shape_dtype_struct(x)
   if isinstance(x, jax.ShapeDtypeStruct):
-    return _replace_shape_dtype_struct(value, weak_type=False)
+    return value.update(weak_type=False)
   if value.weak_type:
-    return _replace_shape_dtype_struct(value, sharding=None)
+    return value.update(sharding=None)
   return value
 
 
-def _create_sharded_array(sharding, x):
+def _create_sharded_array(
+    sharding: _PlaceholderSharding, x: _InputLeafT
+) -> _InputLeafT | jax.Array:
   """Returns zeros like `x` with `sharding`, or `x` if it need not be sharded.
 
   Args:
     sharding: The sharding or layout format of the placeholder.
     x: An input, or the abstract value of a placeholder.
+
+  Returns:
+    `x` itself if `_is_kept_input(sharding, x)`, else the zeros of
+    `_sharded_zeros` with the shape and dtype of `x` and `sharding`.
   """
   if _is_kept_input(sharding, x):
     return x
-  num_devices = (
-      sharding.num_devices
-      if hasattr(sharding, 'num_devices')
-      else sharding.sharding.num_devices  # This is for type `Layout`.
-  )
+  return _sharded_zeros(_create_sharded_array_shape(sharding, x))
+
+
+def _sharded_zeros(spec: jax.ShapeDtypeStruct) -> jax.Array:
+  """Returns strongly typed zeros with the shape, dtype and format of `spec`.
+
+  Each device allocates only its shard, which splits the first dimension evenly
+  across all devices of the sharding.
+
+  Args:
+    spec: The abstract value of a placeholder that is at least one-dimensional
+      and has a sharding.
+  """
+  num_devices = spec.sharding.num_devices
   return jax.make_array_from_callback(
-      x.shape,
-      sharding,
+      spec.shape,
+      spec.format,
       lambda index: jnp.zeros(
-          [x.shape[0] // num_devices, *x.shape[1:]],
-          dtype=x.dtype,
+          [spec.shape[0] // num_devices, *spec.shape[1:]],
+          dtype=spec.dtype,
       ),
   )
 
@@ -573,9 +571,10 @@ def _zeros_from_shape(spec: jax.ShapeDtypeStruct) -> jax.Array:
   Args:
     spec: The abstract value of a placeholder that is not an input.
   """
-  # `spec.sharding` drops the layout; `spec.format` keeps it.
-  if spec.format.layout is not None:
-    return _create_sharded_array(spec.format, spec)
+  # `spec.sharding` drops the layout; `spec.format` keeps it. A scalar has no
+  # first dimension to split.
+  if spec.format.layout is not None and spec.ndim:
+    return _sharded_zeros(spec)
   return _create_output_arrays(spec)
 
 
@@ -630,20 +629,26 @@ def _eval_shape(
   sharding = jitted_fn.lower(*args, **kwargs).compile().output_shardings
 
   return jax.tree.map(
-      lambda x, s: _replace_shape_dtype_struct(x, sharding=s),
+      lambda x, s: x.update(sharding=s),
       out,
       sharding,
   )
 
 
-def _apply_sharding(sharding, shapes):
-  """Applies a sharding prefix tree to a ShapeDtypeStruct tree."""
+def _apply_sharding(sharding: object, shapes: _T) -> _T:
+  """Applies a sharding prefix tree to a ShapeDtypeStruct tree.
+
+  Args:
+    sharding: A sharding prefix tree of `shapes`.
+    shapes: A tree of `jax.ShapeDtypeStruct`s, or None.
+
+  Returns:
+    `shapes` with the shardings of `sharding`.
+  """
   if shapes is None:
-    return None
+    return shapes
   if sharding is None or isinstance(sharding, jax.sharding.Sharding):
-    return jax.tree.map(
-        lambda x: _replace_shape_dtype_struct(x, sharding=sharding), shapes
-    )
+    return jax.tree.map(lambda x: x.update(sharding=sharding), shapes)
   return jax.tree.map(
       _apply_sharding, sharding, shapes, is_leaf=lambda x: x is not sharding
   )
@@ -666,6 +671,7 @@ def get_initial_state_shapes(
         _ScFwdAux,
         _TcAux,
     ],
+    *,
     dense_input_sharding: jax.sharding.Sharding | None = None,
     sparse_input_sharding: jax.sharding.Sharding | None = None,
     pipeline_output_sharding: _ShardingT | None = None,
@@ -775,6 +781,7 @@ def get_initial_state(
         _ScFwdAux,
         _TcAux,
     ],
+    *,
     dense_input_sharding: jax.sharding.Sharding | None = None,
     sparse_input_sharding: jax.sharding.Sharding | None = None,
     pipeline_output_sharding: _ShardingT | None = None,
