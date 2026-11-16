@@ -359,6 +359,10 @@ struct TableState {
   int coo_buffer_size_per_device;
   CsrArraysPerHost csr_arrays_per_host;
   StatsPerHost stats_per_host;
+  // Sink for the host-minibatching second sort pass, whose stats are discarded
+  // because the first-pass stats are authoritative. Owned here so it outlives
+  // the asynchronous sort tasks that write into it.
+  std::optional<StatsPerHost> discarded_second_pass_stats;
   int batch_size_for_device;
   TableExtractionAndSortingPipelineVariant pipeline;
 
@@ -490,43 +494,25 @@ void CreateMinibatchingBucketsForTable(
   });
   DCHECK(options.IsHostMinibatchingEnabled());
   state.stats_per_host.dropped_id_count = 0;
+  StatsPerHost& discarded_stats = state.discarded_second_pass_stats.emplace(
+      options.local_device_count, options.GetNumScs(),
+      options.num_sc_per_device);
   std::visit(
       [&](auto& pipe) {
         using ColIdT = typename std::decay_t<decltype(pipe)>::ColIdType;
         pipe.device_sorting_results.assign(
             options.local_device_count,
             tsl::AsyncValueRef<DeviceSortingTaskResultT<ColIdT>>());
-        absl::BlockingCounter counter(options.local_device_count);
         for (int local_device = 0; local_device < options.local_device_count;
              ++local_device) {
-          options.async_task_scheduler([&, local_device] {
-            // Note: We create a dummy stats object here because we don't want
-            // to overwrite the stats from the first pass, which are
-            // authoritative. The only stat we care about from this second pass
-            // is the number of dropped IDs.
-            auto dummy_stats_host = std::make_shared<StatsPerHost>(
-                /*local_device_count=*/1, options.GetNumScs(),
-                options.num_sc_per_device);
-            internal::StatsPerDevice dummy_stats =
-                dummy_stats_host->GetStatsPerDevice(0);
-            auto result_av = SortAndGroupCooTensorsForTablePipelineAsync(
-                state, pipe, local_device, options,
-                SortPass::kHostMinibatchingBucketed, std::move(dummy_stats));
-            pipe.device_sorting_results[local_device] = result_av;
-            // `dummy_stats_host` must be kept alive until `result_av` is
-            // ready, because `dummy_stats` (which is used in the async task
-            // that produces `result_av`) holds references to data owned by
-            // `dummy_stats_host`. Moving `dummy_stats_host` into this
-            // `AndThen` callback ensures its lifetime is extended until the
-            // async operation completes.
-            result_av.GetAsyncValue()->AndThen(
-                [dummy_stats_host = std::move(dummy_stats_host), &counter] {
-                  counter.DecrementCount();
-                });
-          });
+          // This only schedules the per-SC sorting tasks; consumers wait on
+          // `pipe.device_sorting_results` via RunWhenReady / AndThen.
+          pipe.device_sorting_results[local_device] =
+              SortAndGroupCooTensorsForTablePipelineAsync(
+                  state, pipe, local_device, options,
+                  SortPass::kHostMinibatchingBucketed,
+                  discarded_stats.GetStatsPerDevice(local_device));
         }
-        // Wait for all local devices to finish.
-        counter.Wait();
       },
       state.pipeline);
 }
