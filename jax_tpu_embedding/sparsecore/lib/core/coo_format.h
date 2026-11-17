@@ -46,10 +46,10 @@ template <typename ColIdT>
 inline uint64_t HighwayHash(ColIdT col_id) {
   static_assert(std::is_same_v<ColIdT, int32_t> ||
                 std::is_same_v<ColIdT, int64_t>);
+  highwayhash::HHStateT<HH_TARGET> state(kHighwayHashKey);
   highwayhash::HHResult64 result;
-  highwayhash::HighwayHashCatT<HH_TARGET> hash(kHighwayHashKey);
-  hash.Append(reinterpret_cast<const char*>(&col_id), sizeof(col_id));
-  hash.Finalize(&result);
+  highwayhash::HighwayHashT(&state, reinterpret_cast<const char*>(&col_id),
+                            sizeof(col_id), &result);
   return result;
 }
 

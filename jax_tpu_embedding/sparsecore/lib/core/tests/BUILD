@@ -150,6 +150,15 @@ pytype_strict_contrib_test(
 )
 
 cc_test(
+    name = "coo_format_test",
+    srcs = ["coo_format_test.cc"],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/core:coo_format",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "ragged_tensor_input_batch_test",
     srcs = ["ragged_tensor_input_batch_test.cc"],
     deps = [
