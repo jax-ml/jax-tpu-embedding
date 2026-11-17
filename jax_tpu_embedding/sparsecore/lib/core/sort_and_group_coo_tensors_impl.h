@@ -64,15 +64,29 @@ enum class SortPass {
   kHostMinibatchingBucketed,
 };
 
+// How ID limits and dropping are enforced during a sort-and-group pass.
+enum class IdLimitMode {
+  kNone,
+  kPerPartition,
+  kPerSparseCoreAligned,
+};
+
 // Compile-time policies derived from a `SortPass`.
 template <SortPass kPass>
 struct SortPassTraits {
   static constexpr bool kCreateBuckets =
       kPass == SortPass::kHostMinibatchingBucketed;
-  static constexpr bool kDeviceMinibatching =
-      kPass == SortPass::kDeviceMinibatching;
-  static constexpr bool kDropIds =
-      kPass == SortPass::kNoMinibatching || kCreateBuckets;
+  static constexpr IdLimitMode kIdLimitMode = [] {
+    switch (kPass) {
+      case SortPass::kNoMinibatching:
+      case SortPass::kHostMinibatchingBucketed:
+        return IdLimitMode::kPerPartition;
+      case SortPass::kDeviceMinibatching:
+        return IdLimitMode::kPerSparseCoreAligned;
+      case SortPass::kHostMinibatchingCheck:
+        return IdLimitMode::kNone;
+    }
+  }();
   static constexpr bool kComputeSplit =
       kPass == SortPass::kHostMinibatchingCheck || kCreateBuckets;
   // Host minibatching reports a boolean "minibatching required" from the first
@@ -254,11 +268,14 @@ struct LocalSparseCoreTensorGroupingContextT {
 using LocalSparseCoreTensorGroupingContext =
     LocalSparseCoreTensorGroupingContextT<int32_t>;
 
-template <bool kHasVariableWeights, bool kCreateBuckets, RowCombiner Combiner,
-          bool kDeviceMinibatching = false, typename ColIdT>
+template <bool kHasVariableWeights, SortPass kPass, RowCombiner Combiner,
+          typename ColIdT>
 inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
     LocalSparseCoreTensorGroupingContextT<ColIdT> context) {
-  static_assert(!kCreateBuckets || !kDeviceMinibatching);
+  using Traits = SortPassTraits<kPass>;
+  constexpr bool kCreateBuckets = Traits::kCreateBuckets;
+  constexpr bool kPerSparseCoreAlignedLimit =
+      Traits::kIdLimitMode == IdLimitMode::kPerSparseCoreAligned;
   using CooT = CooFormatT<ColIdT>;
   using UColIdT = std::make_unsigned_t<ColIdT>;
   tsl::profiler::TraceMe group_traceme([&] {
@@ -287,12 +304,12 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
   const int64_t hbm_word_size = options.hbm_word_size_in_4b;
   const int64_t hbm_word_mask = hbm_word_size - 1;
   const int64_t max_aligned_ids_per_sc =
-      kDeviceMinibatching
+      kPerSparseCoreAlignedLimit
           ? xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size) *
                 int64_t{global_sc_count}
           : 0;
   const int64_t max_aligned_unique_ids_per_sc =
-      kDeviceMinibatching
+      kPerSparseCoreAlignedLimit
           ? xla::RoundUpTo<int64_t>(max_unique_ids_per_partition,
                                     hbm_word_size) *
                 int64_t{global_sc_count}
@@ -358,7 +375,7 @@ inline void GroupAndDeduplicateCooTensorsForLocalSparseCore(
       bool exceeds_ids_limit;
       bool starts_new_ids_word = false;
       bool starts_new_unique_word = false;
-      if (kDeviceMinibatching) {
+      if constexpr (kPerSparseCoreAlignedLimit) {
         starts_new_ids_word =
             (kept_ids(global_sc_id, bucket_id) & hbm_word_mask) == 0;
         exceeds_ids_limit =
@@ -598,9 +615,8 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
                 MatrixXi::Zero(global_sc_count, bucket_count);
 
             // Megacore CSR is exempt from per-SparseCore ID capping.
-            const bool can_drop_id =
-                !feature_metadata.enable_megacore_csr &&
-                (Traits::kDropIds || Traits::kDeviceMinibatching);
+            const bool can_drop_id = !feature_metadata.enable_megacore_csr &&
+                                     Traits::kIdLimitMode != IdLimitMode::kNone;
             const internal::LocalSparseCoreTensorGroupingContextT<ColIdT>
                 context = {
                     .keys = keys,
@@ -629,18 +645,15 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             switch (context.feature_metadata.row_combiner) {
               case RowCombiner::kSum:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSum,
-                    Traits::kDeviceMinibatching>(context);
+                    kHasVariableWeights, kPass, RowCombiner::kSum>(context);
                 break;
               case RowCombiner::kMean:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kMean,
-                    Traits::kDeviceMinibatching>(context);
+                    kHasVariableWeights, kPass, RowCombiner::kMean>(context);
                 break;
               case RowCombiner::kSqrtn:
                 internal::GroupAndDeduplicateCooTensorsForLocalSparseCore<
-                    kHasVariableWeights, kCreateBuckets, RowCombiner::kSqrtn,
-                    Traits::kDeviceMinibatching>(context);
+                    kHasVariableWeights, kPass, RowCombiner::kSqrtn>(context);
                 break;
             }
 
@@ -686,13 +699,15 @@ SortAndGroupCooTensorsPerLocalDeviceImpl(
             // Megacore CSR is disabled; Megacore CSR checks per-device limits
             // when filling the merged buffer.
             if (!feature_metadata.enable_megacore_csr) {
-              if constexpr (Traits::kDropIds) {
+              if constexpr (Traits::kIdLimitMode ==
+                            IdLimitMode::kPerPartition) {
                 internal::ValidateMaxIdsOrDie(
                     observed_max_ids_per_bucket,
                     observed_max_unique_ids_per_bucket, max_ids_per_partition,
                     max_unique_ids_per_partition, stacked_table_name,
                     options.allow_id_dropping);
-              } else if constexpr (Traits::kDeviceMinibatching) {
+              } else if constexpr (Traits::kIdLimitMode ==
+                                   IdLimitMode::kPerSparseCoreAligned) {
                 internal::ValidateDeviceMinibatchingMaxIdsOrDie(
                     stats.required_buffer_size[local_sc_id],
                     unique_ids_per_partition_per_bucket, max_ids_per_partition,
