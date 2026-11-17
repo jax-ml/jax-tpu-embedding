@@ -319,12 +319,16 @@ int ComputeCooBufferSizePerDevice(
       SuggestedCooBufferSizeForStackedTables(stacked_table_metadata);
   const int num_scs = global_device_count * num_sc_per_device;
   const int num_scs_per_device = num_sc_per_device;
+  const bool enable_megacore_csr =
+      EnableMegacoreCsrForStackedTables(stacked_table_metadata);
 
   const int64_t max_ids_rounded_up =
       xla::RoundUpTo<int64_t>(max_ids_per_partition, hbm_word_size_in_4b);
+  // Megacore CSR always produces one minibatch, so skip bucket reservation.
   const int64_t theoretical_max = ComputeTheoreticalMaxCooBufferSize(
       max_ids_per_partition, global_device_count, num_sc_per_device,
-      hbm_word_size_in_4b, minibatching_mode);
+      hbm_word_size_in_4b,
+      enable_megacore_csr ? MinibatchingMode::kDisabled : minibatching_mode);
   absl::string_view stacked_table_name = stacked_table_metadata[0].name;
   VLOG_EVERY_N(2, 10007) << "Theoretical Max for table " << stacked_table_name
                          << ": " << theoretical_max
@@ -342,9 +346,16 @@ int ComputeCooBufferSizePerDevice(
     VLOG_EVERY_N(2, 10007) << "Suggested Coo Buffer Size for table "
                            << stacked_table_name << ": "
                            << suggested_coo_buffer_size_per_device.value();
-    computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
-        theoretical_max, suggested_coo_buffer_size_per_device.value(),
-        num_scs_per_device, hbm_word_size_in_4b, stacked_table_name);
+    if (enable_megacore_csr) {
+      // Only align suggested sizes since the Megacore max excludes buckets.
+      computed_coo_buffer_size_per_device = xla::RoundUpTo<int64_t>(
+          suggested_coo_buffer_size_per_device.value(),
+          int64_t{hbm_word_size_in_4b} * num_scs_per_device);
+    } else {
+      computed_coo_buffer_size_per_device = MayBeUpdateBufferSize(
+          theoretical_max, suggested_coo_buffer_size_per_device.value(),
+          num_scs_per_device, hbm_word_size_in_4b, stacked_table_name);
+    }
   } else {
     LOG_IF(WARNING, batch_number % 10000 == 0)
         << "No Coo Buffer Size provided for table " << stacked_table_name
@@ -364,7 +375,7 @@ int ComputeCooBufferSizePerDevice(
       << "Computed Coo Buffer Size (" << computed_coo_buffer_size_per_device
       << ") for table " << stacked_table_name
       << " is out of the valid range (0, INT_MAX).";
-  if (EnableMegacoreCsrForStackedTables(stacked_table_metadata)) {
+  if (enable_megacore_csr) {
     // Megacore consumers may sort the full COO buffer on SparseCore, which
     // requires a minimum number of elements per tile (~128 for 16 tiles x 8
     // lanes). 256 keeps small buffers above that.

@@ -2168,6 +2168,46 @@ TEST(MegacoreCsrTest, CooBufferSizeAddsAlignmentPaddingPerDevice) {
   EXPECT_EQ(megacore_size, 6656);
 }
 
+TEST(MegacoreCsrTest, DefaultCooBufferSizeIgnoresMinibatchingBuckets) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  std::vector<FeatureMetadataInStack> metadata = {
+      CreateBufferSizeTestMetadata(
+          /*enable_megacore_csr=*/true, /*max_ids_per_partition=*/64,
+          /*suggested_coo_buffer_size_per_device=*/std::nullopt),
+  };
+
+  // Act & Assert
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(options, metadata), 4224);
+}
+
+TEST(MegacoreCsrTest, SuggestedCooBufferSizeAboveTheoreticalMaxIsKept) {
+  // Arrange
+  PreprocessSparseDenseMatmulInputOptions options{
+      .local_device_count = 1,
+      .global_device_count = 4,
+      .num_sc_per_device = 4,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  std::vector<FeatureMetadataInStack> metadata = {
+      CreateBufferSizeTestMetadata(
+          /*enable_megacore_csr=*/true, /*max_ids_per_partition=*/64,
+          /*suggested_coo_buffer_size_per_device=*/8192),
+  };
+
+  // Act & Assert
+  EXPECT_EQ(ComputeCooBufferSizePerDevice(options, metadata), 8320);
+}
+
 TEST(MegacoreCsrTest, AllowsCooBufferSizeExceedingTileSpmem) {
   PreprocessSparseDenseMatmulInputOptions options{
       .local_device_count = 1,

@@ -52,7 +52,6 @@ BucketMap = dict[int, BucketData]
 
 _MIN_MEGACORE_COO_BUFFER_SIZE = 256
 _MEGACORE_COO_BUFFER_ALIGNMENT = 128
-_MAX_MINIBATCHING_BUCKETS = 64
 _MEGACORE_PADDING_ID = np.iinfo(np.int32).max
 
 
@@ -109,33 +108,23 @@ def _megacore_coo_buffer_size(
     global_device_count: int,
     num_sc_per_device: int,
     hbm_word_size_in_4b: int,
-    minibatching_mode: MinibatchingMode,
     suggested_coo_buffer_size_per_device: int | None = None,
 ) -> int:
-  """Computes the Megacore COO buffer size per device."""
-  num_scs = global_device_count * num_sc_per_device
-  theoretical_max = (
-      input_preprocessing._round_up(max_ids_per_partition, hbm_word_size_in_4b)
-      * num_sc_per_device
-      * num_scs
-      * (
-          _MAX_MINIBATCHING_BUCKETS
-          if minibatching_mode != MinibatchingMode.DISABLED
-          else 1
-      )
-  )
+  """Computes the Megacore COO buffer size per device (single minibatch)."""
   if suggested_coo_buffer_size_per_device is not None:
     base_size = input_preprocessing._round_up(
         suggested_coo_buffer_size_per_device,
         hbm_word_size_in_4b * num_sc_per_device,
     )
-    if base_size > theoretical_max:
-      raise ValueError(
-          f"suggested_coo_buffer_size_per_device ({base_size}) exceeds"
-          f" theoretical_max ({theoretical_max})."
-      )
   else:
-    base_size = theoretical_max
+    num_scs = global_device_count * num_sc_per_device
+    base_size = (
+        input_preprocessing._round_up(
+            max_ids_per_partition, hbm_word_size_in_4b
+        )
+        * num_sc_per_device
+        * num_scs
+    )
 
   aligned_with_device_padding = (
       input_preprocessing._round_up(base_size, hbm_word_size_in_4b)
@@ -288,7 +277,6 @@ def preprocess_sparse_dense_matmul_input(
       global_device_count=global_device_count,
       num_sc_per_device=num_sc_per_device,
       hbm_word_size_in_4b=hbm_word_size_in_4b,
-      minibatching_mode=minibatching_mode,
       suggested_coo_buffer_size_per_device=suggested_coo_buffer_size_per_device,
   )
   return _pack_buckets_to_megacore_csr(

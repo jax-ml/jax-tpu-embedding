@@ -913,6 +913,50 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
         1, 1, row_pointers, gains, expected_gains
     )
 
+  def test_default_coo_buffer_size_ignores_minibatching_buckets(self):
+    features = [[0, 5], [2], [4, 4], [7]]
+    weights = [[1.0, 1.0], [1.0], [1.0, 1.0], [1.0]]
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+
+    _, embedding_ids, _, _ = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=64,
+            max_unique_ids_per_partition=64,
+            rows_per_sc=10,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+            minibatching_mode=input_preprocessing_megacore.MinibatchingMode.DEVICE,
+            suggested_coo_buffer_size_per_device=None,
+        )
+    )
+
+    self.assertLen(embedding_ids, 640)
+
+  def test_suggested_coo_buffer_size_above_theoretical_max_is_kept(self):
+    features = [[0, 5], [2], [4, 4], [7]]
+    weights = [[1.0, 1.0], [1.0], [1.0, 1.0], [1.0]]
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+
+    _, embedding_ids, _, _ = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            features,
+            weights,
+            mesh,
+            max_ids_per_partition=64,
+            max_unique_ids_per_partition=64,
+            rows_per_sc=10,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+            minibatching_mode=input_preprocessing_megacore.MinibatchingMode.DEVICE,
+            suggested_coo_buffer_size_per_device=1024,
+        )
+    )
+
+    self.assertLen(embedding_ids, 1152)
+
   def test_validation_errors(self):
     mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
     features = [[0, 5], [2], [4, 4], [7]]
