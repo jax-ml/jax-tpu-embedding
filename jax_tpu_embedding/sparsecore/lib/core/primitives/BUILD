@@ -38,6 +38,24 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "sparse_dense_matmul_csr_with_fdo_statistics",
+    srcs = [
+        "sparse_dense_matmul_csr_with_fdo_statistics.py",
+    ],
+    visibility = CORE_USERS,
+    deps = [
+        ":sparse_dense_matmul_csr",
+        ":utils",
+        "//jax_tpu_embedding/sparsecore/lib/core:constants",
+        pypi_requirement("jax"),
+        pypi_requirement("jax/extend"),
+        pypi_requirement("jax/extend/mlir:ir"),
+        pypi_requirement("jax/extend/mlir/dialects:stablehlo_dialect"),
+        pypi_requirement("numpy"),
+    ],
+)
+
+pytype_strict_library(
     name = "sparse_dense_matmul_activation_unstack",
     srcs = ["sparse_dense_matmul_activation_unstack.py"],
     deps = [

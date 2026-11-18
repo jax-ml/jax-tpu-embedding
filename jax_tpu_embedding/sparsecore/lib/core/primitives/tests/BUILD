@@ -40,6 +40,31 @@ tpu_py_strict_test(
     ],
 )
 
+# copybara:uncomment_begin(internal)
+# # FDO statistic calculation has to be enabled in the TPU compiler.
+# tpu_py_strict_test(
+#     name = "sparse_dense_matmul_csr_with_fdo_statistics_test",
+#     srcs = [
+#         "sparse_dense_matmul_csr_with_fdo_statistics_test.py",
+#     ],
+#     args = [
+#         "--xla_tpu_sc_enable_fdo_statistic_calculation=true",
+#     ],
+#     deps = [
+#         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing",
+#         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
+#         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr_with_fdo_statistics",
+#         "//jax_tpu_embedding/sparsecore/lib/nn/tests:test_utils",
+#         "//jax_tpu_embedding/sparsecore/utils",
+#         "//third_party/jax:tpu_support",
+#         pypi_requirement("absl/testing:absltest"),
+#         pypi_requirement("absl/testing:parameterized"),
+#         pypi_requirement("jax"),
+#         pypi_requirement("numpy"),
+#     ],
+# )
+# copybara:uncomment_end
+
 tpu_py_strict_test(
     name = "local_sparse_dense_matmul_test",
     srcs = ["local_sparse_dense_matmul_test.py"],
