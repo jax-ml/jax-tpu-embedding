@@ -74,7 +74,7 @@ void SendLocalData(
           [args, peer_address = peer_address, result_av,
            error_set](::grpc::Status s) mutable {
             if (!s.ok() && !result_av.IsAvailable() &&
-                !error_set->exchange(true)) {
+                !error_set->exchange(true, std::memory_order_acq_rel)) {
               absl::Status status =
                   absl::Status(static_cast<absl::StatusCode>(s.error_code()),
                                s.error_message());

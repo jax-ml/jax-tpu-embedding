@@ -29,6 +29,7 @@
 #include "absl/random/distributions.h"  // from @com_google_absl
 #include "absl/random/random.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
+#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/synchronization/mutex.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -60,15 +61,15 @@ std::string CombinerToString(RowCombiner combiner) {
 template <typename Derived>
 void LogStats(const Eigen::MatrixBase<Derived>& data, absl::string_view name) {
   if (data.size() == 0) {
-    fprintf(stderr, "%s: data is empty.\n", name.data());
+    absl::FPrintF(stderr, "%s: data is empty.\n", name);
     return;
   }
   double mean = data.template cast<double>().mean();
   double stdev =
       std::sqrt((data.template cast<double>().array() - mean).square().sum() /
                 data.size());
-  fprintf(stderr, "%s: mean=%f, stdev=%f, min=%d, max=%d\n", name.data(), mean,
-          stdev, data.minCoeff(), data.maxCoeff());
+  absl::FPrintF(stderr, "%s: mean=%f, stdev=%f, min=%d, max=%d\n", name, mean,
+                stdev, data.minCoeff(), data.maxCoeff());
 }
 
 // The following parameters are derived from an empirical analysis of a

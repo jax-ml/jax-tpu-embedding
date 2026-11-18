@@ -534,10 +534,7 @@ TEST_F(AllReduceRaceTest, LateRpcIsIgnored) {
   }
   barrier.Wait();
 
-  for (int i = 0; i < num_tasks_; ++i) {
-    ASSERT_TRUE(results[i].ok());
-    EXPECT_FALSE(*results[i]);
-  }
+  ASSERT_THAT(results, Each(IsOkAndHolds(false)));
 
   EXPECT_EQ(nodes_[0]->GetActiveStatesCount(), 0);
 
@@ -611,10 +608,9 @@ TEST_F(AllReduceDeathTest,
       {
         // Re-create the environment inside the child process to ensure
         // thread-safety after fork.
-        std::unique_ptr<FakeEnv> fake_env = std::make_unique<FakeEnv>();
-        std::unique_ptr<tsl::thread::ThreadPool> thread_pool =
-            std::make_unique<tsl::thread::ThreadPool>(tsl::Env::Default(),
-                                                      "TestPool", 4);
+        auto fake_env = std::make_unique<FakeEnv>();
+        auto thread_pool = std::make_unique<tsl::thread::ThreadPool>(
+            tsl::Env::Default(), "TestPool", 4);
         std::vector<std::unique_ptr<MinibatchingNode>> nodes =
             testing_utils::SetUpMinibatchingNodes(num_tasks, expected_threads,
                                                   fake_env.get());

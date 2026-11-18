@@ -195,7 +195,6 @@ cc_test(
     srcs = ["sparse_coo_input_stream_test.cc"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core:abstract_input_batch",
-        "//jax_tpu_embedding/sparsecore/lib/core:coo_format",
         "//jax_tpu_embedding/sparsecore/lib/core:input_preprocessing_util",
         "//jax_tpu_embedding/sparsecore/lib/core:process_coo_tensors",
         "//jax_tpu_embedding/sparsecore/lib/core:sparse_coo_input_stream",

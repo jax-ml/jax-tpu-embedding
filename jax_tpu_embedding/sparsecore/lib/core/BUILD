@@ -357,6 +357,7 @@ cc_library(
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/core/grpc:minibatching_node",
         "@com_google_absl//absl/strings",
+        "@tsl//tsl/platform:env",
         "@tsl//tsl/platform:test",
     ],
 )

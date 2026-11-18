@@ -14,12 +14,14 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_THREADS_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_INPUT_PREPROCESSING_THREADS_H_
 
+#include "absl/base/nullability.h"  // from @com_google_absl
 #include "tsl/platform/threadpool.h"  // from @tsl
 
 namespace jax_sc_embedding {
 
-// Global thread pool for all computations done by input preprocessing.
-tsl::thread::ThreadPool* PreprocessingThreadPool();
+// Returns the process-wide thread pool used for SparseCore input preprocessing.
+// The returned pointer is never null and remains valid for process lifetime.
+tsl::thread::ThreadPool* absl_nonnull PreprocessingThreadPool();
 
 }  // namespace jax_sc_embedding
 

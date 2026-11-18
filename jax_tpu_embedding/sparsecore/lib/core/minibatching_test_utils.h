@@ -20,6 +20,7 @@
 
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/minibatching_node.h"
+#include "tsl/platform/env.h"  // from @tsl
 #include "tsl/platform/test.h"  // from @tsl
 
 namespace jax_sc_embedding {

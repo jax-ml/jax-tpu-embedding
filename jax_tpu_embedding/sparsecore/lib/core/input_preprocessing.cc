@@ -1066,7 +1066,7 @@ PreprocessSparseDenseMatmulInput(
     OutputCsrArrays* absl_nullable output_csr_arrays) {
   tsl::profiler::TraceMe traceme([&] {
     return tsl::profiler::TraceMeEncode(
-        absl::StrCat("jax_sc_embedding::PreprocessSparseDenseMatmulInput"),
+        "jax_sc_embedding::PreprocessSparseDenseMatmulInput",
         {{"batch_number", options.batch_number}});
   });
   if (absl::Status status = options.Validate(); !status.ok()) {

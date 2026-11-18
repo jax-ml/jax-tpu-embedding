@@ -525,7 +525,7 @@ TEST(SortAndGroupTest, IdDropping) {
       .hbm_word_size_in_4b = 8,
       .allow_id_dropping = true,
   };
-  bool minibatching_split = 0;
+  bool minibatching_split = false;
   StatsPerHost stats_per_host(/*local_device_count=*/1, /*num_partitions=*/4,
                               /*num_sc_per_device=*/4);
   auto stats_per_device = stats_per_host.GetStatsPerDevice(0);

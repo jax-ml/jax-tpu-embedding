@@ -66,6 +66,10 @@ struct PreprocessSparseDenseMatmulOutput {
   SparseDenseMatmulInputStats stats;
 };
 
+// Extracts, sorts, groups, and packs `input_batches` across `stacked_tables`
+// into CSR-wrapped COO buffers according to `options`. When `output_csr_arrays`
+// is non-null, writes CSR arrays into caller-provided storage instead of
+// allocating output matrices in the returned struct.
 absl::StatusOr<PreprocessSparseDenseMatmulOutput>
 PreprocessSparseDenseMatmulInput(
     absl::Span<const std::unique_ptr<AbstractInputBatch>> input_batches,

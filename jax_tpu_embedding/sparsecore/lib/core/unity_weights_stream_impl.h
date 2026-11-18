@@ -25,7 +25,9 @@ namespace jax_sc_embedding {
 template <typename ValuesStream>
 class UnityWeightsStream {
  public:
-  UnityWeightsStream(const ValuesStream& value_stream)
+  // Wraps `value_stream` (which must outlive this adapter) to yield unit
+  // weights across its row and column structure.
+  explicit UnityWeightsStream(const ValuesStream& value_stream)
       : value_stream_(value_stream) {}
 
   int cols() const { return value_stream_.cols(); }

@@ -26,6 +26,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_interface.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/all_reduce_service_impl.h"
 #include "jax_tpu_embedding/sparsecore/lib/core/grpc/grpc_credentials.h"
+#include "tsl/platform/env.h"  // from @tsl
 
 namespace jax_sc_embedding {
 namespace rpc {

@@ -106,6 +106,7 @@ cc_library(
         "@com_github_grpc_grpc//:grpc++",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
+        "@tsl//tsl/platform:env",
     ],
 )
 
