@@ -94,6 +94,7 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       max_unique_ids_per_partition=max_unique_ids_per_partition,
       computation_name="fwd-pass",  # Not used in the forward pass.
       sharding_strategy=sharding_strategy,
+      allowed_embedding_table_dtypes=(np.float32, jnp.bfloat16),
   )
 
   if quantization_config is not None:
@@ -103,12 +104,27 @@ def _tpu_sparse_dense_matmul_csr_abstract_eval(
       )
     quantization_config.validate_table(embedding_dim)
 
+  if embedding_table.dtype == jnp.bfloat16:
+    if len(embedding_table.shape) == 1:
+      raise ValueError(
+          "1D embedding tables are not supported for bfloat16 embeddings."
+      )
+    if embedding_dim % 16 != 0:
+      raise ValueError(
+          "bfloat16 embedding tables require feature width to be a multiple of"
+          f" 16, got {embedding_dim}."
+      )
+    if quantization_config is not None:
+      raise ValueError(
+          "Quantization is not supported for bfloat16 embedding tables."
+      )
+
   shape = (
       (device_batch_size, embedding_dim)
       if len(embedding_table.shape) > 1
       else (device_batch_size,)
   )
-  return core.ShapedArray(shape, dtype=jnp.float32)
+  return core.ShapedArray(shape, dtype=embedding_table.dtype)
 
 
 tpu_sparse_dense_matmul_csr_primitive.def_abstract_eval(
@@ -137,7 +153,7 @@ def _tpu_sparse_dense_matmul_csr_lowering(
   """Lowering for tpu_sparse_dense_matmul_csr."""
   (out_aval,) = ctx.avals_out
 
-  constant_op = hlo.constant(ir.DenseElementsAttr.get(np.float32(0.0)))
+  constant_op = mlir.ir_constant(np.zeros((), dtype=out_aval.dtype))
   embedding_table_type = ir.RankedTensorType(embedding_table.type)
   if embedding_table_type.rank > 1:
     activation_init = hlo.broadcast(
