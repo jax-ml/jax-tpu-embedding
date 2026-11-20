@@ -24,9 +24,9 @@ generic or leaf types. Keep all public PyTree leaf types strictly typed as
 degrades API ergonomics for the 99% data-centric use case, and still cannot
 satisfy the type checker for structural pytree matching.
 
-**Resolution**: Suppress type errors at the *injection site* using `# pyrefly:
-ignore[bad-argument-type]` with a brief comment. Do not alter the class
-definition.
+**Resolution**: Suppress type errors at the *injection site* using
+`# pyrefly: ignore[bad-argument-type]` with a brief comment. Do not alter the
+class definition.
 
 [26572]: https://github.com/jax-ml/jax/issues/26572#issuecomment-2665778697
 [14688]: https://github.com/jax-ml/jax/pull/14688
@@ -74,7 +74,8 @@ are outside this scope and need no performance note.
     compile time (`if constexpr` or a template parameter) instead of adding
     runtime fields that every ID pays for. Comparing the optimized benchmark
     binary or the function's disassembly against the base revision confirms that
-    the default path compiles to the same code.
+    the default path compiles to the same code (state the takeaway in a phrase
+    rather than pasting `.text` or symbol byte counts).
 *   Avoid integer division and modulo by runtime values in per-ID loops. The
     total SC count is validated to be a power of two, so use masks and shifts.
 *   Avoid per-batch heap allocations and copies of COO data; reuse buffers.
@@ -85,11 +86,23 @@ are outside this scope and need no performance note.
 layout), add a matching case to the benchmark in the same change, so the new
 path has a baseline and future changes to it are measured.
 
-**Resolution**: Run the benchmark on the final version of the change. Rank
-results by wall time, then CPU time, then allocations. Cite only deltas with
-p<0.05, never the geomean, and explain any tradeoff between metrics. Ignore peak
-memory per op, whose run-to-run noise is too large to be useful; use allocations
-per op for memory instead.
+**Resolution**: Run the benchmark on the final version of the change and report
+one authoritative run per suite in a single compact Markdown table of at most 8
+rows (or one sentence when no workload changes at p<0.05), following the
+template in [Concise Change Descriptions](#concise-change-descriptions):
+
+*   Rank rows by wall time (`time/op`), then CPU time (`cpu/op`), then
+    allocations (`allocs/op`). Group combiners or workloads that move together.
+*   Format `p < 0.05` deltas as `base -> new` (`-X.X%`) and neutral cells as
+    `~`. Never cite the geomean, and ignore peak memory per op (`allocs/op`
+    tracks memory).
+*   Omit inline `(new - base) / base` arithmetic, duplicate `Nx` speedup
+    multipliers, multiple p-value tests per cell, raw benchmark parameter
+    suffixes (such as `/20/1/0/threads:8`) when the workload label identifies
+    the case, preliminary reruns, and prose explaining noise on unchanged
+    workloads.
+*   Summarize remaining neutral cases in one line below the table, and explain
+    any cross-metric tradeoff in one sentence.
 
 ## Verify Each Optimization Independently
 
@@ -113,5 +126,58 @@ significant improvement (p<0.05) on its own, ranked by wall time, then CPU time,
 then allocations, or if it is needed for another kept optimization to work. For
 hints that only steer the compiler, first check whether they change the
 generated code by comparing the optimized benchmark binary or the function's
-disassembly with and without them; drop those that do not. Report results per
-optimization, and state which workloads each one helps or hurts.
+disassembly with and without them; drop those that do not. When optimizations
+are split into separate changes, report only that change's benchmark table and
+omit ablation logs and rejected experiments (note a non-obvious pitfall in a
+one-line code comment if needed). Include a per-optimization breakdown in the
+description only when one change bundles multiple optimizations, as one compact
+table row per kept optimization.
+
+## Concise Change Descriptions
+
+**Rule**: Keep all prose in a change description (title, motivation paragraph,
+and summary bullets, excluding benchmark tables and collapsed `<details>`
+blocks) to **at most 150 words**.
+
+**Why**: Reviewers and `git log` readers can already see modified files, symbol
+names, and unit tests in the diff. Long code-heavy paragraphs, diff inventories,
+and raw benchmark dumps hide why the change is needed and what tradeoffs it
+makes.
+
+**Resolution**: Follow this structure and template:
+
+*   **Title (<= 65 characters)**: Imperative summary of the change.
+*   **Motivation (1-3 sentences)**: State the problem or bottleneck in plain
+    English (`Previously, ...`), without pasting multi-line code expressions or
+    line numbers.
+*   **Summary (2-4 bullets)**: State the key design changes only. Do not list
+    modified file paths, recite the diff function by function, narrate added
+    unit tests, paste `.o`/`.so` byte sizes, or list rejected experiments tried
+    during exploration. Put incidental drive-by fixes in a collapsed `<details>`
+    block (with a blank line after `<details>`) if worth noting at all.
+
+```markdown
+Store PartitionedCooTensorsT bucket offsets inline
+
+Previously, `PartitionedCooTensorsT` stored `bucket_offsets_` in a
+`std::vector<int>` and grew it inside `Add`, causing a heap allocation per
+SparseCore partition and keeping capacity checks in the inner deduplication
+loop.
+
+* Store `bucket_offsets_` in `absl::InlinedVector<int,
+  CooFormat::kMaxMinibatchingBuckets + 1>` (65 ints max) to avoid per-partition
+  heap allocations.
+* Replace the `push_back` loop in `AdvanceBucketOffsets` with an early return on
+  bucket 0 plus a single `resize`, folding the bucket update away when
+  minibatching is disabled.
+
+| Benchmark | `time/op` | `cpu/op` | `allocs/op` |
+| :--- | :--- | :--- | :--- |
+| `SortAndGroup` `kMean/LargeVocab` | 935 -> 851 ms (-9.0%) | 895 -> 823 ms (-8.0%) | 110 -> 87 (-20.9%) |
+| `SortAndGroup` `kSum/LargeVocab` | 913 -> 831 ms (-8.9%) | 849 -> 803 ms (-5.5%) | ~ |
+| `SortAndGroup` `kMean/ModerateMultivalency` | ~ | 68.2 -> 64.2 ms (-5.8%) | 71 -> 67 (-5.6%) |
+| `preprocess_input_benchmarks` (all 5) | -2.9% to -4.9% | ~ | ~ |
+
+12 runs, p < 0.05 shown (`~` = no significant change); 0 regressions across 22
+cases.
+```
