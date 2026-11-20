@@ -65,11 +65,15 @@ def generate_feature_specs(
     num_features: int,
     num_samples: int,
     *,
+    local_device_count: int = 4,
+    global_device_count: int = 16,
+    num_sc_per_device: int = 4,
     vocab_size: int = 1024,
     combiner: str = "sum",
     stacked: bool = False,
 ) -> list[embedding_spec.FeatureSpec]:
   """Generates feature specs for the given number of features."""
+  global_num_samples = num_samples * global_device_count // local_device_count
   feature_specs = []
   for i in range(num_features):
     table_spec = embedding_spec.TableSpec(
@@ -86,8 +90,8 @@ def generate_feature_specs(
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
-        input_shape=[num_samples, 1],
-        output_shape=[num_samples, 16],
+        input_shape=[global_num_samples, 1],
+        output_shape=[global_num_samples, 16],
         name="feature_spec_{}".format(i),
     )
     feature_specs.append(feature_spec)
@@ -95,15 +99,17 @@ def generate_feature_specs(
     limit = 1024 * num_features
     embedding.auto_stack_tables(
         feature_specs,
-        global_device_count=16,
-        num_sc_per_device=4,
+        global_device_count=global_device_count,
+        num_sc_per_device=num_sc_per_device,
         stack_to_max_ids_per_partition=lambda _name, _batch: limit,
         stack_to_max_unique_ids_per_partition=lambda _name, _batch: limit,
         activation_mem_bytes_limit=64 * 1024 * 1024,
     )
   else:
     embedding.prepare_feature_specs_for_training(
-        feature_specs, global_device_count=16, num_sc_per_device=4
+        feature_specs,
+        global_device_count=global_device_count,
+        num_sc_per_device=num_sc_per_device,
     )
   return feature_specs
 
