@@ -28,8 +28,8 @@ Boolean parameters are often represented as 0 for False and 1 for True.
 For example, to run only the `sparse_coo` benchmarks:
 `--benchmark_filter=preprocess_sparse_coo`
 
-To run only the ragged benchmark with ragged=True:
-`--benchmark_filter='preprocess_numpy/ragged:1'`
+To run only the unweighted single-table ragged benchmark:
+`--benchmark_filter='preprocess_numpy_ragged/weighted:0/stacked:0'`
 
 To upload the profile to pprof:
 pprof -flame /tmp/preprocess.prof
@@ -42,7 +42,9 @@ extraction use `-show_from='jax_sc_embedding::ExtractCooTensors'` and so on.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import concurrent.futures
+import functools
 import sys
 
 from absl import app
@@ -58,50 +60,29 @@ import portpicker
 _NUM_FEATURES = flags.DEFINE_integer("num_features", 100, "Number of features.")
 _NUM_SAMPLES = flags.DEFINE_integer("num_samples", 16000, "Number of samples.")
 
-_GLOBAL_SPECS = None
-_GLOBAL_RAGGED_FEATURES = None
-_GLOBAL_RAGGED_WEIGHTS = None
-_GLOBAL_DENSE_FEATURES = None
-_GLOBAL_DENSE_WEIGHTS = None
-_GLOBAL_RAGGED_INDICES = None
-_GLOBAL_RAGGED_VALUES = None
-_GLOBAL_RAGGED_DENSE_SHAPES = None
 
-
-def generate_feature_specs(num_features: int, num_samples: int):
+def generate_feature_specs(
+    num_features: int,
+    num_samples: int,
+    *,
+    vocab_size: int = 1024,
+    combiner: str = "sum",
+    stacked: bool = False,
+) -> list[embedding_spec.FeatureSpec]:
   """Generates feature specs for the given number of features."""
   feature_specs = []
   for i in range(num_features):
     table_spec = embedding_spec.TableSpec(
-        vocabulary_size=1024,
+        vocabulary_size=vocab_size,
         embedding_dim=16,
-        initializer=lambda: np.zeros((1024, 16), dtype=np.float32),
+        initializer=lambda: np.zeros((1, 16), dtype=np.float32),
         optimizer=embedding_spec.SGDOptimizerSpec(
             learning_rate=0.001,
         ),
-        combiner="sum",
+        combiner=combiner,
         name="table_{}".format(i),
         max_ids_per_partition=1024,
         max_unique_ids_per_partition=1024,
-        _setting_in_stack=embedding_spec.TableSettingInStack(
-            stack_name="table_{}".format(i),
-            padded_vocab_size=1024,
-            padded_embedding_dim=16,
-            row_offset_in_shard=0,
-            shard_rotation=0,
-        ),
-        _stacked_table_spec=embedding_spec.StackedTableSpec(
-            stack_name="table_{}".format(i),
-            stack_vocab_size=1024,
-            stack_embedding_dim=16,
-            optimizer=embedding_spec.SGDOptimizerSpec(
-                learning_rate=0.001,
-            ),
-            combiner="sum",
-            total_sample_count=num_samples,
-            max_ids_per_partition=1024,
-            max_unique_ids_per_partition=1024,
-        ),
     )
     feature_spec = embedding_spec.FeatureSpec(
         table_spec=table_spec,
@@ -110,50 +91,80 @@ def generate_feature_specs(num_features: int, num_samples: int):
         name="feature_spec_{}".format(i),
     )
     feature_specs.append(feature_spec)
+  if stacked:
+    limit = 1024 * num_features
+    embedding.auto_stack_tables(
+        feature_specs,
+        global_device_count=16,
+        num_sc_per_device=4,
+        stack_to_max_ids_per_partition=lambda _name, _batch: limit,
+        stack_to_max_unique_ids_per_partition=lambda _name, _batch: limit,
+        activation_mem_bytes_limit=64 * 1024 * 1024,
+    )
+  else:
+    embedding.prepare_feature_specs_for_training(
+        feature_specs, global_device_count=16, num_sc_per_device=4
+    )
   return feature_specs
 
 
-def generate_samples_for_feature_spec(feature_specs, num_samples, ragged=False):
-  """Generates random samples for a given feature spec."""
+@functools.cache
+def generate_samples(
+    num_features: int,
+    num_samples: int,
+    *,
+    vocab_size: int = 1024,
+    ragged: bool = False,
+    weighted: bool = False,
+) -> tuple[list[np.ndarray], list[np.ndarray] | None]:
+  """Generates random samples for the given dimensions."""
+  np.random.seed(0)
   all_features = []
-  for feature_spec in feature_specs:
-    table_spec = feature_spec.table_spec
+  all_weights = [] if weighted else None
+  dtype = np.int64 if vocab_size > np.iinfo(np.int32).max else np.int32
+  for _ in range(num_features):
     if not ragged:
       features = np.random.randint(
-          table_spec.vocabulary_size,
+          vocab_size,
           size=(num_samples, 16),
-          dtype=np.int32,
+          dtype=dtype,
       )
       all_features.append(features)
     else:
       counts = np.random.randint(1, 32, size=num_samples)
-      total_ids = np.sum(counts)
+      total_ids = int(np.sum(counts))
       ids_flat = np.random.randint(
-          table_spec.vocabulary_size,
+          vocab_size,
           size=(total_ids,),
           dtype=np.int32,
       )
       split_indices = np.cumsum(counts)[:-1]
       features = np.split(ids_flat, split_indices)
       all_features.append(np.array(features, dtype=object))
-  return all_features, None
+      if all_weights is not None:
+        weights_flat = np.random.uniform(0.1, 1.0, size=total_ids).astype(
+            np.float32
+        )
+        all_weights.append(
+            np.array(np.split(weights_flat, split_indices), dtype=object)
+        )
+  return all_features, all_weights
 
 
-def generate_sparse_coo_inputs_for_feature_spec(
-    feature_specs, num_samples, vocab_size
-):
-  """Generates random samples for a given feature spec."""
+@functools.cache
+def generate_sparse_coo_inputs(
+    num_features: int, num_samples: int, vocab_size: int = 1024
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+  """Generates random sparse COO inputs for the given dimensions."""
+  np.random.seed(0)
   all_indices_tensors = []
   all_values_tensors = []
   all_dense_shape_tensors = []
 
-  for feature_spec in feature_specs:
-    table_spec = feature_spec.table_spec
+  for _ in range(num_features):
     counts = np.random.randint(1, 32, size=num_samples)
-    total_ids = np.sum(counts)
-    values = np.random.randint(
-        table_spec.vocabulary_size, size=total_ids, dtype=np.int32
-    )
+    total_ids = int(np.sum(counts))
+    values = np.random.randint(vocab_size, size=total_ids, dtype=np.int32)
     row_indices = np.repeat(np.arange(num_samples), counts)
     col_indices = np.concatenate([np.arange(c) for c in counts])
     indices = np.stack([row_indices, col_indices], axis=1)
@@ -167,6 +178,7 @@ def generate_sparse_coo_inputs_for_feature_spec(
 
 
 def apply_fdo_stats(
+    feature_specs: Sequence[embedding_spec.FeatureSpec],
     stats_cc: pybind_input_preprocessing.SparseDenseMatmulInputStats,
     fdo_headroom: float = 1.0,
     buffer_size_headroom: float | None = None,
@@ -174,6 +186,7 @@ def apply_fdo_stats(
   """Applies FDO adjustment to benchmark specs from stats.
 
   Args:
+    feature_specs: Feature specs to update in place.
     stats_cc: The C++ SparseDenseMatmulInputStats object.
     fdo_headroom: The headroom to apply to the FDO stats for max_ids and
       max_unique_ids. Defaults to 1.0 because we process the same input
@@ -199,27 +212,18 @@ def apply_fdo_stats(
     stats.required_buffer_size_per_sc[table_name] = np.array(
         [int(np.ceil(np.max(value) * buffer_size_headroom))]
     )
-  assert _GLOBAL_SPECS is not None
   embedding.update_preprocessing_parameters(
-      _GLOBAL_SPECS, stats, num_sc_per_device=4
+      feature_specs, stats, num_sc_per_device=4
   )
 
 
-@google_benchmark.register
-@google_benchmark.option.unit(google_benchmark.kMillisecond)
-@google_benchmark.option.arg_names(["ragged"])
-@google_benchmark.option.args_product([[False, True]])
-@google_benchmark.option.iterations(100)
-def preprocess_numpy(state: google_benchmark.State):
-  """Benchmark for preprocessing input for sparse-dense matmul."""
-  assert _GLOBAL_SPECS is not None
-  ragged = state.range(0)
-  if ragged:
-    assert _GLOBAL_RAGGED_FEATURES is not None
-    features, feature_weights = _GLOBAL_RAGGED_FEATURES, _GLOBAL_RAGGED_WEIGHTS
-  else:
-    assert _GLOBAL_DENSE_FEATURES is not None
-    features, feature_weights = _GLOBAL_DENSE_FEATURES, _GLOBAL_DENSE_WEIGHTS
+def _run_numpy_benchmark(
+    state: google_benchmark.State,
+    features: list[np.ndarray],
+    feature_weights: list[np.ndarray] | None,
+    feature_specs: list[embedding_spec.FeatureSpec],
+) -> None:
+  """Runs the benchmark loop for NumPy input preprocessing."""
   batch_num = 0
   while state:
     if batch_num == 0:
@@ -228,7 +232,7 @@ def preprocess_numpy(state: google_benchmark.State):
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_input(
             features,
             feature_weights,
-            _GLOBAL_SPECS,
+            feature_specs,
             local_device_count=4,
             global_device_count=16,
             num_sc_per_device=4,
@@ -239,41 +243,99 @@ def preprocess_numpy(state: google_benchmark.State):
         )
     )
     if batch_num == 0:
-      apply_fdo_stats(stats_cc)
+      apply_fdo_stats(feature_specs, stats_cc)
       state.resume_timing()
     batch_num += 1
 
 
 @google_benchmark.register
 @google_benchmark.option.unit(google_benchmark.kMillisecond)
+@google_benchmark.option.arg_names(["vocab", "combiner"])
+@google_benchmark.option.args([1024, 0])
+@google_benchmark.option.args([1024, 1])
+@google_benchmark.option.args([1024, 2])
+@google_benchmark.option.args([5_000_000_000, 0])
+@google_benchmark.option.iterations(100)
+def preprocess_numpy_dense(state: google_benchmark.State):
+  """Benchmark for preprocessing dense NumPy inputs."""
+  vocab_size = state.range(0)
+  combiner = ("sum", "mean", "sqrtn")[state.range(1)]
+  state.set_label(combiner)
+  specs = generate_feature_specs(
+      _NUM_FEATURES.value,
+      _NUM_SAMPLES.value,
+      vocab_size=vocab_size,
+      combiner=combiner,
+  )
+  features, feature_weights = generate_samples(
+      _NUM_FEATURES.value, _NUM_SAMPLES.value, vocab_size=vocab_size
+  )
+
+  _run_numpy_benchmark(state, features, feature_weights, specs)
+
+
+@google_benchmark.register
+@google_benchmark.option.unit(google_benchmark.kMillisecond)
+@google_benchmark.option.arg_names(["weighted", "stacked"])
+@google_benchmark.option.args([0, 0])
+@google_benchmark.option.args([1, 0])
+@google_benchmark.option.args([0, 1])
+@google_benchmark.option.iterations(100)
+def preprocess_numpy_ragged(state: google_benchmark.State):
+  """Benchmark for preprocessing ragged NumPy inputs."""
+  weighted, stacked = bool(state.range(0)), bool(state.range(1))
+  specs = generate_feature_specs(
+      _NUM_FEATURES.value, _NUM_SAMPLES.value, stacked=stacked
+  )
+  features, feature_weights = generate_samples(
+      _NUM_FEATURES.value,
+      _NUM_SAMPLES.value,
+      ragged=True,
+      weighted=weighted,
+  )
+
+  _run_numpy_benchmark(state, features, feature_weights, specs)
+
+
+@google_benchmark.register
+@google_benchmark.option.unit(google_benchmark.kMillisecond)
+@google_benchmark.option.arg_names(["device_minibatching"])
+@google_benchmark.option.args_product([[False, True]])
 @google_benchmark.option.iterations(100)
 def preprocess_sparse_coo(state: google_benchmark.State):
   """Benchmark for preprocessing input for sparse-dense matmul."""
-  assert _GLOBAL_SPECS is not None
-  assert _GLOBAL_RAGGED_INDICES is not None
-  assert _GLOBAL_RAGGED_VALUES is not None
-  assert _GLOBAL_RAGGED_DENSE_SHAPES is not None
+  device_minibatching = bool(state.range(0))
+  minibatching_mode = (
+      pybind_input_preprocessing.MinibatchingMode.DEVICE
+      if device_minibatching
+      else pybind_input_preprocessing.MinibatchingMode.DISABLED
+  )
+  specs = generate_feature_specs(_NUM_FEATURES.value, _NUM_SAMPLES.value)
+  indices, values, dense_shapes = generate_sparse_coo_inputs(
+      _NUM_FEATURES.value, _NUM_SAMPLES.value
+  )
   batch_num = 0
   while state:
     if batch_num == 0:
       state.pause_timing()
     *_, stats_cc = (
         pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
-            _GLOBAL_RAGGED_INDICES,
-            _GLOBAL_RAGGED_VALUES,
-            _GLOBAL_RAGGED_DENSE_SHAPES,
-            _GLOBAL_SPECS,
+            indices,
+            values,
+            dense_shapes,
+            specs,
             local_device_count=4,
             global_device_count=16,
             num_sc_per_device=4,
             sc_simd_width=8,
             hbm_word_size_in_4b=8,
+            minibatching_mode=minibatching_mode,
             batch_number=batch_num,
-            allow_id_dropping=batch_num == 0,
+            allow_id_dropping=device_minibatching or batch_num == 0,
         )
     )
     if batch_num == 0:
-      apply_fdo_stats(stats_cc)
+      apply_fdo_stats(specs, stats_cc)
       state.resume_timing()
     batch_num += 1
 
@@ -288,6 +350,10 @@ def preprocess_minibatching(
 ):
   """Benchmark for preprocessing input for sparse-dense matmul with minibatching enabled."""
   force_minibatching = state.range(0)
+  specs = generate_feature_specs(_NUM_FEATURES.value, _NUM_SAMPLES.value)
+  indices, values, dense_shapes = generate_sparse_coo_inputs(
+      _NUM_FEATURES.value, _NUM_SAMPLES.value
+  )
   num_hosts = 4
   ports = [portpicker.pick_unused_port() for _ in range(num_hosts)]
   all_reduce_interfaces = []
@@ -305,15 +371,11 @@ def preprocess_minibatching(
     )
 
   def worker(host_id: int, batch_number: int):
-    assert _GLOBAL_SPECS is not None
-    assert _GLOBAL_RAGGED_INDICES is not None
-    assert _GLOBAL_RAGGED_VALUES is not None
-    assert _GLOBAL_RAGGED_DENSE_SHAPES is not None
     return pybind_input_preprocessing.preprocess_sparse_dense_matmul_sparse_coo_input(
-        _GLOBAL_RAGGED_INDICES,
-        _GLOBAL_RAGGED_VALUES,
-        _GLOBAL_RAGGED_DENSE_SHAPES,
-        _GLOBAL_SPECS,
+        indices,
+        values,
+        dense_shapes,
+        specs,
         local_device_count=4,
         global_device_count=16,
         num_sc_per_device=4,
@@ -349,9 +411,11 @@ def preprocess_minibatching(
       if batch_num == 0:
         assert stats_cc is not None
         if force_minibatching:
-          apply_fdo_stats(stats_cc, fdo_headroom=0.5, buffer_size_headroom=1.0)
+          apply_fdo_stats(
+              specs, stats_cc, fdo_headroom=0.5, buffer_size_headroom=1.0
+          )
         else:
-          apply_fdo_stats(stats_cc, fdo_headroom=1.0)
+          apply_fdo_stats(specs, stats_cc, fdo_headroom=1.0)
         state.resume_timing()
       else:
         assert num_minibatches is not None
@@ -366,35 +430,6 @@ def preprocess_minibatching(
 
 
 def main(_):
-  global _GLOBAL_SPECS
-  global _GLOBAL_RAGGED_FEATURES
-  global _GLOBAL_RAGGED_WEIGHTS
-  global _GLOBAL_DENSE_FEATURES
-  global _GLOBAL_DENSE_WEIGHTS
-  global _GLOBAL_RAGGED_INDICES
-  global _GLOBAL_RAGGED_VALUES
-  global _GLOBAL_RAGGED_DENSE_SHAPES
-
-  # Total local batch size that is measured is 16000x100 = 1,600,000.
-  np.random.seed(0)
-  _GLOBAL_SPECS = generate_feature_specs(
-      _NUM_FEATURES.value, _NUM_SAMPLES.value
-  )
-  _GLOBAL_RAGGED_FEATURES, _GLOBAL_RAGGED_WEIGHTS = (
-      generate_samples_for_feature_spec(
-          _GLOBAL_SPECS, _NUM_SAMPLES.value, ragged=True
-      )
-  )
-  _GLOBAL_DENSE_FEATURES, _GLOBAL_DENSE_WEIGHTS = (
-      generate_samples_for_feature_spec(
-          _GLOBAL_SPECS, _NUM_SAMPLES.value, ragged=False
-      )
-  )
-  _GLOBAL_RAGGED_INDICES, _GLOBAL_RAGGED_VALUES, _GLOBAL_RAGGED_DENSE_SHAPES = (
-      generate_sparse_coo_inputs_for_feature_spec(
-          _GLOBAL_SPECS, _NUM_SAMPLES.value, 1024
-      )
-  )
   google_benchmark.run_benchmarks()
 
 
