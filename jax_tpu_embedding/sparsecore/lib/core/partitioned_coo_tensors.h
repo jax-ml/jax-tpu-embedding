@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"  // from @com_google_absl
+#include "absl/container/inlined_vector.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
 #include "absl/numeric/bits.h"  // from @com_google_absl
 #include "absl/types/span.h"  // from @com_google_absl
@@ -46,13 +47,14 @@ class PartitionedCooTensorsT {
         size_(0),
         bucket_count_per_sc_(bucket_count_per_sc),
         global_sc_count_(global_sc_count),
-        bucket_offsets_(),
+        bucket_offsets_(1, 0),
         curr_bucket_id_(0),
         merged_(false),
         dedup_col_id_(std::numeric_limits<UColIdT>::max()),
         dedup_row_id_(std::numeric_limits<uint32_t>::max()) {
-    bucket_offsets_.reserve(1 + bucket_count_per_sc_);
-    bucket_offsets_.push_back(0);
+    CHECK_GE(bucket_count_per_sc_, 1);
+    CHECK_LE(bucket_count_per_sc_,
+             static_cast<int>(CooFormat::kMaxMinibatchingBuckets));
   }
 
   PartitionedCooTensorsT(PartitionedCooTensorsT&& other) noexcept
@@ -141,6 +143,7 @@ class PartitionedCooTensorsT {
 
   // Get COO tensors for given SC and bucket.
   absl::Span<const CooT> operator()(int bucket_id) const {
+    DCHECK_GE(bucket_id, 0);
     const int start_index = bucket_id;
     const int start_offset = bucket_offsets_[start_index];
     DCHECK_LT(start_index + 1, bucket_offsets_.size());
@@ -240,14 +243,15 @@ class PartitionedCooTensorsT {
  private:
   // Advance bucket offsets to the given `target_bucket_id`.
   void AdvanceBucketOffsets(int target_bucket_id) {
+    DCHECK_GE(curr_bucket_id_, 0);
     DCHECK_LT(curr_bucket_id_, bucket_count_per_sc_)
         << "Bucket offsets already finalized.";
     DCHECK_LE(target_bucket_id, bucket_count_per_sc_);
-
-    while (curr_bucket_id_ < target_bucket_id) {
-      bucket_offsets_.push_back(size_);
-      curr_bucket_id_++;
+    if (target_bucket_id <= 0 || target_bucket_id <= curr_bucket_id_) {
+      return;
     }
+    bucket_offsets_.resize(target_bucket_id + 1, size_);
+    curr_bucket_id_ = target_bucket_id;
   }
 
   // Flattened list of COO Tensors for all SCs.
@@ -258,8 +262,10 @@ class PartitionedCooTensorsT {
   int bucket_count_per_sc_;
   // Number of global SCs.
   uint32_t global_sc_count_;
-  // Minibatching bucket offsets for all SCs (=1 for non-minibatching per SC).
-  std::vector<int> bucket_offsets_;
+  // Inline minibatching bucket offsets (=1 bucket per SC when not
+  // minibatching).
+  absl::InlinedVector<int, CooFormat::kMaxMinibatchingBuckets + 1>
+      bucket_offsets_;
   // Internal counters of the current SC and bucket being populated.
   int curr_bucket_id_;
   // Merged into minibatches?

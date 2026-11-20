@@ -14,6 +14,7 @@
 #include "jax_tpu_embedding/sparsecore/lib/core/partitioned_coo_tensors.h"
 
 #include <bitset>
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -23,6 +24,7 @@ namespace jax_sc_embedding {
 namespace {
 
 using ::testing::ElementsAre;
+using ::testing::IsEmpty;
 using ::testing::SizeIs;
 
 TEST(PartitionedCooTensorsTest, Empty) {
@@ -219,6 +221,63 @@ TEST(DevicePartitionedCooTensorsTest, NoMerge) {
   EXPECT_THAT(tensors(1, 3), ElementsAre(coo8));
   EXPECT_EQ(tensors.grouped_coo_tensors[0].Size(), 4);
   EXPECT_EQ(tensors.grouped_coo_tensors[1].Size(), 4);
+}
+
+TEST(PartitionedCooTensorsTest, SparseBucketsFillsSkippedAndTrailingOffsets) {
+  PartitionedCooTensors tensors(/*global_sc_count=*/2,
+                                /*bucket_count_per_sc=*/4);
+  tensors.Reserve(2);
+  CooFormat coo0(/*row_id=*/1, /*col_id=*/1, /*gain=*/1.0f);
+  CooFormat coo2(/*row_id=*/2, /*col_id=*/2, /*gain=*/2.0f);
+
+  tensors.Add(/*target_bucket_id=*/0, coo0);
+  tensors.Add(/*target_bucket_id=*/2, coo2);
+  tensors.FillRemainingScBuckets();
+
+  EXPECT_EQ(tensors.Size(), 2);
+  EXPECT_THAT(tensors(0), ElementsAre(coo0));
+  EXPECT_THAT(tensors(1), IsEmpty());
+  EXPECT_THAT(tensors(2), ElementsAre(coo2));
+  EXPECT_THAT(tensors(3), IsEmpty());
+}
+
+TEST(PartitionedCooTensorsTest, MaybeMergeAccumulatesDuplicateInt64ColId) {
+  using Coo64 = CooFormatT<int64_t>;
+  constexpr int64_t kColId = (int64_t{1} << 35) | 1;
+  PartitionedCooTensorsT<Coo64> tensors(/*global_sc_count=*/2,
+                                        /*bucket_count_per_sc=*/1);
+  tensors.Reserve(2);
+  tensors.Add(/*target_bucket_id=*/0,
+              Coo64(/*row_id=*/3, kColId, /*gain=*/1.5f));
+
+  const bool merged =
+      tensors.MaybeMerge(Coo64(/*row_id=*/3, kColId, /*gain=*/2.5f));
+  tensors.FillRemainingScBuckets();
+
+  EXPECT_TRUE(merged);
+  EXPECT_EQ(tensors.Size(), 1);
+  EXPECT_THAT(tensors(0),
+              ElementsAre(Coo64(/*row_id=*/3, kColId, /*gain=*/4.0f)));
+}
+
+TEST(PartitionedCooTensorsTest, MergeAllOrdersInt64ColIdsByGlobalSc) {
+  using Coo64 = CooFormatT<int64_t>;
+  constexpr int64_t kBaseCol = int64_t{1} << 35;
+  // With global_sc_count = 2, the low bit of col_id selects global SC (0 vs 1).
+  PartitionedCooTensorsT<Coo64> tensors(/*global_sc_count=*/2,
+                                        /*bucket_count_per_sc=*/2);
+  tensors.Reserve(2);
+  Coo64 coo_sc1(/*row_id=*/3, /*col_id=*/kBaseCol | 1, /*gain=*/4.0f);
+  Coo64 coo_sc0(/*row_id=*/7, /*col_id=*/kBaseCol | 0, /*gain=*/2.0f);
+  tensors.Add(/*target_bucket_id=*/0, coo_sc1);
+  tensors.Add(/*target_bucket_id=*/1, coo_sc0);
+  tensors.FillRemainingScBuckets();
+
+  tensors.MergeAll<2>();
+
+  EXPECT_EQ(tensors.GetNumMinibatches(), 1);
+  EXPECT_EQ(tensors.Size(), 2);
+  EXPECT_THAT(tensors(0), ElementsAre(coo_sc0, coo_sc1));
 }
 
 }  // namespace
