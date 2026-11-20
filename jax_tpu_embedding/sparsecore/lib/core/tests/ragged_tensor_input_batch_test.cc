@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -218,6 +219,112 @@ TEST(RaggedTensorInputBatchTest, EmptyRowOffsetsTriggersCheckFailure) {
         ragged_tensor_feature_input(embedding_ids, row_splits);
   };
   EXPECT_DEATH(construct_empty_batch(), "row_offsets cannot be empty");
+}
+
+TEST(RaggedTensorInputBatchTest,
+     ExtractCooTensors64SkipsEmptyRowsWithMeanCombiner) {
+  using Coo64 = CooFormatT<int64_t>;
+  constexpr int64_t kBaseId = int64_t{1} << 32;
+  // Row 0 has 3 IDs, row 1 is empty, and row 2 has 1 ID.
+  RaggedTensorInputBatchWithOwnedData<int64_t, int32_t> batch(
+      {kBaseId, kBaseId + 1, kBaseId + 2, kBaseId + 5},
+      /*row_splits=*/{0, 3, 3, 4});
+  ExtractedCooTensorsPerSparseCoreT<int64_t> extracted(
+      /*batch_size_per_sc=*/3, /*has_variable_weights=*/false,
+      RowCombiner::kMean,
+      KeyLayout<int64_t>::Make(/*num_scs_bit=*/2,
+                               /*max_local_emb_id=*/int64_t{1} << 30));
+
+  batch.ExtractCooTensors64(
+      {
+          .slice_start = 0,
+          .slice_end = 3,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_sc_per_device = 4,
+          .num_scs = 4,
+          .combiner = RowCombiner::kMean,
+      },
+      extracted);
+
+  EXPECT_THAT(extracted.ToCooVector(),
+              ElementsAre(Coo64(0, kBaseId, 1.0f / 3.0f),
+                          Coo64(0, kBaseId + 1, 1.0f / 3.0f),
+                          Coo64(0, kBaseId + 2, 1.0f / 3.0f),
+                          Coo64(2, kBaseId + 5, 1.0f)));
+}
+
+TEST(RaggedTensorInputBatchTest,
+     ExtractCooTensors64AppliesShiftOffsetAndSqrtnCombiner) {
+  using Coo64 = CooFormatT<int64_t>;
+  constexpr int64_t kBaseId = int64_t{1} << 32;
+  // With num_scs = 4, col_shift = 1, col_offset = 8:
+  //   kBaseId + 0 (shard 0 -> shard 1) maps to kBaseId + 8 + 1 = kBaseId + 9.
+  //   kBaseId + 3 (shard 3 -> shard 0) maps to kBaseId + 8 + 0 = kBaseId + 8.
+  RaggedTensorInputBatchWithOwnedData<int64_t, int32_t> batch(
+      {kBaseId, kBaseId + 3}, /*row_splits=*/{0, 2});
+  ExtractedCooTensorsPerSparseCoreT<int64_t> extracted(
+      /*batch_size_per_sc=*/1, /*has_variable_weights=*/false,
+      RowCombiner::kSqrtn,
+      KeyLayout<int64_t>::Make(/*num_scs_bit=*/2,
+                               /*max_local_emb_id=*/int64_t{1} << 30));
+
+  batch.ExtractCooTensors64(
+      {
+          .slice_start = 0,
+          .slice_end = 1,
+          .row_offset = 10,
+          .col_offset = 8,
+          .col_shift = 1,
+          .num_sc_per_device = 4,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSqrtn,
+      },
+      extracted);
+
+  const float expected_gain = 1.0f / std::sqrt(2.0f);
+  EXPECT_THAT(extracted.ToCooVector(),
+              ElementsAre(Coo64(10, kBaseId + 9, expected_gain),
+                          Coo64(10, kBaseId + 8, expected_gain)));
+}
+
+TEST(RaggedTensorInputBatchTest, ExtractCooTensors64SpansMultipleKeyBatches) {
+  constexpr int64_t kBaseId = int64_t{1} << 32;
+  // Row 0 (64 IDs) hits the exact 64-key batch boundary; row 1 (150 IDs) spans
+  // two full 64-key batches plus a 22-key tail.
+  std::vector<int64_t> embedding_ids(64 + 150);
+  std::iota(embedding_ids.begin(), embedding_ids.end(), kBaseId);
+  RaggedTensorInputBatchWithOwnedData<int64_t, int32_t> batch(
+      embedding_ids, /*row_splits=*/{0, 64, 214});
+  ExtractedCooTensorsPerSparseCoreT<int64_t> extracted(
+      /*batch_size_per_sc=*/2, /*has_variable_weights=*/false,
+      RowCombiner::kSum,
+      KeyLayout<int64_t>::Make(/*num_scs_bit=*/2,
+                               /*max_local_emb_id=*/int64_t{1} << 30));
+
+  batch.ExtractCooTensors64(
+      {
+          .slice_start = 0,
+          .slice_end = 2,
+          .row_offset = 0,
+          .col_offset = 0,
+          .col_shift = 0,
+          .num_sc_per_device = 4,
+          .num_scs = 4,
+          .combiner = RowCombiner::kSum,
+      },
+      extracted);
+
+  std::vector<CooFormatT<int64_t>> expected;
+  expected.reserve(64 + 150);
+  for (int i = 0; i < 64; ++i) {
+    expected.emplace_back(/*row_id=*/0, kBaseId + i, /*gain=*/1.0f);
+  }
+  for (int i = 0; i < 150; ++i) {
+    expected.emplace_back(/*row_id=*/1, kBaseId + 64 + i, /*gain=*/1.0f);
+  }
+  EXPECT_EQ(extracted.ToCooVector(), expected);
 }
 
 }  // namespace

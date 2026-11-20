@@ -14,6 +14,8 @@
 #ifndef JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PROCESS_COO_TENSORS_IMPL_H_
 #define JAX_TPU_EMBEDDING_SPARSECORE_LIB_CORE_PROCESS_COO_TENSORS_IMPL_H_
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <type_traits>
@@ -93,12 +95,21 @@ void ProcessCooTensors(
   const int batch_size_per_sc = extracted_coo_tensors.batch_size_per_sc_;
   CHECK_GT(batch_size_per_sc, 0);
   const ColIdT col_offset = static_cast<ColIdT>(options.col_offset);
+  const int col_shift = options.col_shift;
+  const int num_scs_mod = (1 << num_scs_bit) - 1;
+  const KeyLayout<ColIdT> key_layout = extracted_coo_tensors.key_layout_;
+  DCHECK_EQ(key_layout.num_scs_bit(), static_cast<uint32_t>(num_scs_bit));
+  using UColIdT = std::make_unsigned_t<ColIdT>;
   using ValueT =
       std::decay_t<decltype(std::declval<ValuesStreamT&>().getRowSpan()[0])>;
+  const int slice_end = options.slice_end;
 
-  for (; values_stream.row() < options.slice_end;
+  constexpr int kKeyBatchSize = 64;
+  alignas(32) std::array<uint64_t, kKeyBatchSize> key_buf;
+
+  for (; values_stream.row() < slice_end;
        values_stream.NextRow(), weights_stream.NextRow()) {
-    DCHECK_LT(weights_stream.row(), options.slice_end);
+    DCHECK_LT(weights_stream.row(), slice_end);
     DCHECK_EQ(values_stream.cols(), weights_stream.cols());
     DCHECK_EQ(values_stream.row(), weights_stream.row());
 
@@ -118,6 +129,12 @@ void ProcessCooTensors(
       divisor = ComputeWeightDivisor(options.combiner, weights_stream);
     }
 
+    // Empty rows emit no COO entries; skip span lookup and per-ID extraction
+    // after recording per-row combiner counts/gains above.
+    if (num_cols <= 0) {
+      continue;
+    }
+
     const auto values = values_stream.getRowSpan();  // template-dependent type.
     if constexpr (!is_unity_weights_stream_v<WeightsStreamT>) {
       const absl::Span<const float> weights = weights_stream.getRowSpan();
@@ -135,17 +152,33 @@ void ProcessCooTensors(
             options.col_shift, col_offset, num_scs_bit);
       }
     } else {
-      for (int i = 0; i < num_cols; ++i) {
-        const auto embedding_id = values[i];
-        DCHECK_GE(embedding_id, 0);
-        if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
-          DCHECK_LE(static_cast<int64_t>(embedding_id),
-                    options.max_embedding_id);
-        }
+      DCHECK(!extracted_coo_tensors.has_variable_weights_);
+      const auto* values_ptr = values.data();
+      const UColIdT row_data = static_cast<UColIdT>(sample_id);
+      // Stage grouping keys in fixed-size stack chunks so the inner loop
+      // avoids per-ID vector capacity checks and aliasing reloads.
+      for (int base = 0; base < num_cols; base += kKeyBatchSize) {
+        const int chunk = std::min(num_cols - base, kKeyBatchSize);
+        const auto* chunk_ptr = values_ptr + base;
+        for (int i = 0; i < chunk; ++i) {
+          const auto embedding_id = chunk_ptr[i];
+          DCHECK_GE(embedding_id, 0);
+          if constexpr (sizeof(ValueT) > sizeof(int32_t)) {
+            DCHECK_LE(static_cast<int64_t>(embedding_id),
+                      options.max_embedding_id);
+          }
 
-        extracted_coo_tensors.emplace_back(
-            sample_id, static_cast<ColIdT>(embedding_id), options.col_shift,
-            col_offset, num_scs_bit);
+          // Map raw embedding ID to shifted/sharded column ID and pack key.
+          const ColIdT col_id =
+              CooFormatT<ColIdT>::GetColId(static_cast<ColIdT>(embedding_id),
+                                           col_shift, col_offset, num_scs_mod);
+          key_buf[i] = key_layout.GetGroupingKey(
+              static_cast<UColIdT>(col_id), row_data, /*create_buckets=*/false);
+        }
+        // Append the computed chunk to `keys` in a single bulk insert.
+        extracted_coo_tensors.keys.insert(extracted_coo_tensors.keys.end(),
+                                          key_buf.data(),
+                                          key_buf.data() + chunk);
       }
     }
   }
