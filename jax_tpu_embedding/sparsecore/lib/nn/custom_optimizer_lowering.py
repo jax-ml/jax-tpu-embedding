@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any
 
 import jax
 import jax.extend as jex
@@ -105,7 +104,7 @@ def _get_optimizer_avals(
 
 
 def lower_to_stablehlo(
-    custom_computation_fn: Callable[..., Any],
+    custom_computation_fn: Callable[..., jax.Array | tuple[jax.Array, ...]],
     embedding_dim: int = 1,
     num_slot_variables: int = 0,
     num_hyperparameters: int = 1,

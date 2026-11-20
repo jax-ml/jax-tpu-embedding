@@ -13,8 +13,9 @@
 # limitations under the License.
 """Utils for sparsecore grad primitives."""
 
-from typing import Any, Sequence
+from collections.abc import Iterable, Sequence
 
+import jax
 from jax import core
 from jax.extend.mlir import ir
 from jax.extend.mlir.dialects import func as func_dialect
@@ -82,7 +83,9 @@ def maybe_clip_params(
 
 
 def ensure_dtype(
-    check: Any, expected_type: Any | tuple[Any, ...], object_name: str
+    check: core.ShapedArray | np.generic,
+    expected_type: jax.typing.DTypeLike | tuple[jax.typing.DTypeLike, ...],
+    object_name: str,
 ):
   expected = (
       expected_type if isinstance(expected_type, tuple) else (expected_type,)
@@ -94,7 +97,9 @@ def ensure_dtype(
 
 
 def ensure_dim(
-    check: Any, expected_dim: int | tuple[int, ...], object_name: str
+    check: core.ShapedArray,
+    expected_dim: int | tuple[int, ...],
+    object_name: str,
 ):
   expected = (expected_dim,) if isinstance(expected_dim, int) else expected_dim
   if len(check.shape) not in expected:
@@ -117,7 +122,9 @@ def validate_abstract_eval_params(
     sharding_strategy: int,
     min_value: float | None = None,
     max_value: float | None = None,
-    allowed_embedding_table_dtypes: Any | tuple[Any, ...] = np.float32,
+    allowed_embedding_table_dtypes: (
+        jax.typing.DTypeLike | tuple[jax.typing.DTypeLike, ...]
+    ) = np.float32,
 ):
   """Validate parameters common to all sparsecore grad primitives."""
   ensure_dtype(lhs_row_pointers, np.int32, "lhs_row_pointers")
@@ -190,7 +197,9 @@ def get_embedding_dim(val: core.ShapedArray) -> int:
   return val.shape[1] if len(val.shape) > 1 else 1
 
 
-def to_value_sequence(results: Any) -> Sequence[ir.Value]:
+def to_value_sequence(
+    results: ir.Value | Iterable[object],
+) -> Sequence[ir.Value]:
   """Converts FFI lowering results to a Sequence of ir.Values."""
   if isinstance(results, ir.Value):
     return [results]

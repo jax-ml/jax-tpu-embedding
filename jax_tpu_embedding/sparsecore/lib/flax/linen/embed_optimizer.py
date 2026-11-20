@@ -21,7 +21,7 @@ from jax_tpu_embedding.sparsecore.lib.flax.linen import embed
 import optax
 
 
-def _is_emb_path(path: list[Any]) -> bool:
+def _is_emb_path(path: jax.tree_util.KeyPath) -> bool:
   return any(
       isinstance(level, jax.tree_util.DictKey)
       and level.key == embed.EMBEDDING_PARAM_NAME

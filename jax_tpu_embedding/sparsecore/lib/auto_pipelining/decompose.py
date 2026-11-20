@@ -14,7 +14,7 @@
 """Decomposer to split a Jaxpr into SparseCore forward, dense and SparseCore backward."""
 
 import dataclasses
-from typing import Any
+from typing import TypeVar
 
 import jax
 import jax.extend as jex
@@ -23,7 +23,7 @@ from jax_tpu_embedding.sparsecore.lib.auto_pipelining import preprocess
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import utils
 
 
-Carry = Any
+_CarryT = TypeVar('_CarryT')
 Activations = list[jax.Array]
 Updates = list[jax.Array]
 
@@ -48,23 +48,23 @@ class FunctionRunner:
     flatten_args = jax.tree.leaves(args)
     return jax.core.eval_jaxpr(jaxpr, self.literals, *flatten_args)
 
-  def embedding_lookup(self, carry: Carry, *args) -> Activations:
+  def embedding_lookup(self, carry: object, *args) -> Activations:
     return self._run_jaxpr(self.lookup_jaxpr, carry, *args)
 
-  def dense(self, activations: Activations, carry: Carry, *args):
+  def dense(self, activations: Activations, carry: object, *args):
     jaxpr_res = self._run_jaxpr(self.dense_jaxpr, activations, carry, *args)
     updates = jaxpr_res[: self.update_params_len]
     dense_results = jaxpr_res[self.update_params_len :]
     res = jax.tree.unflatten(self.result_structure, dense_results)
     return updates, *res
 
-  def embedding_update(self, updates: Updates, carry: Carry) -> Carry:
+  def embedding_update(self, updates: Updates, carry: _CarryT) -> _CarryT:
     res = self._run_jaxpr(self.update_jaxpr, updates, carry)
     return jax.tree.unflatten(self.carry_structure, res)
 
   def embedding_update_lookup(
-      self, updates: Updates, carry: Carry, *args
-  ) -> tuple[Activations, Carry]:
+      self, updates: Updates, carry: _CarryT, *args
+  ) -> tuple[Activations, _CarryT]:
     res = self._run_jaxpr(self.update_lookup_jaxpr, updates, carry, *args)
     activations = res[: self.activations_len]
     flatten_carry = res[self.activations_len :]

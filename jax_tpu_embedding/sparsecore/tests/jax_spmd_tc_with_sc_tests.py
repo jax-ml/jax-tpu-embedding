@@ -11,9 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from collections.abc import Callable
 import functools
-from typing import Any, override
+from typing import override
 
 from absl import flags
 from absl import logging
@@ -64,7 +63,7 @@ class ShakespeareSpmdModel(nn.Module):
   embedding_size: int
   mesh: Mesh
 
-  dense_init: Callable[[Any, Any, Any], Any] = nn.initializers.lecun_normal()
+  dense_init: jax.nn.initializers.Initializer = nn.initializers.lecun_normal()
 
   @nn.compact
   def __call__(self, emb_activations):

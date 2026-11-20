@@ -52,6 +52,7 @@ ArrayLike = jnp.ndarray | np.typing.ArrayLike
 T: TypeAlias = TypeVar("T")
 Nested: TypeAlias = T | Sequence[T] | Mapping[str, T]
 LimitsCallable: TypeAlias = table_stacking.LimitsCallable
+AllReduceInterface: TypeAlias = pybind_input_preprocessing.AllReduceInterface
 get_default_limits = table_stacking.get_default_limits
 
 

@@ -49,6 +49,7 @@ pytype_strict_library(
     deps = [
         ":custom_optimizer_lowering",
         ":slot_shape",
+        "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_csr",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adagrad_momentum",
         "//jax_tpu_embedding/sparsecore/lib/core/primitives:sparse_dense_matmul_grad_with_adam",

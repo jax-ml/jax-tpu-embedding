@@ -22,7 +22,7 @@ protocol buffer definitions for serving and checkpointing.
 from __future__ import annotations
 
 import collections
-from typing import Any, Mapping, Sequence, TypeAlias, TypeVar
+from typing import Mapping, Sequence, TypeAlias, TypeVar
 
 import jax
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -139,7 +139,7 @@ def optimizer_spec_to_proto(
   if opt is None:
     return None
 
-  opt_type: Any = get_optimizer_type(type(opt))
+  opt_type = get_optimizer_type(type(opt))
   float_params = (
       opt.get_float_params()
       if opt_type != embedding_spec_pb2.OptimizerSpecProto.CUSTOM

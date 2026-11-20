@@ -775,7 +775,7 @@ def _unstack_slots(
 
   def _unstack_leaf(
       *leaves_across_source_stacks: jax.Array,
-  ) -> dict[str, Any]:
+  ) -> dict[str, jax.Array]:
     source_stacked_slot_dict = dict(
         zip(source_slots.keys(), leaves_across_source_stacks, strict=True)
     )
@@ -834,7 +834,7 @@ def _unstack_and_restack_slots(
 
   def _restack_leaf(
       *leaves_across_source_stacks: jax.Array,
-  ) -> dict[str, Any]:
+  ) -> dict[str, Nested[jax.Array]]:
     source_stacked_slot_dict = dict(
         zip(source_slots.keys(), leaves_across_source_stacks, strict=True)
     )

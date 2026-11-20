@@ -199,7 +199,7 @@ class SparseCoreEmbed(nn.Module):
       step: int,
       features: embedding.Nested[np.ndarray],
       features_weights: embedding.Nested[np.ndarray] | None,
-      all_reduce_interface: Any | None = None,
+      all_reduce_interface: embedding.AllReduceInterface | None = None,
   ) -> embedding.PreprocessedInput:
     """Preprocesses the input for sparse dense matmul.
 

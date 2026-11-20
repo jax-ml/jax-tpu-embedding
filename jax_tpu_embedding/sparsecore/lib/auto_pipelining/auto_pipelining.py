@@ -116,9 +116,6 @@ import jax.extend as jex
 from jax_tpu_embedding.sparsecore.lib.auto_pipelining import decompose
 
 
-Carry = decompose.Carry
-
-
 def dump_jaxpr(jaxpr: jex.core.ClosedJaxpr | jex.core.Jaxpr, name: str) -> None:
   """Dumps a Jaxpr to a file, if the TEST_UNDECLARED_OUTPUTS_DIR is set."""
   dirname = os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR')
@@ -134,10 +131,12 @@ def dump_jaxpr(jaxpr: jex.core.ClosedJaxpr | jex.core.Jaxpr, name: str) -> None:
 
 class EmbeddingPipeliningState(NamedTuple):
   activations_1: list[jax.Array] | None = None
-  args_1: Any = None
+  args_1: tuple[object, ...] | None = None
   updates_0: list[jax.Array] | None = None
 
 
+_CarryT = TypeVar('_CarryT')
+_ResultT = TypeVar('_ResultT')
 FunctionArgs = ParamSpec('FunctionArgs')
 FunctionResults = TypeVar('FunctionResults')
 
@@ -146,13 +145,17 @@ TrainStepFunc = Callable[
     Concatenate[EmbeddingPipeliningState, FunctionArgs],
     tuple[EmbeddingPipeliningState, FunctionResults],
 ]
+FinalizeFunc = Callable[
+    [EmbeddingPipeliningState, object],
+    tuple[EmbeddingPipeliningState, FunctionResults],
+]
 
 
 @dataclasses.dataclass
 class PipeliningFunction(Generic[FunctionArgs, FunctionResults]):
   """Wrapper class that encapsulates the pipelined train step and finalize call."""
   train_step_func: TrainStepFunc[FunctionArgs, FunctionResults]
-  finalize: Callable[..., Any]
+  finalize: FinalizeFunc[FunctionResults]
 
   def __call__(
       self,
@@ -171,8 +174,8 @@ def init_state() -> EmbeddingPipeliningState:
 def _run(
     runner: decompose.FunctionRunner,
     state: EmbeddingPipeliningState,
-    carry: Carry,
-    args_2,
+    carry: _CarryT,
+    args_2: tuple[object, ...] | None,
 ):
   """Runs one step of the pipelined training loop."""
   if args_2 is not None:
@@ -216,8 +219,10 @@ def _run(
 
 
 def finalize_pipelining(
-    fn: Callable[..., Any], state: EmbeddingPipeliningState, carry: Carry
-):
+    fn: PipeliningFunction[FunctionArgs, tuple[_CarryT, *tuple[_ResultT, ...]]],
+    state: EmbeddingPipeliningState,
+    carry: _CarryT,
+) -> tuple[EmbeddingPipeliningState, tuple[_CarryT, *tuple[_ResultT, ...]]]:
   """Finalizes the pipelining run."""
   assert isinstance(
       fn, PipeliningFunction
@@ -234,7 +239,7 @@ def auto_pipelining(
 ) -> PipeliningFunction[FunctionArgs, FunctionResults]:
   """A decorator to transform a function for SparseCore pipelining."""
 
-  def _build_runner(carry: Carry, args_2):
+  def _build_runner(carry: object, args_2: tuple[object, ...]):
     """Compile the function if it's not compiled yet."""
     closed_jaxpr, res_shape = jax.make_jaxpr(
         fn, static_argnums=static_argnums, return_shape=True
@@ -258,11 +263,11 @@ def auto_pipelining(
     return runner
 
   @functools.wraps(fn)
-  def train_pipeline(state: EmbeddingPipeliningState, carry: Carry, *args_2):
+  def train_pipeline(state: EmbeddingPipeliningState, carry: object, *args_2):
     runner = _build_runner(carry, args_2)
     return _run(runner, state, carry, args_2)
 
-  def finalize_pipeline(state: EmbeddingPipeliningState, carry: Carry):
+  def finalize_pipeline(state: EmbeddingPipeliningState, carry: object):
     assert state.args_1, (
         'Args_1 should not be None. This is likely caused by a bug in the'
         ' auto-pipelining system.'
@@ -279,8 +284,13 @@ def auto_pipelining(
           donate_argnames=('carry',),
       ),
   )
-  finalize_pipeline = jax.jit(
-      finalize_pipeline, out_shardings=out_shardings, donate_argnames=('carry',)
+  finalize_func = cast(
+      FinalizeFunc[FunctionResults],
+      jax.jit(
+          finalize_pipeline,
+          out_shardings=out_shardings,
+          donate_argnames=('carry',),
+      ),
   )
 
-  return PipeliningFunction(train_step_func, finalize_pipeline)
+  return PipeliningFunction(train_step_func, finalize_func)

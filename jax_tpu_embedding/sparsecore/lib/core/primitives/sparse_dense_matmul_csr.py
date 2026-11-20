@@ -13,9 +13,10 @@
 # limitations under the License.
 """Primitive tpu_sparse_dense_matmul_csr."""
 
+from collections.abc import Sequence
 import functools
 import json
-from typing import Any, Protocol, Sequence, runtime_checkable
+from typing import Protocol, TypeAlias, TypedDict, runtime_checkable
 
 import jax
 from jax import core
@@ -30,6 +31,37 @@ from jax_tpu_embedding.sparsecore.lib.core.primitives import utils
 import numpy as np
 
 
+class FixedQuantizationParams(TypedDict):
+  """Parameters for fixed-range quantization in backend config."""
+
+  min_value: float
+  max_value: float
+  num_buckets: int
+
+
+class FixedQuantizationBackendConfig(TypedDict):
+  """Backend config payload for fixed-range quantization."""
+
+  fixed: FixedQuantizationParams
+
+
+class AbsmaxQuantizationParams(TypedDict):
+  """Parameters for dynamic absmax quantization in backend config."""
+
+  num_buckets: int
+
+
+class AbsmaxQuantizationBackendConfig(TypedDict):
+  """Backend config payload for dynamic absmax quantization."""
+
+  absmax: AbsmaxQuantizationParams
+
+
+QuantizationBackendConfig: TypeAlias = (
+    FixedQuantizationBackendConfig | AbsmaxQuantizationBackendConfig
+)
+
+
 @runtime_checkable
 class QuantizationConfigProtocol(Protocol):
   """Protocol for SparseCore embedding quantization configurations."""
@@ -39,7 +71,7 @@ class QuantizationConfigProtocol(Protocol):
   ) -> None:
     ...
 
-  def to_backend_config(self) -> dict[str, Any]:
+  def to_backend_config(self) -> QuantizationBackendConfig:
     ...
 
 

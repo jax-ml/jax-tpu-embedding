@@ -24,6 +24,7 @@ from flax import struct
 import jax
 import jax.extend as jex
 import jax.numpy as jnp
+from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_csr
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adagrad_momentum
 from jax_tpu_embedding.sparsecore.lib.core.primitives import sparse_dense_matmul_grad_with_adam
@@ -40,7 +41,6 @@ DEFAULT_ACTIVATION_MEM_BYTES_LIMIT: int = 2048 * 1024
 
 NumericParameter: TypeAlias = jax.typing.ArrayLike
 LearningRate: TypeAlias = NumericParameter | Callable[..., NumericParameter]
-HyperParameterType: TypeAlias = Callable[[Any], jax.Array] | float
 
 # Update computation of a `CustomOptimizerSpec`. It is invoked positionally as
 # `fn(gradient, table, *slot_variables, learning_rate, *hyperparameters)` with
@@ -85,12 +85,6 @@ class CallablePlaceholder:
 
   def __repr__(self) -> str:
     return f"CallablePlaceholder({self.tag!r})"
-
-
-class _OptimizerDefinition(NamedTuple):
-  primitive: jex.core.Primitive | Any
-  slot_variable_type: type[Any]
-  default_initializers: dict[str, CallableTableInitializer]
 
 
 _SlotVar1T = TypeVar("_SlotVar1T")
@@ -289,7 +283,7 @@ class CustomOptimizerSpec(OptimizerSpec):
       self,
       learning_rate: LearningRate = 0.001,
       custom_computation_fn: CustomOptimizerComputation | None = None,
-      stablehlo: str | bytes | Any | None = None,
+      stablehlo: str | bytes | None = None,
       slot_variable_initializers_tuple: tuple[
           CallableTableInitializer, ...
       ] = (),
@@ -1328,7 +1322,9 @@ class QuantizationConfig(metaclass=abc.ABCMeta):
     raise NotImplementedError
 
   @abc.abstractmethod
-  def to_backend_config(self) -> dict[str, Any]:
+  def to_backend_config(
+      self,
+  ) -> sparse_dense_matmul_csr.QuantizationBackendConfig:
     """Returns the backend config for this quantization config."""
     raise NotImplementedError
 
@@ -1362,7 +1358,9 @@ class FixedQuantizationConfig(QuantizationConfig):
     del embedding_dim, table_name
 
   @override
-  def to_backend_config(self) -> dict[str, Any]:
+  def to_backend_config(
+      self,
+  ) -> sparse_dense_matmul_csr.FixedQuantizationBackendConfig:
     return {
         "fixed": {
             "min_value": self.min_value,
@@ -1403,7 +1401,9 @@ class AbsmaxQuantizationConfig(QuantizationConfig):
       )
 
   @override
-  def to_backend_config(self) -> dict[str, Any]:
+  def to_backend_config(
+      self,
+  ) -> sparse_dense_matmul_csr.AbsmaxQuantizationBackendConfig:
     return {
         "absmax": {
             "num_buckets": self.num_buckets,
