@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
-import concurrent
+import concurrent.futures
 import dataclasses
 from typing import override
 

@@ -91,9 +91,9 @@ def _preprocess_batch_to_megacore_buckets(
       zip(feat_seq, weight_seq, strict=True)
   ):
     for col_id, weight in zip(sample_feat, sample_weight, strict=True):
-      global_sc_id = int(col_id) % num_scs
+      global_sc_id = col_id % num_scs
       dest_sc = global_sc_id % num_sc_per_device
-      emb_id = int(col_id) // num_scs
+      emb_id = col_id // num_scs
       linearized_emb_id = dest_sc * rows_per_sc + emb_id
       buckets[global_sc_id][(linearized_emb_id, sample_id)] += float(weight)
 
@@ -194,7 +194,7 @@ def preprocess_sparse_dense_matmul_input(
     num_sc_per_device: int = -1,
     hbm_word_size_in_4b: int = -1,
     sharding_strategy: str = "MOD",
-    minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
+    minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
     suggested_coo_buffer_size_per_device: int | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Preprocesses input into Megacore (chip-level) SparseCore CSR format.
@@ -221,8 +221,6 @@ def preprocess_sparse_dense_matmul_input(
     A tuple `(row_pointers, embedding_ids, sample_ids, gains)` forming the
     Megacore CSR wrapped COO input.
   """
-  if isinstance(minibatching_mode, str):
-    minibatching_mode = MinibatchingMode(minibatching_mode)
   if minibatching_mode == MinibatchingMode.HOST:
     raise ValueError(
         "Megacore CSR does not support host minibatching; use"

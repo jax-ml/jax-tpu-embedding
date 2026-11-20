@@ -230,15 +230,6 @@ class PipelineState(
   placeholder_tc_aux: _TcAux
 
 
-Sharding: TypeAlias = jax.sharding.Sharding
-ShardedLastStepInput: TypeAlias = LastStepInput[
-    Sharding, Sharding, Sharding, Sharding
-]
-ShardedStepBeforeLastStepInput: TypeAlias = StepBeforeLastStepInput[
-    Sharding, Sharding, Sharding
-]
-
-
 def get_pipeline_state_sharding(
     pipeline_state_cls: Callable[..., _PipelineStateT],
     dense_input_sharding: _ShardingT,
@@ -265,13 +256,13 @@ def get_pipeline_state_sharding(
   )
   return pipeline_state_cls(
       pipeline_step=None,
-      last_step_inputs=ShardedLastStepInput(
+      last_step_inputs=LastStepInput(
           sparse_inputs=sparse_input_sharding,
           embedding_activations=sc_layout,
           dense_inputs=dense_input_sharding,
           sc_fwd_aux=dense_input_sharding,
       ),
-      step_before_last_step_inputs=ShardedStepBeforeLastStepInput(
+      step_before_last_step_inputs=StepBeforeLastStepInput(
           sparse_inputs=sparse_input_sharding,
           embedding_gradients=sc_layout,
           tc_aux=tc_aux_sharding,

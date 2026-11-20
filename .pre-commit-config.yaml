@@ -16,7 +16,7 @@ repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: 0470f7c8a653e950f7cc5a653204ceb3fde4c02a  # frozen: v0.15.1
   hooks:
-  - id: ruff
+  - id: ruff-check
 
 - repo: https://github.com/rhysd/actionlint
   rev: 393031adb9afb225ee52ae2ccd7a5af5525e03e8  # frozen: v1.7.11

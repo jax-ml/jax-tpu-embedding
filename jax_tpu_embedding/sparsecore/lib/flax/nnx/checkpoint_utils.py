@@ -25,6 +25,7 @@ from absl import logging
 from etils import epath
 from flax import nnx
 import jax
+from jax.experimental import layout
 from jax_tpu_embedding.sparsecore.lib.flax.nnx import embed
 from jax_tpu_embedding.sparsecore.lib.nn import embedding
 from jax_tpu_embedding.sparsecore.lib.nn import embedding_spec
@@ -637,12 +638,12 @@ def _enforce_sharding_and_layout(
   assert base_sharding.spec is not None
   fmt = utils.embedding_table_format(base_sharding.mesh, base_sharding.spec)
   sharding_axis = next((s for s in base_sharding.spec if s is not None), None)
-  if not isinstance(fmt, jax.experimental.layout.Format):
+  if not isinstance(fmt, layout.Format):
     return jax.device_put(arr, fmt)
 
   repack = jax.jit(
       jax.shard_map(
-          lambda x: jax.experimental.layout.with_layout_constraint(
+          lambda x: layout.with_layout_constraint(
               # x + 0.0 is a common JAX workaround to force the application of
               # layout constraints.
               x + 0.0,

@@ -42,7 +42,7 @@ extraction use `-show_from='jax_sc_embedding::ExtractCooTensors'` and so on.
 
 from __future__ import annotations
 
-import concurrent
+import concurrent.futures
 import sys
 
 from absl import app

@@ -23,6 +23,7 @@ from absl import logging
 from etils import epath
 from flax import nnx
 import jax
+from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import NamedSharding
@@ -318,7 +319,7 @@ def run_model() -> None:
           and (step + 1) % config.loss_reset_frequency == 0
       ):
         loaded_stats = fdo_client.load()
-        jax.experimental.multihost_utils.sync_global_devices('FDO_load_barrier')
+        multihost_utils.sync_global_devices('FDO_load_barrier')
         embedding.update_preprocessing_parameters(
             feature_specs, loaded_stats, config.num_sc_per_device
         )

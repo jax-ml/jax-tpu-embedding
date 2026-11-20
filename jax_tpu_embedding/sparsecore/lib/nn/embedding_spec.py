@@ -260,7 +260,7 @@ class OptimizerSpec(metaclass=abc.ABCMeta):
         kwargs[param] = float(float_params[param])
     for param in cls._bool_params:
       if param in bool_params:
-        kwargs[param] = bool(bool_params[param])
+        kwargs[param] = bool_params[param]
     return cls(**kwargs)
 
 

@@ -100,7 +100,7 @@ def _to_sequence_of_batches(
       f"When minibatching_mode is {minibatching_mode}, {input_name} must be a"
       " sequence of batches."
   )
-  return cast(Sequence[_T], inputs)
+  return inputs
 
 
 def _round_up(value: int, round_to: int) -> int:
@@ -365,7 +365,7 @@ def preprocess_sparse_dense_matmul_input(
     sc_simd_width: int = -1,
     hbm_word_size_in_4b: int = -1,
     sharding_strategy: str = "MOD",
-    minibatching_mode: MinibatchingMode | str = MinibatchingMode.DISABLED,
+    minibatching_mode: MinibatchingMode = MinibatchingMode.DISABLED,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Preprocesses standard input into SparseCore CSR wrapped COO format.
 
@@ -393,8 +393,6 @@ def preprocess_sparse_dense_matmul_input(
       row_ids: Sample ids for each embedding id.
       gains: The weights for each embedding id.
   """
-  if isinstance(minibatching_mode, str):
-    minibatching_mode = MinibatchingMode(minibatching_mode)
   if max_ids_per_partition <= 0:
     raise ValueError(
         f"max_ids_per_partition must be positive, got {max_ids_per_partition}."

@@ -31,8 +31,8 @@ from absl import logging
 from absl.testing import absltest
 from clu import metrics
 from clu import parameter_overview
-import flax
 from flax import linen as nn
+from flax import struct
 import jax
 import jax.numpy as jnp
 from jax.sharding import Mesh  # pylint: disable=g-importing-member
@@ -55,7 +55,7 @@ NestedArray = embedding.Nested[jax.Array]
 PyTree = Any
 
 
-@flax.struct.dataclass
+@struct.dataclass
 class TrainState:
   """State of the model and the training.
 
@@ -67,7 +67,7 @@ class TrainState:
   step: jax.Array
 
 
-@flax.struct.dataclass
+@struct.dataclass
 class TrainMetrics(metrics.Collection):
   """Training metrics.
 
@@ -81,7 +81,7 @@ class TrainMetrics(metrics.Collection):
   train_loss_std: metrics.Std.from_output('loss')  # pyrefly: ignore[invalid-annotation]
 
 
-@flax.struct.dataclass
+@struct.dataclass
 class ShakespeareModelDenseInput:
   """Input data for the Shakespeare model."""
 
@@ -93,7 +93,7 @@ ShakesperaeModelPipelineCurrentStepInput = ep_utils.CurrentStepInput[
 ]
 
 
-@flax.struct.dataclass
+@struct.dataclass
 class ShakespeareModelOutput:
   """Model output data."""
 

@@ -28,9 +28,10 @@ from absl import logging
 from clu import metrics
 from clu import parameter_overview
 from etils import epath
-import flax
 from flax import linen as nn
+from flax import struct
 import jax
+from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.sharding import Mesh
 from jax.sharding import NamedSharding
@@ -50,7 +51,7 @@ np.set_printoptions(threshold=sys.maxsize)
 Nested = embedding.Nested
 
 
-@flax.struct.dataclass
+@struct.dataclass
 class TrainState:
   """State of the model and the training.
 
@@ -61,7 +62,7 @@ class TrainState:
   opt_state: optax.OptState
 
 
-@flax.struct.dataclass
+@struct.dataclass
 class TrainMetrics(metrics.Collection):
   # train_accuracy: metrics.Accuracy
   # learning_rate: metrics.LastValue.from_output("learning_rate")
@@ -428,7 +429,7 @@ def run_model():
     if (step + 1) % config.loss_reset_frequency == 0:
       train_metrics = None
       loaded_stats = fdo_client.load()
-      jax.experimental.multihost_utils.sync_global_devices('FDO_load_barrier')
+      multihost_utils.sync_global_devices('FDO_load_barrier')
 
       embedding.update_preprocessing_parameters(
           feature_specs, loaded_stats, config.num_sc_per_device
