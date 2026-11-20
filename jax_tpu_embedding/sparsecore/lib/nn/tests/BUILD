@@ -262,3 +262,32 @@ pytype_strict_contrib_test(
         pypi_requirement("numpy"),
     ],
 )
+
+pytype_strict_contrib_test(
+    name = "large_table_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["large_table_test.py"],
+    args = [
+        # TPU chip configuration,
+    ],
+    main = "large_table_test.py",
+    shard_count = 8,
+    tags = [
+        "exclusive-if-local",
+        "nopresubmit",
+        "requires-accel-hbm",
+        "requires-tpu",
+    ],
+    deps = [
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding",
+        "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
+        "//jax_tpu_embedding/sparsecore/utils",
+        "//third_party/jax:tpu_support",
+        pypi_requirement("absl/testing:absltest"),
+        pypi_requirement("absl/testing:parameterized"),
+        pypi_requirement("jax"),
+        pypi_requirement("numpy"),
+        pypi_requirement("orbax/checkpoint"),
+    ],
+)
