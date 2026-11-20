@@ -33,12 +33,13 @@ definition.
 
 ## Input Preprocessing Performance Evidence
 
-**Rule**: Treat input preprocessing in `sparsecore/lib/core/` as
+**Rule**: Treat C++ host input preprocessing in `sparsecore/lib/core/` as
 performance-critical. Every change to its hot path needs a before/after run of
-`sparsecore/lib/core/benchmarks:input_preprocessing_benchmark`, with the results
-(or the reason no run is needed) summarized in the change description. For
-internal contributors, the internal review flow asks for this as a `PERF=` tag
-and gives the exact command to run.
+`sparsecore/lib/core/benchmarks:input_preprocessing_benchmark` (or
+`sparsecore/lib/nn/tests:preprocess_input_benchmarks` for Python-bound input
+batches), with the results (or the reason no run is needed) summarized in the
+change description. For internal contributors, the internal review flow asks for
+this as a `PERF=` tag and gives the exact command to run.
 
 **Why**: This code runs on the host for every batch and every stacked table, so
 small per-ID costs add up quickly. Past measurements show how sensitive it is:
@@ -55,13 +56,17 @@ small per-ID costs add up quickly. Past measurements show how sensitive it is:
 Unit and end-to-end tests check correctness, not speed, so none of these effects
 would show up without a benchmark.
 
-**Scope**: The hot path is everything that runs per ID or per batch: COO
-extraction, sort and group, minibatching splits and merges, and CSR buffer
-filling (`coo_format.h`, `input_preprocessing*.{h,cc}`,
-`partitioned_coo_tensors.h`, `sort_and_group_coo_tensors_impl.h` and the
-`*_impl.h` input streams). Skipping the benchmark is appropriate only when the
-change cannot alter generated code on that path, for example comments, renames,
-or code that runs once per table such as validation.
+**Scope**: The hot path is the C++ code that runs per ID or per batch: COO
+extraction, sort and group, and CSR buffer filling (`coo_format.h`,
+`input_preprocessing*.{h,cc}`,
+`{numpy,ragged_tensor,sparse_coo}_input_batch.{h,cc}`,
+`process_coo_tensors_impl.h`, `partitioned_coo_tensors.h`, and
+`sort_and_group_coo_tensors_impl.h`). Skipping the benchmark is appropriate only
+when a change to those files cannot alter generated code on that path, for
+example comments, renames, or code that runs once per table such as validation.
+Changes restricted to unit tests (`tests/`), benchmarks (`benchmarks/`), gRPC
+transport (`grpc/`), TPU primitives (`primitives/`), or Python reference modules
+are outside this scope and need no performance note.
 
 **Writing hot-path code**:
 
