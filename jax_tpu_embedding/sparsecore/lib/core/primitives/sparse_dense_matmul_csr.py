@@ -57,8 +57,23 @@ class AbsmaxQuantizationBackendConfig(TypedDict):
   absmax: AbsmaxQuantizationParams
 
 
+class Codebook2DQuantizationParams(TypedDict):
+  """Parameters for dynamic 2D codebook quantization in backend config."""
+
+  centroids: list[float]
+  logical_dim: int
+
+
+class Codebook2DQuantizationBackendConfig(TypedDict):
+  """Backend config payload for dynamic 2D codebook quantization."""
+
+  codebook_2d: Codebook2DQuantizationParams
+
+
 QuantizationBackendConfig: TypeAlias = (
-    FixedQuantizationBackendConfig | AbsmaxQuantizationBackendConfig
+    FixedQuantizationBackendConfig
+    | AbsmaxQuantizationBackendConfig
+    | Codebook2DQuantizationBackendConfig
 )
 
 
