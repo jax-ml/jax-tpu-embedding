@@ -1133,6 +1133,61 @@ class InputPreprocessingMegacoreTest(absltest.TestCase):
     self.assertEqual(sample_ids[17], 0)
     self.assertEqual(gains[17], 1.0)
 
+  def test_device_minibatching_validates_aggregate_device_limits(self):
+    mesh = jax.sharding.Mesh(self.global_devices[:2], "x")
+    device_mode = input_preprocessing_megacore.MinibatchingMode.DEVICE
+    # 4 global SCs, hbm_word_size_in_4b=8, num_sc_per_device=2 =>
+    # max_device_ids = 8 * 4 * 2 = 64, max_device_unique_ids = 8 * 4 * 2 = 64.
+    skewed_features = [[i * 4 for i in range(8)]]
+    skewed_weights = [[1.0] * 8]
+    row_pointers, _, _, _ = (
+        input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+            skewed_features,
+            skewed_weights,
+            mesh,
+            max_ids_per_partition=2,
+            max_unique_ids_per_partition=1,
+            rows_per_sc=100,
+            num_sc_per_device=2,
+            hbm_word_size_in_4b=8,
+            minibatching_mode=device_mode,
+            suggested_coo_buffer_size_per_device=128,
+        )
+    )
+    self.assertEqual(row_pointers[0], 8)
+
+    with self.assertRaisesRegex(
+        ValueError, "Device has too many ids across partitions"
+    ):
+      input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+          [[0] for _ in range(65)],
+          [[1.0] for _ in range(65)],
+          mesh,
+          max_ids_per_partition=2,
+          max_unique_ids_per_partition=1,
+          rows_per_sc=100,
+          num_sc_per_device=2,
+          hbm_word_size_in_4b=8,
+          minibatching_mode=device_mode,
+          suggested_coo_buffer_size_per_device=128,
+      )
+
+    with self.assertRaisesRegex(
+        ValueError, "Device has too many unique ids across partitions"
+    ):
+      input_preprocessing_megacore.preprocess_sparse_dense_matmul_input(
+          [[i * 4 for i in range(65)]],
+          [[1.0] * 65],
+          mesh,
+          max_ids_per_partition=16,
+          max_unique_ids_per_partition=1,
+          rows_per_sc=100,
+          num_sc_per_device=2,
+          hbm_word_size_in_4b=8,
+          minibatching_mode=device_mode,
+          suggested_coo_buffer_size_per_device=128,
+      )
+
 
 class InputPreprocessingInt64LargeVocabTest(absltest.TestCase):
 

@@ -809,7 +809,10 @@ struct MegacoreCsrOptions {
   // Row stride used to linearize embedding IDs as
   // `dest_sc * rows_per_sc + row_in_sc`. Unused if `num_sc_per_device == 1`.
   int rows_per_sc = 0;
-  // Per-device limits (`max_*_ids_per_partition * num_sc_per_device`).
+  // Per-destination-device limits (`limit_per_partition * num_sc_per_device`)
+  // in `kDisabled` mode, or aggregate local-device limits
+  // (`RoundUpTo(limit_per_partition, hbm_word_size_in_4b) * num_scs *
+  // num_sc_per_device`) in `kDevice` mode.
   int max_ids_per_device = std::numeric_limits<int>::max();
   int max_unique_ids_per_device = std::numeric_limits<int>::max();
 };

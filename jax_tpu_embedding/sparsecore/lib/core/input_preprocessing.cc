@@ -400,15 +400,32 @@ struct TableState {
               rows_per_sc, static_cast<int>(*feature_metadata.max_col_id) + 1);
         }
       }
+      const int max_ids_per_partition =
+          MaxIdsPerPartitionForStackedTables(stacked_table_metadata);
+      const int max_unique_ids_per_partition =
+          MaxUniqueIdsPerPartitionForStackedTables(stacked_table_metadata);
+      int64_t max_ids_per_device_64;
+      int64_t max_unique_ids_per_device_64;
+      if (options.GetMinibatchingMode() == MinibatchingMode::kDevice) {
+        const int64_t num_scs = options.GetNumScs();
+        max_ids_per_device_64 =
+            xla::RoundUpTo<int64_t>(max_ids_per_partition,
+                                    options.hbm_word_size_in_4b) *
+            num_scs * options.num_sc_per_device;
+        max_unique_ids_per_device_64 =
+            xla::RoundUpTo<int64_t>(max_unique_ids_per_partition,
+                                    options.hbm_word_size_in_4b) *
+            num_scs * options.num_sc_per_device;
+      } else {
+        max_ids_per_device_64 =
+            int64_t{max_ids_per_partition} * options.num_sc_per_device;
+        max_unique_ids_per_device_64 =
+            int64_t{max_unique_ids_per_partition} * options.num_sc_per_device;
+      }
       const int max_ids_per_device = static_cast<int>(std::min<int64_t>(
-          int64_t{MaxIdsPerPartitionForStackedTables(stacked_table_metadata)} *
-              options.num_sc_per_device,
-          std::numeric_limits<int>::max()));
+          max_ids_per_device_64, std::numeric_limits<int>::max()));
       const int max_unique_ids_per_device = static_cast<int>(std::min<int64_t>(
-          int64_t{MaxUniqueIdsPerPartitionForStackedTables(
-              stacked_table_metadata)} *
-              options.num_sc_per_device,
-          std::numeric_limits<int>::max()));
+          max_unique_ids_per_device_64, std::numeric_limits<int>::max()));
       megacore_csr = MegacoreCsrOptions{
           .rows_per_sc = rows_per_sc,
           .max_ids_per_device = max_ids_per_device,

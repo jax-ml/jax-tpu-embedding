@@ -372,19 +372,17 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
     FindGlobalScOffsets<CooT>(coo_tensors, sc_mask, offsets);
   }
 
+  const bool is_device_minibatching =
+      options.GetMinibatchingMode() == MinibatchingMode::kDevice;
   const int max_ids_per_device = options.allow_id_dropping
                                      ? megacore_csr.max_ids_per_device
                                      : std::numeric_limits<int>::max();
   const int max_unique_ids_per_device =
       options.allow_id_dropping ? megacore_csr.max_unique_ids_per_device
                                 : std::numeric_limits<int>::max();
-  // In device minibatching without ID dropping, unique IDs are neither capped
-  // nor fatal, so skip the extra k-way merge count.
-  const bool check_unique_ids =
-      options.allow_id_dropping ||
-      options.GetMinibatchingMode() != MinibatchingMode::kDevice;
-  int observed_max_ids_per_device = 0;
+  int observed_max_ids_per_device = is_device_minibatching ? total_coo_size : 0;
   int observed_max_unique_ids_per_device = 0;
+  int total_unique_ids = 0;
   int coo_index = 0;
   int processed = 0;
   int g = 0;
@@ -405,18 +403,28 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
       device_ids += partition_count;
     }
 
-    // TODO: Skip per-device capping in MinibatchingMode::kDevice once device
-    // minibatching is supported for Megacore CSR.
+    // In device minibatching mode, `megacore_csr` limits bound the local
+    // device's total across all destination devices; in disabled mode, they
+    // bound each destination device independently.
+    const int64_t id_budget =
+        is_device_minibatching
+            ? std::max(0, max_ids_per_device - processed)
+            : max_ids_per_device;
     const int row_end_limit = static_cast<int>(
-        std::min<int64_t>(coo_end, int64_t{coo_index} + max_ids_per_device));
+        std::min<int64_t>(coo_end, int64_t{coo_index} + id_budget));
     int device_unique_ids = 0;
+    int& unique_ids_counter =
+        is_device_minibatching ? total_unique_ids : device_unique_ids;
+    const bool skip_unique_check =
+        is_device_minibatching
+            ? total_coo_size <= megacore_csr.max_unique_ids_per_device
+            : device_ids <= megacore_csr.max_unique_ids_per_device;
     for (int dest_sc = 0; dest_sc < num_sc_per_device; ++dest_sc, ++g) {
       plan->partition_coo_begin[g] = coo_index;
       const int max_elements = row_end_limit - coo_index;
       int written = 0;
       if (partition_counts[dest_sc] > 0) {
-        if (!check_unique_ids ||
-            device_ids <= megacore_csr.max_unique_ids_per_device) {
+        if (skip_unique_check) {
           written = std::min(partition_counts[dest_sc], max_elements);
         } else if (max_elements > 0 || !options.allow_id_dropping) {
           const int count_limit = options.allow_id_dropping
@@ -426,14 +434,14 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
               max_elements,
               CountMegacorePartitionElements<CooT>(
                   grouped_coo_tensors, *plan, g, num_scs, num_sc_per_device,
-                  count_limit, max_unique_ids_per_device, device_unique_ids));
+                  count_limit, max_unique_ids_per_device, unique_ids_counter));
         }
       }
       coo_index += written;
       processed += written;
       plan->partition_coo_end[g] = coo_index;
     }
-    if (!options.allow_id_dropping) {
+    if (!options.allow_id_dropping && !is_device_minibatching) {
       observed_max_ids_per_device =
           std::max(observed_max_ids_per_device, device_ids);
       observed_max_unique_ids_per_device =
@@ -444,18 +452,14 @@ tsl::AsyncValueRef<int> FillMegacoreLocalDeviceBufferAsync(
                            csr_arrays);
   }
   if (!options.allow_id_dropping) {
-    if (options.GetMinibatchingMode() == MinibatchingMode::kDevice) {
-      internal::LogIfDeviceMinibatchingRequired</*kPerDevice=*/true>(
-          observed_max_ids_per_device, /*observed_max_unique_ids=*/0,
-          megacore_csr.max_ids_per_device,
-          megacore_csr.max_unique_ids_per_device, stacked_table_name);
-    } else {
-      internal::ValidateMaxIdsOrDie</*kPerDevice=*/true>(
-          observed_max_ids_per_device, observed_max_unique_ids_per_device,
-          megacore_csr.max_ids_per_device,
-          megacore_csr.max_unique_ids_per_device, stacked_table_name,
-          /*allow_id_dropping=*/false);
+    if (is_device_minibatching) {
+      observed_max_unique_ids_per_device = total_unique_ids;
     }
+    internal::ValidateMaxIdsOrDie</*kPerDevice=*/true>(
+        observed_max_ids_per_device, observed_max_unique_ids_per_device,
+        megacore_csr.max_ids_per_device,
+        megacore_csr.max_unique_ids_per_device, stacked_table_name,
+        /*allow_id_dropping=*/false);
   }
   for (int row_index = options.global_device_count;
        row_index < csr_arrays.row_pointers.size(); ++row_index) {
