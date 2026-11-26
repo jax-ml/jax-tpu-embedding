@@ -26,7 +26,6 @@ py_library(
         "__init__.py",
         "utils.py",
     ],
-    type_checking = True,
     deps = [
         pypi_requirement("einops"),
         pypi_requirement("jax"),
@@ -39,7 +38,6 @@ py_test(
     name = "utils_test",
     timeout = "short",
     srcs = ["utils_test.py"],
-    type_checking = True,
     deps = [
         ":utils",
         pypi_requirement("absl/testing:absltest"),

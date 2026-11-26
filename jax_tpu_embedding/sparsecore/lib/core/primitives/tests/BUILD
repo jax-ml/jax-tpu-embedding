@@ -13,7 +13,7 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
+load("//third_party/bazel/python:pytype.bzl", "py_test")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -100,7 +100,7 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "sparse_dense_matmul_activation_unstack_test",
     srcs = ["sparse_dense_matmul_activation_unstack_test.py"],
     deps = [
@@ -110,7 +110,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "sparse_dense_matmul_gradient_stack_test",
     srcs = ["sparse_dense_matmul_gradient_stack_test.py"],
     deps = [

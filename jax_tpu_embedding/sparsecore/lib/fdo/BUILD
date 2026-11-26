@@ -13,20 +13,20 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library", "py_test")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = EXTERNAL_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "fdo_client",
     srcs = ["fdo_client.py"],
     deps = ["//jax_tpu_embedding/sparsecore/lib/nn:embedding"],
 )
 
-pytype_strict_library(
+py_library(
     name = "file_fdo_client",
     srcs = ["file_fdo_client.py"],
     deps = [
@@ -39,7 +39,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "file_fdo_client_test",
     srcs = ["file_fdo_client_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
@@ -52,7 +52,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "csv_file_fdo_client",
     srcs = ["csv_file_fdo_client.py"],
     deps = [
@@ -62,7 +62,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "csv_file_fdo_client_test",
     srcs = ["csv_file_fdo_client_test.py"],
     deps = [
@@ -75,7 +75,7 @@ pytype_strict_contrib_test(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "fdo",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],

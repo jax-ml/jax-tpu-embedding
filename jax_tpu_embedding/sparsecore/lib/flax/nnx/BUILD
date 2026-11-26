@@ -15,8 +15,8 @@ load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
 load(
     "//third_party/bazel/python:pytype.bzl",
-    "pytype_strict_binary",
-    "pytype_strict_library",
+    "py_binary",
+    "py_library",
     pytype_strict_test = "pytype_strict_contrib_test",
 )
 
@@ -25,7 +25,7 @@ package(
     default_visibility = EXTERNAL_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "embed",
     srcs = [
         "embed.py",
@@ -41,7 +41,7 @@ pytype_strict_library(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "checkpoint_utils",
     srcs = ["checkpoint_utils.py"],
     deps = [
@@ -61,7 +61,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "nnx",
     srcs = ["__init__.py"],
     visibility = [
@@ -75,7 +75,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "offline_converter_lib",
     srcs = ["offline_converter.py"],
     deps = [
@@ -89,7 +89,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "offline_converter",
     srcs = ["offline_converter.py"],
     main = "offline_converter.py",

@@ -13,14 +13,14 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = EXTERNAL_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "embed",
     srcs = [
         "embed.py",
@@ -36,7 +36,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "embed_optimizer",
     srcs = [
         "embed_optimizer.py",
@@ -49,7 +49,7 @@ pytype_strict_library(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "linen",
     srcs = ["__init__.py"],
     visibility = [

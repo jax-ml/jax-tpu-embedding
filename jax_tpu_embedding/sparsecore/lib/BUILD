@@ -11,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
 )
 
-pytype_strict_library(
+py_library(
     name = "lib",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore:__pkg__"],

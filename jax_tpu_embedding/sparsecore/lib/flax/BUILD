@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -20,7 +20,7 @@ package(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "flax",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],

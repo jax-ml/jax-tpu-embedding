@@ -14,14 +14,14 @@
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library", "py_test")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = CORE_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "test_utils",
     srcs = ["test_utils.py"],
     deps = [pypi_requirement("numpy")],
@@ -90,7 +90,7 @@ cc_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "input_preprocessing_test",
     srcs = [
         "input_preprocessing_test.py",
@@ -109,7 +109,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "pybind_input_preprocessing_test",
     srcs = [
         "pybind_input_preprocessing_test.py",
@@ -132,7 +132,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "sparse_coo_input_preprocessing_test",
     timeout = "short",
     srcs = [

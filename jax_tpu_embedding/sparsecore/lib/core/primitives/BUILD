@@ -13,14 +13,14 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_csr",
     srcs = [
         "sparse_dense_matmul_csr.py",
@@ -37,7 +37,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_csr_with_fdo_statistics",
     srcs = [
         "sparse_dense_matmul_csr_with_fdo_statistics.py",
@@ -55,7 +55,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_activation_unstack",
     srcs = ["sparse_dense_matmul_activation_unstack.py"],
     deps = [
@@ -67,7 +67,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_gradient_stack",
     srcs = ["sparse_dense_matmul_gradient_stack.py"],
     deps = [
@@ -79,7 +79,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "local_sparse_dense_matmul",
     srcs = ["local_sparse_dense_matmul.py"],
     deps = [
@@ -92,7 +92,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_sgd",
     srcs = [
         "sparse_dense_matmul_grad_with_sgd.py",
@@ -109,7 +109,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_adagrad",
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad.py",
@@ -126,7 +126,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_adagrad_momentum",
     srcs = [
         "sparse_dense_matmul_grad_with_adagrad_momentum.py",
@@ -143,7 +143,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_laprop",
     srcs = ["sparse_dense_matmul_grad_with_laprop.py"],
     deps = [
@@ -158,7 +158,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_adam",
     srcs = [
         "sparse_dense_matmul_grad_with_adam.py",
@@ -175,7 +175,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_ftrl",
     srcs = [
         "sparse_dense_matmul_grad_with_ftrl.py",
@@ -192,7 +192,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_grad_with_f2a",
     srcs = ["sparse_dense_matmul_grad_with_f2a.py"],
     deps = [
@@ -207,7 +207,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "optimizers_computation",
     srcs = [
         "optimizers_computation.py",
@@ -220,7 +220,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "sparse_dense_matmul_optimizer_grad",
     srcs = [
         "sparse_dense_matmul_optimizer_grad.py",
@@ -237,7 +237,7 @@ pytype_strict_library(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "primitives",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib/core:__pkg__"],
@@ -255,7 +255,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "utils",
     srcs = ["utils.py"],
     deps = [

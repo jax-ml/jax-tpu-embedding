@@ -13,21 +13,21 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "EXTERNAL_USERS")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = EXTERNAL_USERS,
 )
 
-pytype_strict_library(
+py_library(
     name = "slot_shape",
     srcs = [
         "slot_shape.py",
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "custom_optimizer_lowering",
     srcs = [
         "custom_optimizer_lowering.py",
@@ -41,7 +41,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "embedding_spec",
     srcs = [
         "embedding_spec.py",
@@ -64,7 +64,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "embedding",
     srcs = ["embedding.py"],
     deps = [
@@ -86,7 +86,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "embedding_proto_utils",
     srcs = ["embedding_proto_utils.py"],
     deps = [
@@ -97,7 +97,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "table_stacking",
     srcs = ["table_stacking.py"],
     deps = [
@@ -109,7 +109,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "embedding_pipelining_utils",
     srcs = [
         "embedding_pipelining_utils.py",
@@ -125,7 +125,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "nn",
     srcs = ["__init__.py"],
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],

@@ -15,7 +15,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS")
 load("//third_party/bazel/python:pybind11.bzl", "pybind_extension", "pybind_library")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -165,7 +165,7 @@ pybind_extension(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "input_preprocessing",
     srcs = [
         "input_preprocessing.py",
@@ -179,7 +179,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "input_preprocessing_megacore",
     srcs = [
         "input_preprocessing_megacore.py",
@@ -193,7 +193,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "constants",
     srcs = [
         "constants.py",
@@ -201,7 +201,7 @@ pytype_strict_library(
 )
 
 # Library target.
-pytype_strict_library(
+py_library(
     name = "core",
     srcs = ["__init__.py"],
     # C++ dependencies must go in "data".
@@ -363,9 +363,9 @@ cc_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "pybind_input_preprocessing_pyi",
-    pytype_srcs = ["pybind_input_preprocessing.pyi"],
+    pyi_srcs = ["pybind_input_preprocessing.pyi"],
     deps = [
         "//jax_tpu_embedding/sparsecore/lib/nn:embedding_spec",
         pypi_requirement("numpy"),

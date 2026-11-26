@@ -24,7 +24,6 @@ py_test(
     name = "version_test",
     srcs = ["version_test.py"],
     data = ["//jax_tpu_embedding/sparsecore:version"],
-    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore",
         pypi_requirement("absl/testing:absltest"),

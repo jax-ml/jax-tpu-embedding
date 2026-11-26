@@ -13,7 +13,7 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary")
+load("//third_party/bazel/python:pytype.bzl", "py_binary")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -50,7 +50,7 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "jax_sc_shakespeare_jit",
     srcs = ["jax_sc_shakespeare_jit.py"],
     args = [
@@ -232,7 +232,7 @@ filegroup(
     visibility = ["//jax_tpu_embedding/sparsecore/lib/flax/nnx:__pkg__"],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "jax_sc_shakespeare_jit_flax_nnx",
     srcs = ["jax_sc_shakespeare_jit_flax_nnx.py"],
     args = [

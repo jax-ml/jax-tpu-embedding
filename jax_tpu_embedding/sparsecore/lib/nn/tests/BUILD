@@ -13,14 +13,14 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "CORE_USERS", "EXTERNAL_USERS", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_binary", "pytype_strict_contrib_test", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_binary", "py_library", "py_test")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//visibility:private"],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "preprocess_sparse_dense_matmul_input_test",
     srcs = [
         "preprocess_sparse_dense_matmul_input_test.py",
@@ -38,7 +38,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_binary(
+py_binary(
     name = "preprocess_input_benchmarks",
     srcs = ["preprocess_input_benchmarks.py"],
     visibility = CORE_USERS,
@@ -57,7 +57,7 @@ pytype_strict_binary(
 # Verify that the benchmarks run for small values of (#features, #samples).
 #
 # (Uses default value for num_features and num_samples ignoring the args below.)
-pytype_strict_contrib_test(
+py_test(
     name = "preprocess_input_benchmarks_test",
     srcs = ["preprocess_input_benchmarks.py"],
     args = [
@@ -78,7 +78,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "test_utils",
     testonly = 1,
     srcs = ["test_utils.py"],
@@ -92,7 +92,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "test_utils_test",
     srcs = ["test_utils_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
@@ -106,7 +106,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "tpu_sparse_dense_matmul_test",
     srcs = [
         "tpu_sparse_dense_matmul_test.py",
@@ -133,7 +133,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "tpu_sparse_dense_matmul_grad_test",
     srcs = [
         "tpu_sparse_dense_matmul_grad_test.py",
@@ -202,7 +202,7 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "embedding_spec_test",
     srcs = ["embedding_spec_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
@@ -237,7 +237,7 @@ tpu_py_strict_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "custom_optimizer_lowering_test",
     srcs = ["custom_optimizer_lowering_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
@@ -249,7 +249,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "embedding_pipelining_utils_test",
     srcs = ["embedding_pipelining_utils_test.py"],
     env = {"JAX_PLATFORMS": "cpu"},
@@ -263,7 +263,7 @@ pytype_strict_contrib_test(
     ],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "large_table_test",
     size = "large",
     timeout = "long",

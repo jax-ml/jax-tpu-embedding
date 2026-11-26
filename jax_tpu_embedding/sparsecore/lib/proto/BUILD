@@ -34,6 +34,5 @@ py_proto_library(
 py_library(
     name = "proto",
     srcs = ["__init__.py"],
-    type_checking = True,
     visibility = ["//jax_tpu_embedding/sparsecore/lib:__pkg__"],
 )

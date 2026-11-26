@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_library")
+load("//third_party/bazel/python:pytype.bzl", "py_library")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//jax_tpu_embedding/sparsecore:internal"],
 )
 
-pytype_strict_library(
+py_library(
     name = "utils",
     srcs = ["utils.py"],
     deps = [
@@ -28,7 +28,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "decompose",
     srcs = ["decompose.py"],
     deps = [
@@ -39,7 +39,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "preprocess",
     srcs = ["preprocess.py"],
     deps = [
@@ -48,7 +48,7 @@ pytype_strict_library(
     ],
 )
 
-pytype_strict_library(
+py_library(
     name = "auto_pipelining",
     srcs = ["auto_pipelining.py"],
     deps = [
