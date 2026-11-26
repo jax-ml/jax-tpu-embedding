@@ -29,12 +29,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "fuzztest/fuzztest.h"
-#include "absl/base/log_severity.h"  // from @com_google_absl
 #include "absl/base/thread_annotations.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
 #include "absl/container/flat_hash_set.h"  // from @com_google_absl
 #include "absl/log/check.h"  // from @com_google_absl
-#include "absl/log/scoped_mock_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_matchers.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -2389,21 +2387,11 @@ TEST(MegacoreCsrTest, SupportsDeviceMinibatching) {
                 RowCombiner::kSum, /*max_col_id=*/9,
                 /*enable_megacore_csr=*/true)}}});
 
-  absl::ScopedMockLog mock_log(absl::MockLogDefault::kIgnoreUnexpected);
-  EXPECT_CALL(mock_log,
-              Log(absl::LogSeverity::kWarning, testing::_,
-                  testing::HasSubstr(
-                      "Device minibatching required for table: megacore_table "
-                      "observed max ids per device:")))
-      .Times(testing::AtLeast(1));
-  mock_log.StartCapturingLogs();
-
   // Act
   TF_ASSERT_OK_AND_ASSIGN(
       PreprocessSparseDenseMatmulOutput output,
       PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
                                        stacked_tables, options));
-  mock_log.StopCapturingLogs();
 
   // Assert
   EXPECT_EQ(output.num_minibatches, 1);
@@ -2429,12 +2417,12 @@ TEST(MegacoreCsrTest, DeviceMinibatchingExemptsFromPerScAlignedIdLimits) {
   // 4 global SparseCores (2 devices * 2 SCs/device), hbm_word_size_in_4b = 8.
   // With max_ids_per_partition = 8 and max_unique_ids_per_partition = 8, a
   // non-Megacore table caps each SparseCore at RoundUpTo(8, 8) * 4 = 32 aligned
-  // slots, whereas Megacore CSR caps each destination device at
-  // max_ids_per_partition * num_sc_per_device = 16 unaligned IDs. Place 9
-  // distinct IDs on global_sc_id 0, 1 on global_sc_id 1 (10 <= 16 on device 0),
-  // and 9 on global_sc_id 2 (9 <= 16 on device 1) in sample 0 so SparseCore 0
-  // uses 16 + 8 + 16 = 40 > 32 aligned ID and unique-ID slots while staying
-  // within the Megacore per-device limits.
+  // slots, whereas Megacore CSR in kDevice mode caps the local device total at
+  // RoundUpTo(8, 8) * 4 * 2 = 64 IDs. Place 9 distinct IDs on global_sc_id 0,
+  // 1 on global_sc_id 1 (10 on device 0), and 9 on global_sc_id 2 (9 on
+  // device 1) in sample 0 so SparseCore 0 uses 16 + 8 + 16 = 40 > 32 aligned
+  // ID and unique-ID slots while staying within the Megacore aggregate limit
+  // (19 <= 64).
   std::vector<int64_t> sample_0;
   for (int i = 0; i < 9; ++i) {
     sample_0.push_back(i * 4);
@@ -2543,9 +2531,8 @@ TEST(MegacoreCsrTest, DropsIdsWhenBufferSizeExceeded) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.push_back(CreateInputBatchFromSamples({sample_0, sample_1}));
 
-  // Keep partition limits above observed IDs so only buffer capacity is
-  // exceeded (and to avoid triggering the process-wide LOG_EVERY_N_SEC warning
-  // in LogIfDeviceMinibatchingRequired).
+  // Keep aggregate device limits above observed IDs so only buffer capacity is
+  // exceeded.
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables(
           {{"megacore_table",
@@ -2634,9 +2621,8 @@ TEST(MegacoreCsrTest, DropsIdsMidMergeAcrossLocalScs) {
   std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
   input_batches.push_back(CreateInputBatchFromSamples(samples));
 
-  // Keep partition limits above observed IDs so only buffer capacity is
-  // exceeded (and to avoid triggering the process-wide LOG_EVERY_N_SEC warning
-  // in LogIfDeviceMinibatchingRequired).
+  // Keep aggregate device limits above observed IDs so only buffer capacity is
+  // exceeded.
   absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
       stacked_tables(
           {{"megacore_table",
@@ -2699,7 +2685,7 @@ TEST(MegacoreCsrTest, DropsIdsWhenMaxIdsPerDeviceExceeded) {
       .sc_simd_width = 8,
       .hbm_word_size_in_4b = 8,
       .allow_id_dropping = true,
-      .minibatching_mode = MinibatchingMode::kDevice,
+      .minibatching_mode = MinibatchingMode::kDisabled,
   };
   // max_ids_per_partition = 2 => max_ids_per_device = 4.
   // Device 0 (global_sc_id 0 and 1) has 5 elements on SC 0 and 2 on SC 1; keeps
@@ -2752,7 +2738,7 @@ TEST(MegacoreCsrTest, DropsIdsWhenMaxUniqueIdsPerDeviceExceeded) {
       .sc_simd_width = 8,
       .hbm_word_size_in_4b = 8,
       .allow_id_dropping = true,
-      .minibatching_mode = MinibatchingMode::kDevice,
+      .minibatching_mode = MinibatchingMode::kDisabled,
   };
   // max_unique_ids_per_partition = 1 => max_unique_ids_per_device = 2.
   // Device 0 keeps all 5 elements for its first 2 unique IDs (col_ids 0 and 4)
@@ -2805,7 +2791,7 @@ TEST(MegacoreCsrTest, PreservesDuplicatesWhenDeviceIdsExceedMaxUniqueIds) {
       .sc_simd_width = 8,
       .hbm_word_size_in_4b = 8,
       .allow_id_dropping = true,
-      .minibatching_mode = MinibatchingMode::kDevice,
+      .minibatching_mode = MinibatchingMode::kDisabled,
   };
   // max_unique_ids_per_partition = 1 => max_unique_ids_per_device = 2.
   // Device 0 receives 6 total elements (> 2, triggering the merged unique-ID
@@ -2960,6 +2946,165 @@ TEST(MegacoreCsrTest, EnforcesPerDeviceLimitsInsteadOfPerPartitionLimits) {
                  "Observed max unique ids per device: 3 for table: "
                  "megacore_table is greater than the set max unique ids per "
                  "device: 2");
+  }
+}
+
+TEST(MegacoreCsrTest, DeviceMinibatchingEnforcesAggregateDeviceLimits) {
+  // 2 global devices * 2 SCs/device = 4 global SCs, hbm_word_size_in_4b = 8:
+  // max_ids_per_partition = 2 => max_ids_per_device = 8 * 4 * 2 = 64,
+  // max_unique_ids_per_partition = 1 =>
+  //   max_unique_ids_per_device = 8 * 4 * 2 = 64.
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      stacked_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/2,
+                /*max_unique_ids_per_partition=*/1,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/4,
+                /*suggested_coo_buffer_size_per_device=*/128, RowCombiner::kSum,
+                /*max_col_id=*/99,
+                /*enable_megacore_csr=*/true)}}});
+
+  // Skew 8 distinct IDs onto destination device 0 (exceeds per-destination
+  // limit 2 * 2 = 4, but within aggregate limit 64). No IDs are dropped.
+  {
+    std::vector<int64_t> skewed_ids;
+    skewed_ids.reserve(8);
+    for (int i = 0; i < 8; ++i) {
+      skewed_ids.push_back(i * 4);  // All map to global_sc_id 0 (device 0).
+    }
+    for (const bool allow_id_dropping : {false, true}) {
+      PreprocessSparseDenseMatmulInputOptions options{
+          .local_device_count = 1,
+          .global_device_count = 2,
+          .num_sc_per_device = 2,
+          .sc_simd_width = 8,
+          .hbm_word_size_in_4b = 8,
+          .allow_id_dropping = allow_id_dropping,
+          .minibatching_mode = MinibatchingMode::kDevice,
+      };
+      std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+      input_batches.push_back(
+          CreateInputBatchFromSamples({skewed_ids, {}, {}, {}}));
+      TF_ASSERT_OK_AND_ASSIGN(
+          PreprocessSparseDenseMatmulOutput output,
+          PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                           stacked_tables, options));
+      EXPECT_EQ(output.stats.dropped_id_count.at("megacore_table"), 0);
+    }
+  }
+
+  // Exceeding the aggregate device ID limit (65 > 64) drops 1 ID when
+  // allow_id_dropping=true and dies fatally when allow_id_dropping=false.
+  // Use 65 samples with ID 0 on SC 0 so each sample has a distinct
+  // (col_id, sample_id) pair (total IDs = 65, unique IDs = 1 <= 64).
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      many_sample_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/2,
+                /*max_unique_ids_per_partition=*/1,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/68,
+                /*suggested_coo_buffer_size_per_device=*/128, RowCombiner::kSum,
+                /*max_col_id=*/99,
+                /*enable_megacore_csr=*/true)}}});
+  std::vector<std::vector<int64_t>> many_duplicate_samples(68);
+  for (int i = 0; i < 65; ++i) {
+    many_duplicate_samples[i] = {0};
+  }
+  {
+    PreprocessSparseDenseMatmulInputOptions drop_options{
+        .local_device_count = 1,
+        .global_device_count = 2,
+        .num_sc_per_device = 2,
+        .sc_simd_width = 8,
+        .hbm_word_size_in_4b = 8,
+        .allow_id_dropping = true,
+        .minibatching_mode = MinibatchingMode::kDevice,
+    };
+    std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+    input_batches.push_back(
+        CreateInputBatchFromSamples(many_duplicate_samples));
+    TF_ASSERT_OK_AND_ASSIGN(
+        PreprocessSparseDenseMatmulOutput output,
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         many_sample_tables, drop_options));
+    EXPECT_EQ(output.stats.dropped_id_count.at("megacore_table"), 1);
+  }
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  PreprocessSparseDenseMatmulInputOptions no_drop_options{
+      .local_device_count = 1,
+      .global_device_count = 2,
+      .num_sc_per_device = 2,
+      .sc_simd_width = 8,
+      .hbm_word_size_in_4b = 8,
+      .allow_id_dropping = false,
+      .minibatching_mode = MinibatchingMode::kDevice,
+  };
+  {
+    std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+    input_batches.push_back(
+        CreateInputBatchFromSamples(many_duplicate_samples));
+    EXPECT_DEATH(PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                                  many_sample_tables,
+                                                  no_drop_options)
+                     .IgnoreError(),
+                 "Observed max ids per device: 65 for table: megacore_table is "
+                 "greater than the set max ids per device: 64");
+  }
+  // Exceeding the aggregate unique-ID limit (65 > 64) drops when
+  // allow_id_dropping=true and dies fatally when allow_id_dropping=false.
+  absl::flat_hash_map<std::string, std::vector<FeatureMetadataInStack>>
+      high_id_tables(
+          {{"megacore_table",
+            {FeatureMetadataInStack(
+                /*name=*/"feature_0", /*feature_index=*/0,
+                /*max_ids_per_partition=*/16,
+                /*max_unique_ids_per_partition=*/1,
+                /*row_offset=*/0, /*col_offset=*/0, /*col_shift=*/0,
+                /*batch_size=*/4,
+                /*suggested_coo_buffer_size_per_device=*/128, RowCombiner::kSum,
+                /*max_col_id=*/99,
+                /*enable_megacore_csr=*/true)}}});
+  std::vector<int64_t> many_unique_ids;
+  many_unique_ids.reserve(65);
+  for (int i = 0; i < 65; ++i) {
+    many_unique_ids.push_back(i * 4);
+  }
+  {
+    PreprocessSparseDenseMatmulInputOptions drop_options{
+        .local_device_count = 1,
+        .global_device_count = 2,
+        .num_sc_per_device = 2,
+        .sc_simd_width = 8,
+        .hbm_word_size_in_4b = 8,
+        .allow_id_dropping = true,
+        .minibatching_mode = MinibatchingMode::kDevice,
+    };
+    std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+    input_batches.push_back(
+        CreateInputBatchFromSamples({many_unique_ids, {}, {}, {}}));
+    TF_ASSERT_OK_AND_ASSIGN(
+        PreprocessSparseDenseMatmulOutput output,
+        PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                         high_id_tables, drop_options));
+    EXPECT_EQ(output.stats.dropped_id_count.at("megacore_table"), 1);
+  }
+  {
+    std::vector<std::unique_ptr<AbstractInputBatch>> input_batches;
+    input_batches.push_back(
+        CreateInputBatchFromSamples({many_unique_ids, {}, {}, {}}));
+    EXPECT_DEATH(PreprocessSparseDenseMatmulInput(absl::MakeSpan(input_batches),
+                                                  high_id_tables,
+                                                  no_drop_options)
+                     .IgnoreError(),
+                 "Observed max unique ids per device: 65 for table: "
+                 "megacore_table is greater than the set max unique ids per "
+                 "device: 64");
   }
 }
 

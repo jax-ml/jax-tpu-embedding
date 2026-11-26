@@ -103,6 +103,43 @@ def _preprocess_batch_to_megacore_buckets(
   }
 
 
+def _validate_device_limits(
+    buckets: BucketMap,
+    max_ids_per_partition: int,
+    max_unique_ids_per_partition: int,
+    num_scs: int,
+    num_sc_per_device: int,
+    hbm_word_size_in_4b: int,
+) -> None:
+  """Validates aggregate per-device ID and unique-ID limits for DEVICE mode."""
+  max_device_ids = (
+      input_preprocessing._round_up(max_ids_per_partition, hbm_word_size_in_4b)
+      * num_scs
+      * num_sc_per_device
+  )
+  max_device_unique_ids = (
+      input_preprocessing._round_up(
+          max_unique_ids_per_partition, hbm_word_size_in_4b
+      )
+      * num_scs
+      * num_sc_per_device
+  )
+  total_ids = sum(len(bucket) for bucket in buckets.values())
+  if total_ids > max_device_ids:
+    raise ValueError(
+        f"Device has too many ids across partitions. {total_ids} >"
+        f" {max_device_ids}."
+    )
+  total_unique_ids = sum(
+      len({coord[0] for coord, _ in bucket}) for bucket in buckets.values()
+  )
+  if total_unique_ids > max_device_unique_ids:
+    raise ValueError(
+        "Device has too many unique ids across partitions."
+        f" {total_unique_ids} > {max_device_unique_ids}."
+    )
+
+
 def _megacore_coo_buffer_size(
     max_ids_per_partition: int,
     global_device_count: int,
@@ -270,6 +307,15 @@ def preprocess_sparse_dense_matmul_input(
   buckets = _preprocess_batch_to_megacore_buckets(
       features, features_weights, num_scs, num_sc_per_device, rows_per_sc
   )
+  if minibatching_mode == MinibatchingMode.DEVICE:
+    _validate_device_limits(
+        buckets=buckets,
+        max_ids_per_partition=max_ids_per_partition,
+        max_unique_ids_per_partition=max_unique_ids_per_partition,
+        num_scs=num_scs,
+        num_sc_per_device=num_sc_per_device,
+        hbm_word_size_in_4b=hbm_word_size_in_4b,
+    )
   coo_buffer_size = _megacore_coo_buffer_size(
       max_ids_per_partition=max_ids_per_partition,
       global_device_count=global_device_count,
