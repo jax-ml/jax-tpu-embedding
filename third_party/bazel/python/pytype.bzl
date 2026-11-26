@@ -14,24 +14,65 @@
 """Default (OSS) build versions of Python pytype rules."""
 
 load("@bazel_skylib//lib:collections.bzl", "collections")
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load(
+    "@rules_python//python:defs.bzl",
+    _py_binary = "py_binary",
+    _py_library = "py_library",
+    _py_test = "py_test",
+)
+
+def _uniq_deps(deps):
+    return collections.uniq(deps) if type(deps) == "list" else deps
+
+def py_binary(
+        name,
+        deps = [],
+        pyi_deps = [],
+        pyi_srcs = [],
+        strict_deps = None,
+        type_checking = None,
+        **kwargs):
+    _ = (pyi_deps, pyi_srcs, strict_deps, type_checking)  # @unused
+    _py_binary(name = name, deps = _uniq_deps(deps), **kwargs)
+
+def py_library(
+        name,
+        deps = [],
+        pyi_deps = [],
+        pyi_srcs = [],
+        strict_deps = None,
+        type_checking = None,
+        **kwargs):
+    _ = (pyi_deps, pyi_srcs, strict_deps, type_checking)  # @unused
+    _py_library(name = name, deps = _uniq_deps(deps), **kwargs)
+
+def py_test(
+        name,
+        deps = [],
+        pyi_deps = [],
+        pyi_srcs = [],
+        strict_deps = None,
+        type_checking = None,
+        **kwargs):
+    _ = (pyi_deps, pyi_srcs, strict_deps, type_checking)  # @unused
+    _py_test(name = name, deps = _uniq_deps(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_library.
 def pytype_library(name, deps = [], pytype_deps = [], pytype_srcs = [], **kwargs):
     _ = (pytype_deps, pytype_srcs)  # @unused
-    py_library(name = name, deps = collections.uniq(deps), **kwargs)
+    _py_library(name = name, deps = _uniq_deps(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_binary.
 def pytype_strict_binary(name, deps = [], pytype_deps = [], pytype_srcs = [], **kwargs):
     _ = (pytype_deps, pytype_srcs)  # @unused
-    py_binary(name = name, deps = collections.uniq(deps), **kwargs)
+    _py_binary(name = name, deps = _uniq_deps(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_library.
 def pytype_strict_library(name, deps = [], pytype_deps = [], pytype_srcs = [], **kwargs):
     _ = (pytype_deps, pytype_srcs)  # @unused
-    py_library(name = name, deps = collections.uniq(deps), **kwargs)
+    _py_library(name = name, deps = _uniq_deps(deps), **kwargs)
 
 # Placeholder to use until bazel supports pytype_strict_contrib_test.
 def pytype_strict_contrib_test(name, deps = [], pytype_deps = [], pytype_srcs = [], **kwargs):
     _ = (pytype_deps, pytype_srcs)  # @unused
-    py_test(name = name, deps = collections.uniq(deps), **kwargs)
+    _py_test(name = name, deps = _uniq_deps(deps), **kwargs)

@@ -13,17 +13,18 @@
 # limitations under the License.
 load("//jax_tpu_embedding/sparsecore:jax_tpu_embedding.bzl", "tpu_py_strict_test")
 load("//third_party/bazel/python:pypi.bzl", "pypi_requirement")
-load("//third_party/bazel/python:pytype.bzl", "pytype_strict_contrib_test")
+load("//third_party/bazel/python:pytype.bzl", "py_test")
 
 package(
     default_applicable_licenses = ["//:license"],
     default_visibility = ["//visibility:private"],
 )
 
-pytype_strict_contrib_test(
+py_test(
     name = "version_test",
     srcs = ["version_test.py"],
     data = ["//jax_tpu_embedding/sparsecore:version"],
+    type_checking = True,
     deps = [
         "//jax_tpu_embedding/sparsecore",
         pypi_requirement("absl/testing:absltest"),
