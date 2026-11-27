@@ -485,8 +485,47 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
       config = json.loads(
           ir.StringAttr(custom_calls[0].attributes["backend_config"]).value
       )
+      self.assertEqual(
+          config["sparse_dense_matmul_config"]["table_name"], "my_table"
+      )
+
+  def test_sc_emb_forward_pass_lowering_has_codebook_2d_config(self):
+    ids = jax.ShapeDtypeStruct((16,), jnp.int32)
+    gains = jax.ShapeDtypeStruct((16,), jnp.float32)
+    table = jax.ShapeDtypeStruct((self.vocab_size, self.emb_size), jnp.float32)
+    qconfig = embedding_spec.Codebook2DQuantizationConfig(
+        centroids=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0, -1.0, 0.0),
+        logical_dim=8,
+    )
+    lowered = jax.jit(
+        functools.partial(
+            sparse_dense_matmul_csr.tpu_sparse_dense_matmul_csr_primitive.bind,
+            device_batch_size=self.batch_size,
+            max_ids_per_partition=16,
+            max_unique_ids_per_partition=16,
+            quantization_config=qconfig,
+        )
+    ).lower(ids, ids, ids, gains, np.int32(1), table)
+    module = lowered.compiler_ir()
+    assert module is not None
+    with module.context:
+      custom_calls = []
+      for func in module.body.operations:
+        for op in func.regions[0].blocks[0].operations:
+          if op.operation.name == "stablehlo.custom_call":
+            custom_calls.append(op)
+      self.assertLen(custom_calls, 1)
+      config = json.loads(
+          ir.StringAttr(custom_calls[0].attributes["backend_config"]).value
+      )
     self.assertEqual(
-        config["sparse_dense_matmul_config"]["table_name"], "my_table"
+        config["sparse_dense_matmul_config"]["quantization_config"],
+        {
+            "codebook_2d": {
+                "centroids": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, -1.0, 0.0],
+                "logical_dim": 8,
+            }
+        },
     )
 
   def test_sc_emb_quantization_config_validation(self):
@@ -840,6 +879,98 @@ class SparseDenseMatmulCsrTest(parameterized.TestCase):
         self.assertFalse(
             np.allclose(activations_dynamic, activations_unquant, atol=1e-3)
         )
+
+  @absltest.skipIf(
+      not _is_libtpu_at_least((0, 0, 55)), "Requires libtpu >= 0.0.55"
+  )
+  def test_sc_emb_forward_pass_codebook_2d_numerical_parity(self):
+    mesh = jax.sharding.Mesh(self.global_devices, "x")
+    (
+        lhs_row_pointers,
+        lhs_ids,
+        lhs_sids,
+        lhs_gains,
+    ) = input_preprocessing.preprocess_sparse_dense_matmul_input(
+        self.input_tensor,
+        self.input_weights,
+        mesh,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=64,
+        num_sc_per_device=self.num_sc_per_device,
+        sc_simd_width=self.sc_simd_width,
+        hbm_word_size_in_4b=self.hbm_word_size_in_4b,
+    )
+    rows = np.arange(1, self.vocab_size + 1, dtype=np.float32)[:, None]
+    cols = np.array(
+        [1.0, -0.5, 0.25, 1.5, -1.25, 0.75, -0.25, 2.0], dtype=np.float32
+    )[None, :]
+    table = rows * cols
+    table[0] = 0.0
+    table_sharded = utils.shard_emb_table(
+        table,
+        num_devices=len(self.global_devices),
+        num_sc_per_device=self.num_sc_per_device,
+    )
+    centroids_2d = np.array(
+        [
+            [0.0, 0.0],
+            [0.92075, 0.0],
+            [0.46037, 0.79739],
+            [-0.46037, 0.79739],
+            [-0.92075, 0.0],
+            [-0.46037, -0.79739],
+            [0.46037, -0.79739],
+            [1.80149, 0.62335],
+            [0.97934, 1.63549],
+            [-0.30106, 1.88237],
+            [-1.44058, 1.24846],
+            [-1.90605, 0.03039],
+            [-1.47965, -1.20191],
+            [-0.36091, -1.87181],
+            [0.92671, -1.66588],
+            [1.78071, -0.68046],
+        ],
+        dtype=np.float32,
+    )
+    qconfig = embedding_spec.Codebook2DQuantizationConfig(
+        centroids=tuple(float(v) for v in centroids_2d.reshape(-1)),
+        logical_dim=self.emb_size,
+    )
+
+    activations = self.tpu_sparse_dense_matmul_csr(
+        lhs_row_pointers,
+        lhs_ids,
+        lhs_sids,
+        lhs_gains,
+        1,
+        table_sharded[0],
+        device_batch_size=self.batch_size // self.num_chips,
+        max_ids_per_partition=16,
+        max_unique_ids_per_partition=16,
+        sharding_strategy=1,
+        quantization_config=qconfig,
+        enable_minibatching=False,
+    )
+
+    orig_norm = np.sqrt(np.sum(np.square(table), axis=-1, keepdims=True))
+    safe_orig = np.maximum(orig_norm, np.float32(1e-7))
+    scaled = (
+        table * (np.sqrt(np.float32(self.emb_size)) / safe_orig)
+    ).reshape(self.vocab_size, self.emb_size // 2, 1, 2)
+    codes = np.argmin(
+        np.sum(np.square(scaled - centroids_2d), axis=-1), axis=-1
+    )
+    z_hat = centroids_2d[codes].reshape(self.vocab_size, self.emb_size)
+    quant_norm = np.maximum(
+        np.sqrt(np.sum(np.square(z_hat), axis=-1, keepdims=True)),
+        np.float32(1e-7),
+    )
+    expected_table = z_hat * (orig_norm / quant_norm)
+    expected_activations = expected_table[self.input_tensor.squeeze(axis=1)]
+
+    np.testing.assert_allclose(
+        activations, expected_activations, rtol=1e-5, atol=1e-5
+    )
 
   def test_sc_emb_forward_pass_bfloat16_invalid_configs(self):
     mesh = jax.sharding.Mesh(self.global_devices, "x")

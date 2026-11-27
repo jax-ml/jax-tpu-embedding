@@ -1409,3 +1409,78 @@ class AbsmaxQuantizationConfig(QuantizationConfig):
             "num_buckets": self.num_buckets,
         }
     }
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class Codebook2DQuantizationConfig(QuantizationConfig):
+  """Dynamic 2D codebook quantization configuration.
+
+  Attributes:
+    centroids: Row-major flattened sequence of `[num_entries, 2]` centroid
+      coordinates, with at least 2 entries (`len(centroids) >= 4` and even).
+    logical_dim: Unpadded logical embedding dimension. When `0`, defaults to the
+      padded SparseCore minor dimension.
+  """
+
+  centroids: tuple[float, ...]
+  logical_dim: int = 0
+
+  def __post_init__(self) -> None:
+    """Validates centroid flatness and logical_dim bounds."""
+    if len(self.centroids) < 4 or len(self.centroids) % 2 != 0:
+      raise ValueError(
+          "centroids must be a flattened sequence of [num_entries, 2] floats"
+          f" with at least 2 entries, got length {len(self.centroids)}."
+      )
+    if self.logical_dim < 0 or self.logical_dim == 1:
+      raise ValueError(
+          f"logical_dim must be 0 or >= 2, got {self.logical_dim}."
+      )
+
+  @property
+  def supports_scalar_embeddings(self) -> bool:
+    """Returns whether 1D scalar embeddings are supported."""
+    return False
+
+  @override
+  def validate_table(
+      self, embedding_dim: int, table_name: str | None = None
+  ) -> None:
+    """Validates that this quantization config is compatible with the table.
+
+    Args:
+      embedding_dim: Width of the embedding table.
+      table_name: Optional name of the table for error reporting.
+    """
+    if embedding_dim == 1:
+      table_suffix = (
+          f" (table '{table_name}' has embedding_dim=1)" if table_name else ""
+      )
+      raise ValueError(
+          "Dynamic quantization (codebook_2d) is not supported for 1D scalar"
+          f" embeddings{table_suffix}."
+      )
+    if self.logical_dim > embedding_dim:
+      table_suffix = f" for table '{table_name}'" if table_name else ""
+      raise ValueError(
+          f"logical_dim ({self.logical_dim}) cannot exceed embedding_dim"
+          f" ({embedding_dim}){table_suffix}."
+      )
+    if self.logical_dim == 0 and embedding_dim % 8 != 0:
+      table_suffix = f" for table '{table_name}'" if table_name else ""
+      raise ValueError(
+          f"logical_dim must be explicitly set when embedding_dim"
+          f" ({embedding_dim}) is not a multiple of 8{table_suffix}."
+      )
+
+  @override
+  def to_backend_config(
+      self,
+  ) -> sparse_dense_matmul_csr.Codebook2DQuantizationBackendConfig:
+    """Returns the JSON-serializable XLA backend quantization config."""
+    return {
+        "codebook_2d": {
+            "centroids": list(self.centroids),
+            "logical_dim": self.logical_dim,
+        }
+    }

@@ -814,22 +814,80 @@ class OptimizerSpecTest(absltest.TestCase):
     self.assertEqual(config.num_buckets, 3)
 
   def test_dynamic_quantization_1d_unsupported(self):
-    with self.assertRaisesRegex(
-        ValueError,
-        "Dynamic quantization.*not supported for 1D scalar embeddings"
-        r" \(table 'table_1d' has embedding_dim=1\)",
+    for qconfig in (
+        embedding_spec.AbsmaxQuantizationConfig(num_buckets=256),
+        embedding_spec.Codebook2DQuantizationConfig(
+            centroids=(0.0, 0.0, 1.0, 0.0)
+        ),
     ):
-      embedding_spec.TableSpec(
-          vocabulary_size=32,
-          embedding_dim=1,
-          initializer=lambda *_: jnp.zeros((32, 1), dtype=jnp.float32),
-          optimizer=embedding_spec.SGDOptimizerSpec(),
-          combiner="sum",
-          name="table_1d",
-          quantization_config=embedding_spec.AbsmaxQuantizationConfig(
-              num_buckets=256
-          ),
+      with self.subTest(qconfig=type(qconfig).__name__):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Dynamic quantization.*not supported for 1D scalar embeddings"
+            r" \(table 'table_1d' has embedding_dim=1\)",
+        ):
+          embedding_spec.TableSpec(
+              vocabulary_size=32,
+              embedding_dim=1,
+              initializer=lambda *_: jnp.zeros((32, 1), dtype=jnp.float32),
+              optimizer=embedding_spec.SGDOptimizerSpec(),
+              combiner="sum",
+              name="table_1d",
+              quantization_config=qconfig,
+          )
+
+  def test_codebook_2d_quantization_config_spec(self):
+    qconfig = embedding_spec.Codebook2DQuantizationConfig(
+        centroids=(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
+        logical_dim=16,
+    )
+    self.assertEqual(qconfig.centroids, (0.0, 0.0, 1.0, 0.0, 0.0, 1.0))
+    self.assertEqual(qconfig.logical_dim, 16)
+    self.assertFalse(qconfig.supports_scalar_embeddings)
+    self.assertEqual(
+        qconfig.to_backend_config(),
+        {
+            "codebook_2d": {
+                "centroids": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                "logical_dim": 16,
+            }
+        },
+    )
+
+  def test_codebook_2d_quantization_config_validation(self):
+    for bad_centroids in ((), (1.0, 0.0), (0.0, 0.0, 1.0)):
+      with self.subTest(bad_centroids=bad_centroids):
+        with self.assertRaisesRegex(ValueError, "centroids must be"):
+          embedding_spec.Codebook2DQuantizationConfig(centroids=bad_centroids)
+    for bad_dim in (-1, 1):
+      with self.subTest(bad_dim=bad_dim):
+        with self.assertRaisesRegex(ValueError, "logical_dim must be"):
+          embedding_spec.Codebook2DQuantizationConfig(
+              centroids=(0.0, 0.0, 1.0, 0.0), logical_dim=bad_dim
+          )
+    qconfig = embedding_spec.Codebook2DQuantizationConfig(
+        centroids=(0.0, 0.0, 1.0, 0.0), logical_dim=16
+    )
+    with self.assertRaisesRegex(ValueError, "cannot exceed embedding_dim"):
+      qconfig.validate_table(embedding_dim=8, table_name="narrow_table")
+    default_dim_qconfig = embedding_spec.Codebook2DQuantizationConfig(
+        centroids=(0.0, 0.0, 1.0, 0.0)
+    )
+    with self.assertRaisesRegex(
+        ValueError, "logical_dim must be explicitly set"
+    ):
+      default_dim_qconfig.validate_table(
+          embedding_dim=12, table_name="unaligned_table"
       )
+    explicit_dim_qconfig = embedding_spec.Codebook2DQuantizationConfig(
+        centroids=(0.0, 0.0, 1.0, 0.0), logical_dim=12
+    )
+    explicit_dim_qconfig.validate_table(
+        embedding_dim=12, table_name="unaligned_table"
+    )
+    explicit_dim_qconfig.validate_table(
+        embedding_dim=16, table_name="padded_stack_table"
+    )
 
 
 if __name__ == "__main__":
